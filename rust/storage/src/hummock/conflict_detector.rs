@@ -14,8 +14,6 @@ pub struct ConflictDetector {
     epoch_watermark: AtomicU64,
 }
 
-const CAS_MAX_ATTEMPT: usize = 10;
-
 impl ConflictDetector {
     pub fn new() -> ConflictDetector {
         ConflictDetector {
@@ -29,10 +27,8 @@ impl ConflictDetector {
     }
 
     pub fn set_watermark(&self, epoch: HummockEpoch) {
-        let mut attempt_count = 0;
         // set the new watermark with CAS to enable detection in concurrent update
-        while attempt_count < CAS_MAX_ATTEMPT {
-            attempt_count += 1;
+        loop {
             let current_watermark = self.get_epoch_watermark();
             assert!(
                 epoch > current_watermark,
@@ -53,7 +49,6 @@ impl ConflictDetector {
                 return;
             }
         }
-        unreachable!("CAS attempt exceeds maximum");
     }
 
     /// Check whether there is key conflict for the given `kv_pairs` and add the key in `kv_pairs`
