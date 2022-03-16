@@ -7,7 +7,7 @@ use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::mpsc;
 
-use crate::optimizer::plan_node::PlanNodeType;
+use crate::optimizer::plan_node::{PlanNode, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::scheduler::plan_fragmenter::{Query, QueryStageRef, StageId};
@@ -76,6 +76,7 @@ impl AugmentedStage {
     }
 
     /// Serialize augmented stage into plan node. Used by task manager to construct task.
+    // FIXME: should do rewrite outside of `to_prost`
     pub fn to_prost(&self, task_id: TaskId, query: &Query) -> Result<PlanFragment> {
         let prost_root = self.rewrite_exchange(self.query_stage.root.clone(), task_id, query)?;
         Ok(PlanFragment {
