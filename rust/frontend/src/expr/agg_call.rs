@@ -4,12 +4,31 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
     inputs: Vec<ExprImpl>,
 }
+
+impl std::fmt::Debug for AggCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            f.debug_struct("AggCall")
+                .field("agg_kind", &self.agg_kind)
+                .field("return_type", &self.return_type)
+                .field("inputs", &self.inputs)
+                .finish()
+        } else {
+            let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+            self.inputs.iter().for_each(|child| {
+                builder.field(child);
+            });
+            builder.finish()
+        }
+    }
+}
+
 impl AggCall {
     #![allow(clippy::diverging_sub_expression)]
     /// Returns error if the function name matches with an existing function

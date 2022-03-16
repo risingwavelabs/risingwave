@@ -112,7 +112,9 @@ impl TestCase {
 
         let logical_plan = match Planner::new(context).plan(bound) {
             Ok(logical_plan) => {
-                ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                if self.logical_plan.is_some() {
+                    ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
+                }
                 logical_plan
             }
             Err(err) => {
@@ -136,9 +138,7 @@ impl TestCase {
 }
 
 fn explain_plan(plan: &PlanRef) -> String {
-    let mut actual = String::new();
-    plan.explain(0, &mut actual).unwrap();
-    actual
+    plan.explain_to_string().expect("failed to explain")
 }
 
 fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {

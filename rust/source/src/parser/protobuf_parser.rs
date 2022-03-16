@@ -118,7 +118,7 @@ impl ProtobufParser {
             .map(|f| {
                 let field_type = f.field_type(&self.descriptors);
                 let column_type =
-                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
+                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf();
                 Ok(ColumnDesc {
                     column_type: Some(column_type),
                     name: f.name().to_string(),
@@ -406,32 +406,32 @@ mod tests {
             columns,
             vec![
                 ColumnDesc {
-                    column_type: Some(DataType::Int32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int32.to_protobuf()),
                     name: "id".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "address".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "city".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Int64.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int64.to_protobuf()),
                     name: "zipcode".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Float32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Float32.to_protobuf()),
                     name: "rate".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "date".to_string(),
                     ..Default::default()
                 },

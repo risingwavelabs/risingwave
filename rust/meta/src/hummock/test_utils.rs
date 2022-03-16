@@ -8,18 +8,69 @@ use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, SstableMeta}
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
+    HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
 };
 
 use crate::cluster::StoredClusterManager;
 use crate::hummock::HummockManager;
 use crate::manager::{MetaSrvEnv, NotificationManager};
 use crate::rpc::metrics::MetaMetrics;
-use crate::storage::MemStore;
+use crate::storage::{MemStore, MetaStore};
+
+pub async fn add_test_tables<S>(
+    hummock_manager: &HummockManager<S>,
+    context_id: HummockContextId,
+) -> Vec<Vec<SstableInfo>>
+where
+    S: MetaStore,
+{
+    // Increase version by 2.
+    let mut epoch: u64 = 1;
+    let table_ids = vec![
+        hummock_manager.get_new_table_id().await.unwrap(),
+        hummock_manager.get_new_table_id().await.unwrap(),
+        hummock_manager.get_new_table_id().await.unwrap(),
+    ];
+    let (test_tables, _) = generate_test_tables(epoch, table_ids);
+    hummock_manager
+        .add_tables(context_id, test_tables.clone(), epoch)
+        .await
+        .unwrap();
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
+
+    // Simulate a compaction and increase version by 1.
+    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let (test_tables_2, _) = generate_test_tables(
+        epoch,
+        vec![hummock_manager.get_new_table_id().await.unwrap()],
+    );
+    compact_task.sorted_output_ssts = test_tables_2.clone();
+    hummock_manager
+        .report_compact_task(compact_task, true)
+        .await
+        .unwrap();
+    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
+    // test_tables to_delete]}
+
+    // Increase version by 1.
+    epoch += 1;
+    let (test_tables_3, _) = generate_test_tables(
+        epoch,
+        vec![hummock_manager.get_new_table_id().await.unwrap()],
+    );
+    hummock_manager
+        .add_tables(context_id, test_tables_3.clone(), epoch)
+        .await
+        .unwrap();
+    // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
+    // to_delete:test_tables], v4: [test_tables_2, test_tables_3 uncommitted]}
+    vec![test_tables, test_tables_2, test_tables_3]
+}
 
 pub fn generate_test_tables(
     epoch: u64,
-    table_id: &mut u64,
+    table_ids: Vec<u64>,
 ) -> (Vec<SstableInfo>, Vec<(SstableMeta, Bytes)>) {
     // Tables to add
     let opt = SSTableBuilderOptions {
@@ -31,26 +82,25 @@ pub fn generate_test_tables(
 
     let mut sst_info = vec![];
     let mut sst_data = vec![];
-    for i in 0..2 {
+    for (i, table_id) in table_ids.into_iter().enumerate() {
         let mut b = SSTableBuilder::new(opt.clone());
         let kv_pairs = vec![
             (i, HummockValue::Put(b"test".as_slice())),
             (i * 10, HummockValue::Put(b"test".as_slice())),
         ];
         for kv in kv_pairs {
-            b.add(&iterator_test_key_of_epoch(*table_id, kv.0, epoch), kv.1);
+            b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1);
         }
         let (data, meta) = b.finish();
         sst_data.push((meta.clone(), data));
         sst_info.push(SstableInfo {
-            id: *table_id,
+            id: table_id,
             key_range: Some(KeyRange {
                 left: meta.smallest_key,
                 right: meta.largest_key,
                 inf: false,
             }),
         });
-        (*table_id) += 1;
     }
     (sst_info, sst_data)
 }

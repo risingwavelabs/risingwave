@@ -4,14 +4,15 @@ use std::collections::{HashMap, HashSet};
 use std::option::Option::Some;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::Mutex;
 
-use crate::manager::{NotificationManagerRef, NotificationTarget};
+use crate::manager::NotificationManagerRef;
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
@@ -55,12 +56,9 @@ where
             core.add_database(database);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::DatabaseV2(database.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::DatabaseV2(database.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -78,12 +76,9 @@ where
             core.drop_database(&database);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::DatabaseV2(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::DatabaseV2(database))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -100,12 +95,9 @@ where
             core.add_schema(schema);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::SchemaV2(schema.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::SchemaV2(schema.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -123,12 +115,9 @@ where
             core.drop_schema(&schema);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::SchemaV2(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::SchemaV2(schema))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -143,14 +132,14 @@ where
             let version = core.new_version_id().await?;
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
+            for &dependent_table_id in &table.dependent_tables {
+                core.increase_ref_count(dependent_table_id);
+            }
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::TableV2(table.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -163,18 +152,31 @@ where
         let mut core = self.core.lock().await;
         let table = Table::select(&*self.meta_store_ref, &table_id).await?;
         if let Some(table) = table {
-            let version = core.new_version_id().await?;
-            Table::delete(&*self.meta_store_ref, &table_id).await?;
-            core.drop_table(&table);
-
-            self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::TableV2(table),
-                    NotificationTarget::Frontend,
+            match core.get_ref_count(table_id) {
+                Some(ref_count) => Err(CatalogError(
+                    anyhow!(
+                        "Fail to delete table {} because {} other table(s) depends on it.",
+                        table_id,
+                        ref_count
+                    )
+                    .into(),
                 )
-                .await?;
-            Ok(version)
+                .into()),
+                None => {
+                    let version = core.new_version_id().await?;
+                    Table::delete(&*self.meta_store_ref, &table_id).await?;
+                    core.drop_table(&table);
+                    for &dependent_table_id in &table.dependent_tables {
+                        core.decrease_ref_count(dependent_table_id);
+                    }
+
+                    self.nm
+                        .notify_fe(Operation::Delete, &Info::TableV2(table))
+                        .await;
+
+                    Ok(version)
+                }
+            }
         } else {
             Err(RwError::from(InternalError(
                 "table doesn't exist".to_string(),
@@ -190,12 +192,9 @@ where
             core.add_source(source);
 
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Source(source.to_owned()),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
@@ -213,12 +212,9 @@ where
             core.drop_source(&source);
 
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Source(source),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
+                .notify_fe(Operation::Delete, &Info::Source(source))
+                .await;
+
             Ok(version)
         } else {
             Err(RwError::from(InternalError(

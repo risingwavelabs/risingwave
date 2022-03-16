@@ -3,7 +3,8 @@ use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
 use risingwave_sqlparser::ast::{Query, Statement};
@@ -20,6 +21,7 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     let catalog = catalog_mgr
         .get_database_snapshot(session.database())
         .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
+
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(Statement::Query(query))?;
     let plan = Planner::new(Rc::new(RefCell::new(context)))
@@ -50,8 +52,23 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         output_id: 0,
     };
 
+    // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
+    // TODO: hummock snapshot should maintain as cache instead of RPC each query.
+    let meta_client = session.env().meta_client();
+    let pin_snapshot_req = PinSnapshotRequest { context_id: 0 };
+    let epoch = meta_client
+        .inner
+        .pin_snapshot(pin_snapshot_req)
+        .await
+        .to_rw_result()?
+        .snapshot
+        .unwrap()
+        .epoch;
+
     let mut rows = vec![];
-    compute_client.create_task(task_id.clone(), plan).await?;
+    compute_client
+        .create_task(task_id.clone(), plan, epoch)
+        .await?;
     let mut source =
         GrpcExchangeSource::create_with_client(compute_client.clone(), task_sink_id.clone())
             .await?;
@@ -60,6 +77,16 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     }
 
     let pg_descs = get_pg_field_descs(bound)?;
+
+    // Unpin corresponding snapshot.
+    meta_client
+        .inner
+        .unpin_snapshot(UnpinSnapshotRequest {
+            context_id: 0,
+            snapshot: Some(HummockSnapshot { epoch }),
+        })
+        .await
+        .to_rw_result()?;
 
     Ok(PgResponse::new(
         StatementType::SELECT,

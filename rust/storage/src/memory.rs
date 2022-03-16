@@ -195,8 +195,9 @@ impl StateStore for MemoryStateStore {
         unimplemented!()
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
         // memory backend doesn't support wait for epoch, so this is a no-op.
+        Ok(())
     }
 
     async fn sync(&self, _epoch: Option<u64>) -> Result<()> {

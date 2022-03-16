@@ -89,7 +89,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 
     /// Wait until the epoch is committed and its data is ready to read.
-    async fn wait_epoch(&self, epoch: u64);
+    async fn wait_epoch(&self, epoch: u64) -> Result<()>;
 
     /// Sync buffered data to S3.
     /// If epoch is None, all buffered data will be synced.

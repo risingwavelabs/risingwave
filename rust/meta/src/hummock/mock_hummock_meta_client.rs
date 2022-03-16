@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
 use risingwave_storage::hummock::{
@@ -113,6 +114,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> HummockResult<()> {
         unimplemented!()
     }
 }

@@ -4,11 +4,12 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
-    TableSetStatistics, VacuumTask,
+    TableSetStatistics,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -146,6 +147,7 @@ impl Compactor {
             sub_result?
         }
 
+        // `sorted_output_ssts` must be sorted by key range
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
             for table in &sub_output {
@@ -225,6 +227,7 @@ impl Compactor {
             let epoch = get_epoch(iter_key);
 
             if epoch < watermark {
+                // Only retain latest key which satisfies epoch < watermark
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
                     iter.next().await?;
@@ -232,6 +235,7 @@ impl Compactor {
                 }
             }
 
+            // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
@@ -285,12 +289,6 @@ impl Compactor {
     ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
-            for _sst_to_delete in &compact_task.sorted_output_ssts {
-                // TODO: delete these tables in (S3) storage
-                // However, if we request a table_id from hummock storage service every time we
-                // generate a table, we would not delete here, or we should notify
-                // hummock storage service to delete them.
-            }
             compact_task.sorted_output_ssts.clear();
         }
 
@@ -321,7 +319,7 @@ impl Compactor {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            hummock_meta_client,
+            hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
@@ -373,14 +371,27 @@ impl Compactor {
                             vacuum_task,
                         })) => {
                             if let Some(compact_task) = compact_task {
+                                let input_ssts = compact_task
+                                    .input_ssts
+                                    .iter()
+                                    .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                                    .collect_vec();
+                                tracing::debug!("Try to compact SSTs {:?}", input_ssts);
                                 if let Err(e) =
                                     Compactor::compact(&sub_compact_context, compact_task).await
                                 {
                                     tracing::warn!("failed to compact. {}", RwError::from(e));
                                 }
                             }
-                            if let Some(VacuumTask { task: Some(task) }) = vacuum_task {
-                                if let Err(e) = Vacuum::vacuum(sstable_store.clone(), task).await {
+                            if let Some(vacuum_task) = vacuum_task {
+                                tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+                                if let Err(e) = Vacuum::vacuum(
+                                    sstable_store.clone(),
+                                    vacuum_task,
+                                    hummock_meta_client.clone(),
+                                )
+                                .await
+                                {
                                     tracing::warn!("failed to vacuum. {}", e);
                                 }
                             }

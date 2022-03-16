@@ -295,7 +295,7 @@ impl CatalogConnector {
             0,
             ColumnDesc {
                 name: ROWID_NAME.to_string(),
-                column_type: Some(DataType::Int64.to_protobuf()?),
+                column_type: Some(DataType::Int64.to_protobuf()),
                 ..Default::default()
             },
         );
@@ -424,7 +424,7 @@ mod tests {
             .iter()
             .map(|c| ColumnDesc {
                 name: c.0.clone(),
-                column_type: Some(c.1.to_protobuf().unwrap()),
+                column_type: Some(c.1.to_protobuf()),
                 ..Default::default()
             })
             .collect();

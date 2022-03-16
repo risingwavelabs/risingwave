@@ -15,7 +15,8 @@ pub struct BoundQuery {
 }
 
 impl Binder {
-    pub(super) fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+    /// Bind a [`Query`].
+    pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {

@@ -12,9 +12,9 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
-    ReportCompactionTasksRequest, ReportCompactionTasksResponse, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
+    ReportVacuumTaskResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -232,7 +232,7 @@ impl MetaClient {
                         return;
                     }
                 }
-                tracing::debug!("heartbeat");
+                tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
                 if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
                     tracing::warn!("Failed to send_heartbeat. {}", err);
                 }
@@ -342,6 +342,13 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: SubscribeCompactTasksRequest,
     ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
+        unimplemented!()
+    }
+
+    async fn report_vacuum_task(
+        &self,
+        _req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
         unimplemented!()
     }
 }
@@ -573,6 +580,18 @@ impl MetaClientInner for GrpcMetaClient {
             .hummock_client
             .to_owned()
             .subscribe_compact_tasks(req)
+            .await?
+            .into_inner())
+    }
+
+    async fn report_vacuum_task(
+        &self,
+        req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
+        Ok(self
+            .hummock_client
+            .to_owned()
+            .report_vacuum_task(req)
             .await?
             .into_inner())
     }

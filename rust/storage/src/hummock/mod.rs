@@ -10,6 +10,7 @@ use itertools::Itertools;
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
+use risingwave_common::error::Result;
 pub use sstable::*;
 pub mod compactor;
 mod error;
@@ -119,7 +120,7 @@ impl HummockStorage {
             shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
         let instance = Self {
             options,
@@ -391,8 +392,8 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
-        self.local_version_manager.wait_epoch(epoch).await;
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        Ok(self.local_version_manager.wait_epoch(epoch).await?)
     }
 
     pub fn shared_buffer_manager(&self) -> &SharedBufferManager {

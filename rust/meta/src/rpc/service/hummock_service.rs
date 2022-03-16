@@ -4,7 +4,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::{CompactorManager, HummockManager};
+use crate::hummock::{CompactorManager, HummockManager, VacuumTrigger};
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
@@ -14,6 +14,7 @@ where
 {
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
+    vacuum_trigger: Arc<VacuumTrigger<S>>,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -23,10 +24,12 @@ where
     pub fn new(
         hummock_manager: Arc<HummockManager<S>>,
         compactor_manager: Arc<CompactorManager>,
+        vacuum_trigger: Arc<VacuumTrigger<S>>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
+            vacuum_trigger,
         }
     }
 }
@@ -184,5 +187,18 @@ where
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
         let rx = self.compactor_manager.add_compactor().await;
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn report_vacuum_task(
+        &self,
+        request: Request<ReportVacuumTaskRequest>,
+    ) -> Result<Response<ReportVacuumTaskResponse>, Status> {
+        if let Some(vacuum_task) = request.into_inner().vacuum_task {
+            self.vacuum_trigger
+                .report_vacuum_task(vacuum_task)
+                .await
+                .map_err(|e| e.to_grpc_status())?;
+        }
+        Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 }
