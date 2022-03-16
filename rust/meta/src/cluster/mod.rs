@@ -29,7 +29,7 @@ pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
-const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
+const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 #[derive(Debug)]
