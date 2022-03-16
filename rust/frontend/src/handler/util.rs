@@ -69,10 +69,63 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
 #[cfg(test)]
 mod tests {
     use itertools::Itertools;
+    use pgwire::pg_field_descriptor::TypeOid;
     use risingwave_common::array::*;
     use risingwave_common::{column, column_nonnull};
 
-    use crate::handler::util::to_pg_rows;
+    use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr, BoundStatement};
+    use crate::expr::ExprImpl;
+    use crate::handler::util::{get_pg_field_descs, to_pg_rows};
+
+    #[test]
+    fn test_get_pg_field_descs() {
+        let select = BoundSelect {
+            distinct: false,
+            select_items: vec![
+                ExprImpl::literal_int(1),
+                ExprImpl::literal_int(2),
+                ExprImpl::literal_bool(true),
+            ],
+            aliases: vec![
+                Some("column1".to_string()),
+                Some("column2".to_string()),
+                Some("column3".to_string()),
+            ],
+            from: None,
+            selection: None,
+        };
+        let bound = BoundStatement::Query(
+            BoundQuery {
+                body: BoundSetExpr::Select(select.into()),
+                order: vec![],
+            }
+            .into(),
+        );
+        let pg_descs = get_pg_field_descs(bound).unwrap();
+        assert_eq!(
+            pg_descs
+                .clone()
+                .into_iter()
+                .map(|p| { p.get_name().to_string() })
+                .collect_vec(),
+            [
+                "column1".to_string(),
+                "column2".to_string(),
+                "column3".to_string()
+            ]
+        );
+        assert_eq!(
+            pg_descs
+                .into_iter()
+                .map(|p| { p.get_type_oid().as_number() })
+                .collect_vec(),
+            [
+                TypeOid::Int.as_number(),
+                TypeOid::Int.as_number(),
+                TypeOid::Boolean.as_number()
+            ]
+        );
+    }
 
     #[test]
     fn test_to_pg_rows() {
