@@ -23,7 +23,7 @@ pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
 pub struct CatalogCache {
-    catalog_version: CatalogVersion,
+    version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
 }
@@ -31,7 +31,7 @@ pub struct CatalogCache {
 impl Default for CatalogCache {
     fn default() -> Self {
         Self {
-            catalog_version: 0,
+            version: 0,
             database_by_name: HashMap::new(),
             db_name_by_id: HashMap::new(),
         }
@@ -87,11 +87,11 @@ impl CatalogCache {
         let database = self.database_by_name.remove(&name).unwrap();
     }
 
-    pub fn drop_schema(&mut self, schema_id: SchemaId, db_id: DatabaseId) {
+    pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
         self.get_database_mut(db_id).unwrap().drop_schema(schema_id);
     }
 
-    pub fn drop_table(&mut self, schema_id: SchemaId, db_id: DatabaseId, tb_id: TableId) {
+    pub fn drop_table(&mut self, db_id: DatabaseId, schema_id: SchemaId, tb_id: TableId) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -99,7 +99,7 @@ impl CatalogCache {
             .drop_table(tb_id);
     }
 
-    pub fn drop_source(&mut self, schema_id: SchemaId, db_id: DatabaseId, source_id: SourceId) {
+    pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
         self.get_database_mut(db_id)
             .unwrap()
             .get_schema_mut(schema_id)
@@ -124,6 +124,16 @@ impl CatalogCache {
     ) -> Option<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
+    }
+
+    /// Get the catalog cache's catalog version.
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
+    /// Set the catalog cache's catalog version.
+    pub fn set_version(&mut self, catalog_version: CatalogVersion) {
+        self.version = catalog_version;
     }
 }
 
