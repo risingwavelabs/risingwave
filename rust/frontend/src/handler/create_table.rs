@@ -6,7 +6,6 @@ use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
-use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::QueryContext;
 
 fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
@@ -57,7 +56,7 @@ mod tests {
 
     use risingwave_common::types::DataType;
 
-    use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use crate::catalog::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 

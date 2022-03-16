@@ -9,7 +9,7 @@ use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
-use crate::catalog::catalog_service::Catalog;
+use crate::catalog::catalog::Catalog;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.

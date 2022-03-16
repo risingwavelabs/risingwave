@@ -4,17 +4,20 @@ use std::sync::Arc;
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_meta::manager::SourceId;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
 };
+use risingwave_rpc_client::MetaClient;
+use tokio::sync::watch::Receiver;
 
-use crate::catalog::database_catalog::DatabaseCatalog;
-use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{DatabaseId, SchemaId};
+use super::catalog::Catalog;
+use super::{DatabaseId, SchemaId};
+
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
+/// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
 pub struct CatalogReader(pub Arc<RwLock<Catalog>>);
 impl CatalogReader {
@@ -23,117 +26,67 @@ impl CatalogReader {
     }
 }
 
-/// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
-/// is protected by a RwLock. only [`ObserverManager`] will get its mut reference and do write to
-/// sync with the meta catalog. Other situations it is read only with a read guard.
-///
-/// - catalog (root catalog)
-///   - database catalog
-///     - schema catalog
-///       - table catalog
-///        - column catalog
-pub struct Catalog {
-    version: CatalogVersion,
-    database_by_name: HashMap<String, DatabaseCatalog>,
-    db_name_by_id: HashMap<DatabaseId, String>,
+///  [`CatalogWriter`] is for DDL (create table/schema/database), it will only send rpc to meta and
+/// get the catalog version as response. then it will wait the local catalog to update to sync with
+/// the version.
+#[derive(Clone)]
+pub struct CatalogWriter {
+    meta_client: MetaClient,
+    catalog_updated_rx: Receiver<CatalogVersion>,
 }
 
-impl Default for Catalog {
-    fn default() -> Self {
+impl CatalogWriter {
+    pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
         Self {
-            version: 0,
-            database_by_name: HashMap::new(),
-            db_name_by_id: HashMap::new(),
+            meta_client,
+            catalog_updated_rx,
         }
     }
-}
 
-impl Catalog {
-    fn get_database_mut(&mut self, db_id: DatabaseId) -> Option<&mut DatabaseCatalog> {
-        let name = self.db_name_by_id.get(&db_id)?;
-        self.database_by_name.get_mut(name)
+    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+        let mut rx = self.catalog_updated_rx.clone();
+        while *rx.borrow_and_update() < version {
+            rx.changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
+        Ok(())
     }
 
-    pub fn create_database(&mut self, db: &ProstDatabase) {
-        let name = db.name;
-        let id = db.id.into();
-
-        self.database_by_name.try_insert(name, db.into()).unwrap();
-        self.db_name_by_id.try_insert(id, name).unwrap();
+    pub async fn create_database(&self, db_name: &str) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_database(ProstDatabase {
+                name: db_name.to_string(),
+                id: 0,
+            })
+            .await?;
+        self.wait_version(version).await
     }
 
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .create_schema(proto);
+    pub async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_schema(ProstSchema {
+                id: 0,
+                name: schema_name.to_string(),
+                database_id: db_id,
+            })
+            .await?;
+        self.wait_version(version).await
     }
 
-    pub fn create_table(&mut self, proto: &ProstTable) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .create_table(proto);
-    }
-    pub fn create_source(&mut self, proto: ProstSource) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .create_source(proto);
+    /// for the `CREATE TABLE statement`
+    pub async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
+        todo!()
     }
 
-    pub fn drop_database(&mut self, db_id: DatabaseId) {
-        let name = self.db_name_by_id.remove(&db_id).unwrap();
-        let database = self.database_by_name.remove(&name).unwrap();
-    }
-
-    pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
-        self.get_database_mut(db_id).unwrap().drop_schema(schema_id);
-    }
-
-    pub fn drop_table(&mut self, db_id: DatabaseId, schema_id: SchemaId, tb_id: TableId) {
-        self.get_database_mut(db_id)
-            .unwrap()
-            .get_schema_mut(schema_id)
-            .unwrap()
-            .drop_table(tb_id);
-    }
-
-    pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
-        self.get_database_mut(db_id)
-            .unwrap()
-            .get_schema_mut(schema_id)
-            .unwrap()
-            .drop_source(source_id);
-    }
-
-    pub fn get_database_by_name(&self, db_name: &str) -> Option<&DatabaseCatalog> {
-        self.database_by_name.get(db_name)
-    }
-
-    pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.get_database_by_name(db_name)?
-            .get_schema_by_name(schema_name)
-    }
-
-    pub fn get_table_by_name(
+    // TODO: maybe here to pass a materialize plan node
+    pub async fn create_materialized_view(
         &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Option<&TableCatalog> {
-        self.get_schema_by_name(db_name, schema_name)?
-            .get_table_by_name(table_name)
-    }
-
-    /// Get the catalog cache's catalog version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the catalog cache's catalog version.
-    pub fn set_version(&mut self, catalog_version: CatalogVersion) {
-        self.version = catalog_version;
+        db_id: DatabaseId,
+        schema_id: SchemaId,
+    ) -> Result<()> {
+        todo!()
     }
 }

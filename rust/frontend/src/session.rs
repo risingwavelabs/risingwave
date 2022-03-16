@@ -17,8 +17,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::catalog::catalog_service::{Catalog, CatalogReader};
-use crate::catalog::catalog_writer::CatalogWriter;
+use crate::catalog::catalog::Catalog;
+use crate::catalog::catalog_service::{CatalogReader, CatalogWriter};
 use crate::handler::handle;
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
@@ -91,7 +91,6 @@ impl FrontendEnv {
 
     #[cfg(test)]
     pub async fn mock() -> Self {
-        use crate::catalog::catalog_service::Catalog;
         use crate::test_utils::FrontendMockMetaClient;
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
         let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
