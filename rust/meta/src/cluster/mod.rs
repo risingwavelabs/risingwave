@@ -223,7 +223,7 @@ where
     }
 
     pub async fn heartbeat(&self, worker_id: u32) -> Result<()> {
-        tracing::debug!("heartbeat from {}", worker_id);
+        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
         // 1. Get unique key. TODO: avoid this step
         let key = match core.get_worker_by_id(worker_id) {

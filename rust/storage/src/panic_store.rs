@@ -51,7 +51,7 @@ impl StateStore for PanicStateStore {
         panic!("should not create iter from the panic state store!");
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()>{
         panic!("should not wait epoch from the panic state store!");
     }
 
