@@ -131,6 +131,9 @@ where
             let version = core.new_version_id().await?;
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
+            for &dependent_table_id in &table.dependent_tables {
+                core.increase_ref_count(dependent_table_id);
+            }
 
             self.nm
                 .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
@@ -151,6 +154,9 @@ where
             let version = core.new_version_id().await?;
             Table::delete(&*self.meta_store_ref, &table_id).await?;
             core.drop_table(&table);
+            for &dependent_table_id in &table.dependent_tables {
+                core.decrease_ref_count(dependent_table_id);
+            }
 
             self.nm
                 .notify_fe(Operation::Delete, &Info::TableV2(table))
