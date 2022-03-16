@@ -28,34 +28,35 @@ use crate::model::{MetadataModel, Transactional, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
 
+// Update to states are performed as follow:
+// - Call load_meta_store_state when creating HummockManager (on boot or on meta-node leadership
+//   change).
+// - Read in-mem states and make copies of them.
+// - Make changes on the copies.
+// - Commit the changes via meta store transaction.
+// - If transaction succeeds, update in-mem states with the copies.
 pub struct HummockManager<S> {
+    meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    // 1. When trying to locks compaction and versioning at the same time, compaction lock should
+    // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
-    // 2. The two meta_store_ref from versioning and compaction point to the same meta store
-    // instance. By convention we always use the one from compaction to get and commit meta store
-    // transaction when both are available.
-    // 3. TODO: Currently we don't prevent a meta store
-    // transaction from living longer than the compaction guard or versioning guard it was
-    // requested from. We need to fix it.
-    compaction: Mutex<Compaction<S>>,
-    versioning: RwLock<Versioning<S>>,
+    compaction: Mutex<Compaction>,
+    versioning: RwLock<Versioning>,
 
     metrics: Arc<MetaMetrics>,
 }
 
-struct Compaction<S> {
-    meta_store_ref: Arc<S>,
+struct Compaction {
     compact_status: CompactStatus,
 }
 
-struct Versioning<S> {
-    meta_store_ref: Arc<S>,
+struct Versioning {
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
     pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
     stale_sstables: BTreeMap<HummockVersionId, HummockStaleSstables>,
+    sstable_id_infos: BTreeMap<HummockSSTableId, SstableIdInfo>,
 }
 
 impl<S> HummockManager<S>
@@ -64,17 +65,17 @@ where
 {
     pub async fn new(env: MetaSrvEnv<S>, metrics: Arc<MetaMetrics>) -> Result<HummockManager<S>> {
         let instance = HummockManager {
+            meta_store_ref: env.meta_store_ref(),
             id_gen_manager_ref: env.id_gen_manager_ref(),
             versioning: RwLock::new(Versioning {
-                meta_store_ref: env.meta_store_ref(),
                 current_version_id: CurrentHummockVersionId::new(),
                 hummock_versions: Default::default(),
                 pinned_versions: Default::default(),
                 pinned_snapshots: Default::default(),
                 stale_sstables: Default::default(),
+                sstable_id_infos: Default::default(),
             }),
             compaction: Mutex::new(Compaction {
-                meta_store_ref: env.meta_store_ref(),
                 compact_status: CompactStatus::new(),
             }),
             metrics,
@@ -88,23 +89,21 @@ where
     /// load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
-        compaction_guard.compact_status =
-            CompactStatus::get(compaction_guard.meta_store_ref.as_ref())
-                .await?
-                .unwrap_or_else(CompactStatus::new);
+        compaction_guard.compact_status = CompactStatus::get(self.meta_store_ref.as_ref())
+            .await?
+            .unwrap_or_else(CompactStatus::new);
 
         let mut versioning_guard = self.versioning.write().await;
         versioning_guard.current_version_id =
-            CurrentHummockVersionId::get(versioning_guard.meta_store_ref.as_ref())
+            CurrentHummockVersionId::get(self.meta_store_ref.as_ref())
                 .await?
                 .unwrap_or_else(CurrentHummockVersionId::new);
 
-        versioning_guard.hummock_versions =
-            HummockVersion::list(versioning_guard.meta_store_ref.as_ref())
-                .await?
-                .into_iter()
-                .map(|version| (version.id, version))
-                .collect();
+        versioning_guard.hummock_versions = HummockVersion::list(self.meta_store_ref.as_ref())
+            .await?
+            .into_iter()
+            .map(|version| (version.id, version))
+            .collect();
 
         // Insert the initial version.
         if versioning_guard.hummock_versions.is_empty() {
@@ -123,33 +122,35 @@ where
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
             };
-            init_version
-                .insert(versioning_guard.meta_store_ref.as_ref())
-                .await?;
+            init_version.insert(self.meta_store_ref.as_ref()).await?;
             versioning_guard
                 .hummock_versions
                 .insert(init_version.id, init_version);
         }
 
-        versioning_guard.pinned_versions =
-            HummockPinnedVersion::list(versioning_guard.meta_store_ref.as_ref())
-                .await?
-                .into_iter()
-                .map(|p| (p.context_id, p))
-                .collect();
+        versioning_guard.pinned_versions = HummockPinnedVersion::list(self.meta_store_ref.as_ref())
+            .await?
+            .into_iter()
+            .map(|p| (p.context_id, p))
+            .collect();
         versioning_guard.pinned_snapshots =
-            HummockPinnedSnapshot::list(versioning_guard.meta_store_ref.as_ref())
+            HummockPinnedSnapshot::list(self.meta_store_ref.as_ref())
                 .await?
                 .into_iter()
                 .map(|p| (p.context_id, p))
                 .collect();
 
-        versioning_guard.stale_sstables =
-            HummockStaleSstables::list(versioning_guard.meta_store_ref.as_ref())
-                .await?
-                .into_iter()
-                .map(|s| (s.version_id, s))
-                .collect();
+        versioning_guard.stale_sstables = HummockStaleSstables::list(self.meta_store_ref.as_ref())
+            .await?
+            .into_iter()
+            .map(|s| (s.version_id, s))
+            .collect();
+
+        versioning_guard.sstable_id_infos = SstableIdInfo::list(self.meta_store_ref.as_ref())
+            .await?
+            .into_iter()
+            .map(|s| (s.id, s))
+            .collect();
 
         Ok(())
     }
@@ -196,14 +197,10 @@ where
         context_pinned_version_copy.pin_version(version_id);
         let mut transaction = Transaction::default();
         context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(
-            versioning_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+            .await?;
 
-        // Update in-mem state
+        // Update in-mem state after transaction succeeds.
         versioning_guard.pinned_versions.insert(
             context_pinned_version_copy.context_id,
             context_pinned_version_copy,
@@ -240,13 +237,9 @@ where
             };
         context_pinned_version_copy.unpin_version(pinned_version_id);
         context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(
-            versioning_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
-        // Update in-mem state
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+            .await?;
+        // Update in-mem state after transaction succeeds.
         versioning_guard.pinned_versions.insert(
             context_pinned_version_copy.context_id,
             context_pinned_version_copy,
@@ -337,6 +330,7 @@ where
     ) -> Result<HummockVersion> {
         let stats = sstables.iter().map(SSTableStat::from).collect_vec();
 
+        let mut sst_id_infos_update_vec = vec![];
         let mut compaction_guard = self.compaction.lock().await;
         let mut compact_status_copy = compaction_guard.compact_status.clone();
         match compact_status_copy.level_handlers.first_mut().unwrap() {
@@ -356,7 +350,6 @@ where
             }
         }
         let mut transaction = Transaction::default();
-        // update compact_status
         compact_status_copy.update_in_transaction(&mut transaction);
 
         let mut versioning_guard = self.versioning.write().await;
@@ -369,12 +362,7 @@ where
 
         // Track SST in meta.
         for sst_id in sstables.iter().map(|s| s.id) {
-            let sst_id_info = SstableIdInfo::select(
-                versioning_guard.meta_store_ref.as_ref(),
-                &SstableRefId { id: sst_id },
-            )
-            .await?;
-            match sst_id_info {
+            match versioning_guard.sstable_id_infos.get(&sst_id).cloned() {
                 None => {
                     #[cfg(not(test))]
                     return Err(ErrorCode::MetaError(format!(
@@ -390,6 +378,7 @@ where
                     }
                     sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
                     sst_id_info.upsert_in_transaction(&mut transaction)?;
+                    sst_id_infos_update_vec.push(sst_id_info);
                 }
             }
         }
@@ -427,12 +416,8 @@ where
         hummock_version_copy.upsert_in_transaction(&mut transaction)?;
 
         // the trx contain update for both tables and compact_status
-        self.commit_trx(
-            compaction_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+            .await?;
 
         self.trigger_sst_stat(&compact_status_copy);
 
@@ -442,6 +427,11 @@ where
         versioning_guard
             .hummock_versions
             .insert(hummock_version_copy.id, hummock_version_copy.clone());
+        for sst_id_info_update in sst_id_infos_update_vec {
+            versioning_guard
+                .sstable_id_infos
+                .insert(sst_id_info_update.id, sst_id_info_update);
+        }
 
         #[cfg(test)]
         {
@@ -475,14 +465,10 @@ where
         context_pinned_snapshot_copy.pin_snapshot(max_committed_epoch);
         let mut transaction = Transaction::default();
         context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(
-            versioning_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+            .await?;
 
-        // Update in-mem state
+        // Update in-mem state after transaction succeeds.
         versioning_guard.pinned_snapshots.insert(
             context_pinned_snapshot_copy.context_id,
             context_pinned_snapshot_copy,
@@ -516,14 +502,10 @@ where
         let mut transaction = Transaction::default();
         context_pinned_snapshot_copy.unpin_snapshot(hummock_snapshot.epoch);
         context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(
-            versioning_guard.meta_store_ref.as_ref(),
-            transaction,
-            Some(context_id),
-        )
-        .await?;
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+            .await?;
 
-        // Update in-mem state
+        // Update in-mem state after transaction succeeds.
         versioning_guard.pinned_snapshots.insert(
             context_pinned_snapshot_copy.context_id,
             context_pinned_snapshot_copy,
@@ -547,7 +529,7 @@ where
             Some(mut compact_task) => {
                 let mut transaction = Transaction::default();
                 compact_status_copy.update_in_transaction(&mut transaction);
-                self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+                self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                     .await?;
                 compact_task.watermark = {
                     let versioning_guard = self.versioning.read().await;
@@ -563,7 +545,7 @@ where
                         .flat_map(|v| v.snapshot_id.clone())
                         .fold(max_committed_epoch, std::cmp::min)
                 };
-                // Update in-mem state
+                // Update in-mem state after transaction succeeds.
                 compaction_guard.compact_status = compact_status_copy;
                 Ok(Some(compact_task))
             }
@@ -592,6 +574,7 @@ where
             .map(SSTableStat::from)
             .collect();
 
+        let mut sst_id_info_update_vec = vec![];
         // Extract info for logging.
         let compact_task_id = compact_task.task_id;
         let input_sst_ids = compact_task
@@ -670,12 +653,7 @@ where
             stale_sstables_copy.upsert_in_transaction(&mut transaction)?;
 
             for sst_id in &output_sst_ids {
-                let sst_id_info = SstableIdInfo::select(
-                    versioning_guard.meta_store_ref.as_ref(),
-                    &SstableRefId { id: *sst_id },
-                )
-                .await?;
-                match sst_id_info {
+                match versioning_guard.sstable_id_infos.get(sst_id).cloned() {
                     None => {
                         return Err(ErrorCode::MetaError(format!(
                             "invalid sst id {}, may have been vacuumed",
@@ -686,11 +664,12 @@ where
                     Some(mut sst_id_info) => {
                         sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
                         sst_id_info.upsert_in_transaction(&mut transaction)?;
+                        sst_id_info_update_vec.push(sst_id_info);
                     }
                 }
             }
 
-            self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                 .await?;
 
             // Update in-mem state after transaction succeeds. after transaction succeeds.
@@ -702,6 +681,11 @@ where
             versioning_guard
                 .stale_sstables
                 .insert(stale_sstables_copy.version_id, stale_sstables_copy);
+            for sst_id_info_update in sst_id_info_update_vec {
+                versioning_guard
+                    .sstable_id_infos
+                    .insert(sst_id_info_update.id, sst_id_info_update);
+            }
 
             tracing::debug!(
                 "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
@@ -713,7 +697,7 @@ where
             );
         } else {
             // The compact task is cancelled.
-            self.commit_trx(compaction_guard.meta_store_ref.as_ref(), transaction, None)
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                 .await?;
 
             // Update in-mem state after transaction succeeds. after transaction succeeds.
@@ -784,7 +768,7 @@ where
         hummock_version_copy.max_committed_epoch = epoch;
         hummock_version_copy.id = new_version_id;
         hummock_version_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
             .await?;
         // Update in-mem state after transaction succeeds.
         versioning_guard.current_version_id = current_version_id_copy;
@@ -806,6 +790,7 @@ where
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         let mut current_version_id_copy = versioning_guard.current_version_id.clone();
+        let mut sst_id_info_update_vec = vec![];
         let old_version_id = current_version_id_copy.increase();
         let new_version_id = current_version_id_copy.id();
         current_version_id_copy.upsert_in_transaction(&mut transaction)?;
@@ -825,11 +810,14 @@ where
                 let uncommitted_epoch = &hummock_version_copy.uncommitted_epochs[idx];
 
                 // remove tables of the aborting epoch
-                for table_id in &uncommitted_epoch.table_ids {
-                    SstableIdInfo::delete_in_transaction(
-                        SstableRefId { id: *table_id },
-                        &mut transaction,
-                    )?;
+                for sst_id in &uncommitted_epoch.table_ids {
+                    if let Some(mut sst_id_info) =
+                        versioning_guard.sstable_id_infos.get(sst_id).cloned()
+                    {
+                        sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
+                        sst_id_info.upsert_in_transaction(&mut transaction)?;
+                        sst_id_info_update_vec.push(sst_id_info);
+                    }
                 }
                 hummock_version_copy.uncommitted_epochs.swap_remove(idx);
 
@@ -837,13 +825,18 @@ where
                 hummock_version_copy.id = new_version_id;
                 hummock_version_copy.upsert_in_transaction(&mut transaction)?;
 
-                self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+                self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                     .await?;
                 // Update in-mem state after transaction succeeds.
                 versioning_guard.current_version_id = current_version_id_copy;
                 versioning_guard
                     .hummock_versions
                     .insert(hummock_version_copy.id, hummock_version_copy);
+                for sst_id_info_update in sst_id_info_update_vec {
+                    versioning_guard
+                        .sstable_id_infos
+                        .insert(sst_id_info_update.id, sst_id_info_update);
+                }
                 Ok(())
             }
             None => Ok(()),
@@ -866,15 +859,25 @@ where
             .await
             .map(|id| id as HummockSSTableId)?;
 
-        let versioning_guard = self.versioning.write().await;
-        SstableIdInfo {
+        let mut versioning_guard = self.versioning.write().await;
+        let new_sst_id_info = SstableIdInfo {
             id: sstable_id,
             id_create_timestamp: sstable_id_info::get_timestamp_now(),
             meta_create_timestamp: INVALID_TIMESTAMP,
             meta_delete_timestamp: INVALID_TIMESTAMP,
+        };
+        new_sst_id_info.insert(self.meta_store_ref.as_ref()).await?;
+
+        // Update in-mem state after transaction succeeds.
+        versioning_guard
+            .sstable_id_infos
+            .insert(new_sst_id_info.id, new_sst_id_info);
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
         }
-        .insert(versioning_guard.meta_store_ref.as_ref())
-        .await?;
 
         Ok(sstable_id)
     }
@@ -906,10 +909,10 @@ where
         if !to_commit {
             return Ok(());
         }
-        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
             .await?;
 
-        // Update in-mem state
+        // Update in-mem state after transaction succeeds.
         versioning_guard.pinned_versions.remove(&context_id);
         versioning_guard.pinned_snapshots.remove(&context_id);
 
@@ -963,6 +966,7 @@ where
 
     /// Delete metadata of the given `version_id`
     pub async fn delete_version(&self, version_id: HummockVersionId) -> Result<()> {
+        let mut sst_id_info_update_vec = vec![];
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         // Delete record in HummockVersion if any.
@@ -978,14 +982,12 @@ where
         if let Some(ssts_to_delete) = stale_sstables {
             // Delete tracked sstables.
             for sst_id in &ssts_to_delete.id {
-                if let Some(mut sstable_id_info) = SstableIdInfo::select(
-                    versioning_guard.meta_store_ref.as_ref(),
-                    &SstableRefId { id: *sst_id },
-                )
-                .await?
+                if let Some(mut sst_id_info) =
+                    versioning_guard.sstable_id_infos.get(sst_id).cloned()
                 {
-                    sstable_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
-                    sstable_id_info.upsert_in_transaction(&mut transaction)?;
+                    sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
+                    sst_id_info.upsert_in_transaction(&mut transaction)?;
+                    sst_id_info_update_vec.push(sst_id_info);
                 }
             }
             HummockStaleSstables::delete_in_transaction(
@@ -1003,12 +1005,17 @@ where
             );
         }
 
-        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
             .await?;
 
         // Update in-mem state after transaction succeeds.
         versioning_guard.hummock_versions.remove(&version_id);
         versioning_guard.stale_sstables.remove(&version_id);
+        for sst_id_info_update in sst_id_info_update_vec {
+            versioning_guard
+                .sstable_id_infos
+                .insert(sst_id_info_update.id, sst_id_info_update);
+        }
 
         #[cfg(test)]
         {
@@ -1031,6 +1038,7 @@ where
             let pinned_versions_copy = versioning_guard.pinned_versions.clone();
             let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
             let stale_sstables_copy = versioning_guard.stale_sstables.clone();
+            let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
             (
                 compact_status_copy,
                 current_version_id_copy,
@@ -1038,6 +1046,7 @@ where
                 pinned_versions_copy,
                 pinned_snapshots_copy,
                 stale_sstables_copy,
+                sst_id_infos_copy,
             )
         };
         let mem_state = get_state().await;
@@ -1053,16 +1062,33 @@ where
 
     pub async fn list_sstable_id_infos(&self) -> Result<Vec<SstableIdInfo>> {
         let versioning_guard = self.versioning.read().await;
-        SstableIdInfo::list(versioning_guard.meta_store_ref.as_ref()).await
+        Ok(versioning_guard
+            .sstable_id_infos
+            .values()
+            .cloned()
+            .collect_vec())
     }
 
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
-        let versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         for sst_id in sst_ids.as_ref() {
             SstableIdInfo::delete_in_transaction(SstableRefId { id: *sst_id }, &mut transaction)?;
         }
-        self.commit_trx(versioning_guard.meta_store_ref.as_ref(), transaction, None)
-            .await
+        self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
+            .await?;
+
+        // Update in-mem state after transaction succeeds.
+        for sst_id in sst_ids.as_ref() {
+            versioning_guard.sstable_id_infos.remove(sst_id);
+        }
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        Ok(())
     }
 }
