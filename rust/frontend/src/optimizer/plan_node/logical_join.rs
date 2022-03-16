@@ -174,13 +174,13 @@ impl ToBatch for LogicalJoin {
 
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
-            // For inner joins, pull non-equi conditions to a filter operator on top of it
+            // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let equi_cond =
+                let eq_cond =
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
-                let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
-                let hash_join = BatchHashJoin::new(logical_join, equi_cond).into();
+                let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
+                let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
                 BatchFilter::new(logical_filter).into()
             } else {
@@ -210,13 +210,13 @@ impl ToStream for LogicalJoin {
 
         if predicate.has_eq() {
             // Convert to Hash Join for equal joins
-            // For inner joins, pull non-equi conditions to a filter operator on top of it
+            // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let equi_cond =
+                let eq_cond =
                     EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
-                let logical_join = logical_join.clone_with_cond(equi_cond.eq_cond());
-                let hash_join = StreamHashJoin::new(logical_join, equi_cond).into();
+                let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
+                let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
                 StreamFilter::new(logical_filter).into()
             } else {
@@ -461,7 +461,7 @@ mod tests {
             ctx,
         );
 
-        let equi_cond = ExprImpl::FunctionCall(Box::new(
+        let eq_cond = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::Equal,
                 vec![
@@ -471,7 +471,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let non_equi_cond = ExprImpl::FunctionCall(Box::new(
+        let non_eq_cond = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::Equal,
                 vec![
@@ -486,7 +486,7 @@ mod tests {
         ));
         // Condition: ($1 = $3) AND ($2 == 42)
         let on_cond = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(Type::And, vec![equi_cond.clone(), non_equi_cond.clone()]).unwrap(),
+            FunctionCall::new(Type::And, vec![eq_cond.clone(), non_eq_cond.clone()]).unwrap(),
         ));
 
         let join_type = JoinType::Inner;
@@ -502,11 +502,11 @@ mod tests {
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(batch_filter.predicate().as_expr(), non_equi_cond);
+        assert_eq!(batch_filter.predicate().as_expr(), non_eq_cond);
 
         let input = batch_filter.input();
         let hash_join = input.as_batch_hash_join().unwrap();
-        assert_eq!(hash_join.eq_join_predicate().eq_cond().as_expr(), equi_cond);
+        assert_eq!(hash_join.eq_join_predicate().eq_cond().as_expr(), eq_cond);
     }
 
     /// Convert
@@ -549,7 +549,7 @@ mod tests {
             ctx,
         );
 
-        let equi_cond = ExprImpl::FunctionCall(Box::new(
+        let eq_cond = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::Equal,
                 vec![
@@ -559,7 +559,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let non_equi_cond = ExprImpl::FunctionCall(Box::new(
+        let non_eq_cond = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::Equal,
                 vec![
@@ -574,7 +574,7 @@ mod tests {
         ));
         // Condition: ($1 = $3) AND ($2 == 42)
         let on_cond = ExprImpl::FunctionCall(Box::new(
-            FunctionCall::new(Type::And, vec![equi_cond, non_equi_cond]).unwrap(),
+            FunctionCall::new(Type::And, vec![eq_cond, non_eq_cond]).unwrap(),
         ));
 
         let join_type = JoinType::LeftOuter;
