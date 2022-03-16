@@ -5,8 +5,9 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::meta::{Catalog, Database as OldProstDatabase};
 use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
@@ -21,11 +22,20 @@ use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 pub const DEFAULT_DATABASE_NAME: &str = "dev";
 pub const DEFAULT_SCHEMA_NAME: &str = "dev";
 
-#[derive(Default)]
 pub struct CatalogCache {
     catalog_version: CatalogVersion,
     database_by_name: HashMap<String, DatabaseCatalog>,
     db_name_by_id: HashMap<DatabaseId, String>,
+}
+
+impl Default for CatalogCache {
+    fn default() -> Self {
+        Self {
+            catalog_version: 0,
+            database_by_name: HashMap::new(),
+            db_name_by_id: HashMap::new(),
+        }
+    }
 }
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory.
@@ -64,14 +74,23 @@ impl CatalogCache {
             .unwrap()
             .create_table(proto);
     }
+    pub fn create_source(&mut self, proto: ProstSource) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .create_source(proto);
+    }
 
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
         let database = self.database_by_name.remove(&name).unwrap();
     }
+
     pub fn drop_schema(&mut self, schema_id: SchemaId, db_id: DatabaseId) {
         self.get_database_mut(db_id).unwrap().drop_schema(schema_id);
     }
+
     pub fn drop_table(&mut self, schema_id: SchemaId, db_id: DatabaseId, tb_id: TableId) {
         self.get_database_mut(db_id)
             .unwrap()
@@ -79,6 +98,15 @@ impl CatalogCache {
             .unwrap()
             .drop_table(tb_id);
     }
+
+    pub fn drop_source(&mut self, schema_id: SchemaId, db_id: DatabaseId, source_id: SourceId) {
+        self.get_database_mut(db_id)
+            .unwrap()
+            .get_schema_mut(schema_id)
+            .unwrap()
+            .drop_source(source_id);
+    }
+
     pub fn get_database_by_name(&self, db_name: &str) -> Option<&DatabaseCatalog> {
         self.database_by_name.get(db_name)
     }
