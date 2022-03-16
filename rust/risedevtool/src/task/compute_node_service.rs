@@ -37,6 +37,8 @@ impl Task for ComputeNodeService {
 
         let mut cmd = self.compute_node()?;
 
+        cmd.env("RUST_BACKTRACE", "1");
+
         cmd.arg("--config-path")
             .arg(Path::new(&prefix_config).join("risingwave.toml"))
             .arg("--host")
