@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -18,7 +19,7 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
+use super::{key, HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -160,7 +161,7 @@ pub struct SharedBufferManager {
 
 impl SharedBufferManager {
     pub fn new(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
         // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
@@ -348,7 +349,7 @@ pub struct SharedBufferUploader {
     /// Batches to upload grouped by epoch
     batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
     local_version_manager: Arc<LocalVersionManager>,
-    options: Arc<HummockOptions>,
+    options: Arc<StorageConfig>,
 
     /// Statistics.
     // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
@@ -361,7 +362,7 @@ pub struct SharedBufferUploader {
 
 impl SharedBufferUploader {
     pub fn new(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
@@ -508,7 +509,7 @@ mod tests {
 
     use super::SharedBufferBatch;
     use crate::hummock::iterator::test_utils::{
-        iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
     };
     use crate::hummock::iterator::{
         BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
@@ -517,8 +518,9 @@ mod tests {
     use crate::hummock::local_version_manager::LocalVersionManager;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
+    use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{HummockOptions, SstableStore};
+    use crate::hummock::SstableStore;
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -672,7 +674,7 @@ mod tests {
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
-            Arc::new(HummockOptions::default_for_test()),
+            Arc::new(default_config_for_test()),
             vm,
             sstable_store,
             Arc::new(StateStoreMetrics::unused()),
@@ -691,7 +693,7 @@ mod tests {
         for key in put_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Put(test_value_of(0, *idx).into()),
+                HummockValue::Put(iterator_test_value_of(0, *idx).into()),
             ));
             *idx += 1;
         }

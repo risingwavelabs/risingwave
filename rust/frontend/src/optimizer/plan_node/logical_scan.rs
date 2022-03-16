@@ -4,7 +4,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, StreamTableSource, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
@@ -12,7 +12,6 @@ use crate::session::QueryContextRef;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct LogicalScan {
     pub base: LogicalBase,
     table_name: String,
@@ -63,6 +62,10 @@ impl LogicalScan {
         f.field("table", &self.table_name)
             .field("columns", &columns);
     }
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -103,6 +106,6 @@ impl ToBatch for LogicalScan {
 
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        StreamTableSource::new(self.clone()).into()
     }
 }

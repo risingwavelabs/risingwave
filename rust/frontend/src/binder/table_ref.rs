@@ -16,14 +16,14 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Debug)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
-    Join(Box<JoinRef>),
+    Join(Box<BoundJoin>),
 }
 
 #[derive(Debug)]
-pub struct JoinRef {
+pub struct BoundJoin {
     pub left: TableRef,
     pub right: TableRef,
-    pub cond: Option<ExprImpl>,
+    pub cond: ExprImpl,
 }
 
 #[derive(Debug, Clone)]
@@ -46,10 +46,10 @@ impl Binder {
         let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
-            root = TableRef::Join(Box::new(JoinRef {
+            root = TableRef::Join(Box::new(BoundJoin {
                 left: root,
                 right,
-                cond: None,
+                cond: ExprImpl::literal_bool(true),
             }));
         }
         Ok(Some(root))
@@ -62,7 +62,7 @@ impl Binder {
             match join.join_operator {
                 JoinOperator::Inner(constraint) => {
                     let cond = self.bind_join_constraint(constraint)?;
-                    let join = JoinRef {
+                    let join = BoundJoin {
                         left: root,
                         right,
                         cond,
@@ -76,9 +76,9 @@ impl Binder {
         Ok(root)
     }
 
-    fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<Option<ExprImpl>> {
+    fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<ExprImpl> {
         Ok(match constraint {
-            JoinConstraint::None => None,
+            JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
                 return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
             }
@@ -91,7 +91,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                Some(bound_expr)
+                bound_expr
             }
             JoinConstraint::Using(_columns) => {
                 return Err(ErrorCode::NotImplementedError("USING".into()).into())
@@ -145,6 +145,7 @@ impl Binder {
             .for_each(|(index, column_catalog)| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
+                    column_catalog.name().into(),
                     begin + index,
                     column_catalog.data_type(),
                 ));

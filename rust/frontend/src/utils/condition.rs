@@ -1,3 +1,5 @@
+use std::fmt;
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
@@ -10,6 +12,19 @@ use crate::optimizer::plan_node::CollectInputRef;
 pub struct Condition {
     /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
+}
+
+impl fmt::Display for Condition {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut conjunctions = self.conjunctions.iter();
+        if let Some(expr) = conjunctions.next() {
+            write!(f, "{:?}", expr)?;
+        }
+        for expr in conjunctions {
+            write!(f, "AND {:?}", expr)?;
+        }
+        Ok(())
+    }
 }
 
 impl Condition {
@@ -34,6 +49,21 @@ impl Condition {
         if let Some(mut ret) = iter.next() {
             for expr in iter {
                 ret = FunctionCall::new(ExprType::And, vec![ret, expr])
+                    .unwrap()
+                    .into();
+            }
+            ret
+        } else {
+            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
+        }
+    }
+
+    pub fn as_expr(&self) -> ExprImpl {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
                     .unwrap()
                     .into();
             }

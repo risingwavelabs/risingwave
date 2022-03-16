@@ -20,7 +20,7 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
@@ -28,9 +28,9 @@ pub struct FrontendOpts {
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
-    /// Interval to send heartbeat in ms
-    #[clap(long, default_value = "1000")]
-    pub heartbeat_interval: u32,
+    /// No given `config_path` means to use default config.
+    #[clap(long, default_value = "")]
+    pub config_path: String,
 }
 
 /// Start frontend

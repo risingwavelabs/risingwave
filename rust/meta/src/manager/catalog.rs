@@ -12,7 +12,7 @@ use risingwave_pb::meta::{Catalog, Database, Schema, Table};
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
 use tokio::sync::Mutex;
 
-use super::{NotificationManagerRef, NotificationTarget};
+use super::NotificationManagerRef;
 use crate::model::{CatalogVersionGenerator, MetadataModel};
 use crate::storage::MetaStore;
 
@@ -61,13 +61,8 @@ where
 
             // Notify frontends to create database.
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Database(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Add, &Info::Database(database))
+                .await;
 
             Ok(version)
         } else {
@@ -88,13 +83,8 @@ where
 
             // Notify frontends to delete database.
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Database(database),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Delete, &Info::Database(database))
+                .await;
 
             Ok(version)
         } else {
@@ -106,8 +96,11 @@ where
 
     pub async fn create_schema(&self, mut schema: Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let schema_id = SchemaId::from(&schema.schema_ref_id);
-        if !core.has_schema(&schema_id) {
+        let exist = core
+            .schemas
+            .values()
+            .any(|s| s.schema_name == schema.schema_name);
+        if !exist {
             let version = core.new_version_id(&*self.meta_store_ref).await?;
             schema.version = version;
 
@@ -116,13 +109,8 @@ where
 
             // Notify frontends to create schema.
             self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Schema(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Add, &Info::Schema(schema))
+                .await;
 
             Ok(version)
         } else {
@@ -144,13 +132,8 @@ where
 
             // Notify frontends to delete schema.
             self.nm
-                .notify(
-                    Operation::Delete,
-                    &Info::Schema(schema),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+                .notify_fe(Operation::Delete, &Info::Schema(schema))
+                .await;
 
             Ok(version)
         } else {
@@ -162,8 +145,11 @@ where
 
     pub async fn create_table(&self, mut table: Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let table_id = TableId::from(&table.table_ref_id);
-        if !core.has_table(&table_id) {
+        let exist = core
+            .tables
+            .values()
+            .any(|t| t.table_name == table.table_name);
+        if !exist {
             let version = core.new_version_id(&*self.meta_store_ref).await?;
             table.version = version;
 
@@ -178,14 +164,7 @@ where
             }
 
             // Notify frontends to create table.
-            self.nm
-                .notify(
-                    Operation::Add,
-                    &Info::Table(table),
-                    NotificationTarget::Frontend,
-                )
-                .await?;
-            // TODO(Zehua) Error handling of `notify` method.
+            self.nm.notify_fe(Operation::Add, &Info::Table(table)).await;
 
             Ok(version)
         } else {
@@ -234,13 +213,8 @@ where
 
                     // Notify frontends to delete table.
                     self.nm
-                        .notify(
-                            Operation::Delete,
-                            &Info::Table(table),
-                            NotificationTarget::Frontend,
-                        )
-                        .await?;
-                    // TODO(Zehua) Error handling of `notify` method.
+                        .notify_fe(Operation::Delete, &Info::Table(table))
+                        .await;
 
                     Ok(version)
                 }

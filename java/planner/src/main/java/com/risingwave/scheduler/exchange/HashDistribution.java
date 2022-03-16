@@ -16,7 +16,6 @@ public class HashDistribution implements Distribution {
   public ExchangeInfo toExchangeInfo(int outputCount) {
     var hashInfo =
         ExchangeInfo.HashInfo.newBuilder()
-            .setHashMethod(ExchangeInfo.HashInfo.HashMethod.CRC32)
             .addAllKeys(this.keys)
             .setOutputCount(outputCount)
             .build();

@@ -146,18 +146,22 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
 
-    use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::key::key_with_epoch;
-    use crate::hummock::sstable::builder::tests::gen_test_sstable;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
 
     #[tokio::test]
     async fn test_reverse_sstable_iterator() {
         // build remote table
         let sstable_store = mock_sstable_store();
-        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_store.clone()).await;
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
@@ -170,7 +174,7 @@ mod tests {
             cnt -= 1;
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, builder_test_key_of(cnt));
+            assert_bytes_eq!(key, test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
             sstable_iter.next().await.unwrap();
         }
@@ -181,7 +185,9 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_sstable_seek() {
         let sstable_store = mock_sstable_store();
-        let table = gen_test_sstable(default_builder_opt_for_test(), sstable_store.clone()).await;
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
@@ -193,20 +199,20 @@ mod tests {
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter.seek(&builder_test_key_of(i)).await.unwrap();
+            sstable_iter.seek(&test_key_of(i)).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_bytes_eq!(key, builder_test_key_of(i));
+            assert_bytes_eq!(key, test_key_of(i));
         }
 
         // Seek to key #TEST_KEYS_COUNT-500 and start iterating
         sstable_iter
-            .seek(&builder_test_key_of(TEST_KEYS_COUNT - 500))
+            .seek(&test_key_of(TEST_KEYS_COUNT - 500))
             .await
             .unwrap();
         for i in (0..TEST_KEYS_COUNT - 500 + 1).rev() {
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(i), "key index:{}", i);
+            assert_eq!(key, test_key_of(i), "key index:{}", i);
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -214,7 +220,7 @@ mod tests {
         let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         sstable_iter.seek(largest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, builder_test_key_of(TEST_KEYS_COUNT - 1));
+        assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1));
 
         // Seek to > last key
         let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
@@ -239,7 +245,7 @@ mod tests {
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(idx - 1));
+            assert_eq!(key, test_key_of(idx - 1));
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());

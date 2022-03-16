@@ -10,6 +10,7 @@ use itertools::Itertools;
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
+use risingwave_common::error::Result;
 pub use sstable::*;
 pub mod compactor;
 mod error;
@@ -27,13 +28,15 @@ mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
+#[cfg(test)]
+mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
 mod version_cmp;
 
 pub use error::*;
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::LevelType;
 use value::*;
 
@@ -61,56 +64,10 @@ pub const INVALID_EPOCH: HummockEpoch = 0;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-#[derive(Default, Debug, Clone)]
-pub struct HummockOptions {
-    /// Target size of the SSTable.
-    pub sstable_size: u32,
-
-    /// Size of each block in bytes in SST.
-    pub block_size: u32,
-
-    /// False positive probability of bloom filter.
-    pub bloom_false_positive: f64,
-
-    /// Data directory for storing data and metadata objects.
-    pub data_directory: String,
-
-    /// checksum algorithm.
-    pub checksum_algo: ChecksumAlg,
-    /// enable async checkpoint or not
-    pub async_checkpoint_enabled: bool,
-}
-
-impl HummockOptions {
-    #[cfg(test)]
-    pub fn default_for_test() -> Self {
-        Self {
-            sstable_size: 256 * (1 << 20),
-            block_size: 64 * (1 << 10),
-            bloom_false_positive: 0.1,
-            data_directory: "hummock_001".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn small_for_test() -> Self {
-        Self {
-            sstable_size: 4 * (1 << 10),
-            block_size: 1 << 10,
-            bloom_false_positive: 0.1,
-            data_directory: "hummock_001_small".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true,
-        }
-    }
-}
-
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    options: Arc<HummockOptions>,
+    options: Arc<StorageConfig>,
 
     local_version_manager: Arc<LocalVersionManager>,
 
@@ -124,7 +81,7 @@ pub struct HummockStorage {
 impl HummockStorage {
     /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
-        options: HummockOptions,
+        options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -142,15 +99,13 @@ impl HummockStorage {
 
     /// Create a [`HummockStorage`].
     pub async fn new(
-        options: HummockOptions,
+        options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        let options = Arc::new(options);
-
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             options.clone(),
             local_version_manager.clone(),
@@ -165,7 +120,7 @@ impl HummockStorage {
             shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
         let instance = Self {
             options,
@@ -411,7 +366,7 @@ impl HummockStorage {
         self.shared_buffer_manager.sync(epoch).await
     }
 
-    fn get_builder(options: &HummockOptions) -> SSTableBuilder {
+    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
         // TODO: use different option values (especially table_size) for compaction
         SSTableBuilder::new(SSTableBuilderOptions {
             table_capacity: options.sstable_size,
@@ -425,7 +380,7 @@ impl HummockStorage {
         &self.hummock_meta_client
     }
 
-    pub fn options(&self) -> &Arc<HummockOptions> {
+    pub fn options(&self) -> &Arc<StorageConfig> {
         &self.options
     }
 
@@ -437,8 +392,8 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
-        self.local_version_manager.wait_epoch(epoch).await;
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        Ok(self.local_version_manager.wait_epoch(epoch).await?)
     }
 
     pub fn shared_buffer_manager(&self) -> &SharedBufferManager {

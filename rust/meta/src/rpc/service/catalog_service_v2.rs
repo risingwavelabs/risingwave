@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use risingwave_common::error::tonic_err;
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
@@ -7,11 +8,10 @@ use risingwave_pb::catalog::{
     CreateSourceResponse, DropDatabaseRequest, DropDatabaseResponse, DropMaterializedSourceRequest,
     DropMaterializedSourceResponse, DropMaterializedViewRequest, DropMaterializedViewResponse,
     DropSchemaRequest, DropSchemaResponse, DropSourceRequest, DropSourceResponse,
-    GetCatalogRequest, GetCatalogResponse,
 };
 use tonic::{Request, Response, Status};
 
-use crate::manager::{CatalogManagerRef, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::stream::StreamManagerRef;
 
@@ -47,25 +47,54 @@ impl<S> CatalogService for CatalogServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn get_catalog(
-        &self,
-        _request: Request<GetCatalogRequest>,
-    ) -> Result<Response<GetCatalogResponse>, Status> {
-        todo!()
-    }
-
     async fn create_database(
         &self,
-        _request: Request<CreateDatabaseRequest>,
+        request: Request<CreateDatabaseRequest>,
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Database }>()
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        let mut database = req.get_db().map_err(tonic_err)?.clone();
+        database.id = id as u32;
+        let version = self
+            .catalog_manager
+            .create_database(&database)
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+
+        Ok(Response::new(CreateDatabaseResponse {
+            status: None,
+            database_id: id as u32,
+            version,
+        }))
     }
 
     async fn create_schema(
         &self,
-        _request: Request<CreateSchemaRequest>,
+        request: Request<CreateSchemaRequest>,
     ) -> Result<Response<CreateSchemaResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Schema }>()
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        let mut schema = req.get_schema().map_err(tonic_err)?.clone();
+        schema.id = id as u32;
+        let version = self
+            .catalog_manager
+            .create_schema(&schema)
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+
+        Ok(Response::new(CreateSchemaResponse {
+            status: None,
+            schema_id: id as u32,
+            version,
+        }))
     }
 
     async fn create_source(
@@ -91,16 +120,36 @@ where
 
     async fn drop_database(
         &self,
-        _request: Request<DropDatabaseRequest>,
+        request: Request<DropDatabaseRequest>,
     ) -> Result<Response<DropDatabaseResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let database_id = req.get_database_id();
+        let version = self
+            .catalog_manager
+            .drop_database(database_id)
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(DropDatabaseResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn drop_schema(
         &self,
-        _request: Request<DropSchemaRequest>,
+        request: Request<DropSchemaRequest>,
     ) -> Result<Response<DropSchemaResponse>, Status> {
-        todo!()
+        let req = request.into_inner();
+        let schema_id = req.get_schema_id();
+        let version = self
+            .catalog_manager
+            .drop_schema(schema_id)
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(DropSchemaResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn drop_source(

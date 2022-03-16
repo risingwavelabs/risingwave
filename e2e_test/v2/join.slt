@@ -1,0 +1,14 @@
+statement ok
+create table t1 (v1 int not null, v2 int not null);
+
+statement ok
+create table t2 (v1 int not null, v2 int not null);
+
+statement ok
+explain select t1.v2, t2.v2 from t1 join t2 on t1.v1 = t2.v1;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;

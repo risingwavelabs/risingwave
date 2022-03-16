@@ -152,15 +152,18 @@ pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
 
+mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
 mod batch_hash_join;
+mod batch_insert;
 mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
-mod batch_sort_merge_join;
+mod batch_values;
 mod logical_agg;
+mod logical_delete;
 mod logical_filter;
 mod logical_insert;
 mod logical_join;
@@ -175,15 +178,18 @@ mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
 
+pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
-pub use batch_sort_merge_join::BatchSortMergeJoin;
+pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
+pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -223,6 +229,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -230,9 +237,11 @@ macro_rules! for_all_plan_nodes {
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
             ,{ Batch, Project }
             ,{ Batch, Filter }
+            ,{ Batch, Insert }
+            ,{ Batch, Delete }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
-            ,{ Batch, SortMergeJoin }
+            ,{ Batch, Values }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
@@ -255,6 +264,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -275,10 +285,12 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Filter }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
+            ,{ Batch, Values }
             ,{ Batch, Limit }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
+            ,{ Batch, Insert }
+            ,{ Batch, Delete }
         }
     };
 }
@@ -304,7 +316,7 @@ macro_rules! enum_plan_node_type {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
             #[derive(PartialEq, Debug)]
-            pub enum PlanNodeType{
+            pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }
 
@@ -346,4 +358,5 @@ macro_rules! impl_down_cast_fn {
         }
     }
 }
+
 for_all_plan_nodes! { impl_down_cast_fn }

@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::HashJoinNode;
 
 use super::{
     BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
@@ -15,6 +17,9 @@ use crate::optimizer::property::{Distribution, Order, WithSchema};
 pub struct BatchHashJoin {
     pub base: BatchBase,
     logical: LogicalJoin,
+
+    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 }
 
@@ -43,8 +48,8 @@ impl BatchHashJoin {
 }
 
 impl fmt::Display for BatchHashJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "BatchHashJoin(predicate: {})", self.eq_join_predicate())
     }
 }
 
@@ -68,7 +73,8 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         todo!()
     }
 }
-impl_plan_tree_node_for_binary! {BatchHashJoin}
+
+impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl WithSchema for BatchHashJoin {
     fn schema(&self) -> &Schema {
@@ -91,4 +97,30 @@ impl ToDistributedBatch for BatchHashJoin {
     }
 }
 
-impl ToBatchProst for BatchHashJoin {}
+impl ToBatchProst for BatchHashJoin {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::HashJoin(HashJoinNode {
+            join_type: self.logical.join_type() as i32,
+            left_key: self
+                .eq_join_predicate
+                .left_eq_indexes()
+                .into_iter()
+                .map(|a| a as i32)
+                .collect(),
+            right_key: self
+                .eq_join_predicate
+                .right_eq_indexes()
+                .into_iter()
+                .map(|a| a as i32)
+                .collect(),
+            left_output: (0..self.logical.left().schema().len())
+                .into_iter()
+                .map(|a| a as i32)
+                .collect(),
+            right_output: (0..self.logical.right().schema().len())
+                .into_iter()
+                .map(|a| a as i32)
+                .collect(),
+        })
+    }
+}

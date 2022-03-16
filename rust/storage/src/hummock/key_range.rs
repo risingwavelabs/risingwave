@@ -1,12 +1,11 @@
 use std::cmp;
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use super::version_cmp::VersionedComparator;
 
 /// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
@@ -83,6 +82,15 @@ impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
             right: kr.right.to_vec(),
             inf: kr.inf,
         }
+    }
+}
+
+impl From<&risingwave_pb::hummock::KeyRange> for KeyRange {
+    fn from(kr: &risingwave_pb::hummock::KeyRange) -> Self {
+        KeyRange::new(
+            Bytes::copy_from_slice(&kr.left),
+            Bytes::copy_from_slice(&kr.right),
+        )
     }
 }
 

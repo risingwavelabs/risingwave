@@ -11,7 +11,7 @@ import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RwBatchInsert;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
-import com.risingwave.proto.plan.TaskSinkId;
+import com.risingwave.proto.plan.TaskOutputId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.Messages;
 import com.risingwave.scheduler.QueryManager;
@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Handler of user queries. */
-@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.ORDER_BY})
+@HandlerSignature(sqlKinds = {SqlKind.SELECT, SqlKind.INSERT, SqlKind.DELETE, SqlKind.ORDER_BY})
 public class QueryHandler implements SqlHandler {
 
   private static final Logger log = LoggerFactory.getLogger(QueryHandler.class);
@@ -51,11 +51,12 @@ public class QueryHandler implements SqlHandler {
         throw new RuntimeException(exp);
       }
 
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(resultLocation.getTaskId().toTaskIdProto());
+      TaskOutputId taskOutput =
+          Messages.buildTaskOutputId(resultLocation.getTaskId().toTaskIdProto());
       ComputeClient client =
           context.getComputeClientManager().getOrCreate(resultLocation.getNode());
       Iterator<GetDataResponse> iter =
-          client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+          client.getData(GetDataRequest.newBuilder().setTaskOutputId(taskOutput).build());
 
       // Convert task data to list to iterate it multiple times.
       // FIXME: use Iterator<TaskData>
