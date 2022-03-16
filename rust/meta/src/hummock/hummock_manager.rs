@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicF64, AtomicI64, GenericGauge};
+use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
@@ -239,20 +239,22 @@ where
         }
     }
 
-    fn single_level_stat_bytes<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicF64>>>(
+    fn single_level_stat_bytes<
+        T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicF64>>,
+    >(
         mut metric_vec: T,
         level_stat: &TableSetStatistics,
     ) {
         let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().add(level_stat.size_gb);
+        metric_vec(level_label).unwrap().inc_by(level_stat.size_gb);
     }
 
-    fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericGauge<AtomicI64>>>(
+    fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicU64>>>(
         mut metric_vec: T,
         level_stat: &TableSetStatistics,
     ) {
         let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().add(level_stat.cnt as i64);
+        metric_vec(level_label).unwrap().inc_by(level_stat.cnt);
     }
 
     fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
