@@ -13,6 +13,7 @@ import org.apache.calcite.rel.core.TableModify;
 import org.apache.calcite.rel.logical.LogicalTableModify;
 import org.checkerframework.checker.nullness.qual.Nullable;
 
+/** Logical Delete operator in RisingWave */
 public class RwLogicalDelete extends TableModify implements RisingWaveLogicalRel {
   protected RwLogicalDelete(
       RelOptCluster cluster,
@@ -45,6 +46,7 @@ public class RwLogicalDelete extends TableModify implements RisingWaveLogicalRel
         getUpdateColumnList());
   }
 
+  /** Rule for converting Delete in logical convention to batch convention */
   public static final class LogicalDeleteConverterRule extends ConverterRule {
     public static final LogicalDeleteConverterRule INSTANCE =
         Config.INSTANCE
