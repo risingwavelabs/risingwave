@@ -18,8 +18,8 @@ pub struct BatchHashJoin {
     pub base: BatchBase,
     logical: LogicalJoin,
 
-    /// The join condition must be equivalent to `logical.on`, but seperated into equi and non-equi
-    /// parts to facilitate execution later
+    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 }
 
