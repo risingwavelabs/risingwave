@@ -1,8 +1,8 @@
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::JaegerConfig;
@@ -16,13 +16,15 @@ impl JaegerService {
         Ok(Self { config })
     }
 
-    fn jaeger(&self) -> Result<Command> {
+    fn jaeger_path(&self) -> Result<PathBuf> {
         let prefix_bin = env::var("PREFIX_BIN")?;
-        Ok(Command::new(
-            Path::new(&prefix_bin)
-                .join("jaeger")
-                .join("jaeger-all-in-one"),
-        ))
+        Ok(Path::new(&prefix_bin)
+            .join("jaeger")
+            .join("jaeger-all-in-one"))
+    }
+
+    fn jaeger(&self) -> Result<Command> {
+        Ok(Command::new(self.jaeger_path()?))
     }
 }
 
@@ -30,6 +32,11 @@ impl Task for JaegerService {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl std::io::Write>) -> anyhow::Result<()> {
         ctx.service(self);
         ctx.pb.set_message("starting...");
+
+        let path = self.jaeger_path()?;
+        if !path.exists() {
+            return Err(anyhow!("jeager-all-in-one binary not found in {:?}\nDid you enable tracing feature in `./risedev configure`?", path));
+        }
 
         let mut cmd = self.jaeger()?;
         cmd.arg("--admin.http.host-port")
