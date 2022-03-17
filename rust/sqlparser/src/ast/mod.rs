@@ -817,6 +817,10 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// FLUSH the current barrier.
+    ///
+    /// Note: RisingWave specific statement.
+    Flush,
 }
 
 impl fmt::Display for Statement {
@@ -1159,6 +1163,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::Flush => {
+                write!(f, "FLUSH")
             }
         }
     }

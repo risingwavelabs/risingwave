@@ -22,11 +22,12 @@ use risingwave_pb::meta::create_request::CatalogBody;
 use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
+use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, Catalog, CreateRequest, CreateResponse, Database,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, DropRequest, DropResponse,
-    GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, DropRequest, DropResponse, FlushRequest,
+    FlushResponse, GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
     ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
 };
 use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
@@ -240,6 +241,12 @@ impl MetaClient {
         });
         (join_handle, shutdown_tx)
     }
+
+    pub async fn flush(&self) -> Result<()> {
+        let request = FlushRequest::default();
+        self.inner.flush(request).await?;
+        Ok(())
+    }
 }
 
 /// [`MetaClientInner`] is the low-level api to meta.
@@ -351,6 +358,10 @@ pub trait MetaClientInner: Send + Sync {
     ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
         unimplemented!()
     }
+
+    async fn flush(&self, _req: FlushRequest) -> Result<FlushResponse> {
+        unimplemented!()
+    }
 }
 
 /// Client to meta server. Cloning the instance is lightweight.
@@ -361,6 +372,7 @@ pub struct GrpcMetaClient {
     pub catalog_client: CatalogServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
+    pub stream_client: StreamManagerServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -376,13 +388,15 @@ impl GrpcMetaClient {
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
-        let notification_client = NotificationServiceClient::new(channel);
+        let notification_client = NotificationServiceClient::new(channel.clone());
+        let stream_client = StreamManagerServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
             notification_client,
+            stream_client,
         })
     }
 }
@@ -593,6 +607,16 @@ impl MetaClientInner for GrpcMetaClient {
             .to_owned()
             .report_vacuum_task(req)
             .await?
+            .into_inner())
+    }
+
+    async fn flush(&self, req: FlushRequest) -> Result<FlushResponse> {
+        Ok(self
+            .stream_client
+            .to_owned()
+            .flush(req)
+            .await
+            .to_rw_result()?
             .into_inner())
     }
 }
