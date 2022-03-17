@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::BatchBase;
@@ -65,4 +67,10 @@ impl ToDistributedBatch for BatchFilter {
     }
 }
 
-impl ToBatchProst for BatchFilter {}
+impl ToBatchProst for BatchFilter {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::Filter(FilterNode {
+            search_condition: Some(self.logical.predicate().as_expr().to_protobuf()),
+        })
+    }
+}

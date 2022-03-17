@@ -6,8 +6,9 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
-use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
+use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use risingwave_sqlparser::ast::Statement;
+use uuid::Uuid;
 
 use crate::binder::Binder;
 use crate::handler::util::{get_pg_field_descs, to_pg_rows};
@@ -48,7 +49,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
 
     // Build task id and task sink id
     let task_id = TaskId {
-        query_id: "".to_string(),
+        query_id: Uuid::new_v4().to_string(),
         stage_id: 0,
         task_id: 0,
     };
@@ -74,9 +75,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     compute_client
         .create_task(task_id.clone(), plan, epoch)
         .await?;
-    let mut source =
-        GrpcExchangeSource::create_with_client(compute_client.clone(), task_sink_id.clone())
-            .await?;
+    let mut source = compute_client.get_data(task_sink_id.clone()).await?;
     while let Some(chunk) = source.take_data().await? {
         rows.append(&mut to_pg_rows(chunk));
     }
