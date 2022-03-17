@@ -46,7 +46,6 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -55,6 +54,8 @@ use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::utils::validate_epoch;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
+
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;

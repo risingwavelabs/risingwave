@@ -8,8 +8,8 @@ use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use super::shared_buffer::SharedBufferManager;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,

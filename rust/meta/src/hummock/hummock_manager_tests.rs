@@ -256,9 +256,8 @@ async fn test_hummock_transaction() -> Result<()> {
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch1, uncommitted_epoch.epoch);
         assert_eq!(pinned_version.max_committed_epoch, INVALID_EPOCH);
-        uncommitted_epoch.table_ids.sort_unstable();
-        let table_ids_in_epoch1: Vec<u64> = tables_in_epoch1.iter().map(|t| t.id).collect();
-        assert_eq!(table_ids_in_epoch1, uncommitted_epoch.table_ids);
+        uncommitted_epoch.tables.sort_unstable_by_key(|e| e.id);
+        assert_eq!(tables_in_epoch1, uncommitted_epoch.tables);
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
         hummock_manager
@@ -303,9 +302,8 @@ async fn test_hummock_transaction() -> Result<()> {
         let mut pinned_version = hummock_manager.pin_version(context_id).await?;
         let uncommitted_epoch = pinned_version.uncommitted_epochs.first_mut().unwrap();
         assert_eq!(epoch2, uncommitted_epoch.epoch);
-        uncommitted_epoch.table_ids.sort_unstable();
-        let table_ids_in_epoch2: Vec<u64> = tables_in_epoch2.iter().map(|t| t.id).collect();
-        assert_eq!(table_ids_in_epoch2, uncommitted_epoch.table_ids);
+        uncommitted_epoch.tables.sort_unstable_by_key(|e| e.id);
+        assert_eq!(tables_in_epoch2, uncommitted_epoch.tables);
         assert_eq!(pinned_version.max_committed_epoch, epoch1);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -363,17 +361,15 @@ async fn test_hummock_transaction() -> Result<()> {
             .iter_mut()
             .find(|e| e.epoch == epoch3)
             .unwrap();
-        uncommitted_epoch3.table_ids.sort_unstable();
-        let table_ids_in_epoch3: Vec<u64> = tables_in_epoch3.iter().map(|t| t.id).collect();
-        assert_eq!(table_ids_in_epoch3, uncommitted_epoch3.table_ids);
+        uncommitted_epoch3.tables.sort_unstable_by_key(|e| e.id);
+        assert_eq!(tables_in_epoch3, uncommitted_epoch3.tables);
         let uncommitted_epoch4 = pinned_version
             .uncommitted_epochs
             .iter_mut()
             .find(|e| e.epoch == epoch4)
             .unwrap();
-        uncommitted_epoch4.table_ids.sort_unstable();
-        let table_ids_in_epoch4: Vec<u64> = tables_in_epoch4.iter().map(|t| t.id).collect();
-        assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
+        uncommitted_epoch4.tables.sort_unstable_by_key(|e| e.id);
+        assert_eq!(tables_in_epoch4, uncommitted_epoch4.tables);
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
@@ -398,8 +394,8 @@ async fn test_hummock_transaction() -> Result<()> {
             .iter_mut()
             .find(|e| e.epoch == epoch4)
             .unwrap();
-        uncommitted_epoch4.table_ids.sort_unstable();
-        assert_eq!(table_ids_in_epoch4, uncommitted_epoch4.table_ids);
+        uncommitted_epoch4.tables.sort_unstable_by_key(|e| e.id);
+        assert_eq!(tables_in_epoch4, uncommitted_epoch4.tables);
         assert_eq!(pinned_version.max_committed_epoch, epoch2);
         assert_eq!(
             get_sorted_sstable_ids(&committed_tables),
