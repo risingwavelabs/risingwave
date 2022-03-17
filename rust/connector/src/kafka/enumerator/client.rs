@@ -15,14 +15,17 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use anyhow::Result;
 use async_trait::async_trait;
-use rdkafka::consumer::{BaseConsumer, Consumer};
+use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
 
+
 use crate::base::SplitEnumerator;
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
-use crate::kafka::KAFKA_SYNC_CALL_TIMEOUT;
+use crate::kafka::{KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT};
+use crate::SourceSplit;
 
 pub struct KafkaSplitEnumerator {
     broker_address: String,
@@ -32,26 +35,30 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaOffset,
 }
 
+
 impl KafkaSplitEnumerator {
-    pub fn new(_properties: &HashMap<String, String>) -> KafkaSplitEnumerator {
-        todo!()
-        //
-        // let client = BaseConsumer::client()
-        //
-        // KafkaSplitEnumerator {
-        //     broker_address: properties.get("bootstrap.servers").unwrap().to_string(),
-        //     topic: properties.get("topic").unwrap().to_string(),
-        //     start_offset: KafkaOffset::Earliest,
-        //     stop_offset: KafkaOffset::Latest,
-        // }
+    pub fn new(properties: &HashMap<String, String>) -> Result<KafkaSplitEnumerator> {
+        let broker_address = properties.get(KAFKA_CONFIG_BROKER_KEY).ok_or_else(|| anyhow!("broker_address not found"))?;
+        let topic = properties.get(KAFKA_CONFIG_TOPIC_KEY).ok_or_else(|| anyhow!("topic not found"))?;
+
+        let client: BaseConsumer = rdkafka::ClientConfig::new()
+            .set("bootstrap.servers", broker_address)
+            .create_with_context(DefaultConsumerContext).unwrap();
+
+        Ok(Self {
+            broker_address: broker_address.clone(),
+            topic: topic.clone(),
+            admin_client: client,
+            // todo
+            start_offset: KafkaOffset::Earliest,
+            stop_offset: KafkaOffset::None,
+        })
     }
 }
 
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
-    type Split = KafkaSplit;
-
-    async fn list_splits(&mut self) -> anyhow::Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition()?;
 
         let mut start_offsets = self

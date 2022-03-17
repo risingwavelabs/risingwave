@@ -4,7 +4,7 @@ use std::sync::Arc;
 use dashmap::mapref::entry::Entry;
 use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_connector::base::SplitEnumerator;
 use risingwave_connector::{extract_split_enumerator, SplitEnumeratorImpl};
 use risingwave_pb::catalog::{Source, StreamSourceInfo};
@@ -20,11 +20,12 @@ use crate::storage::MetaStore;
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 pub struct SourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     meta_store_ref: Arc<S>,
     barrier_manager_ref: BarrierManagerRef<S>,
+    enumerators: Mutex<HashMap<u32, SplitEnumeratorImpl>>,
 }
 
 pub struct CreateSourceContext {
@@ -39,8 +40,8 @@ pub struct DropSourceContext {
 }
 
 impl<S> SourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         meta_store_ref: Arc<S>,
@@ -51,11 +52,21 @@ where
         Ok(Self {
             meta_store_ref,
             barrier_manager_ref,
+            enumerators: Mutex::new(HashMap::new()),
         })
     }
 
-    pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {
+    pub async fn run(&self) -> Result<()> {
         todo!()
+    }
+
+    pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {
+        // let enumerator = extract_split_enumerator(&ctx.properties).to_rw_result()?;
+
+
+
+        todo!()
+
     }
 
     pub async fn drop_source(&self, _ctx: DropSourceContext) -> Result<()> {
@@ -64,5 +75,10 @@ where
 
     pub async fn list_splits(&self, table_id: TableRefId) -> Result<()> {
         todo!()
+    }
+
+    async fn assign_splits(&self ) -> Result<()> {
+        todo!()
+        //self.barrier_manager_ref.run_command()
     }
 }

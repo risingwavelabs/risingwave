@@ -20,7 +20,6 @@ use std::hash::Hash;
 use anyhow::{anyhow, Error};
 
 
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -69,17 +68,31 @@ pub enum SplitEnumeratorImpl {
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
 }
 
-pub fn extract_split_enumerator(_properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
-    // let source_type = match properties.get("upstream.source") {
-    //     None => return Err(anyhow!("upstream.source not found")),
-    //     Some(value) => value,
-    // };
-    //
-    // match source_type.as_ref() {
-    //     "kafka" => {
-    //         kafka::enumerator::KafkaSplitEnumerator { broker_address: val, topic: val, admin_client: val, start_offset: val, stop_offset: val }
-    //     }
-    // }
+impl SplitEnumeratorImpl {
+    async fn list_splits(&mut self) -> Result<Vec<&[u8]>> {
+        match self {
+            SplitEnumeratorImpl::Kafka(k) => {
+                k.list_splits().await.map(|x| x.iter().map( |xx| {xx.to_string().unwrap().as_}))
+            }
+            SplitEnumeratorImpl::Pulsar(_) => {
+                todo!()
+            }
+        }
 
-    todo!()
+        todo!()
+    }
+}
+
+pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
+    let source_type = match properties.get("upstream.source") {
+        None => return Err(anyhow!("upstream.source not found")),
+        Some(value) => value,
+    };
+
+    match source_type.as_ref() {
+        "kafka" => {
+            return kafka::enumerator::KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka);
+        }
+        _ => Err(anyhow!("unsupported source type: {}", source_type)),
+    }
 }

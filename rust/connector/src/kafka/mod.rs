@@ -23,3 +23,5 @@ pub use enumerator::*;
 pub use split::*;
 
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);
+const KAFKA_CONFIG_BROKER_KEY: &str = "kafka.broker";
+const KAFKA_CONFIG_TOPIC_KEY: &str = "kafka.topic";

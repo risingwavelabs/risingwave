@@ -76,8 +76,8 @@ pub async fn rpc_serve(
                         .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
                 ),
             )
-            .await
-            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
+                .await
+                .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(
                 addr,
@@ -87,7 +87,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 ui_path,
             )
-            .await
+                .await
         }
         MetaStoreBackend::Mem => {
             let meta_store_ref = Arc::new(MemStore::default());
@@ -99,7 +99,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 ui_path,
             )
-            .await
+                .await
         }
     })
 }
@@ -132,8 +132,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             notification_manager.clone(),
             max_heartbeat_interval,
         )
-        .await
-        .unwrap(),
+            .await
+            .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {
@@ -165,11 +165,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         StreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager_ref,
+            barrier_manager_ref.clone(),
             cluster_manager.clone(),
         )
-        .await
-        .unwrap(),
+            .await
+            .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
         StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
@@ -192,10 +192,18 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ));
 
     let source_manager_ref = Arc::new(
-        SourceManager::new(meta_store_ref, barrier_manager_ref)
+        SourceManager::new(meta_store_ref, barrier_manager_ref.clone())
             .await
             .unwrap(),
     );
+
+    {
+        let source_manager_ref = source_manager_ref.clone();
+        tokio::spawn(async move {
+            source_manager_ref.run().await.unwrap();
+        });
+    }
+
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
@@ -233,11 +241,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         #[cfg(not(test))]
-        StoredClusterManager::start_heartbeat_checker(
+            StoredClusterManager::start_heartbeat_checker(
             cluster_manager,
             Duration::from_secs(1),
         )
-        .await,
+            .await,
+        hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager,

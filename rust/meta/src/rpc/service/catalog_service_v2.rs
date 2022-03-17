@@ -130,24 +130,6 @@ where
             .map_err(tonic_err)? as u32;
 
         let mut source = req.get_source().map_err(tonic_err)?.clone();
-        //
-        // let stream_source = match source.get_info().map_err(tonic_err)? {
-        //     StreamSource(s) => s,
-        //     _ => return Err(Status::invalid_argument("not a stream source")),
-        // };
-
-        // create source in source manager,
-        // The long-running split enumerator will register at this point
-        // let _ = self
-        //     .source_manager
-        //     .create_source(CreateSourceContext {
-        //         source_id,
-        //         discovery_new_split: true,
-        //         properties: stream_source.get_properties().clone(),
-        //     })
-        //     .await
-        //     .map_err(tonic_err)?;
-
         // save source to catalog
         source.id = source_id as u32;
         let version = self
