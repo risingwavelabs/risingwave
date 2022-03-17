@@ -21,6 +21,7 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
@@ -98,12 +99,20 @@ pub struct StreamBase {
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
         }
         Ok(())
+    }
+
+    /// Explain the plan node and return a string.
+    pub fn explain_to_string(&self) -> Result<String> {
+        let mut output = String::new();
+        self.explain(0, &mut output)
+            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
+        Ok(output)
     }
 
     pub fn to_batch_prost(&self) -> BatchPlanProst {
@@ -121,7 +130,6 @@ impl dyn PlanNode {
         }
     }
 
-    #[allow(unreachable_code)]
     pub fn to_stream_prost(&self) -> StreamPlanProst {
         let node = Some(self.to_stream_prost_body());
         let input = self
@@ -130,12 +138,13 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost())
             .collect();
         let identity = format!("{:?}", self);
+        // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity,
             node,
-            operator_id: todo!(),
-            pk_indices: todo!(),
+            operator_id: 0,
+            pk_indices: vec![],
         }
     }
 }
@@ -152,6 +161,7 @@ pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
 
+mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
 mod batch_hash_join;
@@ -160,8 +170,9 @@ mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
 mod batch_sort;
-mod batch_sort_merge_join;
+mod batch_values;
 mod logical_agg;
+mod logical_delete;
 mod logical_filter;
 mod logical_insert;
 mod logical_join;
@@ -176,6 +187,7 @@ mod stream_hash_join;
 mod stream_project;
 mod stream_table_source;
 
+pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
 pub use batch_hash_join::BatchHashJoin;
@@ -184,8 +196,9 @@ pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
 pub use batch_sort::BatchSort;
-pub use batch_sort_merge_join::BatchSortMergeJoin;
+pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
+pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -225,6 +238,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -233,9 +247,10 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Project }
             ,{ Batch, Filter }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
-            ,{ Batch, SortMergeJoin }
+            ,{ Batch, Values }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Limit }
@@ -258,6 +273,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Project }
             ,{ Logical, Scan }
             ,{ Logical, Insert }
+            ,{ Logical, Delete }
             ,{ Logical, Join }
             ,{ Logical, Values }
             ,{ Logical, Limit }
@@ -278,11 +294,12 @@ macro_rules! for_batch_plan_nodes {
             ,{ Batch, Filter }
             ,{ Batch, SeqScan }
             ,{ Batch, HashJoin }
+            ,{ Batch, Values }
             ,{ Batch, Limit }
-            ,{ Batch, SortMergeJoin }
             ,{ Batch, Sort }
             ,{ Batch, Exchange }
             ,{ Batch, Insert }
+            ,{ Batch, Delete }
         }
     };
 }
@@ -308,7 +325,7 @@ macro_rules! enum_plan_node_type {
         paste!{
             /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
             #[derive(PartialEq, Debug)]
-            pub enum PlanNodeType{
+            pub enum PlanNodeType {
                 $( [<$convention $name>] ),*
             }
 
@@ -350,4 +367,5 @@ macro_rules! impl_down_cast_fn {
         }
     }
 }
+
 for_all_plan_nodes! { impl_down_cast_fn }

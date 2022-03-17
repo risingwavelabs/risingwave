@@ -1,0 +1,51 @@
+
+[tasks.update-planner-test]
+description = "Update planner test data"
+private = true
+script = '''
+#!/bin/bash
+set -e
+cd rust && cargo run --bin planner-test-apply
+cd frontend/test_runner/tests/testdata/
+
+for f in *.apply.yaml
+do
+  yq -N -I4 -i '.. style="literal"' "$f"
+done
+'''
+
+[tasks.apply-planner-test]
+description = "Generate planner test data"
+dependencies = [
+  "update-planner-test"
+]
+script = '''
+#!/bin/bash
+set -e
+cd rust/frontend/test_runner/tests/testdata/
+
+for f in *.apply.yaml
+do
+  diff "$f" "$(basename "$f" .apply.yaml).yaml" || true
+done
+
+echo "If you want to apply the planner test data, run: $(tput setaf 2)./risedev do-apply-planner-test$(tput sgr 0)"
+'''
+
+[tasks.do-apply-planner-test]
+description = "Apply planner test data"
+dependencies = [
+  "update-planner-test"
+]
+script = '''
+#!/bin/bash
+set -e
+cd rust/frontend/test_runner/tests/testdata/
+
+for f in *.apply.yaml
+do
+  cp "$f" "$(basename "$f" .apply.yaml).yaml"
+done
+
+echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
+'''

@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 use tokio::task::JoinHandle;
@@ -18,7 +19,8 @@ use super::key_range::KeyRange;
 use super::local_version_manager::LocalVersionManager;
 use super::utils::range_overlap;
 use super::value::HummockValue;
-use super::{key, HummockError, HummockOptions, HummockResult, SstableStoreRef};
+use super::{key, HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::conflict_detector::ConflictDetector;
 use crate::monitor::StateStoreMetrics;
 
 type SharedBufferItem = (Bytes, HummockValue<Bytes>);
@@ -160,7 +162,7 @@ pub struct SharedBufferManager {
 
 impl SharedBufferManager {
     pub fn new(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
         // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
@@ -348,7 +350,7 @@ pub struct SharedBufferUploader {
     /// Batches to upload grouped by epoch
     batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
     local_version_manager: Arc<LocalVersionManager>,
-    options: Arc<HummockOptions>,
+    options: Arc<StorageConfig>,
 
     /// Statistics.
     // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
@@ -356,12 +358,16 @@ pub struct SharedBufferUploader {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
+    /// For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to true
+    /// in `StorageConfig`
+    write_conflict_detector: Option<Arc<ConflictDetector>>,
+
     rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
 
 impl SharedBufferUploader {
     pub fn new(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
@@ -370,18 +376,27 @@ impl SharedBufferUploader {
     ) -> Self {
         Self {
             batches_to_upload: BTreeMap::new(),
-            options,
+            options: options.clone(),
             local_version_manager,
 
             stats,
             hummock_meta_client,
             sstable_store,
+            write_conflict_detector: if options.write_conflict_detection_enabled {
+                Some(Arc::new(ConflictDetector::new()))
+            } else {
+                None
+            },
             rx,
         }
     }
 
     /// Upload buffer batches to S3.
     async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
+        if let Some(detector) = &self.write_conflict_detector {
+            detector.archive_epoch(epoch);
+        }
+
         let buffers = match self.batches_to_upload.remove(&epoch) {
             Some(m) => m,
             None => return Ok(()),
@@ -418,7 +433,6 @@ impl SharedBufferUploader {
         }
 
         // Add all tables at once.
-        let timer = self.stats.batch_write_add_l0_latency.start_timer();
         let version = self
             .hummock_meta_client
             .add_tables(
@@ -436,7 +450,6 @@ impl SharedBufferUploader {
                     .collect(),
             )
             .await?;
-        timer.observe_duration();
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
@@ -447,6 +460,10 @@ impl SharedBufferUploader {
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> Result<()> {
         match item {
             SharedBufferUploaderItem::Batch(m) => {
+                if let Some(detector) = &self.write_conflict_detector {
+                    detector.check_conflict_and_track_write_batch(&m.inner, m.epoch);
+                }
+
                 self.batches_to_upload
                     .entry(m.epoch())
                     .or_insert(Vec::new())
@@ -476,7 +493,7 @@ impl SharedBufferUploader {
                 if let Some(tx) = sync_item.notifier {
                     tx.send(res).map_err(|_| {
                         HummockError::shared_buffer_error(
-                            "Failed to notify shared buffer sync becuase of send drop",
+                            "Failed to notify shared buffer sync because of send drop",
                         )
                     })?;
                 }
@@ -508,7 +525,7 @@ mod tests {
 
     use super::SharedBufferBatch;
     use crate::hummock::iterator::test_utils::{
-        iterator_test_key_of, iterator_test_key_of_epoch, test_value_of,
+        iterator_test_key_of, iterator_test_key_of_epoch, iterator_test_value_of,
     };
     use crate::hummock::iterator::{
         BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
@@ -517,8 +534,9 @@ mod tests {
     use crate::hummock::local_version_manager::LocalVersionManager;
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::SharedBufferManager;
+    use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{HummockOptions, SstableStore};
+    use crate::hummock::SstableStore;
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
 
@@ -590,15 +608,15 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut revverse_iter = shared_buffer_batch.reverse_iter();
-        revverse_iter.rewind().await.unwrap();
+        let mut reverse_iter = shared_buffer_batch.reverse_iter();
+        reverse_iter.rewind().await.unwrap();
         let mut output = vec![];
-        while revverse_iter.is_valid() {
+        while reverse_iter.is_valid() {
             output.push((
-                revverse_iter.key().to_owned(),
-                revverse_iter.value().to_owned_value(),
+                reverse_iter.key().to_owned(),
+                reverse_iter.value().to_owned_value(),
             ));
-            revverse_iter.next().await.unwrap();
+            reverse_iter.next().await.unwrap();
         }
         output.reverse();
         assert_eq!(output, shared_buffer_items);
@@ -672,7 +690,7 @@ mod tests {
             MockHummockMetaService::new(),
         )));
         SharedBufferManager::new(
-            Arc::new(HummockOptions::default_for_test()),
+            Arc::new(default_config_for_test()),
             vm,
             sstable_store,
             Arc::new(StateStoreMetrics::unused()),
@@ -691,7 +709,7 @@ mod tests {
         for key in put_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Put(test_value_of(0, *idx).into()),
+                HummockValue::Put(iterator_test_value_of(0, *idx).into()),
             ));
             *idx += 1;
         }

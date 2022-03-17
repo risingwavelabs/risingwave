@@ -52,8 +52,10 @@ create materialized view m3 as select sum(M1.v1) as sum_m1_v1, sum(m1.v2) as sum
 RwStreamMaterialize(name=[m3])
   RwStreamProject(sum_m1_v1=[$STREAM_NULL_BY_ROW_COUNT($0, $1)], sum_m1_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $2)], $f0=[$0], sum_m1_v1_copy=[$1], sum_m1_v2_copy=[$2])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], sum_m1_v1=[SUM($0)], sum_m1_v2=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
-        RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])]]>
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamChain(all=[true], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
+          RwStreamBatchPlan(table=[[test_schema, m1]], tableId=[0.0.4], primaryKeyIndices=[[2]], columnIds=[[0.0.4.0, 0.0.4.1, 0.0.4.2]])
+]]>
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
@@ -114,8 +116,10 @@ create materialized view m6 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from 
 RwStreamMaterialize(name=[m6])
   RwStreamProject(sum_v1=[$2], avg_v3=[/(CAST($3):DOUBLE NOT NULL, $4)], v1=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($0)], agg#2=[SUM($1)], agg#3=[COUNT($1)])
-      RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
-        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])]]>
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
+          RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.2, 0.0.8.1, 0.0.8.3]])
+]]>
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
@@ -134,8 +138,10 @@ create materialized view m7 as select sum(v1) as sum_v1 from m5 group by v2;
 RwStreamMaterialize(name=[m7])
   RwStreamProject(sum_v1=[$2], v2=[$0])
     RwStreamAgg(group=[{0}], agg#0=[COUNT()], sum_v1=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
-        RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])]]>
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamChain(all=[true], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
+          RwStreamBatchPlan(table=[[test_schema, m5]], tableId=[0.0.8], primaryKeyIndices=[[2]], columnIds=[[0.0.8.0, 0.0.8.2, 0.0.8.3]])
+]]>
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[
@@ -172,8 +178,10 @@ create materialized view m9 as select round(avg(v1), 1) as avg_v1, sum(v2) as su
 RwStreamMaterialize(name=[m9])
   RwStreamProject(avg_v1=[ROUND($STREAM_NULL_BY_ROW_COUNT($0, /(CAST($1):DOUBLE, $2)), 1)], sum_v2=[$STREAM_NULL_BY_ROW_COUNT($0, $3)], count_v3=[$0], $f1=[$1], $f2=[$2], sum_v2_copy=[$3])
     RwStreamAgg(group=[{}], agg#0=[COUNT()], agg#1=[SUM($0)], agg#2=[COUNT($0)], sum_v2=[SUM($1)])
-      RwStreamChain(all=[true], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
-        RwStreamBatchPlan(table=[[test_schema, m8]], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])]]>
+      RwStreamExchange(distribution=[RwDistributionTrait{type=SINGLETON, keys=[]}], collation=[[]])
+        RwStreamChain(all=[true], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
+          RwStreamBatchPlan(table=[[test_schema, m8]], tableId=[0.0.11], primaryKeyIndices=[[2]], columnIds=[[0.0.11.0, 0.0.11.1, 0.0.11.3]])
+]]>
         </Resource>
         <Resource name="primaryKey">
             <![CDATA[

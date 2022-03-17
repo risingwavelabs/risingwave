@@ -11,7 +11,8 @@ git clone https://github.com/singularity-data/risingwave-dev.git
 ```
 
 ## Environment
-* OS: macOS, Linux, or Windows (WSL or Cygwin)
+
+* OS: macOS, Linux
 * Java 11
 * Rust
 * CMake
@@ -19,7 +20,7 @@ git clone https://github.com/singularity-data/risingwave-dev.git
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
 
-To install compilers in macOS, run:
+To install components in macOS, run:
 
 ```shell
 brew install java11
@@ -32,13 +33,13 @@ brew install openssl
 Note that we only tested our code against Java 11. So please use the specific version!
 
 ## Development
+
 You should have already seen multiple folders in our repo:
 - The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
 optimizer, and other components. We use Calcite to serve as our query optimizer.
 - The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
 engine, storage engine and meta service.
 - The `e2e_test` folder contains the latest end-to-end test cases.
-
 
 ### RiseDev
 
@@ -52,12 +53,12 @@ Then, in the root directory, simply run:
 
 ```
 ./risedev d # shortcut for ./risedev dev
-./risedev ci-1node
-./risedev ci-3node
-./risedev dev-compute-node # compute node will need to be started by you
+psql -h localhost -p 4567 -d dev
 ```
 
 Everything will be set for you.
+
+There are a lot of other running configurations, like `ci-1node`, `ci-3node`, `dev-compute-node`. You may find more in `./risedev --help`.
 
 To stop the playground,
 
@@ -71,7 +72,13 @@ And you can configure components for RiseDev.
 ./risedev configure
 ```
 
-For more information, refer to `README.md` under `rust/risedev`.
+For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
+
+```
+./risedev p
+```
+
+For more information, refer to `README.md` under `rust/risedevtool`.
 
 ### Dashboard
 
@@ -81,70 +88,12 @@ To preview the web page, install Node.js, and
 cd rust/meta/src/dashboard && npx reload -b
 ```
 
-## Deployment
-To run the system, you need to use at least four terminals:
-- The Postgres shell is responsible for sending user command to the frontend server and displaying
-results returned by the database.
-- The frontend server receives the user command, performs parsing, binding, planning, optimization,
-and then passes the physical plan to the corresponding to compute server(s).
-- The compute server performs computation and then returns results to the frontend server.
-- The meta server performs epoch, id generation and metadata management.
-
-To start the meta server, create one terminal and then type:
-```shell
-make rust_build ## Not necessary if previously built
-cd rust
-./target/debug/meta-node --log4rs-config config/log4rs.yaml
-```
-
-To start the frontend server, create one terminal and then type:
-```shell
-cd java
-./gradlew -p pgserver run 
-# Or it can be specified by the parameter  ./gradlew -p pgserver run --args="-c ./src/main/resources/server.properties"
-```
-
-To start the compute server, create one terminal and then type:
-```shell
-make rust_build
-cd rust
-```
-You can choose to use `minio` as the serving remote storage.
-```shell
-./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml
-# With hummock state store and use default settings as RiseDev
-./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store hummock+minio://hummock:12345678@localhost:9301/hummock001
-```
-Alternatively, you can choose to use `Amazon S3` as the serving remote storage.
-```shell
-# With Amazon S3 and test accounts, follow https://singularity-data.larksuite.com/docs/docuszYRfc00x6Q0QhqidP2AxEg to set up the test credentials.
-./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store hummock+s3://s3-ut
-```
-
-```shell
-# With tikv state store
-tiup playground
-cargo build --features tikv
-./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store "tikv://<pd_address>"
-```
-
-```shell
-# With rocksdb state store
-cargo build --features rocksdb-local
-./target/debug/compute-node --config-path ../.risingwave/config/risingwave.toml --state-store rocksdb_local:///tmp/default
-```
-
-To start the Postgres shell, create one terminal and then type:
-```shell
-psql -h localhost -p 4567 -d dev
-```
-
-Now you can use the Postgres shell to try out your SQL command!
-
 ## Contributing
+
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
+
 Currently, we are using nightly toolchain `nightly-2022-03-09`. If anyone needs to upgrade
 the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 

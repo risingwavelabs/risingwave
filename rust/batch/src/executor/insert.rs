@@ -15,9 +15,9 @@ use risingwave_source::SourceManagerRef;
 use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
-/// `InsertExecutor` implements table insertion with values from its child executor.
+/// [`InsertExecutor`] implements table insertion with values from its child executor.
 pub struct InsertExecutor {
-    /// target table id
+    /// Target table id.
     table_id: TableId,
     source_manager: SourceManagerRef,
     worker_id: u32,
@@ -57,7 +57,6 @@ impl Executor for InsertExecutor {
         Ok(())
     }
 
-    // TODO: refactor this function since we only have `TableV2` now.
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         if self.executed {
             return Ok(None);
@@ -67,10 +66,9 @@ impl Executor for InsertExecutor {
         let source = source_desc.source.as_table_v2();
 
         let mut notifiers = Vec::new();
-        let mut rows_inserted = 0;
 
         while let Some(child_chunk) = self.child.next().await? {
-            let len = child_chunk.capacity();
+            let len = child_chunk.cardinality();
             assert!(child_chunk.visibility().is_none());
 
             // add row-id column as first column
@@ -84,24 +82,26 @@ impl Executor for InsertExecutor {
             let rowid_column = once(Column::new(Arc::new(ArrayImpl::from(
                 builder.finish().unwrap(),
             ))));
-            let child_columns = child_chunk.columns().iter().map(|c| c.to_owned());
+            let child_columns = child_chunk.into_parts().0.into_iter();
 
             // put row id column to the last to match the behavior of mview
             let columns = child_columns.chain(rowid_column).collect();
             let chunk = StreamChunk::new(vec![Op::Insert; len], columns, None);
 
             let notifier = source.write_chunk(chunk)?;
-
             notifiers.push(notifier);
-            rows_inserted += len;
         }
 
         // Wait for all chunks to be taken / written.
-        try_join_all(notifiers).await.map_err(|_| {
-            RwError::from(ErrorCode::InternalError(
-                "failed to wait chunks to be written".to_owned(),
-            ))
-        })?;
+        let rows_inserted = try_join_all(notifiers)
+            .await
+            .map_err(|_| {
+                RwError::from(ErrorCode::InternalError(
+                    "failed to wait chunks to be written".to_owned(),
+                ))
+            })?
+            .into_iter()
+            .sum::<usize>();
 
         // create ret value
         {
@@ -164,7 +164,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::array::{Array, I64Array};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::{
@@ -178,27 +178,16 @@ mod tests {
     use crate::*;
 
     #[tokio::test]
-    async fn test_insert_executor_for_table_v2() -> Result<()> {
+    async fn test_insert_executor() -> Result<()> {
         let source_manager = Arc::new(MemSourceManager::new());
         let store = MemoryStateStore::new();
 
         // Schema for mock executor.
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int64),
-                Field::unnamed(DataType::Int64),
-            ],
-        };
+        let schema = schema_test_utils::ii();
         let mut mock_executor = MockExecutor::new(schema.clone());
 
-        // Schema of first table
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-                Field::unnamed(DataType::Decimal),
-            ],
-        };
+        // Schema of the table
+        let schema = schema_test_utils::iii();
 
         let table_columns: Vec<_> = schema
             .fields
@@ -216,7 +205,7 @@ mod tests {
         let data_chunk: DataChunk = DataChunk::builder().columns(vec![col1, col2]).build();
         mock_executor.add(data_chunk.clone());
 
-        // Create the first table.
+        // Create the table.
         let table_id = TableId::new(0);
         source_manager.create_table_source_v2(&table_id, table_columns.to_vec())?;
 
@@ -268,6 +257,7 @@ mod tests {
             vec![Some(2), Some(4), Some(6), Some(8), Some(10)]
         );
 
+        // Row id column
         assert_eq!(
             chunk.columns()[2]
                 .array()

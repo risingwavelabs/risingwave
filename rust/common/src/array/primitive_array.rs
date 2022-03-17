@@ -110,7 +110,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -121,13 +121,13 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             compression: CompressionType::None as i32,
             body: output_buffer,
         };
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
             struct_array_data: None,
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {

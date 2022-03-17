@@ -300,7 +300,7 @@ impl Message {
     pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
-                let prost_stream_chunk = stream_chunk.to_protobuf()?;
+                let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
@@ -366,9 +366,6 @@ pub trait Executor: Send + Debug + 'static {
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
     }
-
-    /// Clear the executor's in-memory cache and reset to specific epoch.
-    fn reset(&mut self, _epoch: u64);
 }
 
 #[derive(Debug)]

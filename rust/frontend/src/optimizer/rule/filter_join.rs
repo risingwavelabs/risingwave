@@ -2,6 +2,7 @@ use risingwave_pb::plan::JoinType;
 
 use super::super::plan_node::*;
 use super::Rule;
+use crate::optimizer::rule::BoxedRule;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Pushes predicates above and within a join node into the join node and/or its children nodes.
@@ -27,7 +28,8 @@ use crate::utils::{ColIndexMapping, Condition};
 /// |--------------------------|---------------------|----------------------|
 /// | Join predicate (on)      | Not Pushed          | Pushed               |
 /// | Where predicate (filter) | Pushed              | Not Pushed           |
-struct FilterJoinRule {}
+pub struct FilterJoinRule {}
+
 impl Rule for FilterJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter = plan.as_logical_filter()?;
@@ -88,6 +90,10 @@ impl Rule for FilterJoinRule {
 }
 
 impl FilterJoinRule {
+    pub fn create() -> BoxedRule {
+        Box::new(FilterJoinRule {})
+    }
+
     /// Try to split and pushdown `predicate` into a join's left/right child or the on clause.
     /// Returns the pushed predicates. The pushed part will be removed from the original predicate.
     ///

@@ -168,10 +168,6 @@ impl Executor for ChainExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
@@ -240,10 +236,6 @@ mod test {
 
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
-        }
-
-        fn reset(&mut self, _epoch: u64) {
-            // nothing to do
         }
     }
 

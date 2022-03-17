@@ -49,7 +49,7 @@ impl Binder {
             root = TableRef::Join(Box::new(BoundJoin {
                 left: root,
                 right,
-                cond: ExprImpl::literal_bool::<true>(),
+                cond: ExprImpl::literal_bool(true),
             }));
         }
         Ok(Some(root))
@@ -78,7 +78,7 @@ impl Binder {
 
     fn bind_join_constraint(&mut self, constraint: JoinConstraint) -> Result<ExprImpl> {
         Ok(match constraint {
-            JoinConstraint::None => ExprImpl::literal_bool::<true>(),
+            JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
                 return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
             }
@@ -104,7 +104,11 @@ impl Binder {
             TableFactor::Table { name, .. } => {
                 Ok(TableRef::BaseTable(Box::new(self.bind_table(name)?)))
             }
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", table_factor)).into()),
+            _ => Err(ErrorCode::NotImplementedError(format!(
+                "unsupported table factor {:?}",
+                table_factor
+            ))
+            .into()),
         }
     }
 
@@ -145,6 +149,7 @@ impl Binder {
             .for_each(|(index, column_catalog)| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
+                    column_catalog.name().into(),
                     begin + index,
                     column_catalog.data_type(),
                 ));

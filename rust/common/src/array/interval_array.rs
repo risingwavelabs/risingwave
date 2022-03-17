@@ -52,7 +52,7 @@ impl Array for IntervalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         unimplemented!("To protobuf of Interval Array is not implemented for now")
     }
 

@@ -11,14 +11,17 @@ use crate::pg_response::PgResponse;
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
-    fn connect(&self) -> Box<dyn Session>;
+    fn connect(&self) -> Arc<dyn Session>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(&self, sql: &str) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
+    async fn run_statement(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
 }
 
 /// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
@@ -80,8 +83,8 @@ mod tests {
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
-        fn connect(&self) -> Box<dyn super::Session> {
-            Box::new(TestSession {})
+        fn connect(&self) -> Arc<dyn super::Session> {
+            Arc::new(TestSession {})
         }
     }
 
@@ -90,7 +93,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Session for TestSession {
         async fn run_statement(
-            &self,
+            self: Arc<TestSession>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
             // simulate an error

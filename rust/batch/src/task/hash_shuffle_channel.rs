@@ -4,7 +4,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
 use tokio::sync::mpsc;
@@ -23,9 +22,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = match hash_info.get_hash_method()? {
-        HashMethod::Crc32 => CRC32FastBuilder {},
-    };
+    let hasher_builder = CRC32FastBuilder {};
 
     let hash_values = chunk
         .get_hash_values(

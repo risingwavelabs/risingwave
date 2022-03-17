@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
     HummockVersionRefId, PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest,
-    SstableInfo, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
-    UnpinVersionRequest,
+    ReportVacuumTaskRequest, SstableInfo, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest, VacuumTask,
 };
 use risingwave_rpc_client::MetaClient;
 use tonic::Streaming;
@@ -55,6 +55,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>>;
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()>;
 }
 
 pub struct RpcHummockMetaClient {
@@ -70,7 +71,6 @@ impl RpcHummockMetaClient {
     }
 }
 
-// TODO #93 idempotent retry
 #[async_trait]
 impl HummockMetaClient for RpcHummockMetaClient {
     async fn pin_version(
@@ -215,5 +215,17 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .await
             .map_err(HummockError::meta_error)?;
         Ok(stream)
+    }
+
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()> {
+        self.meta_client
+            .to_owned()
+            .inner
+            .report_vacuum_task(ReportVacuumTaskRequest {
+                vacuum_task: Some(vacuum_task),
+            })
+            .await
+            .map_err(HummockError::meta_error)?;
+        Ok(())
     }
 }

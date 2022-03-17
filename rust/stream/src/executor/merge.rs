@@ -159,10 +159,6 @@ impl Executor for ReceiverExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
@@ -297,10 +293,6 @@ impl Executor for MergeExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
@@ -424,7 +416,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
             // send stream_chunk
-            let stream_chunk = StreamChunk::default().to_protobuf().unwrap();
+            let stream_chunk = StreamChunk::default().to_protobuf();
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(

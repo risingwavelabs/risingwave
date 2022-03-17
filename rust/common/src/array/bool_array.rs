@@ -47,7 +47,7 @@ impl Array for BoolArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
 
         for v in self.iter().flatten() {
@@ -59,13 +59,13 @@ impl Array for BoolArray {
             compression: CompressionType::None as i32,
             body: output_buffer,
         };
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values: vec![values],
             array_type: ArrayType::Bool as i32,
             struct_array_data: None,
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {

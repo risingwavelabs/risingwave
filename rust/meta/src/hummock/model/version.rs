@@ -7,6 +7,7 @@ use crate::model::{MetadataModel, Transactional};
 /// `cf(hummock_version)`: `HummockVersionRefId` -> `HummockVersion`
 const HUMMOCK_VERSION_CF_NAME: &str = "cf/hummock_version";
 
+/// `HummockVersion` tracks `SSTables` in given version.
 impl MetadataModel for HummockVersion {
     type ProstType = HummockVersion;
     type KeyType = HummockVersionRefId;

@@ -4,7 +4,7 @@ use risingwave_common::types::DataType;
 
 use super::Expr;
 use crate::expr::ExprType;
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
     index: usize,
     data_type: DataType,
@@ -12,7 +12,20 @@ pub struct InputRef {
 
 impl fmt::Display for InputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${}", self.index + 1)
+        write!(f, "{:?}", self)
+    }
+}
+
+impl fmt::Debug for InputRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if f.alternate() {
+            f.debug_struct("InputRef")
+                .field("index", &self.index)
+                .field("data_type", &self.data_type)
+                .finish()
+        } else {
+            write!(f, "${}", self.index)
+        }
     }
 }
 

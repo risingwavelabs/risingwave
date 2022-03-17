@@ -17,7 +17,7 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()?),
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
             })
         })
         .collect::<Result<_>>()
@@ -67,7 +67,7 @@ mod tests {
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
 
-        let catalog_manager = frontend.session().ctx.env().catalog_mgr();
+        let catalog_manager = frontend.session().env().catalog_mgr();
         let table = catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .unwrap();

@@ -1,11 +1,13 @@
 use std::cell::RefCell;
 use std::fmt::Formatter;
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
@@ -24,7 +26,7 @@ use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
 pub struct QueryContext {
-    pub session_ctx: Arc<SessionContext>,
+    pub session_ctx: Arc<SessionImpl>,
     pub next_id: i32,
 }
 /// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
@@ -32,7 +34,7 @@ pub struct QueryContext {
 pub type QueryContextRef = Rc<RefCell<QueryContext>>;
 
 impl QueryContext {
-    pub fn new(session_ctx: Arc<SessionContext>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
         Self {
             session_ctx,
             next_id: 0,
@@ -48,7 +50,7 @@ impl QueryContext {
     #[cfg(test)]
     pub async fn mock() -> Self {
         Self {
-            session_ctx: Arc::new(SessionContext::mock().await),
+            session_ctx: Arc::new(SessionImpl::mock().await),
             next_id: 0,
         }
     }
@@ -58,6 +60,15 @@ impl std::fmt::Debug for QueryContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "QueryContext {{ current id = {} }}", self.next_id)
     }
+}
+
+fn load_config(opts: &FrontendOpts) -> FrontendConfig {
+    if opts.config_path.is_empty() {
+        return FrontendConfig::default();
+    }
+
+    let config_path = PathBuf::from(opts.config_path.to_owned());
+    FrontendConfig::init(config_path).unwrap()
 }
 
 /// The global environment for the frontend server.
@@ -96,6 +107,9 @@ impl FrontendEnv {
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
+        let config = load_config(opts);
+        tracing::info!("Starting compute node with config {:?}", config);
+
         let host = opts.host.parse().unwrap();
 
         // Register in meta by calling `AddWorkerNode` RPC.
@@ -103,7 +117,7 @@ impl FrontendEnv {
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
-            Duration::from_millis(opts.heartbeat_interval as u64),
+            Duration::from_millis(config.server.heartbeat_interval as u64),
         );
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
@@ -159,15 +173,11 @@ impl FrontendEnv {
 }
 
 pub struct SessionImpl {
-    pub ctx: Arc<SessionContext>,
-}
-
-pub struct SessionContext {
     env: FrontendEnv,
     database: String,
 }
 
-impl SessionContext {
+impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
@@ -189,15 +199,6 @@ impl SessionContext {
     }
 }
 
-impl SessionImpl {
-    pub fn new(env: FrontendEnv, database: String) -> Self {
-        let context = SessionContext { env, database };
-        Self {
-            ctx: Arc::new(context),
-        }
-    }
-}
-
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
@@ -206,10 +207,8 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(&self) -> Box<dyn Session> {
-        Box::new(SessionImpl {
-            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string())),
-        })
+    fn connect(&self) -> Arc<dyn Session> {
+        Arc::new(SessionImpl::new(self.env.clone(), "dev".to_string()))
     }
 }
 
@@ -235,7 +234,7 @@ impl SessionManagerImpl {
 #[async_trait::async_trait]
 impl Session for SessionImpl {
     async fn run_statement(
-        &self,
+        self: Arc<Self>,
         sql: &str,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Parse sql.

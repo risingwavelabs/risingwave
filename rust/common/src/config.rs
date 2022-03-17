@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use serde::de::Error;
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
@@ -25,6 +26,13 @@ pub struct ComputeNodeConfig {
     // Below for Hummock.
     #[serde(default)]
     pub storage: StorageConfig,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
+pub struct FrontendConfig {
+    // For connection
+    #[serde(default)]
+    pub server: ServerConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -83,12 +91,45 @@ pub struct StorageConfig {
     pub data_directory: String,
 
     /// Checksum algorithm (Crc32c, XxHash64).
-    #[serde(default = "default::checksum_algorithm")]
-    pub checksum_algo: String,
+    #[serde(
+        default = "default::checksum_algorithm",
+        deserialize_with = "ser_parse_checksum_algo"
+    )]
+    pub checksum_algo: risingwave_pb::hummock::checksum::Algorithm,
 
     /// Whether to enable async checkpoint
     #[serde(default = "default::async_checkpoint_enabled")]
     pub async_checkpoint_enabled: bool,
+
+    /// Whether to enable write conflict detection
+    #[serde(default = "default::write_conflict_detection_enabled")]
+    pub write_conflict_detection_enabled: bool,
+}
+
+fn ser_parse_checksum_algo<'de, D>(
+    deserializer: D,
+) -> core::result::Result<risingwave_pb::hummock::checksum::Algorithm, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let checksum_algo = String::deserialize(deserializer)?;
+    match parse_checksum_algo(checksum_algo.as_str()) {
+        Some(algo) => Ok(algo),
+        _ => Err(D::Error::custom(format!(
+            "{} is not supported for Hummock",
+            checksum_algo
+        ))),
+    }
+}
+
+pub fn parse_checksum_algo(
+    checksum_algo: &str,
+) -> Option<risingwave_pb::hummock::checksum::Algorithm> {
+    match checksum_algo {
+        "crc32c" => Some(risingwave_pb::hummock::checksum::Algorithm::Crc32c),
+        "xxhash64" => Some(risingwave_pb::hummock::checksum::Algorithm::XxHash64),
+        _ => None,
+    }
 }
 
 impl Default for StorageConfig {
@@ -112,9 +153,24 @@ impl ComputeNodeConfig {
     }
 }
 
+impl FrontendConfig {
+    pub fn init(path: PathBuf) -> Result<Self> {
+        let config_str = fs::read_to_string(path.clone()).map_err(|e| {
+            RwError::from(InternalError(format!(
+                "failed to open config file '{}': {}",
+                path.to_string_lossy(),
+                e
+            )))
+        })?;
+        let config: FrontendConfig = toml::from_str(config_str.as_str())
+            .map_err(|e| RwError::from(InternalError(format!("parse error {}", e))))?;
+        Ok(config)
+    }
+}
+
 mod default {
     pub fn heartbeat_interval() -> u32 {
-        100
+        1000
     }
 
     pub fn chunk_size() -> u32 {
@@ -138,12 +194,16 @@ mod default {
         "hummock_001".to_string()
     }
 
-    pub fn checksum_algorithm() -> String {
-        "crc32c".to_string()
+    pub fn checksum_algorithm() -> risingwave_pb::hummock::checksum::Algorithm {
+        risingwave_pb::hummock::checksum::Algorithm::Crc32c
     }
 
     pub fn async_checkpoint_enabled() -> bool {
         true
+    }
+
+    pub fn write_conflict_detection_enabled() -> bool {
+        cfg!(debug_assertions)
     }
 }
 

@@ -28,7 +28,7 @@ impl Block {
     pub fn decode(data: Bytes) -> HummockResult<Block> {
         let size = data.len();
 
-        // varify checksum
+        // verify checksum
         let checksum_len = (&data[size - 4..]).get_u32() as usize;
         let content_len = size - 4 - checksum_len;
         let checksum = Checksum::decode(&data[content_len..content_len + checksum_len])
@@ -94,8 +94,9 @@ mod tests {
 
     use crate::assert_bytes_eq;
     use crate::hummock::key::key_with_epoch;
+    use crate::hummock::test_utils::gen_test_sstable_data;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{Block, BlockIterator, SSTableBuilder, SSTableBuilderOptions};
+    use crate::hummock::{Block, BlockIterator, SSTableBuilderOptions};
 
     fn key(index: usize) -> Vec<u8> {
         key_with_epoch(format!("k{:02}", index).into_bytes(), 0)
@@ -119,12 +120,10 @@ mod tests {
             table_capacity: 1024,
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
-        let mut builder = SSTableBuilder::new(options);
-        builder.add(&key(0), HummockValue::Put(&value(0)));
-        builder.add(&key(1), HummockValue::Put(&value(1)));
-        builder.add(&key(2), HummockValue::Put(&value(2)));
-        builder.add(&key(3), HummockValue::Put(&value(3)));
-        let (data, meta) = builder.finish();
+        let (data, meta) = gen_test_sstable_data(
+            options,
+            (0..4).map(|i| (key(i), HummockValue::Put(value(i)))),
+        );
         assert_eq!(meta.block_metas.len(), 2);
         let block0 = Block::decode(data.slice(
             meta.block_metas[0].offset as usize

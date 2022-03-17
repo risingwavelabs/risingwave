@@ -4,9 +4,9 @@ use std::sync::Arc;
 use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use risingwave_batch::rpc::service::exchange::GrpcExchangeWriter;
-use risingwave_batch::task::{BatchManager, TaskSinkId};
+use risingwave_batch::task::{BatchManager, TaskOutputId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::plan::TaskSinkId as ProtoTaskSinkId;
+use risingwave_pb::plan::TaskOutputId as ProtoTaskOutputId;
 use risingwave_pb::task_service::exchange_service_server::ExchangeService;
 use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
@@ -15,6 +15,8 @@ use risingwave_stream::executor::Message;
 use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
+
+const EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
@@ -41,7 +43,10 @@ impl ExchangeService for ExchangeServiceImpl {
             .ok_or_else(|| Status::unavailable("connection unestablished"))?;
         let req = request.into_inner();
         match self
-            .get_data_impl(peer_addr, req.get_sink_id().map_err(tonic_err)?.clone())
+            .get_data_impl(
+                peer_addr,
+                req.get_task_output_id().map_err(tonic_err)?.clone(),
+            )
             .await
         {
             Ok(resp) => Ok(resp),
@@ -90,19 +95,19 @@ impl ExchangeServiceImpl {
     async fn get_data_impl(
         &self,
         peer_addr: SocketAddr,
-        pb_tsid: ProtoTaskSinkId,
+        pb_tsid: ProtoTaskOutputId,
     ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
-        let tsid = TaskSinkId::try_from(&pb_tsid)?;
+        let tsid = TaskOutputId::try_from(&pb_tsid)?;
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
-        let mut task_sink = self.batch_mgr.take_sink(&pb_tsid)?;
+        let mut task_output = self.batch_mgr.take_output(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
-            match task_sink.take_data(&mut writer).await {
+            match task_output.take_data(&mut writer).await {
                 Ok(_) => {
                     info!(
-                        "Exchanged {} chunks from sink {:?}",
+                        "Exchanged {} chunks from output {:?}",
                         writer.written_chunks(),
                         tsid,
                     );
@@ -120,7 +125,7 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         debug!("Serve stream exchange RPC from {}", peer_addr);
         tokio::spawn(async move {
             loop {
