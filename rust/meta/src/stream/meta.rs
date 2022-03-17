@@ -92,14 +92,16 @@ where
     pub async fn update_table_fragments_downstream(
         &self,
         table_id: &TableId,
-        downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
+        extra_downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
     ) -> Result<()> {
         match self.table_fragments.entry(*table_id) {
             Entry::Occupied(mut entry) => {
                 let table_fragment = entry.get_mut();
                 for fragment in table_fragment.fragments.values_mut() {
                     for actor in &mut fragment.actors {
-                        if let Some(downstream_actors) = downstream_actors.get(&actor.actor_id) {
+                        if let Some(downstream_actors) =
+                            extra_downstream_actors.get(&actor.actor_id)
+                        {
                             actor
                                 .downstream_actor_id
                                 .extend(downstream_actors.iter().cloned());
