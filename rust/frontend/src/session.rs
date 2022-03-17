@@ -241,7 +241,7 @@ impl Session for SessionImpl {
         let mut stmts = Parser::parse_sql(sql)?;
         // With pgwire, there would be at most 1 statement in the vec.
         assert!(stmts.len() <= 1);
-        if stmts.len() == 0 {
+        if stmts.is_empty() {
             return Ok(PgResponse::new(
                 pgwire::pg_response::StatementType::EMPTY,
                 0,
