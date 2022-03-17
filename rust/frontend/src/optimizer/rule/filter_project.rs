@@ -1,9 +1,9 @@
 use super::super::plan_node::*;
-use super::Rule;
+use super::{BoxedRule, Rule};
 use crate::utils::Substitute;
 
 /// Pushes a [`LogicalFilter`] past a [`LogicalProject`].
-struct FilterProjectRule {}
+pub struct FilterProjectRule {}
 impl Rule for FilterProjectRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter = plan.as_logical_filter()?;
@@ -19,5 +19,11 @@ impl Rule for FilterProjectRule {
         let input = project.input();
         let pushed_filter = LogicalFilter::new(input, predicate);
         Some(project.clone_with_input(pushed_filter.into()).into())
+    }
+}
+
+impl FilterProjectRule {
+    pub fn create() -> BoxedRule {
+        Box::new(FilterProjectRule {})
     }
 }
