@@ -7,7 +7,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
-use risingwave_sqlparser::ast::{Query, Statement};
+use risingwave_sqlparser::ast::Query;
 
 use crate::binder::Binder;
 use crate::handler::util::{get_pg_field_descs, to_pg_rows};
@@ -23,12 +23,12 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
 
     let mut binder = Binder::new(catalog);
-    let bound = binder.bind(Statement::Query(query))?;
+    let bound = binder.bind_query(*query)?;
 
     let pg_descs = get_pg_field_descs(&bound)?;
 
     let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
+        .plan_query(bound)?
         .gen_batch_query_plan()
         .to_batch_prost();
 

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::Binder;
 use crate::planner::Planner;
@@ -21,9 +21,9 @@ pub async fn handle_create_mv(
         .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
 
     let mut binder = Binder::new(catalog);
-    let bound = binder.bind(Statement::Query(query))?;
+    let bound = binder.bind_query(*query)?;
     let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
+        .plan_query(bound)?
         .gen_create_mv_plan()
         .to_stream_prost();
 

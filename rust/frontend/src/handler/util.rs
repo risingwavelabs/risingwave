@@ -2,10 +2,10 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use crate::binder::{BoundSetExpr, BoundStatement};
+use crate::binder::{BoundQuery, BoundSetExpr};
 use crate::expr::Expr;
 
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
@@ -21,33 +21,25 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
-pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
-    if let BoundStatement::Query(query) = bound {
-        if let BoundSetExpr::Select(ref select) = query.body {
-            let mut pg_descs = vec![];
-            for i in 0..select.select_items.len() {
-                let mut pg_name = "".to_string();
-                if let Some(t) = select.aliases[i].as_ref() {
-                    pg_name = t.to_string();
-                }
-                pg_descs.push(PgFieldDescriptor::new(
-                    pg_name,
-                    data_type_to_type_oid(select.select_items[i].return_type()),
-                ));
-            }
-            Ok(pg_descs)
-        } else {
-            Err(ErrorCode::NotImplementedError(
-                "get pg_field descs only support select bound_set_expr".to_string(),
-            )
-            .into())
-        }
-    } else {
-        Err(ErrorCode::NotImplementedError(
-            "get pg_field descs only support query bound_statement".to_string(),
-        )
-        .into())
-    }
+pub fn get_pg_field_descs(query: &BoundQuery) -> Result<Vec<PgFieldDescriptor>> {
+    let pg_descs = match &query.body {
+        BoundSetExpr::Select(select) => select
+            .select_items
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let name = select.aliases[i].clone().unwrap_or(format!("{:?}", e));
+                PgFieldDescriptor::new(name, data_type_to_type_oid(e.return_type()))
+            })
+            .collect(),
+        BoundSetExpr::Values(v) => v
+            .schema
+            .fields()
+            .iter()
+            .map(|f| PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type())))
+            .collect(),
+    };
+    Ok(pg_descs)
 }
 
 pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
@@ -77,7 +69,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::{column, column_nonnull};
 
-    use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr, BoundStatement};
+    use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr};
     use crate::expr::ExprImpl;
     use crate::handler::util::{get_pg_field_descs, to_pg_rows};
 
@@ -98,13 +90,10 @@ mod tests {
             from: None,
             selection: None,
         };
-        let bound = BoundStatement::Query(
-            BoundQuery {
-                body: BoundSetExpr::Select(select.into()),
-                order: vec![],
-            }
-            .into(),
-        );
+        let bound = BoundQuery {
+            body: BoundSetExpr::Select(select.into()),
+            order: vec![],
+        };
         let pg_descs = get_pg_field_descs(&bound).unwrap();
         assert_eq!(
             pg_descs
