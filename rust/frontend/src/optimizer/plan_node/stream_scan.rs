@@ -8,7 +8,7 @@ use super::{LogicalScan, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamScan` is a virtual plan node to represent a stream scan. It will be converted to chain +
-/// upstream table scan + batch table scan when converting to MView creation request.
+/// upstream source scan + batch table scan when converting to MView creation request.
 #[derive(Debug, Clone)]
 pub struct StreamScan {
     pub base: StreamBase,
@@ -39,7 +39,7 @@ impl_plan_tree_node_for_leaf! { StreamScan }
 impl fmt::Display for StreamScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("StreamScan")
-            .field("logical", &self.logical)
+            .field("logical", &self.logical.to_string())
             .finish()
     }
 }
