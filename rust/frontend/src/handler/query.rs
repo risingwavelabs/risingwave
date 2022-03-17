@@ -1,23 +1,23 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use itertools::Itertools;
-use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
-use risingwave_sqlparser::ast::{Query, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
-use crate::handler::util::to_pg_rows;
+use crate::handler::util::{get_pg_field_descs, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::session::QueryContext;
 
-pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<PgResponse> {
+pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgResponse> {
+    let stmt_type = to_statement_type(&stmt);
+
     let session = context.session_ctx.clone();
     let bound = {
         let mut binder = Binder::new(
@@ -26,6 +26,8 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         );
         binder.bind(Statement::Query(query))?
     };
+    let pg_descs = get_pg_field_descs(&bound)?;
+
     let plan = Planner::new(Rc::new(RefCell::new(context)))
         .plan(bound)?
         .gen_batch_query_plan()
@@ -78,20 +80,6 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         rows.append(&mut to_pg_rows(chunk));
     }
 
-    let pg_len = {
-        if !rows.is_empty() {
-            rows.get(0).unwrap().values().len() as i32
-        } else {
-            0
-        }
-    };
-
-    // TODO: from bound extract column_name and data_type to build pg_desc
-    let pg_descs = (0..pg_len)
-        .into_iter()
-        .map(|_i| PgFieldDescriptor::new("item".to_string(), TypeOid::Varchar))
-        .collect_vec();
-
     // Unpin corresponding snapshot.
     meta_client
         .inner
@@ -103,9 +91,21 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         .to_rw_result()?;
 
     Ok(PgResponse::new(
-        StatementType::SELECT,
+        stmt_type,
         rows.len() as i32,
         rows,
         pg_descs,
     ))
+}
+
+fn to_statement_type(stmt: &Statement) -> StatementType {
+    use StatementType::*;
+
+    match stmt {
+        Statement::Insert { .. } => INSERT,
+        Statement::Delete { .. } => DELETE,
+        Statement::Update { .. } => UPDATE,
+        Statement::Query(_) => SELECT,
+        _ => unreachable!(),
+    }
 }

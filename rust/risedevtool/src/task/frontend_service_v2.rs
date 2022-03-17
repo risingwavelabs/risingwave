@@ -34,6 +34,8 @@ impl Task for FrontendServiceV2 {
 
         let mut cmd = self.frontend_v2()?;
 
+        cmd.env("RUST_BACKTRACE", "1");
+
         cmd.arg("--host")
             .arg(format!("{}:{}", self.config.address, self.config.port));
 

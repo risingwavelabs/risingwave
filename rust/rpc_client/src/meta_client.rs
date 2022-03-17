@@ -18,9 +18,9 @@ use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServic
 use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
     PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
-    ReportCompactionTasksRequest, ReportCompactionTasksResponse, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
-    UnpinVersionRequest, UnpinVersionResponse,
+    ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
+    ReportVacuumTaskResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
+    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -28,6 +28,7 @@ use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
+use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse,
@@ -202,6 +203,12 @@ impl MetaClient {
         });
         (join_handle, shutdown_tx)
     }
+
+    pub async fn flush(&self) -> Result<()> {
+        let request = FlushRequest::default();
+        self.inner.flush(request).await?;
+        Ok(())
+    }
 }
 
 /// [`MetaClientInner`] is the low-level api to meta.
@@ -295,6 +302,7 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
+<<<<<<< HEAD
     async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
         unimplemented!()
     }
@@ -314,6 +322,16 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: CreateMaterializedViewRequest,
     ) -> Result<CreateMaterializedViewResponse> {
+=======
+    async fn report_vacuum_task(
+        &self,
+        _req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
+        unimplemented!()
+    }
+
+    async fn flush(&self, _req: FlushRequest) -> Result<FlushResponse> {
+>>>>>>> main
         unimplemented!()
     }
 }
@@ -327,6 +345,7 @@ pub struct GrpcMetaClient {
     // TODO: add catalog client for catalogV2
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
+    pub stream_client: StreamManagerServiceClient<Channel>,
 }
 
 impl GrpcMetaClient {
@@ -342,13 +361,15 @@ impl GrpcMetaClient {
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
-        let notification_client = NotificationServiceClient::new(channel);
+        let notification_client = NotificationServiceClient::new(channel.clone());
+        let stream_client = StreamManagerServiceClient::new(channel);
         Ok(Self {
             cluster_client,
             heartbeat_client,
             catalog_client,
             hummock_client,
             notification_client,
+            stream_client,
         })
     }
 }
@@ -520,6 +541,7 @@ impl MetaClientInner for GrpcMetaClient {
             .into_inner())
     }
 
+<<<<<<< HEAD
     async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
         // TODO: add catalog client for catalogV2
         todo!()
@@ -544,6 +566,28 @@ impl MetaClientInner for GrpcMetaClient {
     ) -> Result<CreateMaterializedViewResponse> {
         // TODO: add catalog client for catalogV2
         todo!()
+=======
+    async fn report_vacuum_task(
+        &self,
+        req: ReportVacuumTaskRequest,
+    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
+        Ok(self
+            .hummock_client
+            .to_owned()
+            .report_vacuum_task(req)
+            .await?
+            .into_inner())
+    }
+
+    async fn flush(&self, req: FlushRequest) -> Result<FlushResponse> {
+        Ok(self
+            .stream_client
+            .to_owned()
+            .flush(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
+>>>>>>> main
     }
 }
 

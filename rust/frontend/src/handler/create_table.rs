@@ -1,5 +1,5 @@
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
@@ -7,19 +7,20 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-
 use crate::session::QueryContext;
 
-fn columns_to_prost(columns: &[ColumnDef]) -> Vec<ColumnDesc> {
+fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
     columns
         .iter()
         .enumerate()
-        .map(|(idx, col)| ColumnDesc {
-            column_id: idx as i32,
-            name: col.name.to_string(),
-            column_type: Some(bind_data_type(&col.data_type).to_protobuf()),
+        .map(|(idx, col)| {
+            Ok(ColumnDesc {
+                column_id: idx as i32,
+                name: col.name.to_string(),
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
+            })
         })
-        .collect()
+        .collect::<Result<_>>()
 }
 
 pub async fn handle_create_table(

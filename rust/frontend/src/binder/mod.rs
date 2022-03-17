@@ -44,6 +44,7 @@ impl Binder {
         }
     }
 
+    /// Bind a [`Statement`].
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
     }

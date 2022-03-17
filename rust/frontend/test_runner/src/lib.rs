@@ -137,9 +137,7 @@ impl TestCase {
 }
 
 fn explain_plan(plan: &PlanRef) -> String {
-    let mut actual = String::new();
-    plan.explain(0, &mut actual).unwrap();
-    actual
+    plan.explain_to_string().expect("failed to explain")
 }
 
 fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {

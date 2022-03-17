@@ -8,6 +8,7 @@ use crate::model::{MetadataModel, Transactional};
 /// `cf(hummock_pinned_snapshot)`: `HummockContextRefId` -> `HummockPinnedSnapshot`
 const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_pinned_snapshot";
 
+/// `HummockPinnedSnapshot` tracks pinned snapshots by given context id.
 impl MetadataModel for HummockPinnedSnapshot {
     type ProstType = HummockPinnedSnapshot;
     type KeyType = HummockContextRefId;

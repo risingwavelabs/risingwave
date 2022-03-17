@@ -46,8 +46,8 @@ impl DisplayStats {
     }
 
     fn display_batch_inner(&mut self) -> PerfMetrics {
-        let prev_latency_hist = &self.prev_stat.batch_write_latency;
-        let cur_latency_hist = &self.cur_stat.batch_write_latency;
+        let prev_latency_hist = &self.prev_stat.write_batch_shared_buffer_time;
+        let cur_latency_hist = &self.cur_stat.write_batch_shared_buffer_time;
 
         let time_consume = cur_latency_hist.total_sum - prev_latency_hist.total_sum;
 
@@ -57,8 +57,8 @@ impl DisplayStats {
         };
 
         let bytes_pre_sec = {
-            let prev_histogram = &self.prev_stat.batch_write_size;
-            let cur_histogram = &self.cur_stat.batch_write_size;
+            let prev_histogram = &self.prev_stat.write_batch_size;
+            let cur_histogram = &self.cur_stat.write_batch_size;
 
             let written_bytes = cur_histogram.total_sum - prev_histogram.total_sum;
             written_bytes / time_consume

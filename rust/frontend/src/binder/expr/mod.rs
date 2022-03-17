@@ -58,13 +58,13 @@ impl Binder {
         Ok(FunctionCall::new_with_return_type(
             ExprType::Cast,
             vec![self.bind_expr(expr)?],
-            bind_data_type(&data_type),
+            bind_data_type(&data_type)?,
         ))
     }
 }
 
-pub fn bind_data_type(data_type: &AstDataType) -> DataType {
-    match data_type {
+pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
+    let data_type = match data_type {
         AstDataType::SmallInt(_) => DataType::Int16,
         AstDataType::Int(_) => DataType::Int32,
         AstDataType::BigInt(_) => DataType::Int64,
@@ -80,6 +80,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> DataType {
         AstDataType::Timestamp => DataType::Timestamp,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Real => DataType::Float32,
-        _ => unimplemented!("unsupported data type: {:?}", data_type),
-    }
+        _ => {
+            return Err(ErrorCode::NotImplementedError(format!(
+                "unsupported data type: {:?}",
+                data_type
+            ))
+            .into())
+        }
+    };
+    Ok(data_type)
 }

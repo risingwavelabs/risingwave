@@ -73,7 +73,10 @@ pub struct CommandContext<'a, S> {
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    info: &'a BarrierActorInfo,
+    pub info: &'a BarrierActorInfo,
+
+    pub prev_epoch: u64,
+    pub curr_epoch: u64,
 
     command: Command,
 }
@@ -83,12 +86,16 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
+        prev_epoch: u64,
+        curr_epoch: u64,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             clients,
             info,
+            prev_epoch,
+            curr_epoch,
             command,
         }
     }

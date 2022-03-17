@@ -8,6 +8,7 @@ use crate::model::{MetadataModel, Transactional};
 /// `cf(hummock_pinned_version)`: `HummockContextRefId` -> `HummockPinnedVersion`
 const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_pinned_version";
 
+/// `HummockPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockPinnedVersion {
     type ProstType = HummockPinnedVersion;
     type KeyType = HummockContextRefId;

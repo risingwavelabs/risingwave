@@ -103,7 +103,7 @@ where
     }
 
     /// Used in [`crate::barrier::BarrierManager`]
-    pub fn load_all_actors(&self, creating_table_id: Option<TableId>) -> Result<ActorInfos> {
+    pub fn load_all_actors(&self, creating_table_id: Option<TableId>) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
         for entry in &self.table_fragments {
@@ -139,10 +139,10 @@ where
             }
         }
 
-        Ok(ActorInfos {
+        ActorInfos {
             actor_maps,
             source_actor_maps: source_actor_ids,
-        })
+        }
     }
 
     pub fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {

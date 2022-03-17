@@ -36,10 +36,16 @@ impl SstableStore {
         }
     }
 
-    pub async fn put(&self, sst: &Sstable, data: Bytes, policy: CachePolicy) -> HummockResult<()> {
+    pub async fn put(
+        &self,
+        sst: &Sstable,
+        data: Bytes,
+        policy: CachePolicy,
+    ) -> HummockResult<usize> {
         // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
         // reuse block encoding later.
         let meta = Bytes::from(sst.meta.encode_to_vec());
+        let len = data.len();
 
         let data_path = self.get_sst_data_path(sst.id);
         self.store
@@ -68,7 +74,7 @@ impl SstableStore {
             }
         }
 
-        Ok(())
+        Ok(len)
     }
 
     pub async fn get(

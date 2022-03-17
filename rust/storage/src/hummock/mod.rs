@@ -13,6 +13,7 @@ mod sstable;
 use risingwave_common::error::Result;
 pub use sstable::*;
 pub mod compactor;
+mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
@@ -45,7 +46,6 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -53,6 +53,7 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -123,7 +124,7 @@ impl HummockStorage {
         local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
         let instance = Self {
-            options,
+            options: options.clone(),
             local_version_manager,
             hummock_meta_client,
             sstable_store,
@@ -326,10 +327,10 @@ impl HummockStorage {
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = kv_pairs
-            .map(|i| {
+            .map(|(key, value)| {
                 (
-                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
-                    i.1,
+                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                    value,
                 )
             })
             .collect_vec();
