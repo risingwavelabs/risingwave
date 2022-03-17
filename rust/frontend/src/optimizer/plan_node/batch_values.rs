@@ -47,7 +47,7 @@ impl WithSchema for BatchValues {
 
 impl ToDistributedBatch for BatchValues {
     fn to_distributed(&self) -> PlanRef {
-        todo!()
+        self.clone().into()
     }
 }
 

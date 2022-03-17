@@ -125,7 +125,7 @@ impl TestCase {
 
         // Only generate batch_plan if it is specified in test case
         if self.batch_plan.is_some() {
-            ret.batch_plan = Some(explain_plan(&logical_plan.gen_batch_query_plan()));
+            ret.batch_plan = Some(explain_plan(&logical_plan.gen_dist_batch_query_plan()));
         }
 
         // Only generate stream_plan if it is specified in test case
