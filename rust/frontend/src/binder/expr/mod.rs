@@ -1,3 +1,4 @@
+use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, Expr, UnaryOperator};
@@ -91,43 +92,29 @@ impl Binder {
         else_result: Option<Box<Expr>>,
     ) -> Result<FunctionCall> {
         let mut inputs = Vec::new();
-        // suppose lengths of conditions and results are the same
-        if conditions.len() != results.len() {
-            todo!();
-        }
         let results_expr: Vec<ExprImpl> = results
             .into_iter()
             .map(|expr| self.bind_expr(expr).unwrap())
             .collect();
+        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr).unwrap());
         let mut return_type = Binder::find_proper_type(&results_expr)?;
-        return_type = match else_result.clone() {
-            Some(t) => {
-                let _return_type = self.bind_expr(*t)?.return_type();
-                Binder::find_compat(return_type, _return_type)?
-            }
-            None => return_type,
-        };
-        for i in 0..conditions.len() {
-            let condition = conditions.get(i).unwrap();
+        if let Some(expr) = &else_result_expr {
+            return_type = Binder::find_compat(return_type, expr.return_type())?;
+        }
+        for (condition, result) in zip_eq(conditions, results_expr) {
             let _condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
                     op: BinaryOperator::Eq,
-                    right: Box::new(condition.clone()),
+                    right: Box::new(condition),
                 },
-                None => condition.clone(),
+                None => condition,
             };
             inputs.push(self.bind_expr(_condition)?);
-            inputs.push(Binder::ensure_type(
-                results_expr.get(i).unwrap().clone(),
-                return_type.clone(),
-            ));
+            inputs.push(Binder::ensure_type(result, return_type.clone()));
         }
-        if let Some(expr) = else_result {
-            inputs.push(Binder::ensure_type(
-                self.bind_expr(*expr)?,
-                return_type.clone(),
-            ));
+        if let Some(expr) = else_result_expr {
+            inputs.push(Binder::ensure_type(expr, return_type.clone()));
         }
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,
