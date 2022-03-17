@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
@@ -60,18 +59,21 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> TonicResponse<CreateMaterializedViewResponse> {
+        use risingwave_pb::common::ParallelUnitType;
+
         use crate::stream::CreateMaterializedViewContext;
 
         let req = request.into_inner();
-        let worker_count = self
+        let hash_parallel_count = self
             .cluster_manager
-            .get_worker_count(WorkerType::ComputeNode);
+            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
+            .await;
         let mut ctx = CreateMaterializedViewContext::default();
 
         let mut fragmenter = StreamFragmenter::new(
             self.id_gen_manager_ref.clone(),
             self.fragment_manager_ref.clone(),
-            worker_count as u32,
+            hash_parallel_count as u32,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)

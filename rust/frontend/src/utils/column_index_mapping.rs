@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::fmt::Debug;
 use std::vec;
 
@@ -7,7 +5,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use log::debug;
 
-use crate::expr::{ExprRewriter, InputRef};
+use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -38,7 +36,7 @@ impl ColIndexMapping {
     /// Positive offset:
     ///
     /// ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(3, 3);
     /// assert_eq!(mapping.map(0), 3);
     /// assert_eq!(mapping.map(1), 4);
@@ -48,7 +46,7 @@ impl ColIndexMapping {
     /// Negative offset:
     ///
     ///  ```rust
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mapping = ColIndexMapping::with_shift_offset(6, -3);
     /// assert_eq!(mapping.try_map(0), None);
     /// assert_eq!(mapping.try_map(1), None);
@@ -77,7 +75,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut remaining_cols = FixedBitSet::with_capacity(5);
     /// remaining_cols.insert(1);
     /// remaining_cols.insert(3);
@@ -103,7 +101,7 @@ impl ColIndexMapping {
     ///
     /// ```rust
     /// # use fixedbitset::FixedBitSet;
-    /// # use frontend::utils::ColIndexMapping;
+    /// # use risingwave_frontend::utils::ColIndexMapping;
     /// let mut removed_cols = FixedBitSet::with_capacity(5);
     /// removed_cols.insert(0);
     /// removed_cols.insert(2);
@@ -158,8 +156,8 @@ impl ColIndexMapping {
 }
 
 impl ExprRewriter for ColIndexMapping {
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> InputRef {
-        InputRef::new(self.map(input_ref.index()), input_ref.data_type())
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        InputRef::new(self.map(input_ref.index()), input_ref.data_type()).into()
     }
 }
 

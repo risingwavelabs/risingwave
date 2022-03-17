@@ -6,10 +6,10 @@ use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::session::QueryContext;
 
 pub async fn handle_drop_table(
-    context: QueryContext<'_>,
+    context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let session = context.session_ctx;
     let str_table_name = table_name.to_string();
 
     let catalog_mgr = session.env().catalog_mgr();

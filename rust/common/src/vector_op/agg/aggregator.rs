@@ -117,40 +117,40 @@ pub fn create_agg_state_unary(
     use crate::expr::data_types::*;
 
     macro_rules! gen_arms {
-      [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
-      match (
-        input_type,
-        agg_type,
-        return_type.clone(),
-        distinct,
-      ) {
-        $(
-        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
-          Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-            return_type,
-            input_col_idx,
-            $fn,
-          ))
-        },
-        ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
-          Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
-            return_type,
-            input_col_idx,
-            $fn,
-          ))
-        },
-        )*
-        (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
-          return Err(
-            ErrorCode::InternalError(format!(
-              "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
-              unimpl_agg, unimpl_input, unimpl_ret, distinct
-            ))
-            .into(),
-          )
-        }
-      }
-    };
+        [$(($agg:ident, $fn:expr, $in:tt, $ret:tt)),* $(,)?] => {
+            match (
+                input_type,
+                agg_type,
+                return_type.clone(),
+                distinct,
+            ) {
+                $(
+                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, false) => {
+                        Box::new(GeneralAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
+                            return_type,
+                            input_col_idx,
+                            $fn,
+                        ))
+                    },
+                    ($in! { type_match_pattern }, AggKind::$agg, $ret! { type_match_pattern }, true) => {
+                        Box::new(GeneralDistinctAgg::<$in! { type_array }, _, $ret! { type_array }>::new(
+                            return_type,
+                            input_col_idx,
+                            $fn,
+                        ))
+                    },
+                )*
+                (unimpl_input, unimpl_agg, unimpl_ret, distinct) => {
+                    return Err(
+                        ErrorCode::InternalError(format!(
+                        "unsupported aggregator: type={:?} input={:?} output={:?} distinct={}",
+                        unimpl_agg, unimpl_input, unimpl_ret, distinct
+                        ))
+                        .into(),
+                    )
+                }
+            }
+        };
     }
 
     let state: Box<dyn Aggregator> = gen_arms![
@@ -189,6 +189,17 @@ pub fn create_agg_state_unary(
         (Max, max_str, varchar, varchar),
         // Global Agg
         (Sum, sum, int64, int64),
+        // We remark that SingleValue does not produce a runtime error when it receives zero row.
+        // Therefore, we do NOT need to change the logic in GeneralAgg::output_concrete.
+        (SingleValue, SingleValue::new(), int16, int16),
+        (SingleValue, SingleValue::new(), int32, int32),
+        (SingleValue, SingleValue::new(), int64, int64),
+        (SingleValue, SingleValue::new(), float32, float32),
+        (SingleValue, SingleValue::new(), float64, float64),
+        (SingleValue, SingleValue::new(), decimal, decimal),
+        (SingleValue, SingleValue::new(), boolean, boolean),
+        (SingleValue, SingleValue::new(), char, char),
+        (SingleValue, SingleValue::new(), varchar, varchar),
     ];
     Ok(state)
 }
@@ -240,5 +251,10 @@ mod tests {
         test_create! { decimal_type, Min, decimal_type, is_ok }
         test_create! { bool_type, Min, bool_type, is_ok } // TODO(#359): revert to is_err
         test_create! { char_type, Min, char_type, is_ok }
+
+        test_create! { int64_type, SingleValue, int64_type, is_ok }
+        test_create! { decimal_type, SingleValue, decimal_type, is_ok }
+        test_create! { bool_type, SingleValue, bool_type, is_ok }
+        test_create! { char_type, SingleValue, char_type, is_ok }
     }
 }

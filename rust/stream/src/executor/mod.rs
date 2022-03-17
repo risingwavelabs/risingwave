@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
@@ -10,10 +11,12 @@ pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
+use futures::Stream;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
+pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
@@ -54,9 +57,10 @@ mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
+mod lookup;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
 mod source;
@@ -70,7 +74,11 @@ mod integration_tests;
 mod test_utils;
 
 pub const INVALID_EPOCH: u64 = 0;
+
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
+
+/// Boxed stream of [`StreamMessage`].
+pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
@@ -281,18 +289,18 @@ impl Message {
     /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
-          self,
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            self,
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         )
     }
 
     pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
-                let prost_stream_chunk = stream_chunk.to_protobuf()?;
+                let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
@@ -313,6 +321,13 @@ impl Message {
             }
         };
         Ok(res)
+    }
+
+    pub fn as_chunk(&self) -> Option<&StreamChunk> {
+        match self {
+            Self::Chunk(chunk) => Some(chunk),
+            _ => None,
+        }
     }
 }
 
@@ -351,9 +366,6 @@ pub trait Executor: Send + Debug + 'static {
     fn init(&mut self, _epoch: u64) -> Result<()> {
         unreachable!()
     }
-
-    /// Clear the executor's in-memory cache and reset to specific epoch.
-    fn reset(&mut self, _epoch: u64);
 }
 
 #[derive(Debug)]
@@ -443,10 +455,10 @@ macro_rules! build_executor {
                 },
             )*
             _ => Err(RwError::from(
-              ErrorCode::InternalError(format!(
-                "unsupported node:{:?}",
-                $node.get_node().unwrap()
-              )),
+                ErrorCode::InternalError(format!(
+                    "unsupported node:{:?}",
+                    $node.get_node().unwrap()
+                )),
             )),
         }
     }

@@ -11,8 +11,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, StageId, TaskId as ProstTaskId, TaskSinkId as ProstSinkId,
-    ValuesNode,
+    PlanFragment, PlanNode, TaskId as ProstTaskId, TaskOutputId as ProstOutputId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
 
@@ -21,7 +20,7 @@ use crate::rpc::service::exchange::ExchangeWriter;
 
 // TODO: rewrite these tests without relying on `PlanFragment`.
 
-fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
+fn get_num_outputs(plan: &PlanFragment) -> Result<u32> {
     Ok(match plan.get_exchange_info()?.get_mode()? {
         DistributionMode::Single => 1,
         DistributionMode::Hash => match plan.get_exchange_info()?.distribution {
@@ -36,7 +35,7 @@ fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
 }
 
 /// Write the execution results into a buffer for testing.
-/// In a real server, the results will be flushed into a grpc sink.
+/// In a real server, the results will be flushed into a grpc output.
 struct FakeExchangeWriter {
     messages: Vec<GetDataResponse>,
 }
@@ -57,13 +56,9 @@ pub struct TestRunner {
 impl TestRunner {
     pub fn new() -> Self {
         let tid = ProstTaskId {
-            stage_id: Some(StageId {
-                query_id: Some(QueryId {
-                    trace_id: "".to_string(),
-                }),
-                stage_id: 0,
-            }),
+            stage_id: 0,
             task_id: 0,
+            query_id: "".to_owned(),
         };
         Self {
             tid,
@@ -95,15 +90,15 @@ impl TestRunner {
     ) -> Result<Vec<Vec<GetDataResponse>>> {
         let task_manager = self.env.task_manager();
         let mut res = Vec::new();
-        let sink_ids = 0..get_num_sinks(plan)?;
-        for sink_id in sink_ids {
-            let proto_sink_id = ProstSinkId {
+        let output_ids = 0..get_num_outputs(plan)?;
+        for output_id in output_ids {
+            let proto_output_id = ProstOutputId {
                 task_id: Some(self.tid.clone()),
-                sink_id,
+                output_id,
             };
-            let mut task_sink = task_manager.take_sink(&proto_sink_id)?;
+            let mut task_output = task_manager.take_output(&proto_output_id)?;
             let mut writer = FakeExchangeWriter { messages: vec![] };
-            task_sink.take_data(&mut writer).await.unwrap();
+            task_output.take_data(&mut writer).await.unwrap();
             res.push(writer.messages);
         }
         // In test, we remove the task manually, while in production,
@@ -225,7 +220,7 @@ impl<'a> TableBuilder<'a> {
 
     fn build_insert_values_plan(&self) -> Result<PlanFragment> {
         let insert = InsertNode {
-            table_ref_id: None,
+            table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
         };
 

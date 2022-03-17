@@ -10,20 +10,24 @@ mod level_handler;
 mod mock_hummock_meta_client;
 mod model;
 #[cfg(test)]
-mod test_utils;
+pub mod test_utils;
+mod vacuum;
 
 use std::sync::Arc;
 use std::time::Duration;
 
 pub use compactor_manager::*;
 pub use hummock_manager::*;
+use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+pub use vacuum::*;
 
 use crate::storage::MetaStore;
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
+/// A vacuum trigger is started here too.
 pub fn start_compaction_trigger<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
@@ -56,8 +60,13 @@ where
                     continue;
                 }
             };
+            let input_ssts = compact_task
+                .input_ssts
+                .iter()
+                .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                .collect_vec();
             if !compactor_manager_ref
-                .try_assign_compact_task(compact_task.clone())
+                .try_assign_compact_task(Some(compact_task.clone()), None)
                 .await
             {
                 // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
@@ -68,7 +77,9 @@ where
                 {
                     tracing::warn!("failed to report_compact_task {}", e);
                 }
+                continue;
             }
+            tracing::debug!("Try to compact SSTs {:?}", input_ssts);
         }
     });
 

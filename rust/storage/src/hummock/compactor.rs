@@ -4,9 +4,12 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
+use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
-    CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
+    TableSetStatistics,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -18,23 +21,23 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockError, HummockMetaClient, HummockOptions, HummockResult, HummockStorage, HummockValue,
+    HummockError, HummockMetaClient, HummockResult, HummockStorage, HummockValue,
     LocalVersionManager, SSTableBuilder, SSTableIterator, Sstable,
 };
-use crate::monitor::StateStoreStats;
+use crate::hummock::vacuum::Vacuum;
+use crate::monitor::StateStoreMetrics;
 
 #[derive(Clone)]
 pub struct SubCompactContext {
-    pub options: Arc<HummockOptions>,
+    pub options: Arc<StorageConfig>,
     pub local_version_manager: Arc<LocalVersionManager>,
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
     pub sstable_store: SstableStoreRef,
-    pub stats: Arc<StateStoreStats>,
+    pub stats: Arc<StateStoreMetrics>,
     pub is_share_buffer_compact: bool,
 }
 
 pub struct Compactor;
-
 impl Compactor {
     pub async fn run_compact(
         context: &SubCompactContext,
@@ -42,8 +45,26 @@ impl Compactor {
     ) -> HummockResult<()> {
         let mut overlapping_tables = vec![];
         let mut non_overlapping_table_seqs = vec![];
+        let target_level = compact_task.target_level;
+        let add_table = |accumu: &mut TableSetStatistics, table: &Sstable| {
+            accumu.size_gb += table.meta.estimated_size as f64 / (1024 * 1024 * 1024) as f64;
+            accumu.cnt += 1;
+        };
+        let accumulating_readsize =
+            |metrics: &mut CompactMetrics, level_idx: u32, tables: &Vec<Arc<Sstable>>| {
+                let read_statistics: &mut TableSetStatistics = if level_idx == target_level {
+                    metrics.read_level_nplus1.as_mut().unwrap()
+                } else {
+                    metrics.read_level_n.as_mut().unwrap()
+                };
+                for table in tables {
+                    add_table(read_statistics, table);
+                }
+            };
         for LevelEntry {
-            level: opt_level, ..
+            level_idx,
+            level: opt_level,
+            ..
         } in &compact_task.input_ssts
         {
             let level = opt_level.as_ref().unwrap();
@@ -51,6 +72,7 @@ impl Compactor {
                 .local_version_manager
                 .pick_few_tables(level.get_table_ids())
                 .await?;
+            accumulating_readsize(compact_task.metrics.as_mut().unwrap(), *level_idx, &tables);
             if level.get_level_type().unwrap() == LevelType::Nonoverlapping {
                 non_overlapping_table_seqs.push(tables);
             } else {
@@ -125,9 +147,31 @@ impl Compactor {
             sub_result?
         }
 
+        // `sorted_output_ssts` must be sorted by key range
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
-            compact_task.sorted_output_ssts.extend(sub_output);
+            for table in &sub_output {
+                add_table(
+                    compact_task
+                        .metrics
+                        .as_mut()
+                        .unwrap()
+                        .write
+                        .as_mut()
+                        .unwrap(),
+                    table,
+                );
+            }
+            compact_task
+                .sorted_output_ssts
+                .extend(sub_output.iter().map(|sst| SstableInfo {
+                    id: sst.id,
+                    key_range: Some(risingwave_pb::hummock::KeyRange {
+                        left: sst.meta.get_smallest_key().to_vec(),
+                        right: sst.meta.get_largest_key().to_vec(),
+                        inf: false,
+                    }),
+                }));
         }
 
         Ok(())
@@ -182,6 +226,8 @@ impl Compactor {
 
             let epoch = get_epoch(iter_key);
 
+            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
+            // and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
@@ -190,6 +236,7 @@ impl Compactor {
                 }
             }
 
+            // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
@@ -203,7 +250,7 @@ impl Compactor {
         context: SubCompactContext,
         kr: KeyRange,
         iter: MergeIterator<'_>,
-        output_sst_infos: &mut Vec<SstableInfo>,
+        output_ssts: &mut Vec<Sstable>,
         // TODO: better naming
         is_target_ultimate_and_leveling: bool,
         watermark: Epoch,
@@ -216,34 +263,39 @@ impl Compactor {
         });
 
         let has_user_key_overlap = !is_target_ultimate_and_leveling;
+
+        // Monitor time cost building shared buffer to SSTs.
+        let build_l0_sst_timer = if context.is_share_buffer_compact {
+            Some(context.stats.write_build_l0_sst_time.start_timer())
+        } else {
+            None
+        };
         Compactor::compact_and_build_sst(&mut builder, kr, iter, has_user_key_overlap, watermark)
             .await?;
+        if let Some(timer) = build_l0_sst_timer {
+            timer.observe_duration();
+        }
 
         // Seal table for each split
         builder.seal_current();
 
-        output_sst_infos.reserve(builder.len());
+        output_ssts.reserve(builder.len());
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            context
+            let len = context
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
+
             if context.is_share_buffer_compact {
-                context.stats.addtable_upload_sst_counts.inc();
-            } else {
-                context.stats.compaction_upload_sst_counts.inc();
+                context
+                    .stats
+                    .write_shared_buffer_sync_size
+                    .observe(len as _);
             }
-            let info = SstableInfo {
-                id: table_id,
-                key_range: Some(risingwave_pb::hummock::KeyRange {
-                    left: sst.meta.get_smallest_key().to_vec(),
-                    right: sst.meta.get_largest_key().to_vec(),
-                    inf: false,
-                }),
-            };
-            output_sst_infos.push(info);
+
+            output_ssts.push(sst);
         }
 
         Ok(())
@@ -255,12 +307,6 @@ impl Compactor {
     ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
-            for _sst_to_delete in &compact_task.sorted_output_ssts {
-                // TODO: delete these tables in (S3) storage
-                // However, if we request a table_id from hummock storage service every time we
-                // generate a table, we would not delete here, or we should notify
-                // hummock storage service to delete them.
-            }
             compact_task.sorted_output_ssts.clear();
         }
 
@@ -282,17 +328,17 @@ impl Compactor {
     }
 
     pub fn start_compactor(
-        options: Arc<HummockOptions>,
+        options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
-        stats: Arc<StateStoreStats>,
+        stats: Arc<StateStoreMetrics>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            hummock_meta_client,
-            sstable_store,
+            hummock_meta_client: hummock_meta_client.clone(),
+            sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
         };
@@ -339,12 +385,33 @@ impl Compactor {
                     match message {
                         // The inner Some is the side effect of generated code.
                         Ok(Some(SubscribeCompactTasksResponse {
-                            compact_task: Some(compact_task),
+                            compact_task,
+                            vacuum_task,
                         })) => {
-                            if let Err(e) =
-                                Compactor::compact(&sub_compact_context, compact_task).await
-                            {
-                                tracing::warn!("failed to compact. {}", RwError::from(e));
+                            if let Some(compact_task) = compact_task {
+                                let input_ssts = compact_task
+                                    .input_ssts
+                                    .iter()
+                                    .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                                    .collect_vec();
+                                tracing::debug!("Try to compact SSTs {:?}", input_ssts);
+                                if let Err(e) =
+                                    Compactor::compact(&sub_compact_context, compact_task).await
+                                {
+                                    tracing::warn!("failed to compact. {}", RwError::from(e));
+                                }
+                            }
+                            if let Some(vacuum_task) = vacuum_task {
+                                tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+                                if let Err(e) = Vacuum::vacuum(
+                                    sstable_store.clone(),
+                                    vacuum_task,
+                                    hummock_meta_client.clone(),
+                                )
+                                .await
+                                {
+                                    tracing::warn!("failed to vacuum. {}", e);
+                                }
                             }
                         }
                         Err(e) => {

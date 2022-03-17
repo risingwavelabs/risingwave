@@ -48,11 +48,11 @@ public class BatchPlannerConfigurations {
           .build();
 
   @Config
-  public static final ConfigEntry<Boolean> OPTIMIZER_ENABLE_CALCITE_SUBQUERY_EXPAND =
-      ConfigEntry.<Boolean>builder("risingwave.optimizer.calcite.subquery.expand.enable")
+  public static final ConfigEntry<Boolean> ENABLE_NEW_SUBQUERY_PLANNER =
+      ConfigEntry.<Boolean>builder("enable_new_subquery_batch_planner")
           .setOptional(true)
-          .withDefaultValue(true)
+          .withDefaultValue(false)
           .withConverter(BOOLEAN_PARSER)
-          .withDoc("Optimizer config to enable subquery expand")
+          .withDoc("Optimizer config to enable new subquery expand")
           .build();
 }

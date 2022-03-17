@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
-    AddTablesRequest, CompactTask, GetCompactionTasksRequest, GetNewTableIdRequest,
-    HummockSnapshot, HummockVersion, PinSnapshotRequest, PinVersionRequest,
-    ReportCompactionTasksRequest, SstableInfo, SubscribeCompactTasksRequest,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
+    AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
+    PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest, ReportVacuumTaskRequest,
+    SstableInfo, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
+    UnpinVersionRequest, VacuumTask,
 };
 use risingwave_rpc_client::MetaClient;
 use tonic::Streaming;
@@ -14,7 +14,7 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
     TracedHummockError,
 };
-use crate::monitor::StateStoreStats;
+use crate::monitor::StateStoreMetrics;
 
 #[derive(Default)]
 pub struct RetryableError {}
@@ -39,7 +39,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<HummockVersion>;
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>>;
     async fn report_compaction_task(
         &self,
         compact_task: CompactTask,
@@ -50,17 +49,18 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>>;
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()>;
 }
 
 pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
 
-    // TODO: should be separated `HummockStats` instead of `StateStoreStats`.
-    stats: Arc<StateStoreStats>,
+    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl RpcHummockMetaClient {
-    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreStats>) -> RpcHummockMetaClient {
+    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreMetrics>) -> RpcHummockMetaClient {
         RpcHummockMetaClient { meta_client, stats }
     }
 }
@@ -164,19 +164,6 @@ impl HummockMetaClient for RpcHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        self.stats.get_compaction_task_counts.inc();
-        let timer = self.stats.get_compaction_task_latency.start_timer();
-        let result = self
-            .meta_client
-            .inner
-            .get_compaction_tasks(GetCompactionTasksRequest {})
-            .await
-            .map_err(HummockError::meta_error)?;
-        timer.observe_duration();
-        Ok(result.compact_task)
-    }
-
     async fn report_compaction_task(
         &self,
         compact_task: CompactTask,
@@ -215,5 +202,17 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .await
             .map_err(HummockError::meta_error)?;
         Ok(stream)
+    }
+
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()> {
+        self.meta_client
+            .to_owned()
+            .inner
+            .report_vacuum_task(ReportVacuumTaskRequest {
+                vacuum_task: Some(vacuum_task),
+            })
+            .await
+            .map_err(HummockError::meta_error)?;
+        Ok(())
     }
 }

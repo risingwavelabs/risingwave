@@ -19,6 +19,7 @@ use top_n::*;
 
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
+pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
 pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
@@ -31,6 +32,7 @@ use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
+mod delete;
 mod drop_stream;
 mod drop_table;
 mod filter;
@@ -134,8 +136,9 @@ impl<'a> ExecutorBuilder<'a> {
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
             NodeBody::CreateTable => CreateTableExecutor,
-            NodeBody::RowSeqScan => RowSeqScanExecutor,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
             NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
             NodeBody::DropTable => DropTableExecutor,
             NodeBody::Exchange => ExchangeExecutor,
             NodeBody::Filter => FilterExecutor,

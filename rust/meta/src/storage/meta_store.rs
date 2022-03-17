@@ -1,8 +1,7 @@
 use std::str;
 
 use async_trait::async_trait;
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode;
+use risingwave_common::error::{ErrorCode, RwError};
 
 use crate::storage::transaction::Transaction;
 use crate::storage::{Key, Value};

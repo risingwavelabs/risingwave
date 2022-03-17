@@ -96,8 +96,7 @@ message ChainNode {
 message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 pk_indices = 2;
-  repeated int32 column_ids = 3;
-  repeated plan.Field fields = 4;
+  repeated plan.ColumnDesc column_descs = 3;
 }
 
 message StreamNode {

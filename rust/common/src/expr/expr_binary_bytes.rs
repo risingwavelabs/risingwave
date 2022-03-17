@@ -1,6 +1,5 @@
-use std::marker::PhantomData;
+//! For expression that only accept two arguments + 1 bytes writer as input.
 
-/// For expression that only accept two arguments + 1 bytes writer as input.
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
@@ -12,13 +11,12 @@ pub fn new_substr_start(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: substr_start,
-        _phantom: PhantomData,
-    })
+        substr_start,
+    ))
 }
 
 pub fn new_substr_for(
@@ -26,13 +24,12 @@ pub fn new_substr_for(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: substr_for,
-        _phantom: PhantomData,
-    })
+        substr_for,
+    ))
 }
 
 #[cfg(test)]

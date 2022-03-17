@@ -1,10 +1,13 @@
 mod column;
+mod physical_table;
 mod schema;
-
 use core::fmt;
 
 pub use column::*;
-pub use schema::*;
+pub use physical_table::*;
+pub use schema::{test_utils as schema_test_utils, Field, Schema};
+
+pub type CatalogVersion = u64;
 
 pub enum CatalogId {
     DatabaseId(DatabaseId),

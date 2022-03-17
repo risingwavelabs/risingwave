@@ -1,31 +1,117 @@
+use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::expr::ExprImpl;
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
 
+/// Aggregation Call
 #[derive(Clone, Debug)]
 pub struct PlanAggCall {
+    /// Kind of aggregation function
     pub agg_kind: AggKind,
+
+    /// Data type of the returned column
     pub return_type: DataType,
+
+    /// Column indexes of input columns
     pub inputs: Vec<usize>,
 }
 
+/// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
+///
+/// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
+/// functions in the `SELECT` clause.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
+    pub base: LogicalBase,
     agg_calls: Vec<PlanAggCall>,
     agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,
-    schema: Schema,
     input: PlanRef,
+}
+
+/// `ExprHandler` extracts agg calls and references to group columns from select list, in
+/// preparation for generating a plan like `LogicalProject - LogicalAgg - LogicalProject`.
+struct ExprHandler {
+    // `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
+    // followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
+    pub project: Vec<ExprImpl>,
+    group_column_index: HashMap<InputRef, usize>,
+    pub agg_calls: Vec<PlanAggCall>,
+    pub error: Option<ErrorCode>,
+}
+
+impl ExprHandler {
+    fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
+        let mut group_column_index = HashMap::new();
+        for (index, expr) in group_exprs.iter().enumerate() {
+            // TODO: support more complicated expression in GROUP BY clause, because we currently
+            // assume the only thing can appear in GROUP BY clause is an input column name.
+            if let ExprImpl::InputRef(input_ref) = expr {
+                group_column_index.insert(*input_ref.clone(), index);
+            } else {
+                return Err(ErrorCode::NotImplementedError(
+                    "GROUP BY only supported on input column names!".into(),
+                )
+                .into());
+            }
+        }
+        Ok(ExprHandler {
+            project: group_exprs,
+            group_column_index,
+            agg_calls: vec![],
+            error: None,
+        })
+    }
+}
+
+impl ExprRewriter for ExprHandler {
+    // When there is an agg call, there are 3 things to do:
+    // 1. eval its inputs via project;
+    // 2. add a PlanAggCall to agg;
+    // 3. rewrite it as an InputRef to the agg result in select list.
+    //
+    // Note that the rewriter does not traverse into inputs of agg calls.
+    fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
+        let return_type = agg_call.return_type();
+        let (agg_kind, inputs) = agg_call.decompose();
+
+        let begin = self.project.len();
+        self.project.extend(inputs);
+        let end = self.project.len();
+
+        self.agg_calls.push(PlanAggCall {
+            agg_kind,
+            return_type: return_type.clone(),
+            inputs: (begin..end).collect(),
+        });
+        ExprImpl::from(InputRef::new(
+            self.group_column_index.len() + self.agg_calls.len() - 1,
+            return_type,
+        ))
+    }
+    // When there is an InputRef (outside of agg call), it must refers to a group column.
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        if let Some(index) = self.group_column_index.get(&input_ref) {
+            InputRef::new(*index, input_ref.data_type()).into()
+        } else {
+            self.error = Some(ErrorCode::InvalidInputSyntax(
+                "column must appear in the GROUP BY clause or be used in an aggregate function"
+                    .into(),
+            ));
+            input_ref.into()
+        }
+    }
 }
 
 impl LogicalAgg {
@@ -35,6 +121,7 @@ impl LogicalAgg {
         group_keys: Vec<usize>,
         input: PlanRef,
     ) -> Self {
+        let ctx = input.ctx();
         let schema = Self::derive_schema(
             input.schema(),
             &group_keys,
@@ -44,11 +131,16 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
             agg_calls,
             group_keys,
             input,
-            schema,
+            base,
             agg_call_alias,
         }
     }
@@ -88,8 +180,41 @@ impl LogicalAgg {
         select_alias: Vec<Option<String>>,
         group_exprs: Vec<ExprImpl>,
         input: PlanRef,
-    ) -> PlanRef {
-        todo!()
+    ) -> Result<PlanRef> {
+        let group_keys = (0..group_exprs.len()).collect();
+        let mut expr_handler = ExprHandler::new(group_exprs)?;
+
+        let rewritten_select_exprs = select_exprs
+            .into_iter()
+            .map(|expr| {
+                let rewritten_expr = expr_handler.rewrite_expr(expr);
+                if let Some(error) = expr_handler.error.take() {
+                    return Err(error.into());
+                }
+                Ok(rewritten_expr)
+            })
+            .collect::<Result<_>>()?;
+
+        // This LogicalProject focuses on the exprs in aggregates and GROUP BY clause.
+        let expr_alias = vec![None; expr_handler.project.len()];
+        let logical_project = LogicalProject::create(input, expr_handler.project, expr_alias);
+
+        // This LogicalAgg foucuses on calculating the aggregates and grouping.
+        let agg_call_alias = vec![None; expr_handler.agg_calls.len()];
+        let logical_agg = LogicalAgg::new(
+            expr_handler.agg_calls,
+            agg_call_alias,
+            group_keys,
+            logical_project,
+        );
+
+        // This LogicalProject focuse on tranforming the aggregates and grouping columns to
+        // InputRef.
+        Ok(LogicalProject::create(
+            logical_agg.into(),
+            rewritten_select_exprs,
+            select_alias,
+        ))
     }
 
     /// Get a reference to the logical agg's agg call alias.
@@ -123,29 +248,17 @@ impl PlanTreeNodeUnary for LogicalAgg {
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
-    }
-}
-
-impl WithOrder for LogicalAgg {}
-
-impl WithDistribution for LogicalAgg {}
-
-impl WithSchema for LogicalAgg {
-    fn schema(&self) -> &Schema {
-        &self.schema
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("LogicalAgg")
+            .field("agg_calls", &self.agg_calls)
+            .field("agg_call_alias", &self.agg_call_alias)
+            .finish()
     }
 }
 
 impl ColPrunable for LogicalAgg {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
         let mut child_required_cols =
             FixedBitSet::with_capacity(self.input.schema().fields().len());
@@ -213,15 +326,150 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::assert_eq_input_ref;
+    use crate::expr::{assert_eq_input_ref, AggCall, ExprType, FunctionCall};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::property::ctx::WithId;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
+    async fn test_create() {
+        let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields: Vec<Field> = vec![
+            Field {
+                data_type: ty.clone(),
+                name: "v1".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v2".to_string(),
+            },
+            Field {
+                data_type: ty.clone(),
+                name: "v3".to_string(),
+            },
+        ];
+        let table_scan = LogicalScan::new(
+            "test".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema { fields },
+            ctx,
+        );
+        let input = Rc::new(table_scan);
+        let input_ref_1 = InputRef::new(0, ty.clone());
+        let input_ref_2 = InputRef::new(1, ty.clone());
+        let input_ref_3 = InputRef::new(2, ty.clone());
+
+        let gen_internal_value = |select_exprs: Vec<ExprImpl>,
+                                  group_exprs|
+         -> (Vec<ExprImpl>, Vec<PlanAggCall>, Vec<usize>) {
+            let select_alias = vec![None; select_exprs.len()];
+            let plan =
+                LogicalAgg::create(select_exprs, select_alias, group_exprs, input.clone()).unwrap();
+            let logical_project = plan.as_logical_project().unwrap();
+            let exprs = logical_project.exprs();
+
+            let plan = logical_project.input();
+            let logical_agg = plan.as_logical_agg().unwrap();
+            let agg_calls = logical_agg.agg_calls().to_vec();
+            let group_keys = logical_agg.group_keys().to_vec();
+
+            (exprs.clone(), agg_calls, group_keys)
+        };
+
+        // Test case: select v1 from test group by v1;
+        {
+            let select_exprs = vec![input_ref_1.clone().into()];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq!(exprs.len(), 1);
+            assert_eq_input_ref!(&exprs[0], 0);
+
+            assert_eq!(agg_calls.len(), 0);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v1, min(v2) from test group by v1;
+        {
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq!(exprs.len(), 2);
+            assert_eq_input_ref!(&exprs[0], 0);
+            assert_eq_input_ref!(&exprs[1], 1);
+
+            assert_eq!(agg_calls.len(), 1);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v1, min(v2) + max(v3) from t group by v1;
+        {
+            let min_v2 = AggCall::new(AggKind::Min, vec![input_ref_2.clone().into()]).unwrap();
+            let max_v3 = AggCall::new(AggKind::Max, vec![input_ref_3.clone().into()]).unwrap();
+            let func_call =
+                FunctionCall::new(ExprType::Add, vec![min_v2.into(), max_v3.into()]).unwrap();
+            let select_exprs = vec![input_ref_1.clone().into(), ExprImpl::from(func_call)];
+            let group_exprs = vec![input_ref_1.clone().into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq_input_ref!(&exprs[0], 0);
+            if let ExprImpl::FunctionCall(func_call) = &exprs[1] {
+                assert_eq!(func_call.get_expr_type(), ExprType::Add);
+                let inputs = func_call.inputs();
+                assert_eq_input_ref!(&inputs[0], 1);
+                assert_eq_input_ref!(&inputs[1], 2);
+            } else {
+                panic!("Wrong expression type!");
+            }
+
+            assert_eq!(agg_calls.len(), 2);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
+            assert_eq!(agg_calls[1].agg_kind, AggKind::Max);
+            assert_eq!(agg_calls[1].inputs, vec![2]);
+            assert_eq!(group_keys, vec![0]);
+        }
+
+        // Test case: select v2, min(v1 * v3) from test group by v2;
+        {
+            let v1_mult_v3 = FunctionCall::new(
+                ExprType::Multiply,
+                vec![input_ref_1.into(), input_ref_3.into()],
+            )
+            .unwrap();
+            let agg_call = AggCall::new(AggKind::Min, vec![v1_mult_v3.into()]).unwrap();
+            let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
+            let group_exprs = vec![input_ref_2.into()];
+
+            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
+
+            assert_eq_input_ref!(&exprs[0], 0);
+            assert_eq_input_ref!(&exprs[1], 1);
+
+            assert_eq!(agg_calls.len(), 1);
+            assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
+            assert_eq!(agg_calls[0].inputs, vec![1]);
+            assert_eq!(group_keys, vec![0]);
+        }
+    }
+
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2))) group by (input_ref(1))
@@ -231,8 +479,9 @@ mod tests {
     /// ```text
     /// Agg(max(input_ref(1))) group by (input_ref(0))
     ///  TableScan(v2, v3)
-    fn test_prune_all() {
+    async fn test_prune_all() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -254,6 +503,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
@@ -288,7 +538,7 @@ mod tests {
         assert_eq!(scan.schema().fields(), &fields[1..]);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2))) group by (input_ref(1))
@@ -299,7 +549,8 @@ mod tests {
     /// Project(input_ref(1))
     ///   Agg(max(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
-    fn test_prune_group_key() {
+    async fn test_prune_group_key() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -322,6 +573,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
@@ -344,11 +596,13 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 1);
         assert_eq_input_ref!(&project.exprs()[0], 1);
+        assert_eq!(project.id().0, 4);
 
         let agg_new = project.input();
         let agg_new = agg_new.as_logical_agg().unwrap();
         assert_eq!(agg_new.agg_call_alias(), vec![Some("min".to_string())]);
         assert_eq!(agg_new.group_keys(), vec![0]);
+        assert_eq!(agg_new.id().0, 3);
 
         assert_eq!(agg_new.agg_calls.len(), 1);
         let agg_call_new = agg_new.agg_calls[0].clone();
@@ -359,9 +613,10 @@ mod tests {
         let scan = agg_new.input();
         let scan = scan.as_logical_scan().unwrap();
         assert_eq!(scan.schema().fields(), &fields[1..]);
+        assert_eq!(scan.id().0, 2);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Agg(min(input_ref(2)), max(input_ref(1))) group by (input_ref(1), input_ref(2))
@@ -372,8 +627,9 @@ mod tests {
     /// Project(input_ref(0), input_ref(2))
     ///   Agg(max(input_ref(0))) group by (input_ref(0), input_ref(1))
     ///     TableScan(v2, v3)
-    fn test_prune_agg() {
+    async fn test_prune_agg() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -395,6 +651,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let agg_calls = vec![
             PlanAggCall {

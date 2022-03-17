@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -21,5 +22,6 @@
 extern crate log;
 extern crate test;
 
+pub mod common;
 pub mod executor;
 pub mod task;

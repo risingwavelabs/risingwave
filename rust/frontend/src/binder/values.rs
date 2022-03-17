@@ -3,6 +3,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Values;
 
+use super::bind_context::Clause;
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
@@ -14,13 +15,13 @@ pub struct BoundValues {
 
 impl Binder {
     pub(super) fn bind_values(&mut self, values: Values) -> Result<BoundValues> {
-        self.context.in_values_clause = true;
+        self.context.clause = Some(Clause::Values);
         let vec2d = values.0;
         let bound = vec2d
             .into_iter()
             .map(|vec| vec.into_iter().map(|expr| self.bind_expr(expr)).collect())
             .collect::<Result<Vec<Vec<_>>>>()?;
-        self.context.in_values_clause = false;
+        self.context.clause = None;
 
         // calc column type and insert casts here
         let mut types = bound[0]

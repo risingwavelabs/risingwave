@@ -8,8 +8,8 @@ use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-use super::shared_buffer::SharedBufferManager;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
@@ -128,10 +128,10 @@ impl LocalVersionManager {
     }
 
     /// Wait until the local hummock version contains the given committed epoch
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
         // TODO: review usage of all HummockEpoch::MAX
         if epoch == HummockEpoch::MAX {
-            panic!("epoch should not be u64::MAXX");
+            panic!("epoch should not be u64::MAX");
         }
         let mut receiver = self.update_notifier_tx.subscribe();
         loop {
@@ -139,13 +139,18 @@ impl LocalVersionManager {
                 let current_version = self.current_version.read();
                 if let Some(version) = current_version.as_ref() {
                     if version.version.max_committed_epoch >= epoch {
-                        return;
+                        return Ok(());
                     }
                 }
             }
-            if receiver.changed().await.is_err() {
-                // The tx is dropped.
-                return;
+            match tokio::time::timeout(Duration::from_secs(10), receiver.changed()).await {
+                Err(_) => {
+                    return Err(HummockError::wait_epoch("timeout"));
+                }
+                Ok(Err(_)) => {
+                    return Err(HummockError::wait_epoch("tx dropped"));
+                }
+                Ok(Ok(_)) => {}
             }
         }
     }

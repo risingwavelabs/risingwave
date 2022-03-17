@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use risingwave_common::array::RwError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};

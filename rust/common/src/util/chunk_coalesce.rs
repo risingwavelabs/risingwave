@@ -239,11 +239,11 @@ mod tests {
         // Append a chunk with 2 rows
         let input = {
             let column1 = column! {
-              I32Array, [Some(3), None]
+                I32Array, [Some(3), None]
             };
 
             let column2 = column! {
-              I64Array, [None, Some(7i64)]
+                I64Array, [None, Some(7i64)]
             };
 
             let chunk =

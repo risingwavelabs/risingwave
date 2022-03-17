@@ -6,30 +6,51 @@ use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch, ToStream,
+    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::plan_node::CollectRequiredCols;
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::CollectInputRef;
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
+/// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
+    pub base: LogicalBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalProject {
     fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+        let ctx = input.ctx();
+        // Merge contiguous Project nodes.
+        if let Some(input) = input.as_logical_project() {
+            let mut subst = Substitute {
+                mapping: input.exprs.clone(),
+            };
+            let exprs = exprs
+                .iter()
+                .cloned()
+                .map(|expr| subst.rewrite_expr(expr))
+                .collect();
+            return LogicalProject::new(input.input(), exprs, expr_alias);
+        }
+
         let schema = Self::derive_schema(&exprs, &expr_alias);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalProject {
             input,
-            schema,
+            base,
             exprs,
             expr_alias,
         }
@@ -65,7 +86,7 @@ impl LogicalProject {
         let exprs: Vec<ExprImpl> = input_refs
             .into_iter()
             .map(|i| i.unwrap())
-            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).to_expr_impl())
+            .map(|i| InputRef::new(i, input_schema.fields()[i].data_type()).into())
             .collect();
 
         let alias = vec![None; exprs.len()];
@@ -95,6 +116,13 @@ impl LogicalProject {
     pub fn expr_alias(&self) -> &[Option<String>] {
         self.expr_alias.as_ref()
     }
+
+    pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
+        f.debug_struct(name)
+            .field("exprs", self.exprs())
+            .field("expr_alias", &self.expr_alias())
+            .finish()
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
@@ -110,40 +138,22 @@ impl_plan_tree_node_for_unary! {LogicalProject}
 
 impl fmt::Display for LogicalProject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalProject")
-            .field("exprs", self.exprs())
-            .field("expr_alias", &format_args!("{:?}", self.expr_alias()))
-            .finish()
-    }
-}
-
-impl WithOrder for LogicalProject {}
-
-impl WithDistribution for LogicalProject {}
-
-impl WithSchema for LogicalProject {
-    fn schema(&self) -> &Schema {
-        &self.schema
+        self.fmt_with_name(f, "LogicalProject")
     }
 }
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: FixedBitSet::with_capacity(self.input.schema().fields().len()),
+        let mut visitor = CollectInputRef {
+            input_bits: FixedBitSet::with_capacity(self.input.schema().fields().len()),
         };
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
         });
 
-        let child_required_cols = visitor.required_cols;
+        let child_required_cols = visitor.input_bits;
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
         let (exprs, expr_alias) = required_cols
@@ -183,8 +193,28 @@ impl ToStream for LogicalProject {
     }
 }
 
+/// Substitute `InputRef` with corresponding `ExprImpl`.
+struct Substitute {
+    mapping: Vec<ExprImpl>,
+}
+
+impl ExprRewriter for Substitute {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        assert_eq!(
+            self.mapping[input_ref.index()].return_type(),
+            input_ref.return_type(),
+            "Type mismatch when substituting {:?} with {:?}",
+            input_ref,
+            self.mapping[input_ref.index()],
+        );
+        self.mapping[input_ref.index()].clone()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::DataType;
@@ -193,8 +223,72 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
+    async fn test_contiguous_project() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ty = DataType::Int32;
+        let fields: Vec<Field> = (1..4)
+            .map(|i| Field {
+                data_type: ty.clone(),
+                name: format!("v{}", i),
+            })
+            .collect();
+        let table_scan = LogicalScan::new(
+            "test".to_string(),
+            TableId::new(0),
+            vec![1.into(), 2.into(), 3.into()],
+            Schema { fields },
+            ctx,
+        );
+        let inner = LogicalProject::new(
+            table_scan.into(),
+            vec![
+                FunctionCall::new(
+                    Type::Equal,
+                    vec![
+                        InputRef::new(1, ty.clone()).into(),
+                        InputRef::new(2, ty.clone()).into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+                InputRef::new(0, ty.clone()).into(),
+            ],
+            vec![Some("aa".to_string()), Some("bb".to_string())],
+        );
+
+        let outer = LogicalProject::new(
+            inner.into(),
+            vec![
+                InputRef::new(1, ty.clone()).into(),
+                Literal::new(None, ty.clone()).into(),
+                InputRef::new(0, DataType::Boolean).into(),
+            ],
+            vec![None; 3],
+        );
+
+        assert!(outer.input().as_logical_scan().is_some());
+        assert_eq!(outer.exprs().len(), 3);
+        assert_eq_input_ref!(&outer.exprs()[0], 0);
+        match outer.exprs()[2].clone() {
+            ExprImpl::FunctionCall(call) => {
+                assert_eq_input_ref!(&call.inputs()[0], 1);
+                assert_eq_input_ref!(&call.inputs()[1], 2);
+            }
+            _ => panic!("Expected function call"),
+        }
+
+        let outermost =
+            LogicalProject::new(outer.into(), vec![InputRef::new(0, ty).into()], vec![None]);
+
+        assert!(outermost.input().as_logical_scan().is_some());
+        assert_eq!(outermost.exprs().len(), 1);
+        assert_eq_input_ref!(&outermost.exprs()[0], 0);
+    }
+
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Project(1, input_ref(2), input_ref(0)<5)
@@ -205,8 +299,9 @@ mod tests {
     /// Project(input_ref(1), input_ref(0)<5)
     ///   TableScan(v1, v3)
     /// ```
-    fn test_prune_project() {
+    async fn test_prune_project() {
         let ty = DataType::Int32;
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -228,12 +323,13 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let project = LogicalProject::new(
             table_scan.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
-                InputRef::new(2, ty.clone()).to_expr_impl(),
+                InputRef::new(2, ty.clone()).into(),
                 ExprImpl::FunctionCall(Box::new(
                     FunctionCall::new(
                         Type::LessThan,

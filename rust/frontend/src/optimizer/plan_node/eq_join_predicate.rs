@@ -1,23 +1,41 @@
+use std::fmt;
+
 use fixedbitset::FixedBitSet;
 
-use crate::expr::{get_inputs_col_index, Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{get_inputs_col_index, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
 
-/// the join predicate used in optimizer
+/// The join predicate used in optimizer
 #[derive(Debug, Clone)]
 pub struct EqJoinPredicate {
-    /// other conditions, linked with AND conjunction.
+    /// Other conditions, linked with `AND` conjunction.
     other_cond: Condition,
 
-    /// the equal columns indexes(in the input schema) both sides,
+    /// The equal columns indexes(in the input schema) both sides,
     /// the first is from the left table and the second is from the right table.
     /// now all are normal equal(not null-safe-equal),
     eq_keys: Vec<(InputRef, InputRef)>,
 }
 
-#[allow(dead_code)]
+impl fmt::Display for EqJoinPredicate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> std::fmt::Result {
+        let mut eq_keys = self.eq_keys().iter();
+        if let Some((k1, k2)) = eq_keys.next() {
+            write!(f, "{} = {}", k1, k2)?;
+        }
+        for (k1, k2) in eq_keys {
+            write!(f, "AND {} = {}", k1, k2)?;
+        }
+        if !self.other_cond.always_true() {
+            write!(f, "AND {}", self.other_cond)?;
+        }
+
+        Ok(())
+    }
+}
+
 impl EqJoinPredicate {
-    /// the new method for `JoinPredicate` without any analysis, check or rewrite.
+    /// The new method for `JoinPredicate` without any analysis, check or rewrite.
     pub fn new(other_cond: Condition, eq_keys: Vec<(InputRef, InputRef)>) -> Self {
         Self {
             other_cond,
@@ -96,9 +114,9 @@ impl EqJoinPredicate {
                 .iter()
                 .cloned()
                 .map(|(l, r)| {
-                    FunctionCall::new(ExprType::Equal, vec![l.to_expr_impl(), r.to_expr_impl()])
+                    FunctionCall::new(ExprType::Equal, vec![l.into(), r.into()])
                         .unwrap()
-                        .to_expr_impl()
+                        .into()
                 })
                 .collect(),
         }
@@ -109,9 +127,8 @@ impl EqJoinPredicate {
     }
 
     pub fn all_cond(&self) -> Condition {
-        let mut cond = self.eq_cond();
-        cond.and(self.non_eq_cond());
-        cond
+        let cond = self.eq_cond();
+        cond.and(self.non_eq_cond())
     }
 
     pub fn has_eq(&self) -> bool {

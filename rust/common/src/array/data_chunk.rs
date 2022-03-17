@@ -55,7 +55,7 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
-    fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         let cardinality = if let Some(bitmap) = &visibility {
             // with visibility bitmap
             let card = bitmap.iter().map(|visible| visible as usize).sum();
@@ -181,18 +181,21 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstDataChunk> {
-        ensure!(self.visibility.is_none());
+    pub fn to_protobuf(&self) -> ProstDataChunk {
+        assert!(
+            self.visibility.is_none(),
+            "must be compacted before transfer"
+        );
         let mut proto = ProstDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
         for arr in &self.columns {
-            column_ref.push(arr.to_protobuf()?);
+            column_ref.push(arr.to_protobuf());
         }
 
-        Ok(proto)
+        proto
     }
 
     /// `compact` will convert the chunk to compact format.

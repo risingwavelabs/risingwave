@@ -1,32 +1,43 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectRequiredCols, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
+use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
+/// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
+/// true, filtering out the others.
+///
+/// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
+    pub base: LogicalBase,
     predicate: Condition,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
+        let ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
+        let base = LogicalBase {
+            schema,
+            ctx: ctx.clone(),
+            id: ctx.borrow_mut().get_id(),
+        };
         LogicalFilter {
             input,
-            schema,
+            base,
             predicate,
         }
     }
@@ -35,6 +46,11 @@ impl LogicalFilter {
     pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
         let predicate = Condition::with_expr(predicate);
         Ok(Self::new(input, predicate).into())
+    }
+
+    /// Get the predicate of the logical join.
+    pub fn predicate(&self) -> &Condition {
+        &self.predicate
     }
 }
 
@@ -55,37 +71,22 @@ impl fmt::Display for LogicalFilter {
     }
 }
 
-impl WithOrder for LogicalFilter {}
-
-impl WithDistribution for LogicalFilter {}
-
-impl WithSchema for LogicalFilter {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
-
 impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
-        );
+        self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectRequiredCols {
-            required_cols: required_cols.clone(),
+        let mut visitor = CollectInputRef {
+            input_bits: required_cols.clone(),
         };
         self.predicate.visit_expr(&mut visitor);
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.required_cols);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.required_cols), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
 
-        if required_cols == &visitor.required_cols {
+        if required_cols == &visitor.input_bits {
             filter.into()
         } else {
             LogicalProject::with_mapping(
@@ -101,28 +102,36 @@ impl ColPrunable for LogicalFilter {
 
 impl ToBatch for LogicalFilter {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        BatchFilter::new(new_logical).into()
     }
 }
 
 impl ToStream for LogicalFilter {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_stream();
+        let new_logical = self.clone_with_input(new_input);
+        StreamFilter::new(new_logical).into()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::{Field, Schema, TableId};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::property::ctx::WithId;
+    use crate::session::QueryContext;
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -134,21 +143,12 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter() {
-        let ty = DataType::Int32;
+    async fn test_prune_filter() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-            },
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"),
+            Field::with_name(DataType::Int32, "v3"),
         ];
         let table_scan = LogicalScan::new(
             "test".to_string(),
@@ -157,13 +157,14 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
                 vec![
-                    ExprImpl::InputRef(Box::new(InputRef::new(1, ty.clone()))),
-                    ExprImpl::Literal(Box::new(Literal::new(None, ty))),
+                    ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
+                    ExprImpl::Literal(Box::new(Literal::new(None, DataType::Int32))),
                 ],
             )
             .unwrap(),
@@ -185,6 +186,8 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
+        assert_eq!(filter.id().0, 3);
+
         match filter.predicate.clone().to_expr() {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
@@ -195,9 +198,10 @@ mod tests {
         assert_eq!(scan.schema().fields().len(), 2);
         assert_eq!(scan.schema().fields()[0], fields[1]);
         assert_eq!(scan.schema().fields()[1], fields[2]);
+        assert_eq!(scan.id().0, 2);
     }
 
-    #[test]
+    #[tokio::test]
     /// Pruning
     /// ```text
     /// Filter(cond: input_ref(1)<5)
@@ -208,7 +212,8 @@ mod tests {
     ///   Filter(cond: input_ref(0)<5)
     ///     TableScan(v2, v3)
     /// ```
-    fn test_prune_filter_no_project() {
+    async fn test_prune_filter_no_project() {
+        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -231,6 +236,7 @@ mod tests {
             Schema {
                 fields: fields.clone(),
             },
+            ctx,
         );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(

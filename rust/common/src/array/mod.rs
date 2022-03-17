@@ -40,9 +40,8 @@ pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -147,7 +146,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> Result<ProstArray>;
+    fn to_protobuf(&self) -> ProstArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -447,7 +446,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> Result<ProstArray> {
+            pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }

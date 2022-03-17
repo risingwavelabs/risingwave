@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
     HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
-    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest, VacuumTask,
 };
 use tonic::Streaming;
 
@@ -84,10 +84,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        unimplemented!()
-    }
-
     async fn report_compaction_task(
         &self,
         _compact_task: CompactTask,
@@ -110,5 +106,9 @@ impl HummockMetaClient for MockHummockMetaClient {
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
         unimplemented!()
+    }
+
+    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> HummockResult<()> {
+        Ok(())
     }
 }

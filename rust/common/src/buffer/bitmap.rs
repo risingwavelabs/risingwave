@@ -24,9 +24,9 @@ use std::ops::{BitAnd, BitOr};
 
 use risingwave_pb::data::Buffer as ProstBuffer;
 
-use crate::array::{Array, BoolArray, RwError};
+use crate::array::{Array, BoolArray};
 use crate::buffer::Buffer;
-use crate::error::Result;
+use crate::error::{Result, RwError};
 use crate::util::bit_util;
 
 #[derive(Default, Debug)]
@@ -200,12 +200,12 @@ impl Bitmap {
         self.bits.capacity() + mem::size_of_val(self)
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstBuffer> {
+    pub fn to_protobuf(&self) -> ProstBuffer {
         let mut buf = ProstBuffer::default();
         for b in self.iter() {
             buf.body.push(b as u8);
         }
-        Ok(buf)
+        buf
     }
 
     pub fn iter(&self) -> BitmapIter<'_> {

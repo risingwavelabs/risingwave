@@ -28,11 +28,18 @@ message ActorInfo {
 enum WorkerType {
   FRONTEND = 0;
   COMPUTE_NODE = 1;
-  UNKNOWN = 2;
+  RISE_CTL = 2;
+}
+
+enum ParallelUnitType {
+  SINGLE = 0;
+  HASH = 1;
 }
 
 message ParallelUnit {
   uint32 id = 1;
+  ParallelUnitType type = 2;
+  uint32 worker_node_id = 3;
 }
 
 message WorkerNode {
@@ -56,5 +63,5 @@ message Cluster {
 }
 
 message HashMapping {
-  repeated ParallelUnit parallel_units = 1;
+  repeated uint32 parallel_units = 1;
 }

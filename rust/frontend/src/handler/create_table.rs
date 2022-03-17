@@ -17,18 +17,18 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()?),
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
             })
         })
         .collect::<Result<_>>()
 }
 
 pub async fn handle_create_table(
-    context: QueryContext<'_>,
+    context: QueryContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let session = context.session_ctx;
     let mut table = Table {
         info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()

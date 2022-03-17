@@ -1,4 +1,5 @@
 use std::borrow::BorrowMut;
+use std::str::from_utf8;
 use std::time::SystemTime;
 
 use anyhow::anyhow;
@@ -6,8 +7,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use pulsar::{Consumer, Pulsar, SubType, TokioExecutor};
 
-use crate::base::SourceReader;
-use crate::pulsar::source::message::PulsarMessage;
+use crate::base::{InnerMessage, SourceReader};
 use crate::pulsar::split::{PulsarOffset, PulsarSplit};
 
 pub struct PulsarSplitReader {
@@ -20,10 +20,7 @@ const PULSAR_MAX_FETCH_MESSAGES: u32 = 1024;
 
 #[async_trait]
 impl SourceReader for PulsarSplitReader {
-    type Message = PulsarMessage;
-    type Split = PulsarSplit;
-
-    async fn next(&mut self) -> anyhow::Result<Option<Vec<Self::Message>>> {
+    async fn next(&mut self) -> anyhow::Result<Option<Vec<InnerMessage>>> {
         let mut stream = self
             .consumer
             .borrow_mut()
@@ -58,13 +55,14 @@ impl SourceReader for PulsarSplitReader {
                 break;
             }
 
-            ret.push(PulsarMessage { message: msg });
+            ret.push(InnerMessage::from(msg));
         }
 
         Ok(Some(ret))
     }
 
-    async fn assign_split(&mut self, split: PulsarSplit) -> anyhow::Result<()> {
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> anyhow::Result<()> {
+        let split: PulsarSplit = serde_json::from_str(from_utf8(split)?)?;
         let consumer: Consumer<Vec<u8>, TokioExecutor> = self
             .pulsar
             .consumer()

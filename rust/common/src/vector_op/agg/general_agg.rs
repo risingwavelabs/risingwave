@@ -10,7 +10,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct GeneralAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     return_type: DataType,
@@ -22,7 +22,7 @@ where
 impl<T, F, R> GeneralAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
@@ -35,18 +35,22 @@ where
         }
     }
     pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
-        self.result = (self.f)(
-            self.result.as_ref().map(|x| x.as_scalar_ref()),
-            input.value_at(row_id),
-        )
-        .map(|x| x.to_owned_scalar());
+        let datum = self
+            .f
+            .eval(
+                self.result.as_ref().map(|x| x.as_scalar_ref()),
+                input.value_at(row_id),
+            )?
+            .map(|x| x.to_owned_scalar());
+        self.result = datum;
         Ok(())
     }
     pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
-        let r = input
-            .iter()
-            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
-            .map(|x| x.to_owned_scalar());
+        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
+        for datum in input.iter() {
+            cur = self.f.eval(cur, datum)?;
+        }
+        let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
@@ -67,7 +71,7 @@ where
                 builder.append(cur)?;
                 cur = None;
             }
-            cur = (self.f)(cur, v);
+            cur = self.f.eval(cur, v)?;
         }
         self.result = cur.map(|x| x.to_owned_scalar());
         Ok(())
@@ -78,7 +82,7 @@ macro_rules! impl_aggregator {
     ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
         impl<F> Aggregator for GeneralAgg<$input, F, $result>
         where
-            F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
+            F: for<'a> RTFn<'a, $input, $result>,
         {
             fn return_type(&self) -> DataType {
                 self.return_type.clone()
@@ -184,6 +188,46 @@ mod tests {
         agg_state.update(&input_chunk)?;
         agg_state.output(&mut builder)?;
         builder.finish()
+    }
+
+    #[test]
+    fn single_value_int32() -> Result<()> {
+        let test_case = |numbers: &[Option<i32>], result: &[Option<i32>]| -> Result<()> {
+            let input = I32Array::from_slice(numbers).unwrap();
+            let agg_type = AggKind::SingleValue;
+            let input_type = DataType::Int32;
+            let return_type = DataType::Int32;
+            let actual = eval_agg(
+                input_type,
+                Arc::new(input.into()),
+                &agg_type,
+                return_type,
+                ArrayBuilderImpl::Int32(I32ArrayBuilder::new(0)?),
+            );
+            if !result.is_empty() {
+                let actual = actual?;
+                let actual = actual.as_int32().iter().collect::<Vec<_>>();
+                assert_eq!(actual, result);
+            } else {
+                assert!(actual.is_err());
+            }
+            Ok(())
+        };
+
+        // zero row
+        test_case(&[], &[None])?;
+
+        // one row
+        test_case(&[Some(1)], &[Some(1)])?;
+        test_case(&[None], &[None])?;
+
+        // more than one row
+        test_case(&[Some(1), Some(2)], &[])?;
+        test_case(&[Some(1), None], &[])?;
+        test_case(&[None, Some(1)], &[])?;
+        test_case(&[None, None], &[])?;
+        test_case(&[None, Some(1), None], &[])?;
+        test_case(&[None, None, Some(1)], &[])
     }
 
     #[test]

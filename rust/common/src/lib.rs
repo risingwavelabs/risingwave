@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -13,6 +14,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(backtrace)]
+#![feature(fn_traits)]
 
 #[macro_use]
 pub mod error;

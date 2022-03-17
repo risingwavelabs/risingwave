@@ -1,4 +1,4 @@
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Scalar};
 mod input_ref;
 pub use input_ref::*;
 mod literal;
@@ -8,6 +8,7 @@ pub use function_call::*;
 mod agg_call;
 pub use agg_call::*;
 mod type_inference;
+use risingwave_pb::expr::ExprNode;
 pub use type_inference::*;
 mod utils;
 pub use utils::*;
@@ -18,11 +19,20 @@ pub use expr_visitor::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 /// the trait of bound exprssions
-pub trait Expr {
+pub trait Expr: Into<ExprImpl> {
     fn return_type(&self) -> DataType;
-    fn to_expr_impl(self) -> ExprImpl;
+
+    // TODO: replace this with real serialization cc @neverchanje
+    fn to_prost(&self) -> ExprNode {
+        ExprNode {
+            expr_type: 0,
+            rex_node: None,
+            return_type: None,
+        }
+    }
 }
-#[derive(Clone, Debug)]
+
+#[derive(Clone, PartialEq)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
@@ -30,6 +40,28 @@ pub enum ExprImpl {
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
 }
+
+impl ExprImpl {
+    /// A literal int value.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn literal_int(v: i32) -> Self {
+        Self::Literal(Box::new(Literal::new(
+            Some(v.to_scalar_value()),
+            DataType::Int32,
+        )))
+    }
+
+    /// A literal boolean value.
+    #[inline(always)]
+    pub fn literal_bool(v: bool) -> Self {
+        Self::Literal(Box::new(Literal::new(
+            Some(v.to_scalar_value()),
+            DataType::Boolean,
+        )))
+    }
+}
+
 impl Expr for ExprImpl {
     fn return_type(&self) -> DataType {
         match self {
@@ -39,8 +71,51 @@ impl Expr for ExprImpl {
             ExprImpl::AggCall(expr) => expr.return_type(),
         }
     }
-    fn to_expr_impl(self) -> ExprImpl {
-        self
+}
+
+impl From<InputRef> for ExprImpl {
+    fn from(input_ref: InputRef) -> Self {
+        ExprImpl::InputRef(Box::new(input_ref))
+    }
+}
+
+impl From<Literal> for ExprImpl {
+    fn from(literal: Literal) -> Self {
+        ExprImpl::Literal(Box::new(literal))
+    }
+}
+
+impl From<FunctionCall> for ExprImpl {
+    fn from(func_call: FunctionCall) -> Self {
+        ExprImpl::FunctionCall(Box::new(func_call))
+    }
+}
+
+impl From<AggCall> for ExprImpl {
+    fn from(agg_call: AggCall) -> Self {
+        ExprImpl::AggCall(Box::new(agg_call))
+    }
+}
+
+/// A custom Debug implementation that is more concise and suitable to use with
+/// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
+/// still available via `{:#?}`.
+impl std::fmt::Debug for ExprImpl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if f.alternate() {
+            return match self {
+                Self::InputRef(arg0) => f.debug_tuple("InputRef").field(arg0).finish(),
+                Self::Literal(arg0) => f.debug_tuple("Literal").field(arg0).finish(),
+                Self::FunctionCall(arg0) => f.debug_tuple("FunctionCall").field(arg0).finish(),
+                Self::AggCall(arg0) => f.debug_tuple("AggCall").field(arg0).finish(),
+            };
+        }
+        match self {
+            Self::InputRef(x) => write!(f, "{:?}", x),
+            Self::Literal(x) => write!(f, "{:?}", x),
+            Self::FunctionCall(x) => write!(f, "{:?}", x),
+            Self::AggCall(x) => write!(f, "{:?}", x),
+        }
     }
 }
 
@@ -57,3 +132,16 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_expr_debug_alternate() {
+        let mut e = InputRef::new(1, DataType::Boolean).into();
+        e = FunctionCall::new(ExprType::Not, vec![e]).unwrap().into();
+        let s = format!("{:#?}", e);
+        assert!(s.contains("return_type: Boolean"))
+    }
+}

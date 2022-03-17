@@ -2,8 +2,7 @@ use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
-use risingwave_common::error::{BoxedError, ErrorCode, Result};
+use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
 
 use super::{BlockLocation, ObjectMetadata};
 use crate::object::{Bytes, ObjectStore};

@@ -27,7 +27,6 @@ impl HummockStateStore {
     }
 }
 
-// Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
@@ -40,14 +39,8 @@ impl StateStore for HummockStateStore {
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
         self.storage
-            .write_batch(
-                kv_pairs
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
+            .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
-
         Ok(())
     }
 
@@ -74,12 +67,23 @@ impl StateStore for HummockStateStore {
         )))
     }
 
-    async fn wait_epoch(&self, epoch: u64) {
-        self.storage.wait_epoch(epoch).await;
+    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
+        self.storage.wait_epoch(epoch).await
     }
 
     async fn sync(&self, epoch: Option<u64>) -> Result<()> {
         self.storage.sync(epoch).await?;
+        Ok(())
+    }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        self.storage
+            .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+            .await?;
         Ok(())
     }
 }

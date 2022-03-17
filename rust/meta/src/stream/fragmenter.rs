@@ -1,13 +1,11 @@
-use std::cmp::max;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
@@ -22,8 +20,6 @@ use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };
 
-const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
-
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
@@ -33,8 +29,8 @@ pub struct StreamFragmenter<S> {
 
     /// id generator, used to generate actor id.
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    /// worker count, used to init actor parallelization.
-    worker_count: u32,
+    /// hash parallel unit count, used to init actor parallelization.
+    hash_parallel_count: u32,
 }
 
 impl<S> StreamFragmenter<S>
@@ -44,13 +40,13 @@ where
     pub fn new(
         id_gen_manager_ref: IdGeneratorManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
-        worker_count: u32,
+        hash_parallel_count: u32,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
             stream_graph: StreamGraphBuilder::new(fragment_manager_ref),
             id_gen_manager_ref,
-            worker_count,
+            hash_parallel_count,
         }
     }
 
@@ -189,9 +185,7 @@ where
         let parallel_degree = if current_fragment.is_singleton() {
             1
         } else {
-            // Currently, we assume the parallel degree is at least 4, and grows linearly with
-            // more worker nodes added.
-            max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
+            self.hash_parallel_count
         };
         let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 

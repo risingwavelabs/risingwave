@@ -27,10 +27,10 @@ fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
 }
 
 pub(super) async fn handle_create_source(
-    context: QueryContext<'_>,
+    context: QueryContext,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let session = context.session;
+    let session = context.session_ctx;
     let mut table = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
@@ -74,10 +74,10 @@ mod tests {
     syntax = "proto3";
     package test;
     message TestRecord {
-      int32 id = 1;
-      string city = 3;
-      int64 zipcode = 4;
-      float rate = 5;
+        int32 id = 1;
+        string city = 3;
+        int64 zipcode = 4;
+        float rate = 5;
     }"#;
         let temp_file = tempfile::Builder::new()
             .prefix("temp")

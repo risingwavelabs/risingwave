@@ -21,6 +21,8 @@ pub enum HummockError {
     InvalidWriteBatch,
     #[error("SharedBuffer error {0}.")]
     SharedBufferError(String),
+    #[error("Wait epoch error {0}.")]
+    WaitEpoch(String),
     #[error("Other error {0}.")]
     Other(String),
 }
@@ -52,6 +54,10 @@ impl HummockError {
 
     pub fn shared_buffer_error(error: impl ToString) -> TracedHummockError {
         Self::SharedBufferError(error.to_string()).into()
+    }
+
+    pub fn wait_epoch(error: impl ToString) -> TracedHummockError {
+        Self::WaitEpoch(error.to_string()).into()
     }
 }
 

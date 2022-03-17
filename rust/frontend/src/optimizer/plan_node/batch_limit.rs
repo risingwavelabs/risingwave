@@ -2,17 +2,28 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use super::{
+    BatchBase, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
+use crate::optimizer::property::{Distribution, WithSchema};
 
+/// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
 pub struct BatchLimit {
+    pub base: BatchBase,
     logical: LogicalLimit,
 }
 
 impl BatchLimit {
     pub fn new(logical: LogicalLimit) -> Self {
-        BatchLimit { logical }
+        let ctx = logical.base.ctx.clone();
+        let base = BatchBase {
+            order: logical.input().order().clone(),
+            dist: logical.input().distribution().clone(),
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
+        BatchLimit { logical, base }
     }
 }
 
@@ -31,9 +42,6 @@ impl PlanTreeNodeUnary for BatchLimit {
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
-impl WithOrder for BatchLimit {}
-
-impl WithDistribution for BatchLimit {}
 
 impl WithSchema for BatchLimit {
     fn schema(&self) -> &Schema {

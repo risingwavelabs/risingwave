@@ -1,8 +1,10 @@
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
-use crate::optimizer::plan_node::PlanRef;
+use crate::optimizer::PlanRoot;
+use crate::session::QueryContextRef;
 
+mod delete;
 mod insert;
 mod query;
 mod select;
@@ -11,15 +13,22 @@ mod statement;
 mod table_ref;
 mod values;
 
-/// `Planner` converts a bounded statement to a `PlanNode` tree
-pub struct Planner {}
+/// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
+pub struct Planner {
+    ctx: QueryContextRef,
+}
 
 impl Planner {
-    #[allow(clippy::new_without_default)]
-    pub fn new() -> Planner {
-        Planner {}
+    pub fn new(ctx: QueryContextRef) -> Planner {
+        Planner { ctx }
     }
-    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRef> {
+
+    /// Plan a [`BoundStatement`]. Need to bind a statement before plan.
+    pub fn plan(&mut self, stmt: BoundStatement) -> Result<PlanRoot> {
         self.plan_statement(stmt)
+    }
+
+    pub fn ctx(&self) -> QueryContextRef {
+        self.ctx.clone()
     }
 }

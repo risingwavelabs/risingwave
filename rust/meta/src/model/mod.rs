@@ -1,10 +1,12 @@
 mod catalog;
+mod catalog_v2;
 mod cluster;
 mod hash_mapping;
 mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
+pub use catalog_v2::*;
 pub use cluster::*;
 pub use hash_mapping::*;
 use prost::Message;
@@ -109,8 +111,11 @@ pub trait Transactional: MetadataModel {
         );
         Ok(())
     }
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
+    fn delete_in_transaction(
+        key: Self::KeyType,
+        trx: &mut Transaction,
+    ) -> risingwave_common::error::Result<()> {
+        trx.delete(Self::cf_name(), key.encode_to_vec());
         Ok(())
     }
 }

@@ -5,12 +5,13 @@ mod utils;
 
 use clap::Parser;
 use operations::*;
-use risingwave_common::config::StorageConfig;
+use risingwave_common::config::{parse_checksum_algo, StorageConfig};
+use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::monitor::DEFAULT_STATE_STORE_STATS;
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
-use crate::utils::store_statistics::print_statistics;
+use crate::utils::display_stats::print_statistics;
 
 #[derive(Parser, Debug)]
 pub(crate) struct Opts {
@@ -76,6 +77,9 @@ pub(crate) struct Opts {
     // ----- flag -----
     #[clap(long)]
     statistics: bool,
+
+    #[clap(long)]
+    calibrate_histogram: bool,
 }
 
 fn preprocess_options(opts: &mut Opts) {
@@ -98,7 +102,7 @@ fn preprocess_options(opts: &mut Opts) {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let mut opts = Opts::parse();
-    let stats = DEFAULT_STATE_STORE_STATS.clone();
+    let stats = Arc::new(StateStoreMetrics::unused());
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);
@@ -106,23 +110,25 @@ async fn main() {
 
     let config = Arc::new(StorageConfig {
         bloom_false_positive: opts.bloom_false_positive,
-        checksum_algo: opts.checksum_algo.clone(),
+        checksum_algo: parse_checksum_algo(&opts.checksum_algo).unwrap(),
         sstable_size: opts.table_size_mb * (1 << 20),
         block_size: opts.block_size_kb * (1 << 10),
         data_directory: "hummock_001".to_string(),
+        async_checkpoint_enabled: true,
+        write_conflict_detection_enabled: false,
     });
 
     let meta_address = "http://127.0.0.1:5690";
-    let hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let mut hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
+    let meta_address = "127.0.0.1:5690".parse().unwrap();
+    hummock_meta_client
+        .register(meta_address, WorkerType::ComputeNode)
+        .await
+        .unwrap();
 
-    let state_store =
-        match StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone()).await {
-            Ok(state_store_impl) => state_store_impl,
-            Err(_) => {
-                eprintln!("Failed to get state_store");
-                return;
-            }
-        };
+    let state_store = StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone())
+        .await
+        .expect("Failed to get state_store");
 
     dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 

@@ -1,10 +1,9 @@
 use std::net::SocketAddr;
 use std::sync::{Arc, RwLock};
 
-use log::{error, info};
-use risingwave_common::array::RwError;
+use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{Database, Schema, Table};
@@ -16,8 +15,6 @@ use crate::catalog::catalog_service::CatalogCache;
 use crate::catalog::{CatalogError, DatabaseId, SchemaId};
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
-pub const UPDATE_FINISH_NOTIFICATION: i32 = 0;
-
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
 /// which receives meta's notification and update frontend's data.
@@ -25,7 +22,7 @@ pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
     catalog_cache: Arc<RwLock<CatalogCache>>,
-    catalog_updated_tx: Sender<i32>,
+    catalog_updated_tx: Sender<CatalogVersion>,
 }
 
 impl ObserverManager {
@@ -34,7 +31,7 @@ impl ObserverManager {
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog_cache: Arc<RwLock<CatalogCache>>,
-        catalog_updated_tx: Sender<i32>,
+        catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
@@ -52,7 +49,7 @@ impl ObserverManager {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
-                        error!("Stream of notification terminated.");
+                        tracing::error!("Stream of notification terminated.");
                         break;
                     }
                     let resp = resp.unwrap();
@@ -61,19 +58,20 @@ impl ObserverManager {
                     match resp.info {
                         Some(Info::Database(database)) => {
                             self.update_database(operation, database)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
                         Some(Info::Node(node)) => {
                             self.update_worker_node_manager(operation, node);
                         }
                         Some(Info::Schema(schema)) => {
                             self.update_schema(operation, schema)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
                         Some(Info::Table(table)) => {
                             self.update_table(operation, table)
-                                .unwrap_or_else(|e| error!("{}", e.to_string()));
+                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
                         }
+                        Some(_) => todo!(),
                         None => (),
                     }
                 }
@@ -84,9 +82,10 @@ impl ObserverManager {
     /// `update_worker_node_manager` is called in `start` method.
     /// It calls `add_worker_node` and `remove_worker_node` of `WorkerNodeManager`.
     fn update_worker_node_manager(&self, operation: Operation, node: WorkerNode) {
-        info!(
+        tracing::debug!(
             "Update worker nodes, operation: {:?}, node: {:?}",
-            operation, node
+            operation,
+            node
         );
 
         match operation {
@@ -99,12 +98,14 @@ impl ObserverManager {
     /// `update_database` is called in `start` method.
     /// It calls `create_database` and `drop_database` of `CatalogCache`.
     fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update database, operation: {:?}, database: {:?}",
-            operation, database
+            operation,
+            database
         );
         let db_name = database.get_database_name();
         let db_id = database.get_database_ref_id()?.database_id as u64;
+        let version = database.get_version();
 
         match operation {
             Operation::Add => self
@@ -121,16 +122,19 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_schema` is called in `start` method.
     /// It calls `create_schema` and `drop_schema` of `CatalogCache`.
     fn update_schema(&self, operation: Operation, schema: Schema) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update schema, operation: {:?}, schema: {:?}",
-            operation, schema
+            operation,
+            schema
         );
         let schema_ref_id = schema.get_schema_ref_id()?;
         let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
@@ -142,6 +146,7 @@ impl ObserverManager {
             .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
         let schema_name = schema.get_schema_name();
         let schema_id = schema_ref_id.schema_id as SchemaId;
+        let version = schema.get_version();
 
         match operation {
             Operation::Add => self.catalog_cache.write().unwrap().create_schema(
@@ -162,16 +167,19 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 
     /// `update_table` is called in `start` method.
     /// It calls `create_table` and `drop_table` of `CatalogCache`.
     fn update_table(&self, operation: Operation, table: Table) -> Result<()> {
-        info!(
+        tracing::debug!(
             "Update table, operation: {:?}, table: {:?}",
-            operation, table
+            operation,
+            table
         );
         let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
         let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
@@ -190,6 +198,7 @@ impl ObserverManager {
             .unwrap()
             .get_schema_name(schema_id)
             .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
+        let version = table.get_version();
 
         match operation {
             Operation::Add => {
@@ -211,7 +220,9 @@ impl ObserverManager {
         }
 
         self.catalog_updated_tx
-            .send(UPDATE_FINISH_NOTIFICATION)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))
+            .send(version)
+            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        self.catalog_cache.write().unwrap().set_version(version);
+        Ok(())
     }
 }
