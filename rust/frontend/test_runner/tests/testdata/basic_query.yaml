@@ -115,6 +115,13 @@
           BatchScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
           BatchScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
         BatchScan { table: "t3", columns: ["_row_id", "v1", "v2"] }
+  stream_plan: |
+    StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
+      StreamHashJoin(predicate: $5 = $8)
+        StreamHashJoin(predicate: $1 = $4)
+          StreamTableSource { logical: LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] } }
+          StreamTableSource { logical: LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2"] } }
+        StreamTableSource { logical: LogicalScan { table: "t3", columns: ["_row_id", "v1", "v2"] } }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
     create table t2 (v1 int not null, v2 int not null);
@@ -124,6 +131,11 @@
       BatchHashJoin(predicate: $0 = $2)
         BatchScan { table: "t1", columns: ["v1", "v2"] }
         BatchScan { table: "t2", columns: ["v1", "v2"] }
+  stream_plan: |
+    StreamProject { exprs: [$1, $3], expr_alias: [Some("v2"), Some("v2")] }
+      StreamHashJoin(predicate: $0 = $2)
+        StreamTableSource { logical: LogicalScan { table: "t1", columns: ["v1", "v2"] } }
+        StreamTableSource { logical: LogicalScan { table: "t2", columns: ["v1", "v2"] } }
 - sql: |-
     select 1
   batch_plan: |

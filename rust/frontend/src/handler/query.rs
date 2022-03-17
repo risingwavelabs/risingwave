@@ -7,7 +7,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
-use risingwave_sqlparser::ast::{Query, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::binder::Binder;
 use crate::handler::util::{get_pg_field_descs, to_pg_rows};
@@ -15,7 +15,9 @@ use crate::planner::Planner;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::session::QueryContext;
 
-pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<PgResponse> {
+pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgResponse> {
+    let stmt_type = to_statement_type(&stmt);
+
     let session = context.session_ctx.clone();
     let catalog_mgr = session.env().catalog_mgr();
     let catalog = catalog_mgr
@@ -23,9 +25,12 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         .ok_or_else(|| ErrorCode::InternalError(String::from("catalog not found")))?;
 
     let mut binder = Binder::new(catalog);
-    let bound = binder.bind(Statement::Query(query))?;
+    let bound = binder.bind(stmt)?;
+
+    let pg_descs = get_pg_field_descs(&bound)?;
+
     let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound.clone())?
+        .plan(bound)?
         .gen_batch_query_plan()
         .to_batch_prost();
 
@@ -76,8 +81,6 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         rows.append(&mut to_pg_rows(chunk));
     }
 
-    let pg_descs = get_pg_field_descs(bound)?;
-
     // Unpin corresponding snapshot.
     meta_client
         .inner
@@ -89,9 +92,21 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
         .to_rw_result()?;
 
     Ok(PgResponse::new(
-        StatementType::SELECT,
+        stmt_type,
         rows.len() as i32,
         rows,
         pg_descs,
     ))
+}
+
+fn to_statement_type(stmt: &Statement) -> StatementType {
+    use StatementType::*;
+
+    match stmt {
+        Statement::Insert { .. } => INSERT,
+        Statement::Delete { .. } => DELETE,
+        Statement::Update { .. } => UPDATE,
+        Statement::Query(_) => SELECT,
+        _ => unreachable!(),
+    }
 }

@@ -8,7 +8,7 @@ use super::bind_context::{Clause, ColumnBinding};
 use crate::binder::{Binder, TableRef};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoundSelect {
     pub distinct: bool,
     pub select_items: Vec<ExprImpl>,

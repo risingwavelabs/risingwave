@@ -87,6 +87,7 @@ pub enum BeMessage<'a> {
     CommandComplete(BeCommandCompleteMessage),
     // Single byte - used in response to SSLRequest/GSSENCRequest.
     EncryptionResponse,
+    EmptyQueryResponse,
     DataRow(&'a Row),
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery,
@@ -251,6 +252,15 @@ impl<'a> BeMessage<'a> {
 
             BeMessage::EncryptionResponse => {
                 buf.put_u8(b'N');
+            }
+
+            // EmptyQueryResponse
+            // +-----+----------+
+            // | 'I' | int32(4) |
+            // +-----+----------+
+            BeMessage::EmptyQueryResponse => {
+                buf.put_u8(b'I');
+                buf.put_i32(4);
             }
 
             BeMessage::ErrorResponse(error) => {

@@ -58,8 +58,8 @@ impl StateStore for RocksDBStateStore {
 
     async fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
-        epoch: u64,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -72,7 +72,7 @@ impl StateStore for RocksDBStateStore {
         unimplemented!()
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
         unimplemented!()
     }
 

@@ -14,7 +14,7 @@ impl Planner {
         let order = Order {
             field_order: query.order,
         };
-        let dist = Distribution::Any;
+        let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let root = PlanRoot::new(plan, dist, order, out_fields);

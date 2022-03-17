@@ -14,14 +14,14 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
     SubQuery(Box<SubQuery>),
     Join(Box<BoundJoin>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoundJoin {
     pub left: TableRef,
     pub right: TableRef,
