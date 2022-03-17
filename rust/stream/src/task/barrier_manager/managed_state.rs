@@ -4,6 +4,7 @@ use std::iter::once;
 use tokio::sync::oneshot;
 
 use crate::executor::Barrier;
+use crate::task::ActorId;
 
 #[derive(Debug)]
 pub(super) enum ManagedBarrierState {
@@ -20,7 +21,7 @@ pub(super) enum ManagedBarrierState {
         epoch: u64,
 
         /// Actor ids we've collected and stashed.
-        collected_actors: HashSet<u32>,
+        collected_actors: HashSet<ActorId>,
     },
 
     /// Meta service has issued a `send_barrier` request. We're collecting barriers now.
@@ -28,7 +29,7 @@ pub(super) enum ManagedBarrierState {
         epoch: u64,
 
         /// Actor ids remaining to be collected.
-        remaining_actors: HashSet<u32>,
+        remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
         collect_notifier: oneshot::Sender<()>,
@@ -72,7 +73,7 @@ impl ManagedBarrierState {
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
-    pub(super) fn collect(&mut self, actor_id: u32, barrier: &Barrier) {
+    pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
         tracing::trace!(
             target: "events::stream::barrier::collect_barrier",
             "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
@@ -122,7 +123,7 @@ impl ManagedBarrierState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
-        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         collect_notifier: oneshot::Sender<()>,
     ) {
         match self {

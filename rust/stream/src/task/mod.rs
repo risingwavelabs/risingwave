@@ -22,7 +22,8 @@ pub const LOCAL_OUTPUT_CHANNEL_SIZE: usize = 16;
 
 pub type ConsumableChannelPair = (Option<Sender<Message>>, Option<Receiver<Message>>);
 pub type ConsumableChannelVecPair = (Vec<Sender<Message>>, Vec<Receiver<Message>>);
-pub type UpDownActorIds = (u32, u32);
+pub type ActorId = u32;
+pub type UpDownActorIds = (ActorId, ActorId);
 
 /// Stores the information which may be modified from the data plane.
 pub struct SharedContext {
