@@ -61,7 +61,12 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
     // TODO: hummock snapshot should maintain as cache instead of RPC each query.
     let meta_client = session.env().meta_client();
-    let pin_snapshot_req = PinSnapshotRequest { context_id: 0 };
+    let pin_snapshot_req = PinSnapshotRequest {
+        context_id: 0,
+        // u64::MAX always return the greatest current epoch. Use correct `last_pinned` when
+        // retrying this RPC.
+        last_pinned: u64::MAX,
+    };
     let epoch = meta_client
         .inner
         .pin_snapshot(pin_snapshot_req)
