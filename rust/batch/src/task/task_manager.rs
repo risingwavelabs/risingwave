@@ -53,7 +53,7 @@ impl BatchManager {
             .unwrap()
             .get(&task_id)
             .ok_or(TaskNotFound)?
-            .take_task_output(output_id)
+            .get_task_output(output_id)
     }
 
     #[cfg(test)]
@@ -80,7 +80,7 @@ impl BatchManager {
             .unwrap()
             .get(task_id)
             .ok_or(TaskNotFound)?
-            .get_error())
+            .get_error()?)
     }
 }
 

@@ -44,14 +44,13 @@ pub(in crate) enum TaskState {
     Failed,
 }
 
-impl TryFrom<&ProstTaskId> for TaskId {
-    type Error = RwError;
-    fn try_from(prost: &ProstTaskId) -> Result<Self> {
-        Ok(TaskId {
+impl From<&ProstTaskId> for TaskId {
+    fn from(prost: &ProstTaskId) -> Self {
+        TaskId {
             task_id: prost.task_id,
             stage_id: prost.stage_id,
             query_id: prost.query_id.clone(),
-        })
+        }
     }
 }
 
@@ -69,7 +68,7 @@ impl TryFrom<&ProstOutputId> for TaskOutputId {
     type Error = RwError;
     fn try_from(prost: &ProstOutputId) -> Result<Self> {
         Ok(TaskOutputId {
-            task_id: TaskId::try_from(prost.get_task_id()?)?,
+            task_id: TaskId::from(prost.get_task_id()?),
             output_id: prost.get_output_id(),
         })
     }
@@ -171,7 +170,7 @@ impl BatchTaskExecution {
         epoch: u64,
     ) -> Result<Self> {
         Ok(BatchTaskExecution {
-            task_id: TaskId::try_from(prost_tid)?,
+            task_id: TaskId::from(prost_tid),
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
@@ -252,7 +251,7 @@ impl BatchTaskExecution {
     }
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
-        let task_id = TaskId::try_from(output_id.get_task_id()?)?;
+        let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock().unwrap()[output_id.get_output_id() as usize]
             .take()
             .ok_or_else(|| {
