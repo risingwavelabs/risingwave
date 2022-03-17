@@ -93,7 +93,6 @@ service StreamService {
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
 }
