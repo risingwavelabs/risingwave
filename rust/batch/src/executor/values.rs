@@ -181,7 +181,7 @@ mod tests {
         values_executor.close().await.unwrap();
         assert_eq!(
             *result.column_at(0).array(),
-            array! {I16Array, [Some(1 as i16)]}.into()
+            array! {I16Array, [Some(1_i16)]}.into()
         );
         assert_eq!(
             *result.column_at(1).array(),
@@ -207,6 +207,6 @@ mod tests {
         assert_eq!(result.cardinality(), 1);
         assert_eq!(result.dimension(), 0);
 
-        assert_eq!(values_executor.next().await.unwrap().is_none(), true);
+        assert!(values_executor.next().await.unwrap().is_none());
     }
 }
