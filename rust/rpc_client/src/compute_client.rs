@@ -61,10 +61,7 @@ impl ComputeClient {
                 task_output_id: Some(output_id.clone()),
             })
             .await
-            .to_rw_result_with(format!(
-                "failed to create stream {:?} for output_id={:?}",
-                self.addr, output_id
-            ))?
+            .to_rw_result()?
             .into_inner())
     }
 
@@ -137,14 +134,7 @@ pub struct GrpcExchangeSource {
 impl GrpcExchangeSource {
     pub async fn create(addr: SocketAddr, output_id: TaskOutputId) -> Result<Self> {
         let client = ComputeClient::new(&addr).await?;
-        Self::create_with_client(client, output_id).await
-    }
-
-    pub async fn create_with_client(
-        compute_client: ComputeClient,
-        output_id: TaskOutputId,
-    ) -> Result<Self> {
-        compute_client.get_data(output_id).await
+        client.get_data(output_id).await
     }
 }
 
@@ -155,8 +145,7 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data =
-            res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
+        let task_data = res.to_rw_result()?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
 
         trace!(

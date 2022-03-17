@@ -48,6 +48,10 @@ impl ScopedLocalVersion {
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
     }
+
+    pub fn safe_epoch(&self) -> u64 {
+        self.version.safe_epoch
+    }
 }
 
 /// The `LocalVersionManager` maintain a local copy of storage service's hummock version data.

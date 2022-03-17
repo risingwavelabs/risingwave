@@ -1,6 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::LimitNode;
 
 use super::{
     BatchBase, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -58,4 +60,11 @@ impl ToDistributedBatch for BatchLimit {
     }
 }
 
-impl ToBatchProst for BatchLimit {}
+impl ToBatchProst for BatchLimit {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::Limit(LimitNode {
+            limit: self.logical.limit() as u32,
+            offset: self.logical.offset() as u32,
+        })
+    }
+}

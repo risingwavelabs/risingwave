@@ -81,7 +81,7 @@ impl Distribution {
     // +---------------+
     fn satisfies(&self, other: &Distribution) -> bool {
         match self {
-            Distribution::Any => true,
+            Distribution::Any => matches!(other, Distribution::Any),
             Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
             Distribution::Broadcast => matches!(other, Distribution::Any | Distribution::Broadcast),
             Distribution::AnyShard => matches!(other, Distribution::Any | Distribution::AnyShard),

@@ -6,7 +6,7 @@ use crate::expr::ExprType;
 fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
     match expr {
         ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
-            let (_, exprs) = func_call.decompose();
+            let (_, exprs, _) = func_call.decompose();
             for expr in exprs.into_iter() {
                 to_conjunctions_inner(expr, rets);
             }
