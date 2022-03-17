@@ -4,7 +4,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::delete::BoundDelete;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum BoundStatement {
     Insert(Box<BoundInsert>),
     Delete(Box<BoundDelete>),

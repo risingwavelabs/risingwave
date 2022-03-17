@@ -24,8 +24,11 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
 
     let mut binder = Binder::new(catalog);
     let bound = binder.bind(Statement::Query(query))?;
+
+    let pg_descs = get_pg_field_descs(&bound)?;
+
     let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound.clone())?
+        .plan(bound)?
         .gen_batch_query_plan()
         .to_batch_prost();
 
@@ -75,8 +78,6 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     while let Some(chunk) = source.take_data().await? {
         rows.append(&mut to_pg_rows(chunk));
     }
-
-    let pg_descs = get_pg_field_descs(bound)?;
 
     // Unpin corresponding snapshot.
     meta_client
