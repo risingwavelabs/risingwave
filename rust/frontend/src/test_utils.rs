@@ -4,11 +4,13 @@ use std::time::Duration;
 
 use clap::StructOpt;
 use pgwire::pg_response::PgResponse;
-use pgwire::pg_server::Session;
+use pgwire::pg_server::{Session, SessionManager};
+use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_meta::cluster::StoredClusterManager;
 use risingwave_meta::manager::{
-    MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
+    MemEpochGenerator, MetaSrvEnv, NotificationManager, NotificationManagerRef,
+    StoredCatalogManager,
 };
 use risingwave_meta::rpc::{CatalogServiceImpl, ClusterServiceImpl, NotificationServiceImpl};
 use risingwave_meta::storage::MemStore;
@@ -27,27 +29,31 @@ use tonic::Request;
 use crate::session::{FrontendEnv, SessionImpl};
 use crate::FrontendOpts;
 
+/// a mock ['SessionManagerImpl'](super::SessionManagerImpl) for test
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
-    pub session: Arc<SessionImpl>,
     pub observer_join_handle: JoinHandle<()>,
     _heartbeat_join_handle: JoinHandle<()>,
     _heartbeat_shutdown_sender: UnboundedSender<()>,
+    env: FrontendEnv,
+}
+
+impl SessionManager for LocalFrontend {
+    fn connect(&self) -> Arc<dyn Session> {
+        self.session_ref()
+    }
 }
 
 impl LocalFrontend {
-    pub async fn new() -> Self {
-        let args: [OsString; 0] = []; // No argument.
-        let opts: FrontendOpts = FrontendOpts::parse_from(args);
+    pub async fn new(opts: FrontendOpts) -> Self {
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
         let (env, observer_join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
             FrontendEnv::with_meta_client(meta_client, &opts)
                 .await
                 .unwrap();
-        let session = Arc::new(SessionImpl::new(env, "dev".to_string()));
         Self {
             opts,
-            session,
+            env,
             observer_join_handle,
             _heartbeat_join_handle: heartbeat_join_handle,
             _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
@@ -59,21 +65,20 @@ impl LocalFrontend {
         sql: impl Into<String>,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
-        self.session.clone().run_statement(sql.as_str()).await
-    }
-
-    pub fn session(&self) -> &SessionImpl {
-        &self.session
+        self.session_ref().run_statement(sql.as_str()).await
     }
 
     pub fn session_ref(&self) -> Arc<SessionImpl> {
-        self.session.clone()
+        Arc::new(SessionImpl::new(
+            self.env.clone(),
+            DEFAULT_DATABASE_NAME.to_string(),
+        ))
     }
 }
 
 pub struct FrontendMockMetaClient {
-    catalog_srv: CatalogServiceImpl<MemStore>,
     cluster_srv: ClusterServiceImpl<MemStore>,
+    notification_mgr: NotificationManagerRef,
     notification_srv: NotificationServiceImpl,
 }
 
@@ -84,11 +89,6 @@ impl FrontendMockMetaClient {
         let env = MetaSrvEnv::<MemStore>::new(meta_store.clone(), epoch_generator.clone()).await;
 
         let notification_manager = Arc::new(NotificationManager::new());
-        let catalog_manager = Arc::new(
-            StoredCatalogManager::new(meta_store.clone(), notification_manager.clone())
-                .await
-                .unwrap(),
-        );
 
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
@@ -102,9 +102,9 @@ impl FrontendMockMetaClient {
         );
 
         Self {
-            catalog_srv: CatalogServiceImpl::<MemStore>::new(env, catalog_manager),
             cluster_srv: ClusterServiceImpl::<MemStore>::new(cluster_manager),
-            notification_srv: NotificationServiceImpl::new(notification_manager),
+            notification_srv: NotificationServiceImpl::new(notification_manager.clone()),
+            notification_mgr: notification_manager,
         }
     }
 }

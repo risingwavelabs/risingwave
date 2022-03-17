@@ -59,7 +59,7 @@ impl TestCaseResult {
 impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let statements = Parser::parse_sql(&self.sql).unwrap();
 
