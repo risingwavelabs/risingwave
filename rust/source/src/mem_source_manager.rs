@@ -81,7 +81,7 @@ impl SourceManager for MemSourceManager {
         let source = ConnectorSource {
             parser,
             reader,
-            column_descs: Box::new(columns.clone()),
+            column_descs: columns.clone(),
         };
 
         let desc = SourceDesc {

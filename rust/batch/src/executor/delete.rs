@@ -141,9 +141,8 @@ mod tests {
     use risingwave_common::array::{Array, I64Array};
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
-    use risingwave_source::{
-        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
-    };
+    use risingwave_source::{SourceManager, StreamSourceReader};
+    use risingwave_source::mem_source_manager::MemSourceManager;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -183,7 +182,7 @@ mod tests {
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.source.as_table_v2();
-        let mut reader = source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into()])?;
+        let mut reader = source.to_stream_source(vec![0.into(), 1.into()])?;
 
         // Delete
         let mut delete_executor =

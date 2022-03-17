@@ -5,7 +5,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_source::{BatchSourceReader, HighLevelKafkaSourceReaderContext, Source, SourceImpl};
+use risingwave_source::SourceImpl;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
@@ -62,13 +62,9 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             .collect::<Result<Vec<Field>>>()?;
 
         let reader: Box<dyn BatchSourceReader> = match source_desc.source.as_ref() {
-            SourceImpl::HighLevelKafka(k) => Box::new(k.batch_reader(
-                HighLevelKafkaSourceReaderContext {
-                    query_id: Some(source.task_id.clone().query_id),
-                    bound_timestamp_ms: Some(stream_scan_node.timestamp_ms),
-                },
-                column_ids,
-            )?),
+            SourceImpl::Connector(c) => {
+                unimplemented!("batch query for connector source is not implemented.")
+            }
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
             }

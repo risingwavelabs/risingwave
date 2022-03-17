@@ -20,4 +20,4 @@ pub use base::*;
 
 pub mod connector_source;
 pub mod mem_source_manager;
-mod table_v2;
+pub mod table_v2;

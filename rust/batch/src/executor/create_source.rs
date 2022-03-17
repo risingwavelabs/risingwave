@@ -12,7 +12,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
 use risingwave_source::{
-    DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
+    DebeziumJsonParser, ProtobufParser, SourceColumnDesc,
     SourceFormat, SourceManagerRef, SourceParser,
 };
 
@@ -53,16 +53,16 @@ macro_rules! get_from_properties {
 }
 
 impl CreateSourceExecutor {
-    fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
-            properties: Default::default(),
-        }))
-    }
+    // fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
+    //     // Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
+    //     //     bootstrap_servers: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
+    //     //         .split(',')
+    //     //         .map(|s| s.to_string())
+    //     //         .collect::<Vec<String>>(),
+    //     //     topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
+    //     //     properties: Default::default(),
+    //     // }))
+    // }
 }
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {

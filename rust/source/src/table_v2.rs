@@ -8,6 +8,8 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::StreamSourceReader;
+
 // use crate::{BatchSourceReader, Source, StreamSourceReader};
 
 #[derive(Debug)]
@@ -49,6 +51,24 @@ impl TableSourceV2 {
         }
     }
 
+    pub fn to_stream_source(&self, column_ids: Vec<ColumnId>) -> Result<TableV2StreamSource> {
+        let column_indices = column_ids
+            .into_iter()
+            .map(|id| {
+                self.column_descs
+                    .iter()
+                    .position(|c| c.column_id == id)
+                    .expect("column id not exists")
+            })
+            .collect();
+
+        let mut core = self.core.write().unwrap();
+        let (tx, rx) = mpsc::unbounded_channel();
+        core.changes_txs.push(tx);
+
+        Ok(TableV2StreamSource { rx, column_indices })
+    }
+
     /// Generate a global-unique row id with given `worker_id`.
     pub fn next_row_id(&self, worker_id: u32) -> i64 {
         let local_row_id = self.next_row_id.fetch_add(1, Ordering::SeqCst) as u32;
@@ -86,6 +106,46 @@ impl TableSourceV2 {
         let rx = self.write_chunk(chunk)?;
         let written_cardinality = rx.await.unwrap();
         Ok(written_cardinality)
+    }
+}
+
+pub struct TableV2StreamSource {
+    /// The receiver of the changes channel.
+    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
+
+    /// Mappings from the source column to the column to be read.
+    column_indices: Vec<usize>,
+}
+
+#[async_trait]
+impl StreamSourceReader for TableV2StreamSource {
+    async fn open(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn next(&mut self) -> Result<StreamChunk> {
+        let (chunk, notifier) = self
+            .rx
+            .recv()
+            .await
+            .expect("TableSourceV2 dropped before associated streaming task terminated");
+
+        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
+        // after here.
+
+        let (ops, columns, bitmap) = chunk.into_inner();
+
+        let selected_columns = self
+            .column_indices
+            .iter()
+            .map(|i| columns[*i].clone())
+            .collect();
+        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
+
+        // Notify about that we've taken the chunk.
+        notifier.send(chunk.cardinality()).ok();
+
+        Ok(chunk)
     }
 }
 

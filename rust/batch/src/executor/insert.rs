@@ -167,9 +167,8 @@ mod tests {
     use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
-    use risingwave_source::{
-        MemSourceManager, Source, SourceManager, StreamSourceReader, TableV2ReaderContext,
-    };
+    use risingwave_source::SourceManager;
+    use risingwave_source::mem_source_manager::MemSourceManager;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::*;
 

@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
@@ -116,4 +117,14 @@ pub fn build_columns(
 pub fn build_datachunk(column_desc: &[SourceColumnDesc], rows: &[Vec<Datum>]) -> Result<DataChunk> {
     let columns = build_columns(column_desc, rows)?;
     Ok(DataChunk::builder().columns(columns).build())
+}
+
+#[async_trait]
+pub trait StreamSourceReader: Send + 'static {
+    /// `init` is called once to initialize the reader
+    async fn open(&mut self) -> Result<()>;
+
+    /// `next` always returns a StreamChunk. If the queue is empty, it will
+    /// block until new data coming
+    async fn next(&mut self) -> Result<StreamChunk>;
 }

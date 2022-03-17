@@ -19,7 +19,8 @@ use risingwave_connector::state;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::connector_source::ConnectorSource;
-use risingwave_source::*;
+use risingwave_source::mem_source_manager::MemSourceManager;
+use risingwave_source::{SourceDesc, SourceImpl, StreamSourceReader};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
@@ -29,77 +30,10 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
 
-#[async_trait]
-pub trait StreamSourceReader: Send + 'static {
-    /// `init` is called once to initialize the reader
-    async fn open(&mut self) -> Result<()>;
-
-    /// `next` always returns a StreamChunk. If the queue is empty, it will
-    /// block until new data coming
-    async fn next(&mut self) -> Result<StreamChunk>;
-}
-
-#[derive(Debug, Send)]
-pub struct ConnectorStreamSource {
-    source_reader: ConnectorSource,
-    state_store: state::SourceStateHandler<MemoryStateStore>,
-}
-
-#[async_trait]
-impl StreamSourceReader for ConnectorStreamSource {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<StreamChunk> {
-        self.source_reader.next()
-    }
-}
-
-pub struct TableV2StreamSource {
-    /// The receiver of the changes channel.
-    rx: mpsc::UnboundedReceiver<(StreamChunk, oneshot::Sender<usize>)>,
-
-    /// Mappings from the source column to the column to be read.
-    column_indices: Vec<usize>,
-}
-
-#[async_trait]
-impl StreamSourceReader for TableV2StreamSource {
-    async fn open(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn next(&mut self) -> Result<StreamChunk> {
-        let (chunk, notifier) = self
-            .rx
-            .recv()
-            .await
-            .expect("TableSourceV2 dropped before associated streaming task terminated");
-
-        // Caveats: this function is an arm of `tokio::select`. We should ensure there's no `await`
-        // after here.
-
-        let (ops, columns, bitmap) = chunk.into_inner();
-
-        let selected_columns = self
-            .column_indices
-            .iter()
-            .map(|i| columns[*i].clone())
-            .collect();
-        let chunk = StreamChunk::new(ops, selected_columns, bitmap);
-
-        // Notify about that we've taken the chunk.
-        notifier.send(chunk.cardinality()).ok();
-
-        Ok(chunk)
-    }
-}
-
 struct SourceReader {
     /// The reader for stream source
     // TODO change stream_reader to StreamSource
-    pub stream_reader: Box<dyn StreamSourceReader>,
+    pub stream_reader: Box<dyn StreamSourceReader + Send>,
     /// The reader for barrier
     pub barrier_receiver: UnboundedReceiver<Message>,
 }
@@ -396,18 +330,6 @@ impl Debug for SourceExecutor {
             .finish()
     }
 }
-
-pub struct StreamSource {
-    connector_source: ConnectorSource,
-}
-
-// impl StreamSource {
-//     pub fn new() -> Self {}
-
-//     async fn open();
-
-//     async fn next(&self) -> ;
-// }
 
 #[cfg(test)]
 mod tests {
