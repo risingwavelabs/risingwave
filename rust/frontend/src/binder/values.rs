@@ -75,7 +75,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
+    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
         } else {

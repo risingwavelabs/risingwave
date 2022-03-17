@@ -100,6 +100,13 @@ impl Binder {
             .map(|expr| self.bind_expr(expr).unwrap())
             .collect();
         let mut return_type = Binder::find_proper_type(&results_expr)?;
+        return_type = match else_result.clone() {
+            Some(t) => {
+                let _return_type = self.bind_expr(*t)?.return_type();
+                Binder::find_compat(return_type, _return_type)?
+            }
+            None => return_type,
+        };
         for i in 0..conditions.len() {
             let condition = conditions.get(i).unwrap();
             let _condition = match operand {
@@ -111,18 +118,14 @@ impl Binder {
                 None => condition.clone(),
             };
             inputs.push(self.bind_expr(_condition)?);
-            inputs.push(results_expr.get(i).unwrap().clone());
+            inputs.push(Binder::ensure_type(
+                results_expr.get(i).unwrap().clone(),
+                return_type.clone(),
+            ));
         }
-        if let Some(expr) = else_result.clone() {
+        if let Some(expr) = else_result {
             inputs.push(self.bind_expr(*expr)?);
         }
-        return_type = match else_result {
-            Some(t) => {
-                let _return_type = self.bind_expr(*t)?.return_type();
-                Binder::find_compat(return_type, _return_type)?
-            }
-            None => return_type,
-        };
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,
             inputs,
