@@ -4117,6 +4117,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "dashmap",
  "either",
  "farmhash",
  "futures 0.3.21",

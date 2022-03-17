@@ -100,6 +100,10 @@ pub struct StorageConfig {
     /// Whether to enable async checkpoint
     #[serde(default = "default::async_checkpoint_enabled")]
     pub async_checkpoint_enabled: bool,
+
+    /// Whether to enable write conflict detection
+    #[serde(default = "default::write_conflict_detection_enabled")]
+    pub write_conflict_detection_enabled: bool,
 }
 
 fn ser_parse_checksum_algo<'de, D>(
@@ -196,6 +200,10 @@ mod default {
 
     pub fn async_checkpoint_enabled() -> bool {
         true
+    }
+
+    pub fn write_conflict_detection_enabled() -> bool {
+        cfg!(debug_assertions)
     }
 }
 
