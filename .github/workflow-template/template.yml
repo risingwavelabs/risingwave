@@ -555,7 +555,7 @@ jobs:
 
       - name: Run rust test with coverage
         run: |
-          cargo llvm-cov nextest
+          cd rust && cargo llvm-cov nextest
 
       - uses: codecov/codecov-action@v2
         with:
