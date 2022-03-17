@@ -82,14 +82,14 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    
 
     use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
-    use crate::catalog::database_catalog::DatabaseCatalog;
+    
 
     #[test]
     fn test_bind_values() {

@@ -39,10 +39,10 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    
 
     use crate::binder::test_utils::mock_binder;
-    use crate::catalog::database_catalog::DatabaseCatalog;
+    
 
     #[test]
     fn test_bind_value() {
