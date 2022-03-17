@@ -1,8 +1,7 @@
 //! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use bytes::Bytes;
+use crossbeam::atomic::AtomicCell;
 use dashmap::{DashMap, DashSet};
 
 use crate::hummock::value::HummockValue;
@@ -11,19 +10,19 @@ use crate::hummock::HummockEpoch;
 pub struct ConflictDetector {
     // epoch -> key-sets
     epoch_history: DashMap<HummockEpoch, DashSet<Bytes>>,
-    epoch_watermark: AtomicU64,
+    epoch_watermark: AtomicCell<HummockEpoch>,
 }
 
 impl ConflictDetector {
     pub fn new() -> ConflictDetector {
         ConflictDetector {
             epoch_history: DashMap::new(),
-            epoch_watermark: AtomicU64::new(HummockEpoch::MIN),
+            epoch_watermark: AtomicCell::new(HummockEpoch::MIN),
         }
     }
 
     pub fn get_epoch_watermark(&self) -> HummockEpoch {
-        self.epoch_watermark.load(Ordering::SeqCst)
+        self.epoch_watermark.load()
     }
 
     pub fn set_watermark(&self, epoch: HummockEpoch) {
@@ -38,7 +37,7 @@ impl ConflictDetector {
             );
             if self
                 .epoch_watermark
-                .compare_exchange(current_watermark, epoch, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(current_watermark, epoch)
                 .is_ok()
             {
                 return;
