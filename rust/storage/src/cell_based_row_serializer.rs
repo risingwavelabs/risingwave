@@ -1,33 +1,27 @@
-use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::serialize_pk_and_row;
 
+type KeyBytes = Vec<u8>;
+type ValueBytes = Vec<u8>;
 #[derive(Clone)]
-pub struct CellBasedRowSerializer {
-    pk: Option<Vec<u8>>,
-    row: Option<Row>,
-    column_ids: Vec<ColumnId>,
-}
-
-impl CellBasedRowSerializer {
-    pub fn new(column_ids: Vec<ColumnId>) -> Self {
-        Self {
-            pk: None,
-            row: None,
-            column_ids,
-        }
+pub struct CellBasedRowSerializer {}
+impl Default for CellBasedRowSerializer {
+    fn default() -> Self {
+        Self::new()
     }
-
-    /// When we encounter a new key, we can be sure that the previous row has been fully
-    /// deserialized. Then we return the key and the value of the previous row.
+}
+impl CellBasedRowSerializer {
+    pub fn new() -> Self {
+        Self {}
+    }
     pub fn serialize(
         &mut self,
-        pk: &Vec<u8>,
+        pk: &[u8],
         row: Option<Row>,
         column_ids: Vec<ColumnId>,
-    ) -> Result<Vec<(Vec<u8>, Option<Vec<u8>>)>> {
-        serialize_pk_and_row(&pk, &row.clone(), &column_ids)
+    ) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
+        serialize_pk_and_row(pk, &row, &column_ids)
     }
 }

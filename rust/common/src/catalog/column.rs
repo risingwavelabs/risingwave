@@ -43,7 +43,7 @@ pub struct ColumnDesc {
 }
 #[derive(Clone, Debug)]
 pub struct OrderedColumnDesc {
-    column_desc: ColumnDesc,
+    pub column_desc: ColumnDesc,
     order: OrderType,
 }
 impl ColumnDesc {
