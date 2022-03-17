@@ -11,6 +11,7 @@ mod create_source;
 pub mod create_table;
 pub mod drop_table;
 mod explain;
+mod flush;
 mod query;
 pub mod util;
 
@@ -36,6 +37,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             query,
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
+        Statement::Flush => flush::handle_flush(context).await,
         _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
     }
 }

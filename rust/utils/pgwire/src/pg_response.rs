@@ -25,6 +25,7 @@ pub enum StatementType {
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
+    FLUSH,
     OTHER,
 }
 
