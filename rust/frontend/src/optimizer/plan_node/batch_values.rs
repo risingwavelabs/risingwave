@@ -7,6 +7,7 @@ use risingwave_pb::plan::ValuesNode;
 use super::{
     BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
+use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -47,7 +48,7 @@ impl WithSchema for BatchValues {
 
 impl ToDistributedBatch for BatchValues {
     fn to_distributed(&self) -> PlanRef {
-        todo!()
+        self.clone().into()
     }
 }
 

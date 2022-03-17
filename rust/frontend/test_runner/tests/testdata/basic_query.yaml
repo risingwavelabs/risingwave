@@ -14,6 +14,8 @@
       BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
   stream_plan: |
     StreamProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] } }
       StreamTableScan { logical: LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] } }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -29,6 +31,9 @@
         BatchScan { table: "t", columns: ["_row_id"] }
   stream_plan: |
     StreamProject { exprs: [$0], expr_alias: [Some("_row_id")] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
+          StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id"] } }
       StreamFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
         StreamTableScan { logical: LogicalScan { table: "t", columns: ["_row_id"] } }
 - sql: |

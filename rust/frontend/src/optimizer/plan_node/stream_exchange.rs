@@ -4,6 +4,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
+use crate::optimizer::property::order::WithOrder;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
@@ -35,8 +36,11 @@ impl StreamExchange {
 }
 
 impl fmt::Display for StreamExchange {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("StreamExchange")
+            .field("order", self.order())
+            .field("dist", self.distribution())
+            .finish()
     }
 }
 
