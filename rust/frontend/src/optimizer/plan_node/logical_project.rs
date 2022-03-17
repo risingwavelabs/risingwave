@@ -2,7 +2,6 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
@@ -12,7 +11,7 @@ use super::{
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
-use crate::utils::ColIndexMapping;
+use crate::utils::{ColIndexMapping, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -71,11 +70,12 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        debug!("with_mapping {:?}", mapping);
         assert_eq!(
             input.schema().fields().len(),
             mapping.source_upper() + 1,
-            "invalid mapping given"
+            "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
+            input,
+            mapping
         );
         let mut input_refs = vec![None; mapping.target_upper() + 1];
         for (src, tar) in mapping.mapping_pairs() {
@@ -192,25 +192,6 @@ impl ToStream for LogicalProject {
         self.to_stream_with_dist_required(Distribution::any())
     }
 }
-
-/// Substitute `InputRef` with corresponding `ExprImpl`.
-struct Substitute {
-    mapping: Vec<ExprImpl>,
-}
-
-impl ExprRewriter for Substitute {
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        assert_eq!(
-            input_ref.return_type(),
-            self.mapping[input_ref.index()].return_type(),
-            "Type mismatch when substituting {:?} with {:?}",
-            input_ref,
-            self.mapping[input_ref.index()],
-        );
-        self.mapping[input_ref.index()].clone()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
