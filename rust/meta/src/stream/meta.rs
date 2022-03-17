@@ -88,6 +88,34 @@ where
         }
     }
 
+    /// update table fragments with downstream actor ids in sink actors.
+    pub async fn update_table_fragments_downstream(
+        &self,
+        table_id: &TableId,
+        downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
+    ) -> Result<()> {
+        match self.table_fragments.entry(*table_id) {
+            Entry::Occupied(mut entry) => {
+                let table_fragment = entry.get_mut();
+                for fragment in table_fragment.fragments.values_mut() {
+                    for actor in &mut fragment.actors {
+                        if let Some(downstream_actors) = downstream_actors.get(&actor.actor_id) {
+                            actor
+                                .downstream_actor_id
+                                .extend(downstream_actors.iter().cloned());
+                        }
+                    }
+                }
+                table_fragment.insert(&*self.meta_store_ref).await?;
+
+                Ok(())
+            }
+            Entry::Vacant(_) => Err(RwError::from(InternalError(
+                "table_fragment not exist!".to_string(),
+            ))),
+        }
+    }
+
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
         match self.table_fragments.entry(*table_id) {
             Entry::Occupied(entry) => {

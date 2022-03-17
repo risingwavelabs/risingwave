@@ -190,6 +190,7 @@ where
         }
         ctx.dispatches = dispatches;
         ctx.upstream_node_actors = upstream_node_actors;
+        ctx.table_sink_map = table_sink_map;
         Ok(graph)
     }
 
