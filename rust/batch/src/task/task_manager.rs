@@ -1,7 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{hash_map, HashMap};
 use std::sync::{Arc, Mutex};
 
-use risingwave_common::error::ErrorCode::TaskNotFound;
+use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
 
@@ -31,35 +31,41 @@ impl BatchManager {
         epoch: u64,
     ) -> Result<()> {
         let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
+        let task_id = task.get_task_id().clone();
 
         task.async_execute()?;
-        self.tasks
-            .lock()
-            .unwrap()
-            .entry(task.get_task_id().clone())
-            .or_insert_with(|| Box::new(task));
-        Ok(())
+        if let hash_map::Entry::Vacant(e) = self.tasks.lock().unwrap().entry(task_id.clone()) {
+            e.insert(Box::new(task));
+            Ok(())
+        } else {
+            Err(ErrorCode::InternalError(format!(
+                "can not create duplicate task with the same id: {:?}",
+                task_id,
+            ))
+            .into())
+        }
     }
 
     pub fn take_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
-        let task_id = TaskId::try_from(output_id.get_task_id()?)?;
+        let task_id = TaskId::from(output_id.get_task_id()?);
         self.tasks
             .lock()
             .unwrap()
             .get(&task_id)
             .ok_or(TaskNotFound)?
-            .get_task_output(output_id)
+            .take_task_output(output_id)
     }
 
     #[cfg(test)]
     pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
-        let task_id = TaskId::try_from(sid)?;
+        let task_id = TaskId::from(sid);
         match self.tasks.lock().unwrap().remove(&task_id) {
             Some(t) => Ok(Some(t)),
             None => Err(TaskNotFound.into()),
         }
     }
 
+    /// Returns error if task is not running.
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
         match self.tasks.lock().unwrap().get(task_id) {
             Some(task) => task.check_if_running(),
@@ -68,13 +74,13 @@ impl BatchManager {
     }
 
     pub fn get_error(&self, task_id: &TaskId) -> Result<Option<RwError>> {
-        return self
+        Ok(self
             .tasks
             .lock()
             .unwrap()
             .get(task_id)
             .ok_or(TaskNotFound)?
-            .get_error();
+            .get_error())
     }
 }
 
@@ -86,10 +92,12 @@ impl Default for BatchManager {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::plan::exchange_info::DistributionMode;
+    use risingwave_pb::plan::plan_node::NodeBody;
     use risingwave_pb::plan::TaskOutputId as ProstTaskOutputId;
     use tonic::Code;
 
-    use crate::task::{BatchManager, TaskId};
+    use crate::task::{BatchEnvironment, BatchManager, TaskId};
 
     #[test]
     fn test_task_not_found() {
@@ -121,5 +129,37 @@ mod tests {
             Err(e) => assert_eq!(e.to_grpc_status().code(), Code::Internal),
             Ok(_) => unreachable!(),
         };
+    }
+
+    #[tokio::test]
+    async fn test_task_id_conflict() {
+        use risingwave_pb::plan::*;
+
+        let manager = BatchManager::new();
+        let plan = PlanFragment {
+            root: Some(PlanNode {
+                children: vec![],
+                identity: "".to_string(),
+                node_body: Some(NodeBody::Values(ValuesNode {
+                    tuples: vec![],
+                    fields: vec![],
+                })),
+            }),
+            exchange_info: Some(ExchangeInfo {
+                mode: DistributionMode::Single as i32,
+                distribution: None,
+            }),
+        };
+        let env = BatchEnvironment::for_test();
+        let task_id = TaskId {
+            ..Default::default()
+        };
+        manager
+            .fire_task(env.clone(), &task_id, plan.clone(), 0)
+            .unwrap();
+        let err = manager.fire_task(env, &task_id, plan, 0).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("can not create duplicate task with the same id"));
     }
 }
