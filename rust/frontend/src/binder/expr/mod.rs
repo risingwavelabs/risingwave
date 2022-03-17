@@ -97,7 +97,11 @@ impl Binder {
             .map(|expr| self.bind_expr(expr))
             .collect::<Result<_>>()?;
         let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
-        let mut return_type = Binder::find_proper_type(&results_expr)?;
+        let mut return_type = results_expr.get(0).unwrap().return_type();
+        for i in 1..results_expr.len() {
+            return_type =
+                Self::find_compat(return_type, results_expr.get(i).unwrap().return_type())?;
+        }
         if let Some(expr) = &else_result_expr {
             return_type = Binder::find_compat(return_type, expr.return_type())?;
         }
@@ -129,9 +133,8 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
-            ErrorCode::NotImplementedError(format!("{:?}", &func_type)).into()
-        })
+        FunctionCall::new(func_type, vec![expr])
+            .ok_or_else(|| ErrorCode::NotImplementedError(format!("{:?}", &func_type)).into())
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
