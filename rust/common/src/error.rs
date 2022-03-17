@@ -273,7 +273,7 @@ impl ToErrorStr for tonic::Status {
     /// [`tonic::Status`] means no transportation error but only application-level failure.
     /// In this case we focus on the message rather than other fields.
     fn to_error_str(self) -> String {
-        format!("{}", self.message())
+        self.message().to_string()
     }
 }
 
