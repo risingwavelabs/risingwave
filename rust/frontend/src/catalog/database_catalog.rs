@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use risingwave_common::error::{Result, RwError};
+
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
+use crate::catalog::{DatabaseId, SchemaId};
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
@@ -16,12 +16,12 @@ pub struct DatabaseCatalog {
 impl DatabaseCatalog {
     pub fn create_schema(&mut self, proto: ProstSchema) {
         let name = proto.name.clone();
-        let id = proto.id.clone();
+        let id = proto.id;
         let schema = (&proto).into();
         self.schema_by_name
             .try_insert(name.clone(), schema)
             .unwrap();
-        self.schema_name_by_id.try_insert(id.into(), name).unwrap();
+        self.schema_name_by_id.try_insert(id, name).unwrap();
     }
 
     pub fn drop_schema(&mut self, schema_id: SchemaId) {
@@ -45,7 +45,7 @@ impl DatabaseCatalog {
 impl From<&ProstDatabase> for DatabaseCatalog {
     fn from(db: &ProstDatabase) -> Self {
         Self {
-            id: db.id.into(),
+            id: db.id,
             name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),

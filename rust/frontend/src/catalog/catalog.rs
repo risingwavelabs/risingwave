@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result};
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
     source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
@@ -47,7 +47,7 @@ impl Catalog {
 
     pub fn create_database(&mut self, db: ProstDatabase) {
         let name = db.name.clone();
-        let id = db.id.into();
+        let id = db.id;
 
         self.database_by_name
             .try_insert(name.clone(), (&db).into())
@@ -78,7 +78,7 @@ impl Catalog {
 
     pub fn drop_database(&mut self, db_id: DatabaseId) {
         let name = self.db_name_by_id.remove(&db_id).unwrap();
-        let database = self.database_by_name.remove(&name).unwrap();
+        let _database = self.database_by_name.remove(&name).unwrap();
     }
 
     pub fn drop_schema(&mut self, db_id: DatabaseId, schema_id: SchemaId) {
@@ -131,9 +131,9 @@ impl Catalog {
             .get_database_by_name(db_name)
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))?;
         let schema = db
-            .get_schema_by_name(&schema_name)
+            .get_schema_by_name(schema_name)
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()))?;
-        if let Some(source) = schema.get_source_by_name(&relation_name) {
+        if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materivalized source and improve the err msg
             return match source.info {
                 Some(source::Info::TableSource(_)) => {
@@ -146,7 +146,7 @@ impl Catalog {
             };
         }
 
-        if let Some(table) = schema.get_table_by_name(&relation_name) {
+        if let Some(_table) = schema.get_table_by_name(relation_name) {
             return Err(
                 CatalogError::Duplicated("materivalized view", schema_name.to_string()).into(),
             );

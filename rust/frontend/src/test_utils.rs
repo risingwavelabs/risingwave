@@ -12,13 +12,13 @@ use risingwave_meta::manager::{
 };
 use risingwave_meta::rpc::{CatalogServiceImpl, ClusterServiceImpl, NotificationServiceImpl};
 use risingwave_meta::storage::MemStore;
-use risingwave_pb::meta::catalog_service_server::CatalogService;
+
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, CreateRequest, CreateResponse, DeleteWorkerNodeRequest,
-    DeleteWorkerNodeResponse, DropRequest, DropResponse, GetCatalogRequest, GetCatalogResponse,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest,
+    DeleteWorkerNodeResponse,
     ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest,
 };
 use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};

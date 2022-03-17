@@ -5,7 +5,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};

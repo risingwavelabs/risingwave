@@ -101,7 +101,7 @@ impl ObserverManager {
                             Operation::Delete => catalog_guard.drop_source(
                                 source.database_id,
                                 source.schema_id,
-                                source.id.into(),
+                                source.id,
                             ),
                             _ => panic!("receive an unsupported notify {:?}", resp_clone),
                         },

@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion};
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
@@ -11,7 +11,7 @@ use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
-    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
@@ -24,18 +24,17 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
-use risingwave_pb::meta::create_request::CatalogBody;
-use risingwave_pb::meta::drop_request::CatalogId;
+
+
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, Catalog, CreateRequest, CreateResponse, Database,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, DropRequest, DropResponse,
-    GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
-    ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
+    AddWorkerNodeResponse,
+    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, HeartbeatRequest, HeartbeatResponse,
+    ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
 };
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -136,7 +135,7 @@ impl MetaClient {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.database_id.into(), resp.version))
+        Ok((resp.database_id, resp.version))
     }
 
     pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
@@ -145,7 +144,7 @@ impl MetaClient {
         };
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
-        Ok((resp.schema_id.into(), resp.version))
+        Ok((resp.schema_id, resp.version))
     }
 
     /// Unregister the current node to the cluster.

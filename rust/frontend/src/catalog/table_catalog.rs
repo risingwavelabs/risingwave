@@ -70,7 +70,7 @@ impl From<ProstTable> for TableCatalog {
             .into_iter()
             .zip_eq(
                 tb.pk_orders
-                    .clone()
+                    
                     .into_iter()
                     .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
             )

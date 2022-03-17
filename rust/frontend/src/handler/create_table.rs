@@ -1,5 +1,5 @@
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result};
 use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
 use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
@@ -7,7 +7,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
+
 use crate::session::QueryContext;
 
 fn columns_to_prost(columns: &[ColumnDef]) -> Vec<ColumnDesc> {
@@ -25,17 +25,17 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Vec<ColumnDesc> {
 pub async fn handle_create_table(
     context: QueryContext,
     table_name: ObjectName,
-    columns: Vec<ColumnDef>,
+    _columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name.clone())?;
-    let (db_id, schema_id) = session
+    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let (_db_id, _schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), &schema_name, &table_name)?;
 
-    let mut table_source = Table {
+    let _table_source = Table {
         info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()
     };

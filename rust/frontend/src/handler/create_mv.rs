@@ -2,11 +2,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use pgwire::pg_response::PgResponse;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result};
 use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
 
-use crate::binder::{self, Binder};
-use crate::catalog::CatalogError;
+use crate::binder::{Binder};
+
 use crate::planner::Planner;
 use crate::session::QueryContext;
 
@@ -17,7 +17,7 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
     let session = context.session_ctx.clone();
-    let (db_id, schema_id) = session
+    let (_db_id, _schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
@@ -29,7 +29,7 @@ pub async fn handle_create_mv(
         );
         binder.bind(Statement::Query(query))?
     };
-    let catalog_writer = session.env().catalog_writer();
+    let _catalog_writer = session.env().catalog_writer();
     let plan = Planner::new(Rc::new(RefCell::new(context)))
         .plan(bound)?
         .gen_create_mv_plan()

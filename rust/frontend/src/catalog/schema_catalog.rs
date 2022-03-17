@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, RwError};
+
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, SchemaId};
+use crate::catalog::{SchemaId};
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
@@ -59,7 +59,7 @@ impl SchemaCatalog {
 impl From<&ProstSchema> for SchemaCatalog {
     fn from(schema: &ProstSchema) -> Self {
         Self {
-            id: schema.id.into(),
+            id: schema.id,
             name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_name_by_id: HashMap::new(),

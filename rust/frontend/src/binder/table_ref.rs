@@ -168,13 +168,13 @@ impl Binder {
                 let col_desc = ColumnDesc::from(column_catalog.column_desc.as_ref().unwrap());
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    col_desc.name.clone().into(),
+                    col_desc.name.clone(),
                     begin + index,
                     col_desc.data_type,
                 ));
                 self.context
                     .indexs_of
-                    .entry(col_desc.name.to_string())
+                    .entry(col_desc.name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });

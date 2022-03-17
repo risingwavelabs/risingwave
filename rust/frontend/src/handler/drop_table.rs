@@ -8,8 +8,8 @@ pub async fn handle_drop_table(
     context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
-    let session = context.session_ctx;
-    let str_table_name = table_name.to_string();
+    let _session = context.session_ctx;
+    let _str_table_name = table_name.to_string();
 
     // TODO:
     Ok(PgResponse::new(

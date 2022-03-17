@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+
 use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::{CatalogVersion};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
@@ -77,15 +77,15 @@ impl CatalogWriter {
     }
 
     /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
+    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
         todo!()
     }
 
     // TODO: maybe here to pass a materialize plan node
     pub async fn create_materialized_view(
         &self,
-        db_id: DatabaseId,
-        schema_id: SchemaId,
+        _db_id: DatabaseId,
+        _schema_id: SchemaId,
     ) -> Result<()> {
         todo!()
     }

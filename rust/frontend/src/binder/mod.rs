@@ -1,9 +1,9 @@
-use std::sync::Arc;
+
 
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use crate::catalog::catalog::Catalog;
+
 use crate::catalog::schema_catalog::SchemaCatalog;
 
 mod bind_context;
@@ -52,7 +52,7 @@ impl Binder {
     }
 
     fn get_schema_by_name(&self, schema_name: &String) -> Option<&SchemaCatalog> {
-        self.catalog.get_schema_by_name(&self.db_name, &schema_name)
+        self.catalog.get_schema_by_name(&self.db_name, schema_name)
     }
 
     #[cfg(test)]

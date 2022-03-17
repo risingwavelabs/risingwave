@@ -1,13 +1,13 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::Source as ProstSource;
-use risingwave_pb::meta::table::Info;
+use risingwave_common::error::{Result};
+
+
 use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
-use crate::catalog::CatalogError;
+
 use crate::session::QueryContext;
 
 fn create_protobuf_table_schema(
@@ -33,16 +33,16 @@ pub(super) async fn handle_create_source(
     // fix: there is no schema name?
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
-    let (db_id, schema_id) = session
+    let (_db_id, _schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name(session.database(), &schema_name, &source_name)?;
-    let (mut source, mut columns) = match &stmt.source_schema {
+        .check_relation_name(session.database(), schema_name, &source_name)?;
+    let (_source, _columns) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
-    let catalog_writer = session.env().catalog_writer();
+    let _catalog_writer = session.env().catalog_writer();
     // TODO catalog writer to create source
 
     Ok(PgResponse::new(
