@@ -18,7 +18,7 @@ impl Planner {
         let plan: PlanRef = LogicalDelete::create(input, delete.table)?.into();
 
         let order = Order::any().clone();
-        let dist = Distribution::any().clone();
+        let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
 

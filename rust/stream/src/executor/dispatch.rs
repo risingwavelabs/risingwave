@@ -13,9 +13,7 @@ use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
-use crate::task::SharedContext;
-
-type ActorId = u32;
+use crate::task::{ActorId, SharedContext};
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]

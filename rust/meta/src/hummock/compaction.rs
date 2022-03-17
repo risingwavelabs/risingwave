@@ -104,7 +104,7 @@ impl CompactStatus {
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let target_level = select_level + 1;
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
-        // plan to select and merge table(s) in `select_level` into `target_level`
+        // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(l_n, compacting_key_ranges)
             | LevelHandler::Nonoverlapping(l_n, compacting_key_ranges) => {

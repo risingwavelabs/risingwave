@@ -35,6 +35,14 @@ impl LogicalLimit {
     pub fn create(input: PlanRef, limit: usize, offset: usize) -> PlanRef {
         Self::new(input, limit, offset).into()
     }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalLimit {

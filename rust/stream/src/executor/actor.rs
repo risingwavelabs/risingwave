@@ -4,19 +4,23 @@ use risingwave_common::error::Result;
 use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
-use crate::task::SharedContext;
+use crate::task::{ActorId, SharedContext};
 
 /// `Actor` is the basic execution unit in the streaming framework.
 pub struct Actor {
     consumer: Box<dyn StreamConsumer>,
 
-    id: u32,
+    id: ActorId,
 
     context: Arc<SharedContext>,
 }
 
 impl Actor {
-    pub fn new(consumer: Box<dyn StreamConsumer>, id: u32, context: Arc<SharedContext>) -> Self {
+    pub fn new(
+        consumer: Box<dyn StreamConsumer>,
+        id: ActorId,
+        context: Arc<SharedContext>,
+    ) -> Self {
         Self {
             consumer,
             id,

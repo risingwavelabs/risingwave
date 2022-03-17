@@ -46,7 +46,6 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -54,6 +53,8 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
+use crate::hummock::utils::validate_epoch;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -143,6 +144,8 @@ impl HummockStorage {
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Query shared buffer. Return the value without iterating SSTs if found
         if let Some(v) = self
@@ -214,6 +217,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
@@ -268,6 +273,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self

@@ -3,10 +3,11 @@ use std::collections::hash_map::Entry;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
+use super::{BoundQuery, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -16,6 +17,7 @@ use crate::expr::{Expr, ExprImpl};
 #[derive(Debug)]
 pub enum TableRef {
     BaseTable(Box<BaseTableRef>),
+    SubQuery(Box<SubQuery>),
     Join(Box<BoundJoin>),
 }
 
@@ -31,6 +33,11 @@ pub struct BaseTableRef {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub columns: Vec<ColumnCatalog>,
+}
+
+#[derive(Debug)]
+pub struct SubQuery {
+    pub query: BoundQuery,
 }
 
 impl Binder {
@@ -104,6 +111,15 @@ impl Binder {
             TableFactor::Table { name, .. } => {
                 Ok(TableRef::BaseTable(Box::new(self.bind_table(name)?)))
             }
+            TableFactor::Derived {
+                lateral, subquery, ..
+            } => {
+                if lateral {
+                    Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
+                } else {
+                    Ok(TableRef::SubQuery(Box::new(self.bind_subquery(*subquery)?)))
+                }
+            }
             _ => Err(ErrorCode::NotImplementedError(format!(
                 "unsupported table factor {:?}",
                 table_factor
@@ -131,7 +147,13 @@ impl Binder {
         let columns = table_catalog.columns().to_vec();
         let table_id = table_catalog.id();
 
-        self.bind_context(&columns, table_name.clone())?;
+        self.bind_context(
+            columns
+                .iter()
+                .cloned()
+                .map(|c| (c.name().to_string(), c.data_type())),
+            table_name.clone(),
+        )?;
 
         Ok(BaseTableRef {
             name: table_name,
@@ -141,21 +163,25 @@ impl Binder {
     }
 
     /// Fill the BindContext for table.
-    fn bind_context(&mut self, columns: &[ColumnCatalog], table_name: String) -> Result<()> {
+    fn bind_context(
+        &mut self,
+        columns: impl IntoIterator<Item = (String, DataType)>,
+        table_name: String,
+    ) -> Result<()> {
         let begin = self.context.columns.len();
         columns
-            .iter()
+            .into_iter()
             .enumerate()
-            .for_each(|(index, column_catalog)| {
+            .for_each(|(index, (name, data_type))| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    column_catalog.name().into(),
+                    name.clone(),
                     begin + index,
-                    column_catalog.data_type(),
+                    data_type,
                 ));
                 self.context
                     .indexs_of
-                    .entry(column_catalog.name().to_string())
+                    .entry(name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });
@@ -171,5 +197,21 @@ impl Binder {
                 Ok(())
             }
         }
+    }
+
+    /// Before binding a subquery, we push the current context to the stack and create a new
+    /// context.
+    ///
+    /// After finishing binding, we pop the previous context from the stack. And
+    /// update it with the output of the subquery.
+    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<SubQuery> {
+        self.push_context();
+        let query = self.bind_query(query)?;
+        self.pop_context();
+        self.bind_context(
+            itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
+            UNNAMED_SUBQUERY.to_string(),
+        )?;
+        Ok(SubQuery { query })
     }
 }

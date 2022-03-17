@@ -29,7 +29,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(context, table_object_name).await
         }
-        Statement::Query(query) => query::handle_query(context, query).await,
+        Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+            query::handle_query(context, stmt).await
+        }
         Statement::CreateView {
             materialized: true,
             or_replace: false,

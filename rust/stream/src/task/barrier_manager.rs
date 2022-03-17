@@ -6,6 +6,7 @@ use tokio::sync::oneshot;
 
 use self::managed_state::ManagedBarrierState;
 use crate::executor::*;
+use crate::task::ActorId;
 
 mod managed_state;
 #[cfg(test)]
@@ -31,7 +32,7 @@ enum BarrierState {
 /// barriers to and collect them from all actors, and finally report the progress.
 pub struct LocalBarrierManager {
     /// Stores all materialized view source sender.
-    senders: HashMap<u32, UnboundedSender<Message>>,
+    senders: HashMap<ActorId, UnboundedSender<Message>>,
 
     /// Span of the current epoch.
     #[allow(dead_code)]
@@ -64,7 +65,7 @@ impl LocalBarrierManager {
     }
 
     /// Register sender for source actors, used to send barriers.
-    pub fn register_sender(&mut self, actor_id: u32, sender: UnboundedSender<Message>) {
+    pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
         debug!("register sender: {}", actor_id);
         self.senders.insert(actor_id, sender);
     }
@@ -75,18 +76,18 @@ impl LocalBarrierManager {
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = u32>,
-        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<Option<oneshot::Receiver<()>>> {
         let to_send = {
-            let to_send: HashSet<u32> = actor_ids_to_send.into_iter().collect();
+            let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
                 #[cfg(test)]
                 BarrierState::Local if to_send.is_empty() => self.senders.keys().cloned().collect(),
                 _ => to_send,
             }
         };
-        let to_collect: HashSet<u32> = actor_ids_to_collect.into_iter().collect();
+        let to_collect: HashSet<ActorId> = actor_ids_to_collect.into_iter().collect();
         trace!(
             "send barrier {:?}, senders = {:?}, actor_ids_to_collect = {:?}",
             barrier,
@@ -129,7 +130,7 @@ impl LocalBarrierManager {
 
     /// When a [`StreamConsumer`] (typically [`DispatchExecutor`]) get a barrier, it should report
     /// and collect this barrier with its own `actor_id` using this function.
-    pub fn collect(&mut self, actor_id: u32, barrier: &Barrier) -> Result<()> {
+    pub fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) -> Result<()> {
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}

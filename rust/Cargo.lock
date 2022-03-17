@@ -3904,6 +3904,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_sqlparser",
+ "serde_json",
  "smallvec",
  "tempfile",
  "thiserror",

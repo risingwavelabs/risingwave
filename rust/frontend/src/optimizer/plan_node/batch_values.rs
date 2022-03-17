@@ -2,11 +2,13 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::ValuesNode;
 
 use super::{
     BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
+use crate::expr::ExprImpl;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -47,15 +49,83 @@ impl WithSchema for BatchValues {
 
 impl ToDistributedBatch for BatchValues {
     fn to_distributed(&self) -> PlanRef {
-        todo!()
+        self.clone().into()
     }
 }
 
-// TODO: fill ValuesNode
 impl ToBatchProst for BatchValues {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Values(ValuesNode {
-            ..Default::default()
+            tuples: self
+                .logical
+                .rows()
+                .iter()
+                .map(|row| row_to_protobuf(row))
+                .collect(),
+            fields: self
+                .logical
+                .schema()
+                .fields()
+                .iter()
+                .map(|f| f.to_prost())
+                .collect(),
         })
+    }
+}
+
+fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
+    let cells = row.iter().map(|e| e.to_protobuf()).collect();
+    ExprTuple { cells }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_pb::data::DataType;
+    use risingwave_pb::expr::expr_node::RexNode;
+    use risingwave_pb::expr::{ConstantValue, ExprNode};
+    use risingwave_pb::plan::plan_node::NodeBody;
+    use risingwave_pb::plan::values_node::ExprTuple;
+    use risingwave_pb::plan::{Field, ValuesNode};
+
+    use crate::expr::ExprType;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_values_to_prost() {
+        let frontend = LocalFrontend::new().await;
+        // Values(1:I32)
+        let plan = frontend
+            .to_batch_plan("values(1)")
+            .await
+            .unwrap()
+            .to_batch_prost();
+        assert_eq!(
+            plan.get_node_body().unwrap().clone(),
+            NodeBody::Values(ValuesNode {
+                tuples: vec![ExprTuple {
+                    cells: vec![ExprNode {
+                        expr_type: ExprType::ConstantValue as i32,
+                        return_type: Some(DataType {
+                            type_name: TypeName::Int32 as i32,
+                            is_nullable: true,
+                            ..Default::default()
+                        }),
+                        rex_node: Some(RexNode::Constant(ConstantValue {
+                            body: 1_i32.to_be_bytes().to_vec()
+                        }))
+                    }]
+                }],
+                fields: vec![Field {
+                    data_type: Some(DataType {
+                        type_name: TypeName::Int32 as i32,
+                        is_nullable: true,
+                        ..Default::default()
+                    }),
+                    name: "".to_string(),
+                }],
+            })
+        );
     }
 }
