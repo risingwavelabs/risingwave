@@ -11,7 +11,7 @@ impl Planner {
             None => self.create_dummy_values()?,
             Some(t) => self.plan_table_ref(t)?,
         };
-        root = match select.selection {
+        root = match select.where_clause {
             None => root,
             Some(t) => LogicalFilter::create(root, t)?,
         };

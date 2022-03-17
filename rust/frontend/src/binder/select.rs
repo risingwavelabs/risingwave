@@ -15,7 +15,7 @@ pub struct BoundSelect {
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
     pub from: Option<TableRef>,
-    pub selection: Option<ExprImpl>,
+    pub where_clause: Option<ExprImpl>,
 }
 
 impl BoundSelect {
@@ -64,7 +64,7 @@ impl Binder {
             select_items,
             aliases,
             from,
-            selection,
+            where_clause: selection,
         })
     }
 
