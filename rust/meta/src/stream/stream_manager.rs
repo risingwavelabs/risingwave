@@ -32,7 +32,7 @@ pub struct CreateMaterializedViewContext {
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
-    /// Upsream mview actor ids grouped by table id.
+    /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
