@@ -270,8 +270,10 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
 }
 
 impl ToErrorStr for tonic::Status {
+    /// [`tonic::Status`] means no transportation error but only application-level failure.
+    /// In this case we focus on the message rather than other fields.
     fn to_error_str(self) -> String {
-        format!("grpc tonic error: {}", self)
+        format!("{}", self.message())
     }
 }
 
