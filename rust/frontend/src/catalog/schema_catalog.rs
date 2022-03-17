@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{SchemaId};
+use crate::catalog::SchemaId;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {

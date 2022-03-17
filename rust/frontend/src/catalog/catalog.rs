@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
     source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
