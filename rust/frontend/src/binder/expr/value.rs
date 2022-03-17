@@ -41,6 +41,7 @@ impl Binder {
 mod tests {
     use std::sync::Arc;
 
+    use crate::binder::test_utils::mock_binder;
     use crate::catalog::database_catalog::DatabaseCatalog;
 
     #[test]
@@ -49,7 +50,7 @@ mod tests {
 
         use super::*;
 
-        let mut binder = Binder::mock();
+        let mut binder = mock_binder();
         let values = vec![
             "1",
             "111111111111111",

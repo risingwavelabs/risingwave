@@ -88,11 +88,12 @@ mod tests {
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
+    use crate::binder::test_utils::mock_binder;
     use crate::catalog::database_catalog::DatabaseCatalog;
 
     #[test]
     fn test_bind_values() {
-        let mut binder = Binder::mock();
+        let mut binder = mock_binder();
 
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));
