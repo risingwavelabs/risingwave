@@ -23,7 +23,7 @@ impl ConflictDetector {
     }
 
     pub fn get_epoch_watermark(&self) -> HummockEpoch {
-        self.epoch_watermark.load(Ordering::Relaxed)
+        self.epoch_watermark.load(Ordering::SeqCst)
     }
 
     pub fn set_watermark(&self, epoch: HummockEpoch) {
@@ -38,12 +38,7 @@ impl ConflictDetector {
             );
             if self
                 .epoch_watermark
-                .compare_exchange(
-                    current_watermark,
-                    epoch,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
-                )
+                .compare_exchange(current_watermark, epoch, Ordering::SeqCst, Ordering::SeqCst)
                 .is_ok()
             {
                 return;
