@@ -106,7 +106,7 @@ message AddTablesResponse {
 
 message PinVersionRequest {
   uint32 context_id = 1;
-  HummockVersionRefId last_pinned = 2;
+  uint64 last_pinned = 2;
 }
 
 message PinVersionResponse {
@@ -125,7 +125,7 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
-  HummockSnapshot last_pinned = 2;
+  uint64 last_pinned = 2;
 }
 
 message PinSnapshotResponse {

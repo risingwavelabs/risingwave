@@ -60,7 +60,9 @@ pub async fn handle_query(context: QueryContext, query: Box<Query>) -> Result<Pg
     let meta_client = session.env().meta_client();
     let pin_snapshot_req = PinSnapshotRequest {
         context_id: 0,
-        last_pinned: None,
+        // u64::MAX always return the greatest current epoch. Use correct `last_pinned` when
+        // retrying this RPC.
+        last_pinned: u64::MAX,
     };
     let epoch = meta_client
         .inner

@@ -239,7 +239,10 @@ mod tests {
             compactor_manager.clone(),
         ));
 
-        let pinned_version = hummock_manager.pin_version(context_id, None).await.unwrap();
+        let pinned_version = hummock_manager
+            .pin_version(context_id, u64::MAX)
+            .await
+            .unwrap();
 
         // Vacuum no version because the smallest v0 is pinned.
         assert_eq!(

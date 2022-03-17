@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use parking_lot::{Mutex, RwLock};
-use risingwave_pb::hummock::{HummockVersion, HummockVersionRefId, Level, LevelType};
+use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use super::shared_buffer::SharedBufferManager;
@@ -205,10 +205,8 @@ impl LocalVersionManager {
             min_interval.tick().await;
             if let Some(local_version_manager) = local_version_manager.upgrade() {
                 let last_pinned = match local_version_manager.current_version.read().as_ref() {
-                    None => Some(HummockVersionRefId {
-                        id: INVALID_VERSION_ID,
-                    }),
-                    Some(v) => Some(HummockVersionRefId { id: v.version.id }),
+                    None => INVALID_VERSION_ID,
+                    Some(v) => v.version.id,
                 };
                 if let Ok(version) = hummock_meta_client.pin_version(last_pinned).await {
                     local_version_manager.try_set_version(version);

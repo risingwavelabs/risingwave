@@ -183,16 +183,14 @@ where
 
     /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` is an optional parameter to make `pin_version` retryable when set correctly:
-    /// 1. If `last_pinned` is None, always pin and return the current greatest version.
-    /// 2. If `last_pinned` is not None, `pin_version` is retryable:
-    /// 2.1 Return the smallest already pinned version of `context_id` that is greater than
+    /// `last_pinned` is an optional parameter to make `pin_version` retryable:
+    /// 1 Return the smallest already pinned version of `context_id` that is greater than
     /// `last_pinned`, if any.
-    /// 2.2 Otherwise pin and return the current greatest version.
+    /// 2 Otherwise pin and return the current greatest version.
     pub async fn pin_version(
         &self,
         context_id: HummockContextId,
-        last_pinned: Option<HummockVersionRefId>,
+        last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
         let mut context_pinned_version_copy = versioning_guard
@@ -205,22 +203,19 @@ where
             });
 
         let mut already_pinned = false;
-        let version_id = match last_pinned {
-            None => versioning_guard.current_version_id.id(),
-            Some(last_pinned) => {
-                let partition_point = context_pinned_version_copy
-                    .version_id
-                    .iter()
-                    .sorted()
-                    .cloned()
-                    .collect_vec()
-                    .partition_point(|p| *p <= last_pinned.id);
-                if partition_point < context_pinned_version_copy.version_id.len() {
-                    already_pinned = true;
-                    context_pinned_version_copy.version_id[partition_point]
-                } else {
-                    versioning_guard.current_version_id.id()
-                }
+        let version_id = {
+            let partition_point = context_pinned_version_copy
+                .version_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_version_copy.version_id.len() {
+                already_pinned = true;
+                context_pinned_version_copy.version_id[partition_point]
+            } else {
+                versioning_guard.current_version_id.id()
             }
         };
 
@@ -528,7 +523,7 @@ where
     pub async fn pin_snapshot(
         &self,
         context_id: HummockContextId,
-        last_pinned: Option<HummockSnapshot>,
+        last_pinned: HummockEpoch,
     ) -> Result<HummockSnapshot> {
         let mut versioning_guard = self.versioning.write().await;
 
@@ -551,22 +546,19 @@ where
             });
 
         let mut already_pinned = false;
-        let epoch = match last_pinned {
-            None => max_committed_epoch,
-            Some(last_pinned) => {
-                let partition_point = context_pinned_snapshot_copy
-                    .snapshot_id
-                    .iter()
-                    .sorted()
-                    .cloned()
-                    .collect_vec()
-                    .partition_point(|p| *p <= last_pinned.epoch);
-                if partition_point < context_pinned_snapshot_copy.snapshot_id.len() {
-                    already_pinned = true;
-                    context_pinned_snapshot_copy.snapshot_id[partition_point]
-                } else {
-                    max_committed_epoch
-                }
+        let epoch = {
+            let partition_point = context_pinned_snapshot_copy
+                .snapshot_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_snapshot_copy.snapshot_id.len() {
+                already_pinned = true;
+                context_pinned_snapshot_copy.snapshot_id[partition_point]
+            } else {
+                max_committed_epoch
             }
         };
 
