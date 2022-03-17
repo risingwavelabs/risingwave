@@ -34,10 +34,7 @@ pub struct CreateMaterializedViewContext {
 }
 
 /// Stream Manager
-pub struct StreamManager<S>
-where
-    S: MetaStore,
-{
+pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 

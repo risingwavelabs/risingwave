@@ -21,10 +21,7 @@ use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
-pub struct CatalogServiceImpl<S>
-where
-    S: MetaStore,
-{
+pub struct CatalogServiceImpl<S> {
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
