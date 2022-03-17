@@ -302,7 +302,6 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
-<<<<<<< HEAD
     async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
         unimplemented!()
     }
@@ -322,7 +321,6 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: CreateMaterializedViewRequest,
     ) -> Result<CreateMaterializedViewResponse> {
-=======
     async fn report_vacuum_task(
         &self,
         _req: ReportVacuumTaskRequest,
@@ -331,7 +329,6 @@ pub trait MetaClientInner: Send + Sync {
     }
 
     async fn flush(&self, _req: FlushRequest) -> Result<FlushResponse> {
->>>>>>> main
         unimplemented!()
     }
 }
@@ -541,7 +538,6 @@ impl MetaClientInner for GrpcMetaClient {
             .into_inner())
     }
 
-<<<<<<< HEAD
     async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
         // TODO: add catalog client for catalogV2
         todo!()
@@ -566,7 +562,6 @@ impl MetaClientInner for GrpcMetaClient {
     ) -> Result<CreateMaterializedViewResponse> {
         // TODO: add catalog client for catalogV2
         todo!()
-=======
     async fn report_vacuum_task(
         &self,
         req: ReportVacuumTaskRequest,
@@ -587,7 +582,6 @@ impl MetaClientInner for GrpcMetaClient {
             .await
             .to_rw_result()?
             .into_inner())
->>>>>>> main
     }
 }
 
