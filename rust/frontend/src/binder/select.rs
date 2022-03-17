@@ -17,6 +17,23 @@ pub struct BoundSelect {
     pub selection: Option<ExprImpl>,
 }
 
+impl BoundSelect {
+    pub fn names(&self) -> Vec<String> {
+        self.aliases
+            .iter()
+            .cloned()
+            .map(|alias| alias.unwrap_or_else(|| "?column?".to_string()))
+            .collect()
+    }
+
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.select_items
+            .iter()
+            .map(|item| item.return_type())
+            .collect()
+    }
+}
+
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
         let from = self.bind_vec_table_with_joins(select.from)?;

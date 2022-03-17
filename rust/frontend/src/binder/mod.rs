@@ -30,9 +30,8 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,
-
-    // TODO: support subquery.
     context: BindContext,
+    upper_contexts: Vec<BindContext>,
 }
 
 impl Binder {
@@ -40,11 +39,22 @@ impl Binder {
         Binder {
             catalog,
             context: BindContext::new(),
+            upper_contexts: vec![],
         }
     }
 
     /// Bind a [`Statement`].
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
+    }
+
+    fn push_context(&mut self) {
+        let new_context = std::mem::take(&mut self.context);
+        self.upper_contexts.push(new_context);
+    }
+
+    fn pop_context(&mut self) {
+        let old_context = self.upper_contexts.pop();
+        self.context = old_context.unwrap();
     }
 }
