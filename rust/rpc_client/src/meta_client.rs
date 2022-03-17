@@ -320,6 +320,7 @@ pub trait MetaClientInner: Send + Sync {
     ) -> Result<CreateMaterializedViewResponse> {
         unimplemented!()
     }
+
     async fn report_vacuum_task(
         &self,
         _req: ReportVacuumTaskRequest,

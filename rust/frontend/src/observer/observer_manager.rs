@@ -6,8 +6,10 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
+use tokio::runtime::{Handle, Runtime};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
+use tokio::time;
 
 use crate::catalog::catalog::Catalog;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
@@ -41,8 +43,8 @@ impl ObserverManager {
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// update frontend's data. `start` use `mut self` as parameter.
-    pub fn start(mut self) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    pub async fn start(mut self) -> JoinHandle<()> {
+        let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
@@ -124,11 +126,19 @@ impl ObserverManager {
                         }
                         None => panic!("receive an unsupported notify {:?}", resp),
                     }
-                    assert!(resp.version > catalog_guard.version());
+                    assert!(
+                        resp.version > catalog_guard.version(),
+                        "resp version={:?}, current version={:?}",
+                        resp.version,
+                        catalog_guard.version()
+                    );
                     catalog_guard.set_version(resp.version);
                 }
             }
-        })
+        });
+        // FIXME: to wait the local catalog init
+        time::sleep(time::Duration::from_millis(50)).await;
+        handle
     }
 
     /// `update_worker_node_manager` is called in `start` method.

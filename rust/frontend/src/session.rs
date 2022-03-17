@@ -136,7 +136,7 @@ impl FrontendEnv {
             catalog_updated_tx,
         )
         .await;
-        let observer_join_handle = observer_manager.start();
+        let observer_join_handle = observer_manager.start().await;
 
         meta_client.activate(host).await?;
 
