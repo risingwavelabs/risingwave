@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use itertools::Itertools;
 use log::info;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -31,6 +32,8 @@ pub struct CreateMaterializedViewContext {
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by table id.
+    pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
 /// Stream Manager
@@ -245,6 +248,7 @@ where
         self.barrier_manager_ref
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
+                table_sink_map: ctx.table_sink_map,
                 dispatches,
             })
             .await?;
