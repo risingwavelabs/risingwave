@@ -20,11 +20,11 @@ pub struct SchemaCatalog {
 
 impl SchemaCatalog {
     pub fn create_table(&mut self, prost: &ProstTable) {
-        let name = prost.name;
+        let name = prost.name.clone();
         let id = prost.id.into();
         let table = prost.into();
 
-        self.table_by_name.try_insert(name, table).unwrap();
+        self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
 
@@ -33,10 +33,10 @@ impl SchemaCatalog {
         self.table_by_name.remove(&name).unwrap();
     }
     pub fn create_source(&mut self, prost: ProstSource) {
-        let name = prost.name;
+        let name = prost.name.clone();
         let id = prost.id.into();
 
-        self.source_by_name.try_insert(name, prost).unwrap();
+        self.source_by_name.try_insert(name.clone(), prost).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
     pub fn drop_source(&mut self, id: SourceId) {
@@ -46,6 +46,9 @@ impl SchemaCatalog {
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
+    }
+    pub fn get_source_by_name(&self, source_name: &str) -> Option<&ProstSource> {
+        self.source_by_name.get(source_name)
     }
 
     pub fn id(&self) -> SchemaId {
@@ -57,7 +60,7 @@ impl From<&ProstSchema> for SchemaCatalog {
     fn from(schema: &ProstSchema) -> Self {
         Self {
             id: schema.id.into(),
-            name: schema.name,
+            name: schema.name.clone(),
             table_by_name: HashMap::new(),
             table_name_by_id: HashMap::new(),
             source_by_name: HashMap::new(),

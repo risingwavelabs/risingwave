@@ -1,14 +1,18 @@
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::meta::table::Info;
-use risingwave_pb::meta::Table;
-use risingwave_pb::plan::{RowFormatType, StreamSourceInfo};
+use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
+use crate::catalog::CatalogError;
 use crate::session::QueryContext;
 
-fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
+fn create_protobuf_table_schema(
+    schema: &ProtobufSchema,
+) -> Result<(StreamSourceInfo, Vec<ProstColumnDesc>)> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
@@ -18,11 +22,7 @@ fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
         ..Default::default()
     };
 
-    Ok(Table {
-        column_descs,
-        info: Some(Info::StreamSource(info)),
-        ..Default::default()
-    })
+    Ok((info, column_descs))
 }
 
 pub(super) async fn handle_create_source(
@@ -30,22 +30,20 @@ pub(super) async fn handle_create_source(
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let mut table = match &stmt.source_schema {
+    // fix: there is no schema name?
+    let schema_name = DEFAULT_SCHEMA_NAME;
+    let source_name = stmt.source_name.value.clone();
+    let (db_id, schema_id) = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .check_relation_name(session.database(), &schema_name, &source_name)?;
+    let (mut source, mut columns) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
-    match table.info.as_mut().unwrap() {
-        Info::StreamSource(info) => {
-            info.properties = stmt.with_properties.into();
-        }
-        _ => unreachable!(),
-    }
-    table.table_name = stmt.source_name.value.clone();
-
-    let catalog_mgr = session.env().catalog_mgr();
-    catalog_mgr
-        .create_table(session.database(), DEFAULT_SCHEMA_NAME, table)
-        .await?;
+    let catalog_writer = session.env().catalog_writer();
+    // TODO catalog writer to create source
 
     Ok(PgResponse::new(
         StatementType::CREATE_SOURCE,

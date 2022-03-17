@@ -14,11 +14,13 @@ pub struct DatabaseCatalog {
 }
 
 impl DatabaseCatalog {
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
-        let name = proto.name;
-        let id = proto.id;
-        let schema = proto.into();
-        self.schema_by_name.try_insert(name, schema).unwrap();
+    pub fn create_schema(&mut self, proto: ProstSchema) {
+        let name = proto.name.clone();
+        let id = proto.id.clone();
+        let schema = (&proto).into();
+        self.schema_by_name
+            .try_insert(name.clone(), schema)
+            .unwrap();
         self.schema_name_by_id.try_insert(id.into(), name).unwrap();
     }
 
@@ -44,7 +46,7 @@ impl From<&ProstDatabase> for DatabaseCatalog {
     fn from(db: &ProstDatabase) -> Self {
         Self {
             id: db.id.into(),
-            name: db.name,
+            name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
         }

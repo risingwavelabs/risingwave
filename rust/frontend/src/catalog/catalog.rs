@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
+    Table as ProstTable,
 };
 
+use super::CatalogError;
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -42,15 +45,17 @@ impl Catalog {
         self.database_by_name.get_mut(name)
     }
 
-    pub fn create_database(&mut self, db: &ProstDatabase) {
-        let name = db.name;
+    pub fn create_database(&mut self, db: ProstDatabase) {
+        let name = db.name.clone();
         let id = db.id.into();
 
-        self.database_by_name.try_insert(name, db.into()).unwrap();
+        self.database_by_name
+            .try_insert(name.clone(), (&db).into())
+            .unwrap();
         self.db_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
+    pub fn create_schema(&mut self, proto: ProstSchema) {
         self.get_database_mut(proto.database_id)
             .unwrap()
             .create_schema(proto);
@@ -113,6 +118,40 @@ impl Catalog {
     ) -> Option<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
+    }
+
+    /// check the name if duplicated with existing table, materialized view or source;
+    pub fn check_relation_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        relation_name: &str,
+    ) -> Result<(DatabaseId, SchemaId)> {
+        let db = self
+            .get_database_by_name(db_name)
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))?;
+        let schema = db
+            .get_schema_by_name(&schema_name)
+            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()))?;
+        if let Some(source) = schema.get_source_by_name(&relation_name) {
+            // TODO: check if it is a materivalized source and improve the err msg
+            return match source.info {
+                Some(source::Info::TableSource(_)) => {
+                    Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
+                }
+                Some(source::Info::StreamSource(_)) => {
+                    Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
+                }
+                None => unreachable!(),
+            };
+        }
+
+        if let Some(table) = schema.get_table_by_name(&relation_name) {
+            return Err(
+                CatalogError::Duplicated("materivalized view", schema_name.to_string()).into(),
+            );
+        }
+        Ok((db.id(), schema.id()))
     }
 
     /// Get the catalog cache's catalog version.

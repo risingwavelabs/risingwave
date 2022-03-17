@@ -17,7 +17,7 @@ pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
 pub enum CatalogError {
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
-    #[error("duplicated {0}: {1}")]
+    #[error("{0} with name {1} exists")]
     Duplicated(&'static str, String),
 }
 

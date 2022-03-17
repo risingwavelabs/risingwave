@@ -18,13 +18,14 @@ pub(super) fn handle_explain(
 ) -> Result<PgResponse> {
     let context = Rc::new(RefCell::new(context));
     let session = context.borrow().session_ctx.clone();
-    let catalog_mgr = session.env().catalog_mgr();
-    let catalog = catalog_mgr
-        .get_database_snapshot(session.database())
-        .unwrap();
     // bind, plan, optimize, and serialize here
-    let mut binder = Binder::new(catalog);
-    let bound = binder.bind(stmt)?;
+    let bound = {
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
+        binder.bind(stmt)?
+    };
     let mut planner = Planner::new(context);
     let logical = planner.plan(bound)?;
     let batch = logical.gen_batch_query_plan();

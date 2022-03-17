@@ -17,33 +17,16 @@ pub async fn handle_create_mv(
 ) -> Result<PgResponse> {
     let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
     let session = context.session_ctx.clone();
-    let (db_id, schema_id) = {
-        // use local catalog to check if the create mv is legal
-        let catalog_reader = session.env().catalog_reader();
-        let catalog_read_guard = catalog_reader.read_guard();
-        let db = catalog_read_guard
-            .get_database_by_name(session.database())
-            .ok_or_else(|| {
-                ErrorCode::InternalError(format!(
-                    "database {} catalog not found",
-                    session.database()
-                ))
-            })?;
-        let schema = db.get_schema_by_name(&schema_name).ok_or_else(|| {
-            ErrorCode::InternalError(format!("schema {} catalog not found", schema_name))
-        })?;
-        if let Some(table) = schema.get_table_by_name(&table_name) {
-            // TODO: check if it is a materivalized source and improve the err msg
-            return Err(
-                CatalogError::Duplicated("materivalized view", schema_name.to_string()).into(),
-            );
-        }
-        (db.id(), schema.id())
-    };
+    let (db_id, schema_id) = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .check_relation_name(session.database(), &schema_name, &table_name)?;
     let bound = {
-        let catalog_reader = session.env().catalog_reader();
-        let catalog_read_guard = catalog_reader.read_guard();
-        let mut binder = Binder::new(catalog_read_guard, session.database().to_string());
+        let mut binder = Binder::new(
+            session.env().catalog_reader().read_guard(),
+            session.database().to_string(),
+        );
         binder.bind(Statement::Query(query))?
     };
     let catalog_writer = session.env().catalog_writer();
@@ -51,6 +34,7 @@ pub async fn handle_create_mv(
         .plan(bound)?
         .gen_create_mv_plan()
         .to_stream_prost();
+    // TODO catalog writer to create mv
 
     tracing::info!(name= ?name, plan = ?plan);
 

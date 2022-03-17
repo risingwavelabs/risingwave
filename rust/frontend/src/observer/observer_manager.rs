@@ -50,25 +50,26 @@ impl ObserverManager {
                         break;
                     }
                     let resp = resp.unwrap();
+                    let resp_clone = resp.clone();
                     let operation = resp.operation();
-                    let catalog_guard = self.catalog.write();
+                    let mut catalog_guard = self.catalog.write();
                     match resp.info {
                         Some(Info::Database(database)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
-                                resp
+                                resp_clone
                             );
                         }
                         Some(Info::Schema(schema)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
-                                resp
+                                resp_clone
                             );
                         }
                         Some(Info::Table(table)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
-                                resp
+                                resp_clone
                             );
                         }
                         Some(Info::Node(node)) => {
@@ -78,16 +79,16 @@ impl ObserverManager {
                             self.update_worker_node_manager(operation, node);
                         }
                         Some(Info::DatabaseV2(database)) => match operation {
-                            Operation::Add => catalog_guard.create_database(&database),
+                            Operation::Add => catalog_guard.create_database(database),
                             Operation::Delete => catalog_guard.drop_database(database.id),
-                            _ => panic!("receive an unsupported notify {:?}", resp),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
                         },
                         Some(Info::SchemaV2(schema)) => match operation {
-                            Operation::Add => catalog_guard.create_schema(&schema),
+                            Operation::Add => catalog_guard.create_schema(schema),
                             Operation::Delete => {
                                 catalog_guard.drop_schema(schema.database_id, schema.id)
                             }
-                            _ => panic!("receive an unsupported notify {:?}", resp),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
                         },
                         Some(Info::TableV2(table)) => match operation {
                             Operation::Add => catalog_guard.create_table(&table),
@@ -96,7 +97,7 @@ impl ObserverManager {
                                 table.schema_id,
                                 table.id.into(),
                             ),
-                            _ => panic!("receive an unsupported notify {:?}", resp),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
                         },
                         Some(Info::Source(source)) => match operation {
                             Operation::Add => catalog_guard.create_source(source),
@@ -105,14 +106,14 @@ impl ObserverManager {
                                 source.schema_id,
                                 source.id.into(),
                             ),
-                            _ => panic!("receive an unsupported notify {:?}", resp),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
                         },
                         Some(Info::FeSnapshot(snapshot)) => {
                             for db in snapshot.database {
-                                catalog_guard.create_database(&db)
+                                catalog_guard.create_database(db)
                             }
                             for schema in snapshot.schema {
-                                catalog_guard.create_schema(&schema)
+                                catalog_guard.create_schema(schema)
                             }
                             for table in snapshot.table {
                                 catalog_guard.create_table(&table)
