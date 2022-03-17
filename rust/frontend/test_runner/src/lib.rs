@@ -93,20 +93,19 @@ impl TestCase {
 
     fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
         let session = context.borrow().session_ctx.clone();
-        let catalog = session
-            .env()
-            .catalog_mgr()
-            .get_database_snapshot(session.database())
-            .unwrap();
-        let mut binder = Binder::new(catalog);
-
         let mut ret = TestCaseResult::default();
 
-        let bound = match binder.bind(stmt.clone()) {
-            Ok(bound) => bound,
-            Err(err) => {
-                ret.binder_error = Some(err.to_string());
-                return Ok(ret);
+        let bound = {
+            let mut binder = Binder::new(
+                session.env().catalog_reader().read_guard(),
+                session.database().to_string(),
+            );
+            match binder.bind(stmt.clone()) {
+                Ok(bound) => bound,
+                Err(err) => {
+                    ret.binder_error = Some(err.to_string());
+                    return Ok(ret);
+                }
             }
         };
 

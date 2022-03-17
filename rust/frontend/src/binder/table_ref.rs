@@ -130,20 +130,23 @@ impl Binder {
     }
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let schema_catalog = self
-            .get_schema_by_name(&schema_name)
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
+        let table_catalog = {
+            let schema_catalog = self
+                .get_schema_by_name(&schema_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
+            schema_catalog
+                .get_table_by_name(&table_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
+                .clone()
+        };
 
-        let table_catalog = schema_catalog
-            .get_table_by_name(&table_name)
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
-        let columns = table_catalog.columns().to_vec();
         let table_id = table_catalog.id();
         let cell_based_desc = table_catalog.cell_based_table();
+        let columns = table_catalog.columns().to_vec();
+
         self.bind_context(&columns, table_name.clone())?;
-        let columns = table_catalog
-            .columns()
-            .iter()
+        let columns = columns
+            .into_iter()
             .map(|c| c.column_desc.unwrap().into())
             .collect::<Vec<ColumnDesc>>();
 
@@ -162,16 +165,16 @@ impl Binder {
             .iter()
             .enumerate()
             .for_each(|(index, column_catalog)| {
-                let col_desc = ColumnDesc::from(column_catalog.column_desc.unwrap());
+                let col_desc = ColumnDesc::from(column_catalog.column_desc.as_ref().unwrap());
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    column_catalog.column_desc.unwrap().name.into(),
+                    col_desc.name.clone().into(),
                     begin + index,
                     col_desc.data_type,
                 ));
                 self.context
                     .indexs_of
-                    .entry(column_catalog.column_desc.unwrap().name.to_string())
+                    .entry(col_desc.name.to_string())
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });

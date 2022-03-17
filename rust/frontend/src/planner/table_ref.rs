@@ -17,7 +17,12 @@ impl Planner {
         let (column_ids, fields) = table_ref
             .columns
             .iter()
-            .map(|c| (c.column_id, Field::with_name(c.data_type, c.name)))
+            .map(|c| {
+                (
+                    c.column_id,
+                    Field::with_name(c.data_type.clone(), c.name.clone()),
+                )
+            })
             .unzip();
         let schema = Schema::new(fields);
         LogicalScan::create(

@@ -54,26 +54,23 @@ impl ObserverManager {
                     let operation = resp.operation();
                     let mut catalog_guard = self.catalog.write();
                     match resp.info {
-                        Some(Info::Database(database)) => {
+                        Some(Info::Database(_)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
                                 resp_clone
                             );
                         }
-                        Some(Info::Schema(schema)) => {
+                        Some(Info::Schema(_)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
                                 resp_clone
                             );
                         }
-                        Some(Info::Table(table)) => {
+                        Some(Info::Table(_)) => {
                             panic!(
                                 "recive a outdate version catalog notify from meta {:?}",
                                 resp_clone
                             );
-                        }
-                        Some(Info::Node(node)) => {
-                            self.update_worker_node_manager(operation, node);
                         }
                         Some(Info::Node(node)) => {
                             self.update_worker_node_manager(operation, node);

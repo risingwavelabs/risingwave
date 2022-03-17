@@ -48,8 +48,8 @@ impl TableCatalog {
     }
 }
 
-impl From<&ProstTable> for TableCatalog {
-    fn from(tb: &ProstTable) -> Self {
+impl From<ProstTable> for TableCatalog {
+    fn from(tb: ProstTable) -> Self {
         let id = tb.id;
         let name = tb.name.clone();
         let columns = tb.column_catalog.clone();
@@ -86,5 +86,10 @@ impl From<&ProstTable> for TableCatalog {
             columns,
             pk_desc,
         }
+    }
+}
+impl From<&ProstTable> for TableCatalog {
+    fn from(tb: &ProstTable) -> Self {
+        tb.clone().into()
     }
 }
