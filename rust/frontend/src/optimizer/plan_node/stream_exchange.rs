@@ -4,9 +4,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
-use crate::optimizer::property::order::WithOrder;
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::optimizer::property::order::WithOrder;
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input

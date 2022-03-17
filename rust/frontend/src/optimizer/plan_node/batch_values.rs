@@ -7,7 +7,6 @@ use risingwave_pb::plan::ValuesNode;
 use super::{
     BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
-use crate::optimizer::plan_node::PlanTreeNode;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
