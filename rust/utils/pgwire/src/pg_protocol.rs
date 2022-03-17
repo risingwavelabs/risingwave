@@ -113,7 +113,9 @@ where
         let process_res = session.run_statement(query.get_sql()).await;
         match process_res {
             Ok(res) => {
-                if res.is_query() {
+                if res.is_empty() {
+                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                } else if res.is_query() {
                     self.process_query_with_results(res).await?;
                 } else {
                     self.write_message_no_flush(&BeMessage::CommandComplete(
