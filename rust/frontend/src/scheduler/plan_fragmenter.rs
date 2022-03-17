@@ -336,7 +336,7 @@ mod tests {
                 port: 5687,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(0),
+            parallel_units: generate_parallel_units(0, 0),
         };
         let worker2 = WorkerNode {
             id: 1,
@@ -346,7 +346,7 @@ mod tests {
                 port: 5688,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(8),
+            parallel_units: generate_parallel_units(8, 1),
         };
         let worker3 = WorkerNode {
             id: 2,
@@ -356,7 +356,7 @@ mod tests {
                 port: 5689,
             }),
             state: risingwave_pb::common::worker_node::State::Running as i32,
-            parallel_units: generate_parallel_units(16),
+            parallel_units: generate_parallel_units(16, 2),
         };
         let workers = vec![worker1.clone(), worker2.clone(), worker3.clone()];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
@@ -393,7 +393,7 @@ mod tests {
         assert_eq!(scan_node_2.assignments.get(&2).unwrap(), &worker3);
 
         // Check that the serialized exchange source node has been filled with correct info.
-        let prost_node_root = root.augmented_stage.to_prost(0, &query).unwrap();
+        let prost_node_root = root.augmented_stage.to_prost(0, &query);
         assert_eq!(
             prost_node_root.exchange_info.unwrap().mode,
             DistributionMode::Single as i32
@@ -408,7 +408,7 @@ mod tests {
             panic!("The root node should be exchange single");
         }
 
-        let prost_join_node = join_node.augmented_stage.to_prost(0, &query).unwrap();
+        let prost_join_node = join_node.augmented_stage.to_prost(0, &query);
         assert_eq!(prost_join_node.root.as_ref().unwrap().children.len(), 2);
         assert_eq!(
             prost_join_node.exchange_info.unwrap().mode,
@@ -437,18 +437,18 @@ mod tests {
         }
     }
 
-    fn generate_parallel_units(start_id: u32) -> Vec<ParallelUnit> {
+    fn generate_parallel_units(start_id: u32, node_id: u32) -> Vec<ParallelUnit> {
         let parallel_degree = 8;
         let mut parallel_units = vec![ParallelUnit {
             id: start_id,
             r#type: ParallelUnitType::Single as i32,
-            node_host: None,
+            worker_node_id: node_id,
         }];
         for id in start_id + 1..start_id + parallel_degree {
             parallel_units.push(ParallelUnit {
                 id,
                 r#type: ParallelUnitType::Hash as i32,
-                node_host: None,
+                worker_node_id: node_id,
             });
         }
         parallel_units

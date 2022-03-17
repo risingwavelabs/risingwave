@@ -10,8 +10,10 @@ use itertools::Itertools;
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
+use risingwave_common::error::Result;
 pub use sstable::*;
 pub mod compactor;
+mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
@@ -44,7 +46,6 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -52,6 +53,8 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
+use crate::hummock::utils::validate_epoch;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -119,10 +122,10 @@ impl HummockStorage {
             shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
         let instance = Self {
-            options,
+            options: options.clone(),
             local_version_manager,
             hummock_meta_client,
             sstable_store,
@@ -141,6 +144,8 @@ impl HummockStorage {
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Query shared buffer. Return the value without iterating SSTs if found
         if let Some(v) = self
@@ -212,6 +217,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
@@ -266,6 +273,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
@@ -325,10 +334,10 @@ impl HummockStorage {
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = kv_pairs
-            .map(|i| {
+            .map(|(key, value)| {
                 (
-                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
-                    i.1,
+                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                    value,
                 )
             })
             .collect_vec();
@@ -391,8 +400,8 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
-        self.local_version_manager.wait_epoch(epoch).await;
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        Ok(self.local_version_manager.wait_epoch(epoch).await?)
     }
 
     pub fn shared_buffer_manager(&self) -> &SharedBufferManager {

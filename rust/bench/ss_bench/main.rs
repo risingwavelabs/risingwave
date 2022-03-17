@@ -115,6 +115,7 @@ async fn main() {
         block_size: opts.block_size_kb * (1 << 10),
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
+        write_conflict_detection_enabled: false,
     });
 
     let meta_address = "http://127.0.0.1:5690";

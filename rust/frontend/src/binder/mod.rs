@@ -30,9 +30,11 @@ use crate::catalog::database_catalog::DatabaseCatalog;
 pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,
-
-    // TODO: support subquery.
     context: BindContext,
+    /// A stack holding contexts of outer queries when binding a subquery.
+    ///
+    /// See [`Binder::bind_subquery`] for details.
+    upper_contexts: Vec<BindContext>,
 }
 
 impl Binder {
@@ -40,9 +42,27 @@ impl Binder {
         Binder {
             catalog,
             context: BindContext::new(),
+            upper_contexts: vec![],
         }
     }
+
+    /// Bind a [`Statement`].
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
     }
+
+    fn push_context(&mut self) {
+        let new_context = std::mem::take(&mut self.context);
+        self.upper_contexts.push(new_context);
+    }
+
+    fn pop_context(&mut self) {
+        let old_context = self.upper_contexts.pop();
+        self.context = old_context.unwrap();
+    }
 }
+
+/// The column name stored in [`BindContext`] for a column without an alias.
+const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";

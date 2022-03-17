@@ -158,16 +158,12 @@ impl StreamChunk {
         (ops, columns, visibility)
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstStreamChunk> {
-        Ok(ProstStreamChunk {
+    pub fn to_protobuf(&self) -> ProstStreamChunk {
+        ProstStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
-            columns: self
-                .columns
-                .iter()
-                .map(|col| col.to_protobuf())
-                .collect::<Result<Vec<_>>>()?,
-        })
+            columns: self.columns.iter().map(|col| col.to_protobuf()).collect(),
+        }
     }
 
     pub fn from_protobuf(prost: &ProstStreamChunk) -> Result<Self> {

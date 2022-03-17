@@ -13,7 +13,7 @@ use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use tokio::net::TcpListener;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
@@ -100,6 +100,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap(),
     );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
+
     let notification_manager = Arc::new(NotificationManager::new());
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
@@ -153,6 +154,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap(),
     );
 
+    let vacuum_trigger_ref = Arc::new(hummock::VacuumTrigger::new(
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
+
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
@@ -163,7 +169,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         cluster_manager.clone(),
         env,
     );
-    let hummock_srv = HummockServiceImpl::new(hummock_manager.clone(), compactor_manager.clone());
+    let hummock_srv = HummockServiceImpl::new(
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+        vacuum_trigger_ref.clone(),
+    );
     let notification_srv = NotificationServiceImpl::new(notification_manager);
 
     if let Some(prometheus_addr) = prometheus_addr {
@@ -178,9 +188,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             Duration::from_secs(1),
         )
         .await,
+        hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
+    let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .layer(MetricsMiddlewareLayer::new(meta_metrics.clone()))

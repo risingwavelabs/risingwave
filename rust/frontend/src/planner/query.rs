@@ -7,13 +7,14 @@ use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
+    /// Plan a [`BoundQuery`]. Need to bind before planning.
+    pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
         let plan = self.plan_set_expr(query.body)?;
         // plan order and limit here
         let order = Order {
             field_order: query.order,
         };
-        let dist = Distribution::Any;
+        let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let root = PlanRoot::new(plan, dist, order, out_fields);

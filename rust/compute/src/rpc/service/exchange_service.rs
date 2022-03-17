@@ -16,6 +16,8 @@ use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+const EXCHANGE_BUFFER_SIZE: usize = 1024;
+
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
@@ -95,7 +97,7 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         pb_tsid: ProtoTaskOutputId,
     ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
         let tsid = TaskOutputId::try_from(&pb_tsid)?;
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
@@ -123,7 +125,7 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         debug!("Serve stream exchange RPC from {}", peer_addr);
         tokio::spawn(async move {
             loop {

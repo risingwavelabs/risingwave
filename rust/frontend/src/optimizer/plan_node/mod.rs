@@ -21,6 +21,7 @@ use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
@@ -98,7 +99,7 @@ pub struct StreamBase {
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
@@ -106,6 +107,15 @@ impl dyn PlanNode {
         Ok(())
     }
 
+    /// Explain the plan node and return a string.
+    pub fn explain_to_string(&self) -> Result<String> {
+        let mut output = String::new();
+        self.explain(0, &mut output)
+            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
+        Ok(output)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
@@ -121,8 +131,15 @@ impl dyn PlanNode {
         }
     }
 
-    #[allow(unreachable_code)]
+    /// Serialize the plan node and its children to a stream plan proto.
+    ///
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
+        if let Some(stream_scan) = self.as_stream_table_scan() {
+            return stream_scan.adhoc_to_stream_prost();
+        }
+
         let node = Some(self.to_stream_prost_body());
         let input = self
             .inputs()
@@ -130,12 +147,13 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost())
             .collect();
         let identity = format!("{:?}", self);
+        // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity,
             node,
-            operator_id: todo!(),
-            pk_indices: todo!(),
+            operator_id: 0,
+            pk_indices: vec![],
         }
     }
 }
@@ -176,7 +194,8 @@ mod stream_exchange;
 mod stream_filter;
 mod stream_hash_join;
 mod stream_project;
-mod stream_table_source;
+mod stream_source_scan;
+mod stream_table_scan;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -202,7 +221,8 @@ pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
-pub use stream_table_source::StreamTableSource;
+pub use stream_source_scan::StreamSourceScan;
+pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
 use crate::session::QueryContextRef;
@@ -247,7 +267,8 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Limit }
             ,{ Stream, Project }
             ,{ Stream, Filter }
-            ,{ Stream, TableSource }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
         }
@@ -303,9 +324,10 @@ macro_rules! for_stream_plan_nodes {
             [$($x),*]
             ,{ Stream, Project }
             ,{ Stream, Filter }
-            ,{ Stream, TableSource }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
         }
     };
 }

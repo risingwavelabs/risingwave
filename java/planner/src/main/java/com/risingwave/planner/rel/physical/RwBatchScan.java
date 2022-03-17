@@ -48,6 +48,11 @@ public class RwBatchScan extends RwScan implements RisingWaveBatchPhyRel {
         getCluster(), traitSet, getHints(), getTable(), getTableId(), getColumnIds());
   }
 
+  public RwBatchScan copy(ImmutableList<ColumnCatalog.ColumnId> columnIds) {
+    return new RwBatchScan(
+        getCluster(), getTraitSet(), getHints(), getTable(), getTableId(), columnIds);
+  }
+
   @Override
   public RelNode convertToDistributed() {
     return copy(getTraitSet().replace(BATCH_DISTRIBUTED).plus(RwDistributions.RANDOM_DISTRIBUTED));

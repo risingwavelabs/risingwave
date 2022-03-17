@@ -6,6 +6,7 @@ use std::fmt::Write;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -15,9 +16,9 @@ use console::style;
 use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::complete_spin;
 use risedev::{
-    ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService, ExecuteContext,
-    FrontendService, FrontendServiceV2, GrafanaService, JaegerService, MetaNodeService,
-    MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
+    AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService,
+    ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService, JaegerService,
+    MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -99,17 +100,22 @@ fn task_main(
 
     for step in steps {
         let service = services.get(step).unwrap();
-        ports.push(match service {
-            ServiceConfig::Minio(c) => (c.port, c.id.clone()),
-            ServiceConfig::Etcd(c) => (c.port, c.id.clone()),
-            ServiceConfig::Prometheus(c) => (c.port, c.id.clone()),
-            ServiceConfig::ComputeNode(c) => (c.port, c.id.clone()),
-            ServiceConfig::MetaNode(c) => (c.port, c.id.clone()),
-            ServiceConfig::Frontend(c) => (c.port, c.id.clone()),
-            ServiceConfig::FrontendV2(c) => (c.port, c.id.clone()),
-            ServiceConfig::Grafana(c) => (c.port, c.id.clone()),
-            ServiceConfig::Jaeger(c) => (c.dashboard_port, c.id.clone()),
-        });
+        let listen_info = match service {
+            ServiceConfig::Minio(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Etcd(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Prometheus(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::ComputeNode(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::MetaNode(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Frontend(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
+            ServiceConfig::AwsS3(_) => None,
+        };
+
+        if let Some(x) = listen_info {
+            ports.push(x);
+        }
     }
 
     {
@@ -236,6 +242,29 @@ fn task_main(
                     c.dashboard_address, c.dashboard_port
                 ));
             }
+            ServiceConfig::AwsS3(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+
+                struct AwsService(AwsS3Config);
+                impl Task for AwsService {
+                    fn execute(
+                        &mut self,
+                        _ctx: &mut ExecuteContext<impl std::io::Write>,
+                    ) -> anyhow::Result<()> {
+                        Ok(())
+                    }
+
+                    fn id(&self) -> String {
+                        self.0.id.clone()
+                    }
+                }
+
+                ctx.service(&AwsService(c.clone()));
+                ctx.complete_spin();
+                ctx.pb
+                    .set_message(format!("using AWS s3 bucket {}", c.bucket));
+            }
         }
 
         let service_id = service.id().to_string();
@@ -246,7 +275,7 @@ fn task_main(
     Ok((stat, log_buffer))
 }
 
-fn preflight_check() {
+fn preflight_check_proxy() -> Result<()> {
     if env::var("http_proxy").is_ok()
         || env::var("https_proxy").is_ok()
         || env::var("HTTP_PROXY").is_ok()
@@ -258,7 +287,7 @@ fn preflight_check() {
             println!(
                 "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
                 style("risedev-preflight-check").bold(),
-                style("WARN").yellow().bold()
+                style("INFO").green().bold()
             );
         } else {
             println!(
@@ -269,6 +298,45 @@ fn preflight_check() {
             );
         }
     }
+
+    Ok(())
+}
+
+fn preflight_check_ulimit() -> Result<()> {
+    let ulimit = Command::new("ulimit").arg("-n").output()?.stdout;
+    let ulimit = String::from_utf8(ulimit)?;
+    let ulimit: usize = ulimit.trim().parse()?;
+    if ulimit < 8192 {
+        println!(
+            "[{}] {} - ulimit for file handler is too low (currently {}). If you meet too many open files error, considering changing the ulimit.",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            ulimit
+        );
+    }
+    Ok(())
+}
+
+fn preflight_check() -> Result<()> {
+    if let Err(e) = preflight_check_proxy() {
+        println!(
+            "[{}] {} - failed to run proxy preflight check: {}",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            e
+        );
+    }
+
+    if let Err(e) = preflight_check_ulimit() {
+        println!(
+            "[{}] {} - failed to run ulimit preflight check: {}",
+            style("risedev-preflight-check").bold(),
+            style("WARN").yellow().bold(),
+            e
+        );
+    }
+
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -288,7 +356,7 @@ fn main() -> Result<()> {
         )?;
     }
 
-    preflight_check();
+    preflight_check()?;
 
     let task_name = std::env::args()
         .nth(1)
@@ -312,8 +380,6 @@ fn main() -> Result<()> {
     manager.finish_all();
     join_handle.join().unwrap()?;
 
-    let log_path = env::var("PREFIX_LOG")?;
-
     match task_result {
         Ok((stat, log_buffer)) => {
             println!("--- summary of startup time ---");
@@ -327,11 +393,13 @@ fn main() -> Result<()> {
 
             print!("{}", log_buffer);
 
-            println!("* You may find logs at {}", style(log_path).blue().bold());
+            println!(
+                "* You may find logs using `{}` command",
+                style("./risedev l").blue().bold()
+            );
 
             println!(
-                "* Run {} or {} to kill cluster.",
-                style("./risedev kill").blue().bold(),
+                "* Run {} to kill cluster.",
                 style("./risedev k").blue().bold()
             );
 
@@ -340,10 +408,18 @@ fn main() -> Result<()> {
         Err(err) => {
             println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
             println!(
-                "please refer to logs for more information {}",
+                "* Use `{}` to view logs, or visit `{}`",
+                style("./risedev l").blue().bold(),
                 env::var("PREFIX_LOG")?
             );
-            println!("* Run `./risedev kill` or `./risedev k` to clean up cluster.");
+            println!(
+                "* Run `{}` to clean up cluster.",
+                style("./risedev k").blue().bold()
+            );
+            println!(
+                "* Run `{}` to clean data, which might potentially fix the issue.",
+                style("./risedev clean-data").blue().bold()
+            );
             println!("---");
             println!();
             println!();
