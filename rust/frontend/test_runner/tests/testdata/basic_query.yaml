@@ -43,6 +43,15 @@
       StreamFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
         StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1"] } }
 - sql: |
+    create table t ();
+    select (((((false is not true) is true) is not false) is false) is not null) is null from t;
+  batch_plan: |
+    BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
+      BatchScan { table: "t", columns: [] }
+  stream_plan: |
+    StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
+      StreamTableSource { logical: LogicalScan { table: "t", columns: [] } }
+- sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   batch_plan: |

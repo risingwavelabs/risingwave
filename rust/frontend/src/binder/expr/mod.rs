@@ -94,9 +94,9 @@ impl Binder {
         let mut inputs = Vec::new();
         let results_expr: Vec<ExprImpl> = results
             .into_iter()
-            .map(|expr| self.bind_expr(expr).unwrap())
-            .collect();
-        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr).unwrap());
+            .map(|expr| self.bind_expr(expr))
+            .collect::<Result<_>>()?;
+        let else_result_expr = else_result.map(|expr| self.bind_expr(*expr)).transpose()?;
         let mut return_type = Binder::find_proper_type(&results_expr)?;
         if let Some(expr) = &else_result_expr {
             return_type = Binder::find_compat(return_type, expr.return_type())?;
@@ -129,7 +129,9 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        Ok(FunctionCall::new(func_type, vec![expr]).unwrap())
+        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
+            ErrorCode::NotImplementedError(format!("{:?}", &func_type)).into()
+        })
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
