@@ -115,28 +115,11 @@ impl PlanRoot {
 
     /// optimize and generate a batch query plan.
     /// Currently only used by test runner (Have distributed plan but not schedule yet).
+    /// Will be removed after dist execution.
     pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
-        let mut plan = self.logical_plan.clone();
+        let plan = self.gen_batch_query_plan();
 
-        // Predicate Push-down
-        plan = {
-            let rules = vec![FilterJoinRule::create()];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
-
-        // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
-
-        // Convert to physical plan node
-        plan = plan.to_batch_with_order_required(&self.required_order);
-
-        plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
-        // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
-        // TODO: do a final column pruning after add the batch project, but now the column
-        // pruning is not used in batch node, need to think.
-
-        plan
+        plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
     /// optimize and generate a create materialize view plan
