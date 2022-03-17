@@ -135,7 +135,7 @@ jobs:
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          ~/cargo-make/makers dev ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
@@ -146,7 +146,7 @@ jobs:
         timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-v2
+          ~/cargo-make/makers dev ci-v2
           sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
@@ -157,7 +157,7 @@ jobs:
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
+          RW_NO_CACHE=1 ~/cargo-make/makers dev ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
@@ -168,7 +168,7 @@ jobs:
         timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
@@ -275,7 +275,7 @@ jobs:
       - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -290,7 +290,7 @@ jobs:
       - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
+          ~/cargo-make/makers dev ci-1node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
         run: |
@@ -300,7 +300,7 @@ jobs:
       - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          ~/cargo-make/makers dev ci-3node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
         run: |
