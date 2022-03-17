@@ -22,29 +22,24 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
 }
 
 pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
-    if let BoundStatement::Query(query) = bound {
-        if let BoundSetExpr::Select(ref select) = query.body {
-            let mut pg_descs = vec![];
-            for i in 0..select.select_items.len() {
-                let mut pg_name = "".to_string();
-                if let Some(t) = select.aliases[i].as_ref() {
-                    pg_name = t.to_string();
-                }
-                pg_descs.push(PgFieldDescriptor::new(
-                    pg_name,
-                    data_type_to_type_oid(select.select_items[i].return_type()),
-                ));
+    if let BoundStatement::Query(query) = bound
+        && let BoundSetExpr::Select(ref select) = query.body
+    {
+        let mut pg_descs = vec![];
+        for i in 0..select.select_items.len() {
+            let mut pg_name = "".to_string();
+            if let Some(t) = select.aliases[i].as_ref() {
+                pg_name = t.to_string();
             }
-            Ok(pg_descs)
-        } else {
-            Err(ErrorCode::NotImplementedError(
-                "get pg_field descs only support select bound_set_expr".to_string(),
-            )
-            .into())
+            pg_descs.push(PgFieldDescriptor::new(
+                pg_name,
+                data_type_to_type_oid(select.select_items[i].return_type()),
+            ));
         }
+        Ok(pg_descs)
     } else {
         Err(ErrorCode::NotImplementedError(
-            "get pg_field descs only support query bound_statement".to_string(),
+            "get pg_field descs only support select bound_set_expr".to_string(),
         )
         .into())
     }
