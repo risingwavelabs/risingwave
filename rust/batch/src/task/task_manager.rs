@@ -80,7 +80,7 @@ impl BatchManager {
             .unwrap()
             .get(task_id)
             .ok_or(TaskNotFound)?
-            .get_error()?)
+            .get_error())
     }
 }
 

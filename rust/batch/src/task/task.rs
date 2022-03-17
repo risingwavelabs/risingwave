@@ -269,8 +269,8 @@ impl BatchTaskExecution {
         Ok(task_output)
     }
 
-    pub fn get_error(&self) -> Result<Option<RwError>> {
-        Ok(self.failure.lock().unwrap().clone())
+    pub fn get_error(&self) -> Option<RwError> {
+        self.failure.lock().unwrap().clone()
     }
 
     pub fn check_if_running(&self) -> Result<()> {
