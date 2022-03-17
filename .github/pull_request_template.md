@@ -1,13 +1,22 @@
 ## What's changed and what's your intention?
 
+<!-- Please explain **IN DETAIL** what the changes are in this PR and why they are needed: -->
+
+### Summarize your change (**mandatory**)
+
 ***PLEASE DO NOT LEAVE THIS EMPTY !!!***
 
-Please explain **IN DETAIL** what the changes are in this PR and why they are needed:
+### How does this PR work? (optional)
 
-- Summarize your change (**mandatory**)
-- How does this PR work? Need a brief introduction for the changed logic (optional)
-- Describe clearly one logical change and avoid lazy messages (optional)
-- Describe any limitations of the current code (optional)
+<!-- Need a brief introduction for the changed logic -->
+
+<!--
+### Describe clearly one logical change and avoid lazy messages (optional)
+-->
+
+<!--
+### Describe any limitations of the current code (optional)
+-->
 
 ## Checklist
 
