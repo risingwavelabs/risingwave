@@ -115,7 +115,7 @@ impl PlanRoot {
 
     /// optimize and generate a batch query plan.
     /// Currently only used by test runner (Have distributed plan but not schedule yet).
-    pub fn gen_dist_query_plan(&self) -> PlanRef {
+    pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
         let mut plan = self.logical_plan.clone();
 
         // Predicate Push-down
