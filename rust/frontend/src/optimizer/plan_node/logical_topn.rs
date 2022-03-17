@@ -84,11 +84,11 @@ impl ColPrunable for LogicalTopN {
         if *required_cols == input_required_cols {
             top_n
         } else {
+            let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
+            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 top_n,
-                ColIndexMapping::with_remaining_columns(
-                    &required_cols.ones().map(|i| mapping.map(i)).collect(),
-                ),
+                ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
             .into()
         }

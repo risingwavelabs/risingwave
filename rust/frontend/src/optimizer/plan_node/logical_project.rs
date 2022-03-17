@@ -2,7 +2,6 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use log::debug;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
@@ -71,11 +70,12 @@ impl LogicalProject {
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
-        debug!("with_mapping {:?}", mapping);
         assert_eq!(
             input.schema().fields().len(),
             mapping.source_upper() + 1,
-            "invalid mapping given"
+            "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
+            input,
+            mapping
         );
         let mut input_refs = vec![None; mapping.target_upper() + 1];
         for (src, tar) in mapping.mapping_pairs() {
