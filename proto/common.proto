@@ -63,5 +63,7 @@ message Cluster {
 }
 
 message HashMapping {
-  repeated uint32 parallel_units = 1;
+  // For meta, the mapping stores parallel unit id. For compute node, the mapping stores
+  // corresponding actor id.
+  repeated uint32 hash_mapping = 1;
 }
