@@ -101,7 +101,11 @@ mod tests {
                 .into_iter()
                 .map(|p| { p.get_name().to_string() })
                 .collect_vec(),
-            ["column1".to_string(), "".to_string(), "column3".to_string()]
+            [
+                "column1".to_string(),
+                "2:Int32".to_string(),
+                "column3".to_string()
+            ]
         );
         assert_eq!(
             pg_descs
