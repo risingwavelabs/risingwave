@@ -71,6 +71,8 @@ impl ToStreamProst for StreamExchange {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
+                // Frontend does not have the info of hash mapping, which is set by meta.
+                hash_mapping: None,
             }),
         })
     }
