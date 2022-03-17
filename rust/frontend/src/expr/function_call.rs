@@ -91,8 +91,8 @@ impl FunctionCall {
         }
     }
 
-    pub fn decompose(self) -> (ExprType, Vec<ExprImpl>) {
-        (self.func_type, self.inputs)
+    pub fn decompose(self) -> (ExprType, Vec<ExprImpl>, DataType) {
+        (self.func_type, self.inputs, self.return_type)
     }
     pub fn decompose_as_binary(self) -> (ExprType, ExprImpl, ExprImpl) {
         assert_eq!(self.inputs.len(), 2);

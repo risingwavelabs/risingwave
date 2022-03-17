@@ -287,7 +287,7 @@ fn preflight_check_proxy() -> Result<()> {
             println!(
                 "[{}] {} - You are using proxies for all RisingWave components. Please make sure that `no_proxy` is set for all worker nodes within the cluster.",
                 style("risedev-preflight-check").bold(),
-                style("WARN").yellow().bold()
+                style("INFO").green().bold()
             );
         } else {
             println!(
@@ -380,8 +380,6 @@ fn main() -> Result<()> {
     manager.finish_all();
     join_handle.join().unwrap()?;
 
-    let log_path = env::var("PREFIX_LOG")?;
-
     match task_result {
         Ok((stat, log_buffer)) => {
             println!("--- summary of startup time ---");
@@ -395,11 +393,13 @@ fn main() -> Result<()> {
 
             print!("{}", log_buffer);
 
-            println!("* You may find logs at {}", style(log_path).blue().bold());
+            println!(
+                "* You may find logs using `{}` command",
+                style("./risedev l").blue().bold()
+            );
 
             println!(
-                "* Run {} or {} to kill cluster.",
-                style("./risedev kill").blue().bold(),
+                "* Run {} to kill cluster.",
                 style("./risedev k").blue().bold()
             );
 
@@ -408,10 +408,18 @@ fn main() -> Result<()> {
         Err(err) => {
             println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
             println!(
-                "please refer to logs for more information {}",
+                "* Use `{}` to view logs, or visit `{}`",
+                style("./risedev l").blue().bold(),
                 env::var("PREFIX_LOG")?
             );
-            println!("* Run `./risedev kill` or `./risedev k` to clean up cluster.");
+            println!(
+                "* Run `{}` to clean up cluster.",
+                style("./risedev k").blue().bold()
+            );
+            println!(
+                "* Run `{}` to clean data, which might potentially fix the issue.",
+                style("./risedev clean-data").blue().bold()
+            );
             println!("---");
             println!();
             println!();

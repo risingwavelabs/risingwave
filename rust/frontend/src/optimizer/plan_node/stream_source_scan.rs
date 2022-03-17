@@ -6,17 +6,14 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use super::{LogicalScan, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
-/// `StreamTableSource` continuously streams data from internal table or various kinds of
-/// external sources.
+/// `StreamSourceScan` represents a scan from source.
 #[derive(Debug, Clone)]
-pub struct StreamTableSource {
+pub struct StreamSourceScan {
     pub base: StreamBase,
-    // TODO: replace this with actual table. Currently we place the logical scan node here only to
-    // pass plan tests.
     logical: LogicalScan,
 }
 
-impl StreamTableSource {
+impl StreamSourceScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
@@ -29,22 +26,22 @@ impl StreamTableSource {
     }
 }
 
-impl WithSchema for StreamTableSource {
+impl WithSchema for StreamSourceScan {
     fn schema(&self) -> &Schema {
         self.logical.schema()
     }
 }
 
-impl_plan_tree_node_for_leaf! {StreamTableSource}
-impl fmt::Display for StreamTableSource {
+impl_plan_tree_node_for_leaf! { StreamSourceScan }
+
+impl fmt::Display for StreamSourceScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamTableSource {{ logical: {} }}", self.logical)
+        write!(f, "StreamSourceScan {{ logical: {} }}", self.logical)
     }
 }
 
-impl ToStreamProst for StreamTableSource {
+impl ToStreamProst for StreamSourceScan {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        // TODO: support real serialization
-        ProstStreamNode::SourceNode(Default::default())
+        ProstStreamNode::MergeNode(Default::default())
     }
 }

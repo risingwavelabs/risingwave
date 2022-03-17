@@ -33,6 +33,9 @@ impl Task for MetaNodeService {
         ctx.pb.set_message("starting...");
 
         let mut cmd = self.meta_node()?;
+
+        cmd.env("RUST_BACKTRACE", "1");
+
         cmd.arg("--host")
             .arg(format!("{}:{}", self.config.address, self.config.port))
             .arg("--dashboard-host")

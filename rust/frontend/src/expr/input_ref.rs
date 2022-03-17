@@ -33,6 +33,7 @@ impl InputRef {
     pub fn new(index: usize, data_type: DataType) -> Self {
         InputRef { index, data_type }
     }
+
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::InputRef
     }

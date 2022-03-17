@@ -6,8 +6,9 @@ use itertools::Itertools;
 use prometheus::{
     histogram_opts, register_counter_vec_with_registry, register_histogram_vec_with_registry,
     register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, CounterVec, Encoder, Histogram, HistogramVec,
-    IntCounterVec, IntGaugeVec, Registry, TextEncoder, DEFAULT_BUCKETS,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, CounterVec, Encoder,
+    Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, TextEncoder,
+    DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -25,6 +26,10 @@ pub struct MetaMetrics {
     pub grpc_latency: HistogramVec,
     /// latency of each barrier
     pub barrier_latency: Histogram,
+    /// max committed epoch
+    pub max_committed_epoch: IntGauge,
+    /// num of uncommitted SSTs,
+    pub uncommitted_sst_num: IntGauge,
     /// num of SSTs in each level
     pub level_sst_num: IntGaugeVec,
     /// num of SSTs to be merged to next level in each level
@@ -64,6 +69,20 @@ impl MetaMetrics {
             buckets.to_vec()
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let max_committed_epoch = register_int_gauge_with_registry!(
+            "storage_max_committed_epoch",
+            "max committed epoch",
+            registry
+        )
+        .unwrap();
+
+        let uncommitted_sst_num = register_int_gauge_with_registry!(
+            "storage_uncommitted_sst_num",
+            "num of uncommitted SSTs",
+            registry
+        )
+        .unwrap();
 
         let level_sst_num = register_int_gauge_vec_with_registry!(
             "storage_level_sst_num",
@@ -141,6 +160,8 @@ impl MetaMetrics {
             registry,
             grpc_latency,
             barrier_latency,
+            max_committed_epoch,
+            uncommitted_sst_num,
             level_sst_num,
             level_compact_cnt,
             level_compact_read_curr,

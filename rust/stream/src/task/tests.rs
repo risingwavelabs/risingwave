@@ -13,7 +13,7 @@ use super::*;
 use crate::executor::{Barrier, Epoch, Message, Mutation};
 use crate::task::env::StreamEnvironment;
 
-fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
     ActorInfo {
         actor_id,
         host: Some(HostAddress {

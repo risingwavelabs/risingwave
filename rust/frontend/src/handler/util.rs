@@ -2,7 +2,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use crate::binder::{BoundSetExpr, BoundStatement};
@@ -21,32 +21,30 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
-pub fn get_pg_field_descs(bound: BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
+pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
     if let BoundStatement::Query(query) = bound {
-        if let BoundSetExpr::Select(select) = query.body {
-            let mut pg_descs = vec![];
-            for i in 0..select.select_items.len() {
-                let mut pg_name = "".to_string();
-                if let Some(t) = select.aliases[i].as_ref() {
-                    pg_name = t.to_string();
-                }
-                pg_descs.push(PgFieldDescriptor::new(
-                    pg_name,
-                    data_type_to_type_oid(select.select_items[i].return_type()),
-                ));
-            }
-            Ok(pg_descs)
-        } else {
-            Err(ErrorCode::NotImplementedError(
-                "get pg_field descs only support select bound_set_expr".to_string(),
-            )
-            .into())
-        }
+        let pg_descs = match &query.body {
+            BoundSetExpr::Select(select) => select
+                .select_items
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let name = select.aliases[i].clone().unwrap_or(format!("{:?}", e));
+                    PgFieldDescriptor::new(name, data_type_to_type_oid(e.return_type()))
+                })
+                .collect(),
+            BoundSetExpr::Values(v) => v
+                .schema
+                .fields()
+                .iter()
+                .map(|f| {
+                    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
+                })
+                .collect(),
+        };
+        Ok(pg_descs)
     } else {
-        Err(ErrorCode::NotImplementedError(
-            "get pg_field descs only support query bound_statement".to_string(),
-        )
-        .into())
+        panic!("get_pg_field_descs only supports query bound_statement")
     }
 }
 
@@ -105,14 +103,18 @@ mod tests {
             }
             .into(),
         );
-        let pg_descs = get_pg_field_descs(bound).unwrap();
+        let pg_descs = get_pg_field_descs(&bound).unwrap();
         assert_eq!(
             pg_descs
                 .clone()
                 .into_iter()
                 .map(|p| { p.get_name().to_string() })
                 .collect_vec(),
-            ["column1".to_string(), "".to_string(), "column3".to_string()]
+            [
+                "column1".to_string(),
+                "2:Int32".to_string(),
+                "column3".to_string()
+            ]
         );
         assert_eq!(
             pg_descs

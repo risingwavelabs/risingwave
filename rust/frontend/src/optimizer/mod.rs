@@ -104,12 +104,22 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order);
 
-        // TODO: plan.to_distributed_with_required()
+        // TODO: Enable this when distributed e2e is OK.
+        // plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
         // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
         // TODO: do a final column pruning after add the batch project, but now the column
         // pruning is not used in batch node, need to think.
 
         plan
+    }
+
+    /// optimize and generate a batch query plan.
+    /// Currently only used by test runner (Have distributed plan but not schedule yet).
+    /// Will be removed after dist execution.
+    pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
+        let plan = self.gen_batch_query_plan();
+
+        plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
     /// optimize and generate a create materialize view plan

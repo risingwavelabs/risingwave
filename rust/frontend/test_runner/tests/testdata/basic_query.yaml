@@ -1,7 +1,8 @@
 - sql: |-
     values (11, 22), (33+(1+2), 44);
   batch_plan: |
-    BatchValues { rows: [[11:Int32, 22:Int32], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32]] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchValues { rows: [[11:Int32, 22:Int32], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32]] }
 - sql: |-
     select * from t
   binder_error: |-
@@ -10,11 +11,13 @@
     create table t (v1 bigint, v2 double precision);
     select * from t;
   batch_plan: |
-    BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
-      BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+        BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
   stream_plan: |
     StreamProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
-      StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] } }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamTableScan { logical: LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] } }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -24,60 +27,71 @@
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
-    BatchProject { exprs: [$0], expr_alias: [Some("_row_id")] }
-      BatchFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
-        BatchScan { table: "t", columns: ["_row_id"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [Some("_row_id")] }
+        BatchFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
+          BatchScan { table: "t", columns: ["_row_id"] }
   stream_plan: |
     StreamProject { exprs: [$0], expr_alias: [Some("_row_id")] }
-      StreamFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
-        StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id"] } }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
+          StreamTableScan { logical: LogicalScan { table: "t", columns: ["_row_id"] } }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
   batch_plan: |
-    BatchProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
-      BatchFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
-        BatchScan { table: "t", columns: ["_row_id", "v1"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
+        BatchFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
+          BatchScan { table: "t", columns: ["_row_id", "v1"] }
   stream_plan: |
     StreamProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
-      StreamFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
-        StreamTableSource { logical: LogicalScan { table: "t", columns: ["_row_id", "v1"] } }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
+          StreamTableScan { logical: LogicalScan { table: "t", columns: ["_row_id", "v1"] } }
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   batch_plan: |
-    BatchInsert { table_name: "t", columns: [] }
-      BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchInsert { table_name: "t", columns: [] }
+        BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
-    BatchDelete { table_name: "t" }
-      BatchFilter { predicate: Condition { conjunctions: [($1 = 1:Int32)] } }
-        BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchDelete { table_name: "t" }
+        BatchFilter { predicate: Condition { conjunctions: [($1 = 1:Int32)] } }
+          BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
-    BatchDelete { table_name: "t" }
-      BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchDelete { table_name: "t" }
+        BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
   batch_plan: |
-    BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
-      BatchScan { table: "t", columns: ["v1"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
+        BatchScan { table: "t", columns: ["v1"] }
   stream_plan: |
     StreamProject { exprs: [$0], expr_alias: [Some("v1")] }
-      StreamTableSource { logical: LogicalScan { table: "t", columns: ["v1"] } }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamTableScan { logical: LogicalScan { table: "t", columns: ["v1"] } }
 - sql: |
     values(cast(1 as bigint));
   batch_plan: |
-    BatchValues { rows: [[1:Int32::Int64]] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchValues { rows: [[1:Int32::Int64]] }
 - sql: |
     values(not true);
   batch_plan: |
-    BatchValues { rows: [[Not(true:Boolean)]] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchValues { rows: [[Not(true:Boolean)]] }
 - sql: |
     values(must_be_unimplemented_func(1));
   binder_error: |-
@@ -109,23 +123,52 @@
     create table t3 (v1 int, v2 int);
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
   batch_plan: |
-    BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
-      BatchHashJoin(predicate: $5 = $8)
-        BatchHashJoin(predicate: $1 = $4)
-          BatchScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
-          BatchScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
-        BatchScan { table: "t3", columns: ["_row_id", "v1", "v2"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
+        BatchHashJoin(predicate: $5 = $8)
+          BatchExchange { order: Order { field_order: [] }, dist: HashShard([5]) }
+            BatchHashJoin(predicate: $1 = $4)
+              BatchExchange { order: Order { field_order: [] }, dist: HashShard([1]) }
+                BatchScan { table: "t1", columns: ["_row_id", "v1", "v2"] }
+              BatchExchange { order: Order { field_order: [] }, dist: HashShard([4]) }
+                BatchScan { table: "t2", columns: ["_row_id", "v1", "v2"] }
+          BatchExchange { order: Order { field_order: [] }, dist: HashShard([8]) }
+            BatchScan { table: "t3", columns: ["_row_id", "v1", "v2"] }
+  stream_plan: |
+    StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamHashJoin(predicate: $5 = $8)
+          StreamExchange { order: Order { field_order: [] }, dist: HashShard([5]) }
+            StreamHashJoin(predicate: $1 = $4)
+              StreamExchange { order: Order { field_order: [] }, dist: HashShard([1]) }
+                StreamTableScan { logical: LogicalScan { table: "t1", columns: ["_row_id", "v1", "v2"] } }
+              StreamExchange { order: Order { field_order: [] }, dist: HashShard([4]) }
+                StreamTableScan { logical: LogicalScan { table: "t2", columns: ["_row_id", "v1", "v2"] } }
+          StreamExchange { order: Order { field_order: [] }, dist: HashShard([8]) }
+            StreamTableScan { logical: LogicalScan { table: "t3", columns: ["_row_id", "v1", "v2"] } }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
     create table t2 (v1 int not null, v2 int not null);
     select t1.v2, t2.v2 from t1 join t2 on t1.v1 = t2.v1;
   batch_plan: |
-    BatchProject { exprs: [$1, $3], expr_alias: [Some("v2"), Some("v2")] }
-      BatchHashJoin(predicate: $0 = $2)
-        BatchScan { table: "t1", columns: ["v1", "v2"] }
-        BatchScan { table: "t2", columns: ["v1", "v2"] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$1, $3], expr_alias: [Some("v2"), Some("v2")] }
+        BatchHashJoin(predicate: $0 = $2)
+          BatchExchange { order: Order { field_order: [] }, dist: HashShard([0]) }
+            BatchScan { table: "t1", columns: ["v1", "v2"] }
+          BatchExchange { order: Order { field_order: [] }, dist: HashShard([2]) }
+            BatchScan { table: "t2", columns: ["v1", "v2"] }
+  stream_plan: |
+    StreamProject { exprs: [$1, $3], expr_alias: [Some("v2"), Some("v2")] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamHashJoin(predicate: $0 = $2)
+          StreamExchange { order: Order { field_order: [] }, dist: HashShard([0]) }
+            StreamTableScan { logical: LogicalScan { table: "t1", columns: ["v1", "v2"] } }
+          StreamExchange { order: Order { field_order: [] }, dist: HashShard([2]) }
+            StreamTableScan { logical: LogicalScan { table: "t2", columns: ["v1", "v2"] } }
 - sql: |-
     select 1
   batch_plan: |
-    BatchProject { exprs: [1:Int32], expr_alias: [None] }
-      BatchValues { rows: [[]] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [1:Int32], expr_alias: [None] }
+        BatchValues { rows: [[]] }
