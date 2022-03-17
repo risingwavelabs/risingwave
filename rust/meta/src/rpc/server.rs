@@ -192,7 +192,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ));
 
     let source_manager_ref = Arc::new(
-        SourceManager::new()
+        SourceManager::new(meta_store_ref, barrier_manager_ref)
             .await
             .unwrap(),
     );
