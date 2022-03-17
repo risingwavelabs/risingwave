@@ -142,10 +142,27 @@ impl StreamService for StreamServiceImpl {
                     .create_table_source_v2(&id, columns)
                     .map_err(tonic_err)?;
 
-                info!("Create table source id: {}", id);
+                info!("create table source, id: {}", id);
             }
         };
 
         Ok(Response::new(CreateSourceResponse { status: None }))
+    }
+
+    async fn drop_source(
+        &self,
+        request: Request<DropSourceRequest>,
+    ) -> Result<Response<DropSourceResponse>, Status> {
+        let id = request.into_inner().source_id;
+        let id = TableId::new(id); // TODO: use SourceId instead
+
+        self.env
+            .source_manager()
+            .drop_source(&id)
+            .map_err(tonic_err)?;
+
+        info!("drop source, id: {}", id);
+
+        Ok(Response::new(DropSourceResponse { status: None }))
     }
 }

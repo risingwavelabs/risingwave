@@ -290,11 +290,7 @@ mod tests {
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
-    use risingwave_pb::stream_service::{
-        BroadcastActorInfoTableResponse, BuildActorsResponse, CreateSourceRequest,
-        CreateSourceResponse, DropActorsRequest, DropActorsResponse, InjectBarrierRequest,
-        InjectBarrierResponse, UpdateActorsResponse,
-    };
+    use risingwave_pb::stream_service::*;
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
@@ -389,6 +385,13 @@ mod tests {
             &self,
             _request: Request<CreateSourceRequest>,
         ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn drop_source(
+            &self,
+            _request: Request<DropSourceRequest>,
+        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
             unimplemented!()
         }
     }
