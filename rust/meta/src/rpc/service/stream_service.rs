@@ -64,6 +64,12 @@ where
         use crate::stream::CreateMaterializedViewContext;
 
         let req = request.into_inner();
+
+        tracing::debug!(
+            plan = serde_json::to_string_pretty(&req).unwrap().as_str(),
+            "create materialized view"
+        );
+
         let hash_parallel_count = self
             .cluster_manager
             .get_parallel_unit_count(Some(ParallelUnitType::Hash))

@@ -61,7 +61,7 @@ do
   echo "=== Dump log file $out_file ==="
   echo "==="
   echo ""
-  cat "$out_file" | tail -n 100
+  cat "$out_file" | tail -n 300
 done
 '''
 
@@ -74,7 +74,7 @@ set -e
 
 for out_file in ${PREFIX_LOG}/*.log
 do
-  if grep "panicked at" "$out_file" -C 10; then
+  if grep "panicked at" "$out_file" -C 100; then
     echo "\"panicked at\" found in $out_file, please check if there's any bugs in this PR."
     echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1

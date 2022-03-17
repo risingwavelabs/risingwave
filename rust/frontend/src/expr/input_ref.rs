@@ -52,4 +52,16 @@ impl Expr for InputRef {
     fn return_type(&self) -> DataType {
         self.data_type.clone()
     }
+
+    fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
+        use risingwave_pb::expr::expr_node::*;
+        use risingwave_pb::expr::*;
+        ExprNode {
+            expr_type: self.get_expr_type().into(),
+            return_type: Some(self.return_type().to_protobuf()),
+            rex_node: Some(RexNode::InputRef(InputRefExpr {
+                column_idx: self.index() as i32,
+            })),
+        }
+    }
 }

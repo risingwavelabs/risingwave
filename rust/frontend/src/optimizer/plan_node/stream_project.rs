@@ -53,7 +53,7 @@ impl WithSchema for StreamProject {
 impl ToStreamProst for StreamProject {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::ProjectNode(ProjectNode {
-            select_list: self.logical.exprs().iter().map(Expr::to_prost).collect(),
+            select_list: self.logical.exprs().iter().map(Expr::to_protobuf).collect(),
         })
     }
 }
