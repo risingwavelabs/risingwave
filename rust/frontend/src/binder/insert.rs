@@ -3,7 +3,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use crate::binder::{BaseTableRef, Binder, BoundQuery};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoundInsert {
     pub table: BaseTableRef,
     pub source: BoundQuery,

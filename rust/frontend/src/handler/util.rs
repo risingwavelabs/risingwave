@@ -21,9 +21,9 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
-pub fn get_pg_field_descs(bound: BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
+pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
     if let BoundStatement::Query(query) = bound {
-        if let BoundSetExpr::Select(select) = query.body {
+        if let BoundSetExpr::Select(ref select) = query.body {
             let mut pg_descs = vec![];
             for i in 0..select.select_items.len() {
                 let mut pg_name = "".to_string();
@@ -105,7 +105,7 @@ mod tests {
             }
             .into(),
         );
-        let pg_descs = get_pg_field_descs(bound).unwrap();
+        let pg_descs = get_pg_field_descs(&bound).unwrap();
         assert_eq!(
             pg_descs
                 .clone()
