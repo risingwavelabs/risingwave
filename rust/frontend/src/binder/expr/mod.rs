@@ -124,7 +124,10 @@ impl Binder {
             ));
         }
         if let Some(expr) = else_result {
-            inputs.push(self.bind_expr(*expr)?);
+            inputs.push(Binder::ensure_type(
+                self.bind_expr(*expr)?,
+                return_type.clone(),
+            ));
         }
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,
