@@ -8,7 +8,10 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ParallelUnitType, WorkerType};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
-use risingwave_pb::stream_service::CreateSourceRequest as ComputeNodeCreateSourceRequest;
+use risingwave_pb::stream_service::{
+    CreateSourceRequest as ComputeNodeCreateSourceRequest,
+    DropSourceRequest as ComputeNodeDropSourceRequest,
+};
 use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
@@ -214,9 +217,15 @@ where
 
     async fn drop_source(
         &self,
-        _request: Request<DropSourceRequest>,
+        request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
-        todo!()
+        let source_id = request.into_inner().source_id;
+        let version = self.drop_source_inner(source_id).await.map_err(tonic_err)?;
+
+        Ok(Response::new(DropSourceResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn drop_materialized_source(
@@ -308,5 +317,24 @@ where
         let version = self.catalog_manager.create_source(&source).await?;
 
         Ok((source.id, version))
+    }
+
+    async fn drop_source_inner(&self, source_id: SourceId) -> RwResult<CatalogVersion> {
+        // 1. Update the source catalog.
+        let version = self.catalog_manager.drop_source(source_id).await?;
+
+        // 2. Drop source on compute nodes.
+        // TODO: restore the source on other nodes when scale out / fail over
+        let futures = self
+            .all_stream_clients()
+            .await?
+            .into_iter()
+            .map(|mut client| {
+                let request = ComputeNodeDropSourceRequest { source_id };
+                async move { client.drop_source(request).await.to_rw_result() }
+            });
+        let _responses: Vec<_> = try_join_all(futures).await?;
+
+        Ok(version)
     }
 }
