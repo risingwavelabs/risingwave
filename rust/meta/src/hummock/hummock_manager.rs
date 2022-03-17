@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -121,6 +122,7 @@ where
                 ],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
+                safe_epoch: INVALID_EPOCH,
             };
             init_version.insert(self.meta_store_ref.as_ref()).await?;
             versioning_guard
@@ -636,6 +638,7 @@ where
             .collect_vec();
 
         let compact_task_metrics = compact_task.metrics.take();
+        let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
         let mut transaction = Transaction::default();
         let mut compact_status_copy = compaction_guard.compact_status.clone();
@@ -685,6 +688,8 @@ where
                     .collect(),
                 uncommitted_epochs: old_version.uncommitted_epochs.clone(),
                 max_committed_epoch: old_version.max_committed_epoch,
+                // update safe epoch of hummock version
+                safe_epoch: max(old_version.safe_epoch, compacted_watermark),
             };
 
             new_version.upsert_in_transaction(&mut transaction)?;
