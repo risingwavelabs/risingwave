@@ -43,8 +43,17 @@ Firstly, we will need to create a placeholder in yaml testcases:
   stream_plan: ""
 ```
 
+You'll need to install [yq](https://github.com/mikefarah/yq). For macOS users,
+simply `brew install yq`. For Linux users, download yq 4.x from the release page.
+
 ```
 ./risedev apply-planner-test
 ```
 
-Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you may copy and overwrite the current plan tests.
+Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you may run:
+
+```
+./risedev do-apply-planner-test
+```
+
+To apply the new test results.

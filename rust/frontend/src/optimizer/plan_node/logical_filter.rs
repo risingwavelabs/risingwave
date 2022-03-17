@@ -89,11 +89,11 @@ impl ColPrunable for LogicalFilter {
         if required_cols == &visitor.input_bits {
             filter.into()
         } else {
+            let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
+            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 filter.into(),
-                ColIndexMapping::with_remaining_columns(
-                    &required_cols.ones().map(|i| mapping.map(i)).collect(),
-                ),
+                ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
             .into()
         }

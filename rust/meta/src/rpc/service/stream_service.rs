@@ -60,6 +60,12 @@ where
         use crate::stream::CreateMaterializedViewContext;
 
         let req = request.into_inner();
+
+        tracing::debug!(
+            plan = serde_json::to_string_pretty(&req).unwrap().as_str(),
+            "create materialized view"
+        );
+
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
 

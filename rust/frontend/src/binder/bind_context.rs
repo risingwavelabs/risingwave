@@ -38,6 +38,7 @@ impl Display for Clause {
     }
 }
 
+#[derive(Default)]
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,

@@ -5,6 +5,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
+use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, TableRef};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
@@ -15,6 +16,25 @@ pub struct BoundSelect {
     pub aliases: Vec<Option<String>>,
     pub from: Option<TableRef>,
     pub selection: Option<ExprImpl>,
+}
+
+impl BoundSelect {
+    /// The names returned by this [`BoundSelect`].
+    pub fn names(&self) -> Vec<String> {
+        self.aliases
+            .iter()
+            .cloned()
+            .map(|alias| alias.unwrap_or_else(|| UNNAMED_COLUMN.to_string()))
+            .collect()
+    }
+
+    /// The types returned by this [`BoundSelect`].
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.select_items
+            .iter()
+            .map(|item| item.return_type())
+            .collect()
+    }
 }
 
 impl Binder {

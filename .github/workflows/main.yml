@@ -175,7 +175,7 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: Dump last 100 lines of logs on failure
+      - name: Dump last 300 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
       - uses: actions/upload-artifact@v2
