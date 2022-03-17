@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::{CatalogVersion};
+use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
@@ -24,18 +24,15 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
-
-
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, HeartbeatRequest, HeartbeatResponse,
-    ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, FlushRequest,
+    FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
+    SubscribeRequest, SubscribeResponse,
 };
-
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -321,6 +318,8 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: CreateMaterializedViewRequest,
     ) -> Result<CreateMaterializedViewResponse> {
+        unimplemented!()
+    }
     async fn report_vacuum_task(
         &self,
         _req: ReportVacuumTaskRequest,
@@ -562,6 +561,7 @@ impl MetaClientInner for GrpcMetaClient {
     ) -> Result<CreateMaterializedViewResponse> {
         // TODO: add catalog client for catalogV2
         todo!()
+    }
     async fn report_vacuum_task(
         &self,
         req: ReportVacuumTaskRequest,

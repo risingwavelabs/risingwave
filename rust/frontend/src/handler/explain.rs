@@ -19,13 +19,6 @@ pub(super) fn handle_explain(
     let context = Rc::new(RefCell::new(context));
     let session = context.borrow().session_ctx.clone();
     // bind, plan, optimize, and serialize here
-    let bound = {
-        let mut binder = Binder::new(
-            session.env().catalog_reader().read_guard(),
-            session.database().to_string(),
-        );
-        binder.bind(stmt)?
-    };
     let mut planner = Planner::new(context);
 
     let plan = match stmt {
@@ -35,12 +28,24 @@ pub(super) fn handle_explain(
             query,
             ..
         } => {
-            let bound = binder.bind_query(query.as_ref().clone())?;
+            let bound = {
+                let mut binder = Binder::new(
+                    session.env().catalog_reader().read_guard(),
+                    session.database().to_string(),
+                );
+                binder.bind_query(query.as_ref().clone())?
+            };
             let logical = planner.plan_query(bound)?;
             logical.gen_create_mv_plan()
         }
         stmt => {
-            let bound = binder.bind(stmt)?;
+            let bound = {
+                let mut binder = Binder::new(
+                    session.env().catalog_reader().read_guard(),
+                    session.database().to_string(),
+                );
+                binder.bind(stmt)?
+            };
             let logical = planner.plan(bound)?;
             logical.gen_batch_query_plan()
         }

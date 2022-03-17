@@ -24,7 +24,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
             session.env().catalog_reader().read_guard(),
             session.database().to_string(),
         );
-        binder.bind(Statement::Query(query))?
+        binder.bind(stmt)?
     };
     let pg_descs = get_pg_field_descs(&bound)?;
 
