@@ -329,7 +329,6 @@ alias = "kill-risedev"
 
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"
-<<<<<<< HEAD
 
 
 [tasks.ci-v2]
@@ -557,5 +556,3 @@ dependencies = [
   "check-logs",
 ]
 description = "Kill cluster, dump logs and check logs"
-=======
->>>>>>> 3d157b4e (chore(frontend): only retain batch plan in test cases (#953))
