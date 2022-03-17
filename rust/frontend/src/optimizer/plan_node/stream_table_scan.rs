@@ -7,15 +7,16 @@ use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 use super::{LogicalScan, StreamBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
-/// `StreamScan` is a virtual plan node to represent a stream scan. It will be converted to chain +
-/// upstream source scan + batch table scan when converting to MView creation request.
+/// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
+/// to chain + merge node (for upstream materialize) + batch table scan when converting to MView
+/// creation request.
 #[derive(Debug, Clone)]
-pub struct StreamScan {
+pub struct StreamTableScan {
     pub base: StreamBase,
     logical: LogicalScan,
 }
 
-impl StreamScan {
+impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
@@ -28,29 +29,27 @@ impl StreamScan {
     }
 }
 
-impl WithSchema for StreamScan {
+impl WithSchema for StreamTableScan {
     fn schema(&self) -> &Schema {
         self.logical.schema()
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamScan }
+impl_plan_tree_node_for_leaf! { StreamTableScan }
 
-impl fmt::Display for StreamScan {
+impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamScan")
-            .field("logical", &self.logical.to_string())
-            .finish()
+        write!(f, "StreamTableScan {{ logical: {} }}", self.logical)
     }
 }
 
-impl ToStreamProst for StreamScan {
+impl ToStreamProst for StreamTableScan {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
-impl StreamScan {
+impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         ProstStreamPlan {
             input: vec![

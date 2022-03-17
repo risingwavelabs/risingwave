@@ -133,10 +133,10 @@ impl dyn PlanNode {
 
     /// Serialize the plan node and its children to a stream plan proto.
     ///
-    /// Note that [`StreamScan`] has its own implementation of `to_stream_prost`. We have a hook
-    /// inside to do some ad-hoc thing for [`StreamScan`].
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
-        if let Some(stream_scan) = self.as_stream_scan() {
+        if let Some(stream_scan) = self.as_stream_table_scan() {
             return stream_scan.adhoc_to_stream_prost();
         }
 
@@ -194,7 +194,8 @@ mod stream_exchange;
 mod stream_filter;
 mod stream_hash_join;
 mod stream_project;
-mod stream_scan;
+mod stream_source_scan;
+mod stream_table_scan;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -220,7 +221,8 @@ pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
-pub use stream_scan::StreamScan;
+pub use stream_source_scan::StreamSourceScan;
+pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
 use crate::session::QueryContextRef;
@@ -265,7 +267,8 @@ macro_rules! for_all_plan_nodes {
             ,{ Batch, Limit }
             ,{ Stream, Project }
             ,{ Stream, Filter }
-            ,{ Stream, Scan }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
         }
@@ -323,7 +326,8 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, Filter }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
-            ,{ Stream, Scan }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
         }
     };
 }
