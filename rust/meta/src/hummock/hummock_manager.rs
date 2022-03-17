@@ -185,7 +185,7 @@ where
 
     /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` is an optional parameter to make `pin_version` retryable:
+    /// `last_pinned` helps to make `pin_version` retryable:
     /// 1 Return the smallest already pinned version of `context_id` that is greater than
     /// `last_pinned`, if any.
     /// 2 Otherwise pin and return the current greatest version.
@@ -510,7 +510,7 @@ where
 
     /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` is to make `pin_snapshot` retryable, see `pin_version` for detail.
+    /// `last_pinned` helps to `pin_snapshot` retryable, see `pin_version` for detail.
     pub async fn pin_snapshot(
         &self,
         context_id: HummockContextId,
@@ -1011,6 +1011,7 @@ where
     }
 
     pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
+        tracing::debug!("context_id {} is released", context_id);
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         let pinned_version = versioning_guard.pinned_versions.get(&context_id);
