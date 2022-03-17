@@ -53,9 +53,8 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::utils::validate_epoch;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
-
+use crate::hummock::utils::validate_epoch;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
