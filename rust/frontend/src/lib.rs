@@ -15,6 +15,7 @@ pub mod utils;
 extern crate log;
 pub mod test_utils;
 
+use std::ffi::OsString;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -32,6 +33,13 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+}
+
+impl Default for FrontendOpts {
+    fn default() -> Self {
+        let args: [OsString; 0] = []; // No argument.
+        FrontendOpts::parse_from(args)
+    }
 }
 
 /// Start frontend

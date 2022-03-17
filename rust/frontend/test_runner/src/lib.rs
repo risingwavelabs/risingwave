@@ -12,6 +12,7 @@ use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{QueryContext, QueryContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
+use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
