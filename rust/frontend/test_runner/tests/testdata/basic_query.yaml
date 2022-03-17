@@ -172,3 +172,33 @@
     BatchExchange { order: Order { field_order: [] }, dist: Single }
       BatchProject { exprs: [1:Int32], expr_alias: [None] }
         BatchValues { rows: [[]] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int);
+    select v1, min(v2) + max(v3) * count(v1) from t group by v1;
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [Some("v1"), None] }
+        BatchHashAgg { aggs: [AggCall { agg_kind: Min, inputs: [1] }, AggCall { agg_kind: Max, inputs: [2] }, AggCall { agg_kind: Count, inputs: [0] }], group_keys: [0] }
+          BatchProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+            BatchScan { table: "t", columns: ["v1", "v2", "v3"] }
+  stream_plan: |
+    StreamProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [Some("v1"), None] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamHashAgg { aggs: [AggCall { agg_kind: Min, inputs: [1] }, AggCall { agg_kind: Max, inputs: [2] }, AggCall { agg_kind: Count, inputs: [0] }], group_keys: [0] }
+          BatchProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+            BatchScan { table: "t", columns: ["v1", "v2", "v3"] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int);
+    select min(v1) + max(v2) * count(v3) from t;
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [($0 + ($1 * $2))], expr_alias: [None] }
+        BatchSimpleAgg { aggs: [AggCall { agg_kind: Min, inputs: [0] }, AggCall { agg_kind: Max, inputs: [1] }, AggCall { agg_kind: Count, inputs: [2] }] }
+          BatchProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+            BatchScan { table: "t", columns: ["v1", "v2", "v3"] }
+  stream_plan: |
+    StreamProject { exprs: [($0 + ($1 * $2))], expr_alias: [None] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamSimpleAgg { aggs: [AggCall { agg_kind: Min, inputs: [0] }, AggCall { agg_kind: Max, inputs: [1] }, AggCall { agg_kind: Count, inputs: [2] }] }
+          BatchProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+            BatchScan { table: "t", columns: ["v1", "v2", "v3"] }

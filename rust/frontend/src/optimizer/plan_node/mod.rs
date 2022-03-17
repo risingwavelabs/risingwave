@@ -340,13 +340,10 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, Filter }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
-<<<<<<< HEAD
             ,{ Stream, TableScan }
             ,{ Stream, SourceScan }
-=======
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
->>>>>>> 02f71b63 (plan agg.)
         }
     };
 }
