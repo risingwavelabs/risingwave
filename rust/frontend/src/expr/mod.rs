@@ -23,16 +23,11 @@ use risingwave_pb::expr::{ConstantValue, InputRefExpr};
 
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
+    /// Get the return type of the expr
     fn return_type(&self) -> DataType;
 
-    // TODO: replace this with real serialization cc @neverchanje
-    fn to_prost(&self) -> ExprNode {
-        ExprNode {
-            expr_type: 0,
-            rex_node: None,
-            return_type: None,
-        }
-    }
+    /// Serialize the expression
+    fn to_protobuf(&self) -> ExprNode;
 }
 
 #[derive(Clone, PartialEq)]
@@ -130,6 +125,15 @@ impl Expr for ExprImpl {
             ExprImpl::Literal(expr) => expr.return_type(),
             ExprImpl::FunctionCall(expr) => expr.return_type(),
             ExprImpl::AggCall(expr) => expr.return_type(),
+        }
+    }
+
+    fn to_protobuf(&self) -> ExprNode {
+        match self {
+            ExprImpl::InputRef(e) => e.to_protobuf(),
+            ExprImpl::Literal(e) => e.to_protobuf(),
+            ExprImpl::FunctionCall(e) => e.to_protobuf(),
+            ExprImpl::AggCall(e) => e.to_protobuf(),
         }
     }
 }

@@ -8,7 +8,7 @@ use risingwave_pb::plan::ValuesNode;
 use super::{
     BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
 };
-use crate::expr::ExprImpl;
+use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -74,7 +74,7 @@ impl ToBatchProst for BatchValues {
 }
 
 fn row_to_protobuf(row: &[ExprImpl]) -> ExprTuple {
-    let cells = row.iter().map(|e| e.to_protobuf()).collect();
+    let cells = row.iter().map(Expr::to_protobuf).collect();
     ExprTuple { cells }
 }
 

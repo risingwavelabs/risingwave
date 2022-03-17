@@ -17,3 +17,5 @@ mod project_join;
 pub use project_join::*;
 mod filter_join;
 pub use filter_join::*;
+mod filter_project;
+pub use filter_project::*;

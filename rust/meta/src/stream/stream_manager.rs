@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::{debug, info};
+use log::info;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -194,7 +194,7 @@ where
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]update actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -230,7 +230,7 @@ where
 
             let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]build actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
                 .to_owned()
                 .build_actors(BuildActorsRequest {
