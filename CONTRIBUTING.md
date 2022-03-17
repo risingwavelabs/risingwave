@@ -35,14 +35,14 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 To run end-to-end tests with multiple compute-nodes, run the script:
 
 ```shell
-./risedev ci-3node
+./risedev dev ci-3node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
 
 ```shell
-./risedev ci-1node
+./risedev dev ci-1node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
