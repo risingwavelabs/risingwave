@@ -200,6 +200,7 @@ impl StreamManager {
 
     pub fn drop_actor(&self, actors: &[ActorId]) -> Result<()> {
         let mut core = self.core.lock();
+        let mut core = self.core.lock().unwrap();
         for id in actors {
             core.drop_actor(*id);
         }
@@ -243,6 +244,7 @@ impl StreamManager {
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
+        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap();
         }
@@ -261,6 +263,7 @@ impl StreamManager {
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
+        let mut core = self.core.lock().unwrap();
         core.build_actors(actors, env)
     }
 
@@ -369,6 +372,10 @@ impl StreamManagerCore {
         input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
         actor_id: ActorId,
+<<<<<<< HEAD
+=======
+        downstreams: &[ActorId],
+>>>>>>> 3282d1ae (chore: using ActorId in local stream manager (#1025))
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
         let outputs = dispatcher
