@@ -14,7 +14,7 @@ use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::LogicalProject;
-use self::rule::FilterJoinRule;
+use self::rule::*;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -93,7 +93,7 @@ impl PlanRoot {
 
         // Predicate Push-down
         plan = {
-            let rules = vec![FilterJoinRule::create()];
+            let rules = vec![FilterJoinRule::create(), FilterProjectRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -128,7 +128,7 @@ impl PlanRoot {
 
         // Predicate Push-down
         plan = {
-            let rules = vec![FilterJoinRule::create()];
+            let rules = vec![FilterJoinRule::create(), FilterProjectRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };

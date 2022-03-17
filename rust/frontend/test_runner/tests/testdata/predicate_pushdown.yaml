@@ -1,3 +1,4 @@
+# filter join
 - sql: |
     create table t1 (v1 int, v2 int, v3 int);
     create table t2 (v1 int, v2 int, v3 int);
@@ -12,3 +13,45 @@
           BatchExchange { order: Order { field_order: [] }, dist: HashShard([6]) }
             BatchFilter { predicate: Condition { conjunctions: [($2 > 2:Int32)] } }
               BatchScan { table: "t2", columns: ["_row_id", "v1", "v2", "v3"] }
+# filter project
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t) where v2 > 1;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+      LogicalFilter { predicate: Condition { conjunctions: [($2 > 1:Int32)] } }
+        LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+          LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+        BatchFilter { predicate: Condition { conjunctions: [($2 > 1:Int32)] } }
+          BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v1 from (select v2, v1 from t) where v2 > 1;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+      LogicalFilter { predicate: Condition { conjunctions: [($0 > 1:Int32)] } }
+        LogicalProject { exprs: [$2, $1], expr_alias: [Some("v2"), Some("v1")] }
+          LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
+        BatchFilter { predicate: Condition { conjunctions: [($1 > 1:Int32)] } }
+          BatchScan { table: "t", columns: ["v1", "v2"] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v1 from (select v2 as a2, v1 from t where v1 > 2) where a2 > 1;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+      LogicalFilter { predicate: Condition { conjunctions: [($0 > 1:Int32)] } }
+        LogicalProject { exprs: [$2, $1], expr_alias: [Some("a2"), Some("v1")] }
+          LogicalFilter { predicate: Condition { conjunctions: [($1 > 2:Int32)] } }
+            LogicalScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
+        BatchFilter { predicate: Condition { conjunctions: [($1 > 1:Int32)] } }
+          BatchFilter { predicate: Condition { conjunctions: [($0 > 2:Int32)] } }
+            BatchScan { table: "t", columns: ["v1", "v2"] }
