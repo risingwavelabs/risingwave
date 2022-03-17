@@ -206,7 +206,7 @@ jobs:
 
       # --- Post Tasks ---
 
-      - name: Dump last 100 lines of logs on failure
+      - name: Dump last 300 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
 

@@ -8,6 +8,7 @@ use risingwave_pb::plan::ProjectNode;
 use super::{
     BatchBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -70,7 +71,7 @@ impl ToBatchProst for BatchProject {
             .logical
             .exprs()
             .iter()
-            .map(|e| e.to_protobuf())
+            .map(Expr::to_protobuf)
             .collect::<Vec<ExprNode>>();
         NodeBody::Project(ProjectNode { select_list })
     }
