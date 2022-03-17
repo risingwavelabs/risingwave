@@ -10,6 +10,7 @@ import "common.proto";
 import "data.proto";
 import "plan.proto";
 import "stream_plan.proto";
+import "catalog.proto";
 
 message HangingChannel {
   common.ActorInfo upstream = 1;
@@ -70,12 +71,21 @@ message BroadcastActorInfoTableResponse {
   common.Status status = 1;
 }
 
+message CreateSourceRequest {
+  catalog.Source source = 1;
+}
+
+message CreateSourceResponse {
+  common.Status status = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
 }
 
 // TODO: Lifecycle management for actors.

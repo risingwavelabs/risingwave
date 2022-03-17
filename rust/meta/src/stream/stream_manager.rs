@@ -291,8 +291,9 @@ mod tests {
         StreamService, StreamServiceServer,
     };
     use risingwave_pb::stream_service::{
-        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
+        BroadcastActorInfoTableResponse, BuildActorsResponse, CreateSourceRequest,
+        CreateSourceResponse, DropActorsRequest, DropActorsResponse, InjectBarrierRequest,
+        InjectBarrierResponse, UpdateActorsResponse,
     };
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
@@ -382,6 +383,13 @@ mod tests {
                 request_id: "".to_string(),
                 status: None,
             }))
+        }
+
+        async fn create_source(
+            &self,
+            _request: Request<CreateSourceRequest>,
+        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
+            unimplemented!()
         }
     }
 

@@ -24,7 +24,9 @@ message StreamSourceInfo {
   int32 row_id_index = 4;
 }
 
-message TableSourceInfo {}
+message TableSourceInfo {
+  repeated plan.ColumnCatalog columns = 1;
+}
 
 message Source {
   uint32 id = 1;
@@ -41,7 +43,7 @@ message Source {
 message VirtualTable {
   uint32 id = 1;
   string name = 2;
-  repeated plan.ColumnCatalog column_catalog = 3;
+  repeated plan.ColumnCatalog columns = 3;
 }
 
 message Table {
@@ -49,7 +51,7 @@ message Table {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  repeated plan.ColumnCatalog column_catalog = 5;
+  repeated plan.ColumnCatalog columns = 5;
   repeated int32 pk_column_ids = 6;
   repeated plan.OrderType pk_orders = 7;
   repeated uint32 dependent_tables = 8;
