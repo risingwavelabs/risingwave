@@ -13,6 +13,7 @@ pub enum BoundSetExpr {
 }
 
 impl BoundSetExpr {
+    /// The names returned by this [`BoundSetExpr`].
     pub fn names(&self) -> Vec<String> {
         match self {
             BoundSetExpr::Select(s) => s.names(),
@@ -20,6 +21,7 @@ impl BoundSetExpr {
         }
     }
 
+    /// The types returned by this [`BoundSetExpr`].
     pub fn data_types(&self) -> Vec<DataType> {
         match self {
             BoundSetExpr::Select(s) => s.data_types(),

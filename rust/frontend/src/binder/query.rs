@@ -16,10 +16,12 @@ pub struct BoundQuery {
 }
 
 impl BoundQuery {
+    /// The names returned by this [`BoundQuery`].
     pub fn names(&self) -> Vec<String> {
         self.body.names()
     }
 
+    /// The types returned by this [`BoundQuery`].
     pub fn data_types(&self) -> Vec<DataType> {
         self.body.data_types()
     }

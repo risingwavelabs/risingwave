@@ -7,7 +7,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::bind_context::ColumnBinding;
-use super::BoundQuery;
+use super::{BoundQuery, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
 use crate::catalog::column_catalog::ColumnCatalog;
@@ -35,7 +35,7 @@ pub struct BaseTableRef {
     pub columns: Vec<ColumnCatalog>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SubQuery {
     pub query: BoundQuery,
 }
@@ -198,13 +198,19 @@ impl Binder {
             }
         }
     }
+
+    /// Before binding a subquery, we push the current context to the stack and create a new
+    /// context.
+    ///
+    /// After finishing binding, we pop the previous context from the stack. And
+    /// update it with the output of the subquery.
     pub(super) fn bind_subquery(&mut self, query: Query) -> Result<SubQuery> {
         self.push_context();
         let query = self.bind_query(query)?;
         self.pop_context();
         self.bind_context(
             itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
-            "?subquery?".to_string(),
+            UNNAMED_SUBQUERY.to_string(),
         )?;
         Ok(SubQuery { query })
     }

@@ -31,6 +31,9 @@ pub struct Binder {
     #[allow(dead_code)]
     catalog: Arc<DatabaseCatalog>,
     context: BindContext,
+    /// A stack holding contexts of outer queries when binding a subquery.
+    ///
+    /// See [`Binder::bind_subquery`] for details.
     upper_contexts: Vec<BindContext>,
 }
 
@@ -58,3 +61,8 @@ impl Binder {
         self.context = old_context.unwrap();
     }
 }
+
+/// The column name stored in [`BindContext`] for a column without an alias.
+const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";
