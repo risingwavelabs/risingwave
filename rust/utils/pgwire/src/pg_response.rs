@@ -27,6 +27,7 @@ pub enum StatementType {
     SHOW_PARAMETERS,
     FLUSH,
     OTHER,
+    // EMPTY is used when query statement is empty (e.g. ";").
     EMPTY,
 }
 
