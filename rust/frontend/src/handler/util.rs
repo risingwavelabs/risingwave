@@ -95,6 +95,7 @@ mod tests {
             ],
             from: None,
             selection: None,
+            group_by: vec![],
         };
         let bound = BoundStatement::Query(
             BoundQuery {

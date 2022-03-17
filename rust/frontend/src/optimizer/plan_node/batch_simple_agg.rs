@@ -17,7 +17,7 @@ impl BatchSimpleAgg {
         let ctx = logical.base.ctx.clone();
         let base = BatchBase {
             order: Order::any().clone(),
-            dist: Distribution::any().clone(),
+            dist: Distribution::Single,
             id: ctx.borrow_mut().get_id(),
             ctx: ctx.clone(),
         };
@@ -57,7 +57,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
             .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+            .to_distributed_with_required(self.input_order_required(), &Distribution::Single);
         self.clone_with_input(new_input).into()
     }
 }

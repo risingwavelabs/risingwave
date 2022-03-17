@@ -32,10 +32,11 @@ pub struct PlanAggCall {
 
 impl fmt::Debug for PlanAggCall {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("AggCall")
-            .field("agg_kind", &self.agg_kind)
-            .field("inputs", &self.inputs)
-            .finish()
+        let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+        self.inputs.iter().for_each(|child| {
+            builder.field(child);
+        });
+        builder.finish()
     }
 }
 
@@ -98,30 +99,14 @@ impl ExprRewriter for ExprHandler {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs) = agg_call.decompose();
 
-        // Deal with special cases like `select v1, max(v2) + min(v3) * count(v1) from t group by
-        // v1;`, in which columns appear in GROUP BY clause also appear in aggregates' input.
-        let mut begin = self.project.len();
-        let mut input_indexes = vec![];
-        let inputs: Vec<ExprImpl> = inputs
-            .into_iter()
-            .filter(|expr| {
-                if let ExprImpl::InputRef(input_ref) = expr {
-                    if let Some(index) = self.group_column_index.get(input_ref) {
-                        input_indexes.push(*index);
-                        return false;
-                    }
-                }
-                input_indexes.push(begin);
-                begin += 1;
-                true
-            })
-            .collect();
+        let begin = self.project.len();
         self.project.extend(inputs);
+        let end = self.project.len();
 
         self.agg_calls.push(PlanAggCall {
             agg_kind,
             return_type: return_type.clone(),
-            inputs: input_indexes,
+            inputs: (begin..end).collect(),
         });
         ExprImpl::from(InputRef::new(
             self.group_column_index.len() + self.agg_calls.len() - 1,
@@ -278,8 +263,8 @@ impl_plan_tree_node_for_unary! {LogicalAgg}
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("LogicalAgg")
-            .field("agg_calls", &self.agg_calls)
             .field("group_keys", &self.group_keys)
+            .field("agg_calls", &self.agg_calls)
             .finish()
     }
 }
@@ -354,7 +339,7 @@ impl ToBatch for LogicalAgg {
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_batch();
+        let new_input = self.input().to_stream();
         let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
             StreamSimpleAgg::new(new_logical).into()

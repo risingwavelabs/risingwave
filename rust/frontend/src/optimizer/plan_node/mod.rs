@@ -197,9 +197,9 @@ mod stream_filter;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_project;
+mod stream_simple_agg;
 mod stream_source_scan;
 mod stream_table_scan;
-mod stream_simple_agg;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
@@ -228,9 +228,9 @@ pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_project::StreamProject;
+pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_table_scan::StreamTableScan;
-pub use stream_simple_agg::StreamSimpleAgg;
 
 use crate::optimizer::property::{WithContext, WithId};
 use crate::session::QueryContextRef;

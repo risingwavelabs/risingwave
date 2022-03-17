@@ -17,7 +17,7 @@ impl BatchHashAgg {
         let ctx = logical.base.ctx.clone();
         let base = BatchBase {
             order: Order::any().clone(),
-            dist: Distribution::any().clone(),
+            dist: Distribution::HashShard(logical.group_keys().to_vec()),
             id: ctx.borrow_mut().get_id(),
             ctx: ctx.clone(),
         };
@@ -34,8 +34,8 @@ impl BatchHashAgg {
 impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BatchHashAgg")
-            .field("aggs", &self.agg_calls())
             .field("group_keys", &self.group_keys())
+            .field("aggs", &self.agg_calls())
             .finish()
     }
 }
@@ -59,9 +59,10 @@ impl WithSchema for BatchHashAgg {
 
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> PlanRef {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+        let new_input = self.input().to_distributed_with_required(
+            self.input_order_required(),
+            &Distribution::HashShard(self.group_keys().to_vec()),
+        );
         self.clone_with_input(new_input).into()
     }
 }
