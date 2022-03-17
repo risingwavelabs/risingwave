@@ -287,7 +287,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
@@ -516,6 +516,7 @@ mod tests {
             Fragment {
                 fragment_id: 0,
                 fragment_type: FragmentType::Sink as i32,
+                distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
             },
         );

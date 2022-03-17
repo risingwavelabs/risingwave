@@ -78,6 +78,10 @@ where
                         fragment_id,
                         fragment_type: self.fragment_graph.get_fragment_type_by_id(fragment_id)?
                             as i32,
+                        distribution_type: self
+                            .fragment_graph
+                            .get_distribution_type_by_id(fragment_id)?
+                            as i32,
                         actors: actors.clone(),
                     },
                 ))

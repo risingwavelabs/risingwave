@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_common::{ensure, gen_error};
-use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::stream_plan::StreamNode;
 
 use crate::model::FragmentId;
@@ -114,5 +114,20 @@ impl StreamFragmentGraph {
             "fragment id not exist!"
         );
         Ok(self.fragments.get(&fragment_id).unwrap().fragment_type)
+    }
+
+    pub fn get_distribution_type_by_id(
+        &self,
+        fragment_id: FragmentId,
+    ) -> Result<FragmentDistributionType> {
+        ensure!(
+            self.fragments.contains_key(&fragment_id),
+            "fragment id not exist!"
+        );
+        Ok(if self.fragments.get(&fragment_id).unwrap().is_singleton {
+            FragmentDistributionType::Single
+        } else {
+            FragmentDistributionType::Hash
+        })
     }
 }
