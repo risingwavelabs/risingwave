@@ -4,7 +4,6 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{LogicalScan, StreamBase, ToStreamProst};
-use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamSourceScan` represents a scan from source.

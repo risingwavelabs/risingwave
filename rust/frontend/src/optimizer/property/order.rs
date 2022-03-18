@@ -1,5 +1,4 @@
 use std::fmt;
-use std::fmt::Write;
 
 use itertools::Itertools;
 use paste::paste;

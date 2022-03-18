@@ -5,7 +5,6 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
 
 use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
-use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
