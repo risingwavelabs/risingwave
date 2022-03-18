@@ -20,6 +20,7 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use super::ComputeClientPool;
 use crate::executor::*;
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -51,10 +52,17 @@ pub struct StreamManagerCore {
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
 
-    /// The state store of Hummuck
+    /// The state store implement
     state_store: StateStoreImpl,
 
+    /// Metrics of the stream manager
     streaming_metrics: Arc<StreamingMetrics>,
+
+    /// The pool of compute clients.
+    ///
+    /// TODO: currently the client pool won't be cleared. Should remove compute clients when
+    /// disconnected.
+    compute_client_pool: ComputeClientPool,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -316,6 +324,7 @@ impl StreamManagerCore {
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
+            compute_client_pool: ComputeClientPool::new(1024),
         }
     }
 
@@ -346,10 +355,10 @@ impl StreamManagerCore {
         input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
         actor_id: ActorId,
-        downstreams: &[ActorId],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
-        let outputs = downstreams
+        let outputs = dispatcher
+            .downstream_actor_id
             .iter()
             .map(|down_id| {
                 let host_addr = self.get_actor_info(down_id)?.get_host()?;
@@ -358,9 +367,7 @@ impl StreamManagerCore {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(downstreams.len(), outputs.len());
-
-        use stream_plan::dispatcher::DispatcherType::*;
+        use stream_plan::DispatcherType::*;
         let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
@@ -381,7 +388,7 @@ impl StreamManagerCore {
                 Box::new(DispatchExecutor::new(
                     input,
                     HashDataDispatcher::new(
-                        downstreams.to_vec(),
+                        dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
                         hash_mapping,
@@ -627,14 +634,20 @@ impl StreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
+
+                        let pool = self.compute_client_pool.clone();
+
                         tokio::spawn(async move {
-                            let remote_input_res = RemoteInput::create(
-                                upstream_socket_addr,
-                                (up_id, actor_id),
-                                sender,
-                            )
-                            .await;
-                            match remote_input_res {
+                            let init_client = async move {
+                                let remote_input = RemoteInput::create(
+                                    pool.get_client_for_addr(&upstream_socket_addr).await?,
+                                    (up_id, actor_id),
+                                    sender,
+                                )
+                                .await?;
+                                Ok::<_, RwError>(remote_input)
+                            };
+                            match init_client.await {
                                 Ok(mut remote_input) => remote_input.run().await,
                                 Err(e) => {
                                     info!("Spawn remote input fails:{}", e);
@@ -642,7 +655,7 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    Ok(self.context.take_receiver(&(*up_id, actor_id))?)
+                    Ok::<_, RwError>(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -665,12 +678,14 @@ impl StreamManagerCore {
             let actor = self.actors.remove(&actor_id).unwrap();
             let executor =
                 self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
-            let dispatcher = self.create_dispatcher(
-                executor,
-                actor.get_dispatcher()?,
-                actor_id,
-                actor.get_downstream_actor_id(),
-            )?;
+
+            let dispatchers = actor.get_dispatcher();
+            assert_eq!(
+                dispatchers.len(),
+                1,
+                "compute node currently only supports single dispatcher"
+            );
+            let dispatcher = self.create_dispatcher(executor, &dispatchers[0], actor_id)?;
 
             trace!("build actor: {:#?}", &dispatcher);
 
@@ -774,7 +789,7 @@ impl StreamManagerCore {
         let local_actor_ids: HashSet<ActorId> = HashSet::from_iter(
             actors
                 .iter()
-                .map(|actor| actor.clone().get_actor_id())
+                .map(|actor| actor.get_actor_id())
                 .collect::<Vec<_>>()
                 .into_iter(),
         );
@@ -796,8 +811,9 @@ impl StreamManagerCore {
             // At this time, the graph might not be complete, so we do not check if downstream
             // has `current_id` as upstream.
             let down_id = actor
-                .get_downstream_actor_id()
+                .dispatcher
                 .iter()
+                .flat_map(|x| x.downstream_actor_id.iter())
                 .map(|id| (*current_id, *id))
                 .collect_vec();
             update_upstreams(&self.context, &down_id);

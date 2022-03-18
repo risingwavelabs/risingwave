@@ -1,3 +1,5 @@
+#![cfg_attr(coverage, feature(no_coverage))]
+
 extern crate proc_macro;
 extern crate syn;
 #[macro_use]
@@ -9,11 +11,11 @@ use proc_macro2::TokenStream as TokenStream2;
 use proc_macro_error::{proc_macro_error, ResultExt};
 use syn::{DataStruct, DeriveInput};
 
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 mod generate;
 
 // This attribute will be placed before any pb types, including messages and enums.
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 #[proc_macro_derive(AnyPB)]
 #[proc_macro_error]
 pub fn any_pb(input: TokenStream) -> TokenStream {
@@ -28,7 +30,7 @@ pub fn any_pb(input: TokenStream) -> TokenStream {
 }
 
 // Procedure macros can not be tested from the same crate.
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 fn produce(ast: &DeriveInput) -> TokenStream2 {
     let name = &ast.ident;
 

@@ -94,7 +94,8 @@ mod tests {
                 Some("column3".to_string()),
             ],
             from: None,
-            selection: None,
+            where_clause: None,
+            group_by: vec![],
         };
         let bound = BoundStatement::Query(
             BoundQuery {

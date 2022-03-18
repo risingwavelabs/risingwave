@@ -5,6 +5,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, StreamBase, ToStreamProst};
+use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -27,6 +28,18 @@ impl StreamTableScan {
         };
         Self { logical, base }
     }
+
+    pub fn table_id(&self) -> u32 {
+        self.logical.table_id()
+    }
+
+    pub fn table_name(&self) -> &str {
+        self.logical.table_name()
+    }
+
+    pub fn columns(&self) -> &[ColumnId] {
+        self.logical.columns()
+    }
 }
 
 impl WithSchema for StreamTableScan {
@@ -39,7 +52,12 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamTableScan {{ logical: {} }}", self.logical)
+        write!(
+            f,
+            "StreamTableScan {{ table: {}, columns: [{}] }}",
+            self.logical.table_name(),
+            self.logical.column_names().join(", ")
+        )
     }
 }
 

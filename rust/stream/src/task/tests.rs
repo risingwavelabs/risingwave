@@ -78,14 +78,14 @@ async fn test_stream_proto() {
                         operator_id: 2,
                         identity: "ProjectExecutor".to_string(),
                     }),
-                    dispatcher: Some(Dispatcher {
-                        r#type: dispatcher::DispatcherType::Hash as i32,
+                    dispatcher: vec![Dispatcher {
+                        r#type: DispatcherType::Hash as i32,
                         column_indices: vec![0],
                         hash_mapping: Some(HashMapping {
                             hash_mapping: vec![3; VIRTUAL_KEY_COUNT],
                         }),
-                    }),
-                    downstream_actor_id: vec![3],
+                        downstream_actor_id: vec![3],
+                    }],
                     upstream_actor_id: vec![0],
                 },
                 // create 1 -> (3) -> 7, 11
@@ -114,16 +114,16 @@ async fn test_stream_proto() {
                         operator_id: 4,
                         identity: "ProjectExecutor".to_string(),
                     }),
-                    dispatcher: Some(Dispatcher {
-                        r#type: dispatcher::DispatcherType::Hash as i32,
+                    dispatcher: vec![Dispatcher {
+                        r#type: DispatcherType::Hash as i32,
                         column_indices: vec![0],
                         hash_mapping: {
                             let mut hash_mapping = vec![7; VIRTUAL_KEY_COUNT / 2];
                             hash_mapping.resize(VIRTUAL_KEY_COUNT, 11);
                             Some(HashMapping { hash_mapping })
                         },
-                    }),
-                    downstream_actor_id: vec![7, 11],
+                        downstream_actor_id: vec![7, 11],
+                    }],
                     upstream_actor_id: vec![1],
                 },
                 // create 3 -> (7) -> 13
@@ -152,14 +152,14 @@ async fn test_stream_proto() {
                         operator_id: 6,
                         identity: "ProjectExecutor".to_string(),
                     }),
-                    dispatcher: Some(Dispatcher {
-                        r#type: dispatcher::DispatcherType::Hash as i32,
+                    dispatcher: vec![Dispatcher {
+                        r#type: DispatcherType::Hash as i32,
                         column_indices: vec![0],
                         hash_mapping: Some(HashMapping {
                             hash_mapping: vec![13; VIRTUAL_KEY_COUNT],
                         }),
-                    }),
-                    downstream_actor_id: vec![13],
+                        downstream_actor_id: vec![13],
+                    }],
                     upstream_actor_id: vec![3],
                 },
                 // create 3 -> (11) -> 13
@@ -188,11 +188,11 @@ async fn test_stream_proto() {
                         operator_id: 8,
                         identity: "ProjectExecutor".to_string(),
                     }),
-                    dispatcher: Some(Dispatcher {
-                        r#type: dispatcher::DispatcherType::Simple as i32,
+                    dispatcher: vec![Dispatcher {
+                        r#type: DispatcherType::Simple as i32,
+                        downstream_actor_id: vec![13],
                         ..Default::default()
-                    }),
-                    downstream_actor_id: vec![13],
+                    }],
                     upstream_actor_id: vec![3],
                 },
                 // create 7, 11 -> (13) -> 233
@@ -221,11 +221,11 @@ async fn test_stream_proto() {
                         operator_id: 10,
                         identity: "ProjectExecutor".to_string(),
                     }),
-                    dispatcher: Some(Dispatcher {
-                        r#type: dispatcher::DispatcherType::Simple as i32,
+                    dispatcher: vec![Dispatcher {
+                        r#type: DispatcherType::Simple as i32,
+                        downstream_actor_id: vec![233],
                         ..Default::default()
-                    }),
-                    downstream_actor_id: vec![233],
+                    }],
                     upstream_actor_id: vec![11],
                 },
             ],

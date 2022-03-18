@@ -173,11 +173,13 @@ pub use to_prost::*;
 mod batch_delete;
 mod batch_exchange;
 mod batch_filter;
+mod batch_hash_agg;
 mod batch_hash_join;
 mod batch_insert;
 mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
+mod batch_simple_agg;
 mod batch_sort;
 mod batch_values;
 mod logical_agg;
@@ -192,19 +194,24 @@ mod logical_topn;
 mod logical_values;
 mod stream_exchange;
 mod stream_filter;
+mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_materialize;
 mod stream_project;
+mod stream_simple_agg;
 mod stream_source_scan;
 mod stream_table_scan;
 
 pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
 pub use batch_filter::BatchFilter;
+pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
+pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
@@ -219,8 +226,11 @@ pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
+pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
+pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
+pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_table_scan::StreamTableScan;
 
@@ -255,6 +265,8 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Limit }
             ,{ Logical, TopN }
             // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
+            ,{ Batch, SimpleAgg }
+            ,{ Batch, HashAgg }
             ,{ Batch, Project }
             ,{ Batch, Filter }
             ,{ Batch, Insert }
@@ -271,6 +283,9 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, SourceScan }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
+            ,{ Stream, HashAgg }
+            ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
         }
     };
 }
@@ -302,6 +317,8 @@ macro_rules! for_batch_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
+            ,{ Batch, SimpleAgg }
+            ,{ Batch, HashAgg }
             ,{ Batch, Project }
             ,{ Batch, Filter }
             ,{ Batch, SeqScan }
@@ -328,6 +345,9 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, Exchange }
             ,{ Stream, TableScan }
             ,{ Stream, SourceScan }
+            ,{ Stream, HashAgg }
+            ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
         }
     };
 }

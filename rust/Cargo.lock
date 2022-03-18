@@ -4224,6 +4224,7 @@ dependencies = [
  "lazy_static",
  "log",
  "memcomparable",
+ "moka",
  "num-traits",
  "paste",
  "prometheus 0.13.0",

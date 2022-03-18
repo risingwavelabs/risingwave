@@ -532,4 +532,10 @@ mod tests {
 "
         );
     }
+
+    #[test]
+    fn test_no_column_chunk() {
+        let chunk = DataChunk::new_dummy(10);
+        assert_eq!(chunk.rows().count(), 10);
+    }
 }

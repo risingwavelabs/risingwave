@@ -9,6 +9,7 @@ use risingwave_source::SourceManagerRef;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
+// TODO: All DDLs should be RPC requests from the meta service. Remove this.
 pub struct CreateTableExecutor {
     table_id: TableId,
     source_manager: SourceManagerRef,
