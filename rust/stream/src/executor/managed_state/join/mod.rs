@@ -22,6 +22,7 @@ use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RWResult;
 use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, DataType, Datum};
+use risingwave_common::util::ordered::{deserialize_cell, serialize_cell};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use serde::{Deserialize, Serialize};
@@ -66,13 +67,19 @@ impl JoinRow {
     }
 
     /// Serialize the `JoinRow` into a memcomparable bytes. All values must not be null.
-    pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
+    pub fn serialize(&self) -> RWResult<Vec<u8>> {
+        let mut vec = Vec::with_capacity(10);
+
+        // Serialize row.
         for v in &self.row.0 {
-            serialize_datum_into(v, &mut serializer)?;
+            vec.extend_from_slice(&serialize_cell(v)?)
         }
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+
+        // Serialize degree.
         self.degree.serialize(&mut serializer)?;
-        Ok(serializer.into_inner())
+        vec.extend_from_slice(&serializer.into_inner());
+        Ok(vec)
     }
 }
 
@@ -88,12 +95,12 @@ impl JoinRowDeserializer {
     }
 
     /// Deserialize the row from a memcomparable bytes.
-    pub fn deserialize(&self, data: &[u8]) -> Result<JoinRow, memcomparable::Error> {
+    pub fn deserialize(&self, data: &[u8]) -> RWResult<JoinRow> {
         let mut values = vec![];
         values.reserve(self.data_types.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
         for ty in &self.data_types {
-            values.push(deserialize_datum_from(ty, &mut deserializer)?);
+            values.push(deserialize_cell(data, ty)?);
         }
         let degree = u64::deserialize(&mut deserializer)?;
         Ok(JoinRow {
