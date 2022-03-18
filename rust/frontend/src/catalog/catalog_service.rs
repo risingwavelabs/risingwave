@@ -122,7 +122,7 @@ impl CatalogWriter {
     }
 
     /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
+    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
         todo!()
     }
 

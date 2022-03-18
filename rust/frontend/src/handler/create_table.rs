@@ -4,8 +4,8 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, TableSourceInfo};
+use risingwave_pb::catalog::{Table as ProstTable};
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;

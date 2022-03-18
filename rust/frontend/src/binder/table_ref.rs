@@ -3,7 +3,7 @@ use std::collections::hash_map::Entry;
 use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_pb::plan::ColumnCatalog;
+
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };

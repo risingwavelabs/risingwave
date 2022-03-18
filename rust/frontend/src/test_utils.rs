@@ -1,36 +1,33 @@
-use std::any::Any;
+
 use std::cell::RefCell;
-use std::ffi::OsString;
+
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use std::{default, mem};
+
+use std::{mem};
 
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{Result, ToRwResult};
-use risingwave_meta::cluster::StoredClusterManager;
-use risingwave_meta::manager::{
-    MemEpochGenerator, MetaSrvEnv, NotificationManager, NotificationManagerRef,
-    StoredCatalogManager,
-};
-use risingwave_meta::rpc::{CatalogServiceImpl, ClusterServiceImpl, NotificationServiceImpl};
-use risingwave_meta::storage::MemStore;
+use risingwave_common::error::{Result};
+
+
+
+
 use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
     Database as ProstDatabase, Schema as ProstSchema,
 };
-use risingwave_pb::common::worker_node::State;
+
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::meta::cluster_service_server::ClusterService;
+
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    subscribe_response, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse,
+    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse,
     AddWorkerNodeRequest, AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
     ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
 };
@@ -38,11 +35,11 @@ use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::mpsc::{
-    self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    self, Receiver, Sender, UnboundedSender,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-use tonic::Request;
+
 
 use crate::binder::Binder;
 use crate::optimizer::PlanRef;
@@ -96,7 +93,7 @@ impl LocalFrontend {
         let statements = Parser::parse_sql(&sql.into()).unwrap();
         let statement = statements.get(0).unwrap();
         if let Statement::Query(query) = statement {
-            let session = self.session_ref().clone();
+            let session = self.session_ref();
 
             let bound = {
                 let mut binder = Binder::new(
@@ -188,7 +185,7 @@ impl FrontendMockMetaClient {
 
 #[async_trait::async_trait]
 impl MetaClientInner for FrontendMockMetaClient {
-    async fn list_all_nodes(&self, req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
+    async fn list_all_nodes(&self, _req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
         Ok(ListAllNodesResponse::default())
         // Ok(self
         //     .cluster_srv
@@ -219,7 +216,7 @@ impl MetaClientInner for FrontendMockMetaClient {
 
     async fn activate_worker_node(
         &self,
-        req: ActivateWorkerNodeRequest,
+        _req: ActivateWorkerNodeRequest,
     ) -> Result<ActivateWorkerNodeResponse> {
         Ok(ActivateWorkerNodeResponse::default())
         // Ok(self
@@ -232,7 +229,7 @@ impl MetaClientInner for FrontendMockMetaClient {
 
     async fn delete_worker_node(
         &self,
-        req: DeleteWorkerNodeRequest,
+        _req: DeleteWorkerNodeRequest,
     ) -> Result<DeleteWorkerNodeResponse> {
         Ok(DeleteWorkerNodeResponse::default())
         // Ok(self
@@ -243,7 +240,7 @@ impl MetaClientInner for FrontendMockMetaClient {
         //     .into_inner())
     }
 
-    async fn subscribe(&self, req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
+    async fn subscribe(&self, _req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
         Ok(self.mock_catalog.lock().await.subscribe().await)
     }
 
