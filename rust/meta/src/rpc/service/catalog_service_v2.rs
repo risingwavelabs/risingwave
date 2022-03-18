@@ -1,12 +1,13 @@
 #![allow(dead_code)]
 use futures::future::try_join_all;
-use risingwave_common::catalog::{CatalogVersion, TableId};
+use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::plan::TableRefId;
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
@@ -16,7 +17,7 @@ use tonic::{Request, Response, Status};
 use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{
     CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SourceId, StreamClient,
-    StreamClientsRef,
+    StreamClientsRef, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -136,43 +137,18 @@ where
         &self,
         request: Request<CreateMaterializedViewRequest>,
     ) -> Result<Response<CreateMaterializedViewResponse>, Status> {
-        use crate::stream::CreateMaterializedViewContext;
         let req = request.into_inner();
-        let id = self
-            .id_gen_manager
-            .generate::<{ IdCategory::Table }>()
-            .await
-            .map_err(tonic_err)? as u32;
+        let mview = req.get_materialized_view().map_err(tonic_err)?.clone();
+        let stream_node = req.get_stream_node().map_err(tonic_err)?.clone();
 
-        // 1. create mv in stream manager
-        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
-        let mut fragmenter = StreamFragmenter::new(
-            self.id_gen_manager.clone(),
-            self.fragment_manager.clone(),
-            hash_mapping,
-        );
-        let graph = fragmenter
-            .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
-            .await
-            .map_err(tonic_err)?;
-        let table_fragments = TableFragments::new(TableId::new(id), graph);
-        self.stream_manager
-            .create_materialized_view(table_fragments, ctx)
+        let (mview_id, version) = self
+            .create_materialized_view_inner(mview, stream_node)
             .await
             .map_err(tonic_err)?;
 
-        // 2. append the mv into the catalog
-        let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
-        mview.id = id as u32;
-        let version = self
-            .catalog_manager
-            .create_table(&mview)
-            .await
-            .map_err(tonic_err)?;
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
-            table_id: id,
+            table_id: mview_id,
             version,
         }))
     }
@@ -235,6 +211,7 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
+        use risingwave_common::catalog::TableId;
         let req = request.into_inner();
         let mview_id = req.get_table_id();
         // 1. drop table in catalog
@@ -330,5 +307,63 @@ where
         let _responses: Vec<_> = try_join_all(futures).await?;
 
         Ok(version)
+    }
+
+    async fn create_materialized_view_inner(
+        &self,
+        mut mview: Table,
+        stream_node: StreamNode,
+    ) -> RwResult<(TableId, CatalogVersion)> {
+        let id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Table }>()
+            .await? as u32;
+
+        // 1. Mark current mview as "creating" and add reference count to dependent tables
+        self.catalog_manager
+            .start_create_table_process(&mview)
+            .await?;
+
+        // 2. create mview in stream manager
+        match self.create_mview_in_stream_manager(&stream_node, id).await {
+            Ok(_) => {
+                // Insert mview into the catalog only if step 2 succeeded.
+                mview.id = id;
+                let version = self
+                    .catalog_manager
+                    .finish_create_table_process(&mview)
+                    .await?;
+                Ok((id, version))
+            }
+            Err(e) => {
+                self.catalog_manager
+                    .cancel_create_table_process(&mview)
+                    .await?;
+                Err(e)
+            }
+        }
+    }
+
+    async fn create_mview_in_stream_manager(
+        &self,
+        stream_node: &StreamNode,
+        id: TableId,
+    ) -> RwResult<()> {
+        use risingwave_common::catalog::TableId;
+
+        use crate::stream::CreateMaterializedViewContext;
+        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
+        let mut ctx = CreateMaterializedViewContext::default();
+        let mut fragmenter = StreamFragmenter::new(
+            self.id_gen_manager.clone(),
+            self.fragment_manager.clone(),
+            hash_mapping,
+        );
+        let graph = fragmenter.generate_graph(stream_node, &mut ctx).await?;
+        let table_fragments = TableFragments::new(TableId::new(id), graph);
+        self.stream_manager
+            .create_materialized_view(table_fragments, ctx)
+            .await?;
+        Ok(())
     }
 }
