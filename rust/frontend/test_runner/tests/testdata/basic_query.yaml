@@ -30,13 +30,13 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0], expr_alias: [Some("_row_id")] }
-        BatchFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
+        BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
           BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
     StreamMaterialize { table_id: 0 }
       StreamProject { exprs: [$0], expr_alias: [Some("_row_id")] }
         StreamExchange { order: Order { field_order: [] }, dist: Single }
-          StreamFilter { predicate: Condition { conjunctions: [(((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32)))] } }
+          StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
             StreamTableScan { table: t, columns: [_row_id] }
 - sql: |
     create table t (v1 int);
@@ -44,13 +44,13 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
-        BatchFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
+        BatchFilter { predicate: ($1 < 1:Int32) }
           BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
     StreamMaterialize { table_id: 0 }
       StreamProject { exprs: [$0, $1], expr_alias: [Some("_row_id"), Some("v1")] }
         StreamExchange { order: Order { field_order: [] }, dist: Single }
-          StreamFilter { predicate: Condition { conjunctions: [($1 < 1:Int32)] } }
+          StreamFilter { predicate: ($1 < 1:Int32) }
             StreamTableScan { table: t, columns: [_row_id, v1] }
 - sql: |
     create table t (v1 int, v2 int);
@@ -65,7 +65,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchDelete { table_name: "t" }
-        BatchFilter { predicate: Condition { conjunctions: [($1 = 1:Int32)] } }
+        BatchFilter { predicate: ($1 = 1:Int32) }
           BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 int, v2 int);

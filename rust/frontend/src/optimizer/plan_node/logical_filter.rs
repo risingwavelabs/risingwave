@@ -65,9 +65,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 impl_plan_tree_node_for_unary! {LogicalFilter}
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalFilter")
-            .field("predicate", &self.predicate)
-            .finish()
+        write!(f, "LogicalFilter {{ predicate: {} }}", self.predicate)
     }
 }
 
