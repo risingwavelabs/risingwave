@@ -1,8 +1,3 @@
-// TODO: remove this after remote channel is actually used.
-#![allow(dead_code)]
-
-use std::net::SocketAddr;
-
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
@@ -23,30 +18,20 @@ use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
-    client: ComputeClient,
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
-
-    /// Address of the remote endpoint.
-    addr: SocketAddr,
-    up_down_ids: UpDownActorIds,
 }
 
 impl RemoteInput {
+    /// Create a remote input from compute client and related info. Should provide the corresponding
+    /// compute client of where the actor is placed.
     pub async fn create(
-        addr: SocketAddr,
+        client: ComputeClient,
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let client = ComputeClient::new(&addr).await?;
         let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
-        Ok(Self {
-            client,
-            stream,
-            sender,
-            addr,
-            up_down_ids,
-        })
+        Ok(Self { stream, sender })
     }
 
     pub async fn run(&mut self) {
@@ -472,7 +457,10 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
-            let mut remote_input = RemoteInput::create(addr, (0, 0), tx).await.unwrap();
+            let mut remote_input =
+                RemoteInput::create(ComputeClient::new(&addr).await.unwrap(), (0, 0), tx)
+                    .await
+                    .unwrap();
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
