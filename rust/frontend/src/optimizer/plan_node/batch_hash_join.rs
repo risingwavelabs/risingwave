@@ -49,7 +49,12 @@ impl BatchHashJoin {
 
 impl fmt::Display for BatchHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BatchHashJoin(predicate: {})", self.eq_join_predicate())
+        write!(
+            f,
+            "BatchHashJoin {{ type: {:?}, predicate: {} }}",
+            self.logical.join_type(),
+            self.eq_join_predicate()
+        )
     }
 }
 

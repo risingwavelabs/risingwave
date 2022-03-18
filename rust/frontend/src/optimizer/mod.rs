@@ -13,8 +13,9 @@ use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::LogicalProject;
+use self::plan_node::{LogicalProject, StreamMaterialize};
 use self::rule::*;
+use crate::catalog::TableId;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -136,7 +137,9 @@ impl PlanRoot {
         // Convert to physical plan node
         plan = plan.to_stream_with_dist_required(&self.required_dist);
 
-        // FIXME: add `Materialize` operator on the top of plan
+        // TODO: get the correct table id
+        plan = StreamMaterialize::new(self.logical_plan.ctx(), plan, TableId::new(0)).into();
+
         // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
         // result.
         // TODO: do a final column pruning after add the streaming project, but now

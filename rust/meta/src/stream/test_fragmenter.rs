@@ -11,12 +11,11 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
 use risingwave_pb::plan::{ColumnOrder, DatabaseRefId, Field, OrderType, SchemaRefId, TableRefId};
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    Dispatcher, ExchangeNode, FilterNode, MaterializeNode, ProjectNode, SimpleAggNode, SourceNode,
-    StreamNode,
+    DispatchStrategy, DispatcherType, ExchangeNode, FilterNode, MaterializeNode, ProjectNode,
+    SimpleAggNode, SourceNode, StreamNode,
 };
 
 use crate::manager::MetaSrvEnv;
@@ -118,10 +117,9 @@ fn make_stream_node() -> StreamNode {
     // exchange node
     let exchange_node = StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
-            dispatcher: Some(Dispatcher {
+            strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
-                hash_mapping: None,
             }),
             fields: vec![
                 make_field(TypeName::Int32),
@@ -170,7 +168,7 @@ fn make_stream_node() -> StreamNode {
     // exchange node
     let exchange_node_1 = StreamNode {
         node: Some(Node::ExchangeNode(ExchangeNode {
-            dispatcher: Some(Dispatcher {
+            strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
             }),
@@ -277,7 +275,7 @@ async fn test_fragmenter() -> Result<()> {
     for actor in actors {
         assert_eq!(
             expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor.get_downstream_actor_id(),
+            actor.dispatcher[0].get_downstream_actor_id(),
         );
         let mut node = actor.get_nodes().unwrap();
         while !node.get_input().is_empty() {

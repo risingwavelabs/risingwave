@@ -13,10 +13,7 @@ use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler<S>
-where
-    S: MetaStore,
-{
+pub struct Scheduler<S> {
     cluster_manager: Arc<StoredClusterManager<S>>,
     /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
@@ -197,8 +194,7 @@ mod test {
                         actor_id,
                         fragment_id: id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     }],
                 };
@@ -214,8 +210,7 @@ mod test {
                         actor_id: id,
                         fragment_id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     })
                     .collect_vec();

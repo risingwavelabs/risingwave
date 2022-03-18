@@ -93,11 +93,12 @@ mod tests {
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::expr::{InputRefExpression, LiteralExpression};
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
+    use crate::executor::values::ValuesExecutor;
     use crate::*;
 
     #[tokio::test]
@@ -109,12 +110,7 @@ mod tests {
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
-        let schema = Schema {
-            fields: vec![
-                Field::unnamed(DataType::Int32),
-                Field::unnamed(DataType::Int32),
-            ],
-        };
+        let schema = schema_unamed! { DataType::Int32, DataType::Int32 };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(chunk);
 
@@ -149,5 +145,30 @@ mod tests {
 
         proj_executor.close().await.unwrap();
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_project_dummy_chunk() {
+        let literal = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
+
+        let values_executor = ValuesExecutor::new(
+            vec![vec![]], // One single row with no column.
+            Schema::default(),
+            "ValuesExecutor".to_string(),
+        );
+
+        let mut proj_executor = ProjectionExecutor {
+            expr: vec![Box::new(literal)],
+            child: Box::new(values_executor),
+            schema: schema_unamed!(DataType::Int32),
+            identity: "ProjectionExecutor".to_string(),
+        };
+
+        proj_executor.open().await.unwrap();
+        let chunk = proj_executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            *chunk.column_at(0).array(),
+            array_nonnull!(I32Array, [1]).into()
+        );
     }
 }
