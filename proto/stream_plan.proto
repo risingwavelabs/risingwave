@@ -142,10 +142,8 @@ message DispatchStrategy {
 message Dispatcher {
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
-
   // The hash mapping for consistent hashing.
   common.HashMapping hash_mapping = 3;
-
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
@@ -156,7 +154,6 @@ message StreamActor {
   uint32 fragment_id = 2;
   StreamNode nodes = 3;
   repeated Dispatcher dispatcher = 4;
-
   // The actors that send messages to this actor.
   // Note that upstream actor ids are also stored in the proto of merge nodes.
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
