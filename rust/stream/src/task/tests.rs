@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
 use futures::{SinkExt, StreamExt};
-use risingwave_pb::common::{ActorInfo, HostAddress};
+use risingwave_common::hash::VIRTUAL_KEY_COUNT;
+use risingwave_pb::common::{ActorInfo, HashMapping, HostAddress};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan::Field;
@@ -80,7 +81,9 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
-                        hash_mapping: None,
+                        hash_mapping: Some(HashMapping {
+                            hash_mapping: vec![3; VIRTUAL_KEY_COUNT],
+                        }),
                     }),
                     downstream_actor_id: vec![3],
                     upstream_actor_id: vec![0],
@@ -114,7 +117,11 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
-                        hash_mapping: None,
+                        hash_mapping: {
+                            let mut hash_mapping = vec![7; VIRTUAL_KEY_COUNT / 2];
+                            hash_mapping.resize(VIRTUAL_KEY_COUNT, 11);
+                            Some(HashMapping { hash_mapping })
+                        },
                     }),
                     downstream_actor_id: vec![7, 11],
                     upstream_actor_id: vec![1],
@@ -148,7 +155,9 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
-                        hash_mapping: None,
+                        hash_mapping: Some(HashMapping {
+                            hash_mapping: vec![13; VIRTUAL_KEY_COUNT],
+                        }),
                     }),
                     downstream_actor_id: vec![13],
                     upstream_actor_id: vec![3],
