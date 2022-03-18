@@ -45,6 +45,7 @@ pub enum Command {
     /// it adds the table fragments info to meta store.
     CreateMaterializedView {
         table_fragments: TableFragments,
+        table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatches: HashMap<ActorId, Vec<ActorInfo>>,
     },
 }
@@ -73,7 +74,10 @@ pub struct CommandContext<'a, S> {
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    info: &'a BarrierActorInfo,
+    pub info: &'a BarrierActorInfo,
+
+    pub prev_epoch: u64,
+    pub curr_epoch: u64,
 
     command: Command,
 }
@@ -83,12 +87,16 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
+        prev_epoch: u64,
+        curr_epoch: u64,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             clients,
             info,
+            prev_epoch,
+            curr_epoch,
             command,
         }
     }
@@ -166,13 +174,35 @@ where
             }
 
             Command::CreateMaterializedView {
-                table_fragments, ..
+                table_fragments,
+                dispatches,
+                table_sink_map,
             } => {
+                // TODO: all related updates should be done in one transaction.
                 let mut table_fragments = table_fragments.clone();
                 table_fragments.update_actors_state(ActorState::Running);
                 self.fragment_manager
                     .update_table_fragments(table_fragments)
                     .await?;
+
+                for (table_id, actors) in table_sink_map {
+                    let downstream_actors = dispatches
+                        .iter()
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(upstream_actor_id, downstream_actor_infos)| {
+                            (
+                                *upstream_actor_id,
+                                downstream_actor_infos
+                                    .iter()
+                                    .map(|info| info.actor_id)
+                                    .collect(),
+                            )
+                        })
+                        .collect::<HashMap<ActorId, Vec<ActorId>>>();
+                    self.fragment_manager
+                        .update_table_fragments_downstream(table_id, &downstream_actors)
+                        .await?;
+                }
             }
         }
 

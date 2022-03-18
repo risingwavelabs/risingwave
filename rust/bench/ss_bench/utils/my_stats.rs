@@ -7,18 +7,21 @@ use risingwave_storage::monitor::StateStoreMetrics;
 
 #[derive(Clone, Default)]
 pub(crate) struct MyStateStoreStats {
-    pub(crate) batch_write_latency: MyHistogram,
-    pub(crate) batch_write_size: MyHistogram,
+    pub(crate) write_batch_shared_buffer_time: MyHistogram,
+    pub(crate) write_batch_size: MyHistogram,
 }
 
 impl MyStateStoreStats {
     pub(crate) fn from_prom_stats(stats: &StateStoreMetrics) -> Self {
         Self {
-            batch_write_latency: MyHistogram::from_prom_hist(
-                stats.batch_write_latency.metric().get_histogram(),
+            write_batch_shared_buffer_time: MyHistogram::from_prom_hist(
+                stats
+                    .write_batch_shared_buffer_time
+                    .metric()
+                    .get_histogram(),
             ),
-            batch_write_size: MyHistogram::from_prom_hist(
-                stats.batch_write_size.metric().get_histogram(),
+            write_batch_size: MyHistogram::from_prom_hist(
+                stats.write_batch_size.metric().get_histogram(),
             ),
         }
     }

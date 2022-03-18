@@ -8,14 +8,17 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
-use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary,
+    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+};
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
     pub agg_kind: AggKind,
@@ -25,6 +28,16 @@ pub struct PlanAggCall {
 
     /// Column indexes of input columns
     pub inputs: Vec<usize>,
+}
+
+impl fmt::Debug for PlanAggCall {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+        self.inputs.iter().for_each(|child| {
+            builder.field(child);
+        });
+        builder.finish()
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
@@ -174,7 +187,6 @@ impl LogicalAgg {
     /// ```text
     /// LogicalProject -> LogicalAgg -> LogicalProject -> input
     /// ```
-    #[allow(unused_variables)]
     pub fn create(
         select_exprs: Vec<ExprImpl>,
         select_alias: Vec<Option<String>>,
@@ -247,11 +259,12 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
+
 impl fmt::Display for LogicalAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("LogicalAgg")
+            .field("group_keys", &self.group_keys)
             .field("agg_calls", &self.agg_calls)
-            .field("agg_call_alias", &self.agg_call_alias)
             .finish()
     }
 }
@@ -314,13 +327,25 @@ impl ColPrunable for LogicalAgg {
 
 impl ToBatch for LogicalAgg {
     fn to_batch(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_batch();
+        let new_logical = self.clone_with_input(new_input);
+        if self.group_keys().is_empty() {
+            BatchSimpleAgg::new(new_logical).into()
+        } else {
+            BatchHashAgg::new(new_logical).into()
+        }
     }
 }
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        let new_input = self.input().to_stream();
+        let new_logical = self.clone_with_input(new_input);
+        if self.group_keys().is_empty() {
+            StreamSimpleAgg::new(new_logical).into()
+        } else {
+            StreamHashAgg::new(new_logical).into()
+        }
     }
 }
 

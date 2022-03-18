@@ -147,9 +147,14 @@ message TableFragments {
       SINK = 1;
       OTHERS = 2;
     }
+    enum FragmentDistributionType {
+      SINGLE = 0;
+      HASH = 1;
+    }
     uint32 fragment_id = 1;
     FragmentType fragment_type = 2;
-    repeated stream_plan.StreamActor actors = 3;
+    FragmentDistributionType distribution_type = 3;
+    repeated stream_plan.StreamActor actors = 4;
   }
   plan.TableRefId table_ref_id = 1;
   map<uint32, Fragment> fragments = 2;

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
+use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
 use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
@@ -12,10 +13,7 @@ use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler<S>
-where
-    S: MetaStore,
-{
+pub struct Scheduler<S> {
     cluster_manager: Arc<StoredClusterManager<S>>,
     /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
@@ -109,7 +107,7 @@ where
             return Err(InternalError("fragment has no actor".to_string()).into());
         }
 
-        if fragment.actors.len() == 1 {
+        if fragment.distribution_type == FragmentDistributionType::Single as i32 {
             // singleton fragment
             let single_parallel_units = self
                 .cluster_manager
@@ -150,6 +148,7 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_pb::common::{HostAddress, WorkerType};
+    use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
     use risingwave_pb::stream_plan::StreamActor;
 
     use super::*;
@@ -190,6 +189,7 @@ mod test {
                 let fragment = Fragment {
                     fragment_id: id,
                     fragment_type: 0,
+                    distribution_type: FragmentDistributionType::Single as i32,
                     actors: vec![StreamActor {
                         actor_id,
                         fragment_id: id,
@@ -220,6 +220,7 @@ mod test {
                 Fragment {
                     fragment_id,
                     fragment_type: 0,
+                    distribution_type: FragmentDistributionType::Hash as i32,
                     actors,
                 }
             })

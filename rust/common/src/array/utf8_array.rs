@@ -42,7 +42,7 @@ impl Array for Utf8Array {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let offset_buffer = self
             .offset
             .iter()
@@ -76,13 +76,13 @@ impl Array for Utf8Array {
                 body: data_buffer,
             },
         ];
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Utf8 as i32,
             struct_array_data: None,
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -343,9 +343,7 @@ mod tests {
 
         assert!(result_array.is_ok());
         let array = result_array.unwrap();
-        let result_buffers = array.to_protobuf();
-        assert!(result_buffers.is_ok());
-        let buffers = result_buffers.unwrap().values;
+        let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
 

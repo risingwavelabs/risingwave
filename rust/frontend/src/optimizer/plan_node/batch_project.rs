@@ -1,12 +1,14 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ProjectNode;
 
 use super::{
     BatchBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
+use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -63,11 +65,14 @@ impl ToDistributedBatch for BatchProject {
     }
 }
 
-// TODO: fill ProjectNode
 impl ToBatchProst for BatchProject {
     fn to_batch_prost_body(&self) -> NodeBody {
-        NodeBody::Project(ProjectNode {
-            select_list: vec![],
-        })
+        let select_list = self
+            .logical
+            .exprs()
+            .iter()
+            .map(Expr::to_protobuf)
+            .collect::<Vec<ExprNode>>();
+        NodeBody::Project(ProjectNode { select_list })
     }
 }

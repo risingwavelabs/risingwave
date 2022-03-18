@@ -8,6 +8,8 @@ use tracing_futures::Instrument;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, Message};
+use crate::task::ActorId;
+
 /// `TraceExecutor` prints data passing in the stream graph to stdout.
 ///
 /// The position of `TraceExecutor` in graph:
@@ -24,7 +26,7 @@ pub struct TraceExecutor {
     input_pos: usize,
     /// Actor id
     #[allow(dead_code)]
-    actor_id: u32,
+    actor_id: ActorId,
     actor_id_string: String,
 
     // monitor
@@ -46,7 +48,7 @@ impl TraceExecutor {
         input: Box<dyn Executor>,
         input_desc: String,
         input_pos: usize,
-        actor_id: u32,
+        actor_id: ActorId,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
         let span_name = format!("{input_desc}_{input_pos}_next");

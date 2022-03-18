@@ -1,13 +1,21 @@
+#![allow(dead_code)]
+
+use std::sync::Arc;
+
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::SstableMeta;
 
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::key::key_with_epoch;
+use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
 };
+use crate::monitor::StateStoreMetrics;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
@@ -17,7 +25,23 @@ pub fn default_config_for_test() -> StorageConfig {
         data_directory: "hummock_001".to_string(),
         checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         async_checkpoint_enabled: true,
+        write_conflict_detection_enabled: true,
     }
+}
+
+pub async fn mock_hummock_storage() -> HummockStorage {
+    let sstable_store = mock_sstable_store();
+    HummockStorage::with_default_stats(
+        Arc::new(StorageConfig::default()),
+        sstable_store.clone(),
+        Arc::new(LocalVersionManager::new(sstable_store.clone())),
+        Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        ))),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+    .await
+    .unwrap()
 }
 
 /// Number of keys in table generated in `generate_table`.

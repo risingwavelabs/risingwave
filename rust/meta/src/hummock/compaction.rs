@@ -5,7 +5,7 @@ use itertools::{EitherOrBoth, Itertools};
 use prost::Message;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, SstableInfo, TableSetStatistics,
+    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, TableSetStatistics,
 };
 use risingwave_storage::hummock::key::{user_key, FullKey};
 use risingwave_storage::hummock::key_range::KeyRange;
@@ -104,6 +104,7 @@ impl CompactStatus {
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let target_level = select_level + 1;
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(l_n, compacting_key_ranges)
             | LevelHandler::Nonoverlapping(l_n, compacting_key_ranges) => {
@@ -119,6 +120,8 @@ impl CompactStatus {
                     let mut select_level_inputs = vec![*table_id];
                     let key_range;
                     let mut tier_key_range;
+                    // Must ensure that there exists no SSTs in `select_level` which have
+                    // overlapping user key with `select_level_inputs`
                     if !is_select_level_leveling {
                         tier_key_range = sst_key_range.clone();
 
@@ -162,6 +165,8 @@ impl CompactStatus {
                             compacting_key_ranges.partition_point(|(ongoing_key_range, _, _)| {
                                 user_key(&ongoing_key_range.right) < user_key(&key_range.left)
                             });
+                        // if following condition is not satisfied, it may result in two overlapping
+                        // SSTs in target level
                         if insert_point >= compacting_key_ranges.len()
                             || user_key(&compacting_key_ranges[insert_point].0.left)
                                 > user_key(&key_range.right)
@@ -188,6 +193,7 @@ impl CompactStatus {
                                         overlap_end += 1;
                                     }
                                     if overlap_all_idle {
+                                        // Here, we have known that `select_level_input` is valid
                                         compacting_key_ranges.insert(
                                             insert_point,
                                             (
@@ -339,7 +345,7 @@ impl CompactStatus {
         }
     }
 
-    /// Return Some(Vec<table info to add>, Vec<table id to delete>) if succeeds.
+    /// Return Some(Vec<table id to delete>) if succeeds.
     /// Return None if the task has been processed previously.
     #[allow(clippy::needless_collect)]
     pub fn report_compact_task(
@@ -347,7 +353,7 @@ impl CompactStatus {
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
         task_result: bool,
-    ) -> Option<(Vec<SstableInfo>, Vec<HummockSSTableId>)> {
+    ) -> Option<Vec<HummockSSTableId>> {
         let mut delete_table_ids = vec![];
         match task_result {
             true => {
@@ -379,7 +385,7 @@ impl CompactStatus {
                     }
                 }
                 // The task is finished successfully.
-                Some((compact_task.sorted_output_ssts, delete_table_ids))
+                Some(delete_table_ids)
             }
             false => {
                 if !self.cancel_compact_task(compact_task.task_id) {
@@ -387,7 +393,7 @@ impl CompactStatus {
                     return None;
                 }
                 // The task is cancelled successfully.
-                Some((vec![], vec![]))
+                Some(vec![])
             }
         }
     }

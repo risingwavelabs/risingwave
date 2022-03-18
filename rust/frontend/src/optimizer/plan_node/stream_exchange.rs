@@ -6,6 +6,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::optimizer::property::order::WithOrder;
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
@@ -35,8 +36,11 @@ impl StreamExchange {
 }
 
 impl fmt::Display for StreamExchange {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("StreamExchange")
+            .field("order", self.order())
+            .field("dist", self.distribution())
+            .finish()
     }
 }
 
@@ -59,7 +63,7 @@ impl WithSchema for StreamExchange {
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
-            fields: self.schema.to_prost().unwrap(),
+            fields: self.schema.to_prost(),
             dispatcher: Some(Dispatcher {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
@@ -71,6 +75,8 @@ impl ToStreamProst for StreamExchange {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
+                // Frontend does not have the info of hash mapping, which is set by meta.
+                hash_mapping: None,
             }),
         })
     }

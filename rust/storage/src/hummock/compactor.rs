@@ -4,11 +4,12 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse,
-    TableSetStatistics, VacuumTask,
+    TableSetStatistics,
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
@@ -146,6 +147,7 @@ impl Compactor {
             sub_result?
         }
 
+        // `sorted_output_ssts` must be sorted by key range
         sub_compact_outputsets.sort_by_key(|(sub_kr_idx, _)| *sub_kr_idx);
         for (_, sub_output) in sub_compact_outputsets {
             for table in &sub_output {
@@ -224,6 +226,8 @@ impl Compactor {
 
             let epoch = get_epoch(iter_key);
 
+            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
+            // and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
@@ -232,6 +236,7 @@ impl Compactor {
                 }
             }
 
+            // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(FullKey::from_slice(iter_key), iter.value(), is_new_user_key)
                 .await?;
@@ -258,8 +263,18 @@ impl Compactor {
         });
 
         let has_user_key_overlap = !is_target_ultimate_and_leveling;
+
+        // Monitor time cost building shared buffer to SSTs.
+        let build_l0_sst_timer = if context.is_share_buffer_compact {
+            Some(context.stats.write_build_l0_sst_time.start_timer())
+        } else {
+            None
+        };
         Compactor::compact_and_build_sst(&mut builder, kr, iter, has_user_key_overlap, watermark)
             .await?;
+        if let Some(timer) = build_l0_sst_timer {
+            timer.observe_duration();
+        }
 
         // Seal table for each split
         builder.seal_current();
@@ -268,10 +283,17 @@ impl Compactor {
         // TODO: decide upload concurrency
         for (table_id, data, meta) in builder.finish() {
             let sst = Sstable { id: table_id, meta };
-            context
+            let len = context
                 .sstable_store
                 .put(&sst, data, super::CachePolicy::Fill)
                 .await?;
+
+            if context.is_share_buffer_compact {
+                context
+                    .stats
+                    .write_shared_buffer_sync_size
+                    .observe(len as _);
+            }
 
             output_ssts.push(sst);
         }
@@ -285,12 +307,6 @@ impl Compactor {
     ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
         if result.is_err() {
-            for _sst_to_delete in &compact_task.sorted_output_ssts {
-                // TODO: delete these tables in (S3) storage
-                // However, if we request a table_id from hummock storage service every time we
-                // generate a table, we would not delete here, or we should notify
-                // hummock storage service to delete them.
-            }
             compact_task.sorted_output_ssts.clear();
         }
 
@@ -321,7 +337,7 @@ impl Compactor {
         let sub_compact_context = SubCompactContext {
             options,
             local_version_manager,
-            hummock_meta_client,
+            hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,
             is_share_buffer_compact: false,
@@ -337,7 +353,7 @@ impl Compactor {
                     _ = min_interval.tick() => {},
                     // Shutdown compactor
                     _ = shutdown_rx.recv() => {
-                        tracing::info!("compactor is shutting down");
+                        tracing::info!("Compactor is shutting down");
                         return;
                     }
                 }
@@ -349,7 +365,7 @@ impl Compactor {
                 {
                     Ok(stream) => stream,
                     Err(e) => {
-                        tracing::warn!("failed to subscribe_compact_tasks. {}", RwError::from(e));
+                        tracing::warn!("Failed to subscribe_compact_tasks. {}", RwError::from(e));
                         continue 'start_stream;
                     }
                 };
@@ -362,7 +378,7 @@ impl Compactor {
                         },
                         // Shutdown compactor
                         _ = shutdown_rx.recv() => {
-                            tracing::info!("compactor is shutting down");
+                            tracing::info!("Compactor is shutting down");
                             return
                         }
                     };
@@ -373,20 +389,35 @@ impl Compactor {
                             vacuum_task,
                         })) => {
                             if let Some(compact_task) = compact_task {
+                                let input_ssts = compact_task
+                                    .input_ssts
+                                    .iter()
+                                    .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                                    .collect_vec();
+                                tracing::debug!("Try to compact SSTs {:?}", input_ssts);
                                 if let Err(e) =
                                     Compactor::compact(&sub_compact_context, compact_task).await
                                 {
-                                    tracing::warn!("failed to compact. {}", RwError::from(e));
+                                    tracing::warn!("Failed to compact SSTs. {}", RwError::from(e));
                                 }
+                                tracing::debug!("Finish compacting SSTs");
                             }
-                            if let Some(VacuumTask { task: Some(task) }) = vacuum_task {
-                                if let Err(e) = Vacuum::vacuum(sstable_store.clone(), task).await {
-                                    tracing::warn!("failed to vacuum. {}", e);
+                            if let Some(vacuum_task) = vacuum_task {
+                                tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+                                if let Err(e) = Vacuum::vacuum(
+                                    sstable_store.clone(),
+                                    vacuum_task,
+                                    hummock_meta_client.clone(),
+                                )
+                                .await
+                                {
+                                    tracing::warn!("Failed to vacuum SSTs. {}", e);
                                 }
+                                tracing::debug!("Finish vacuuming SSTs");
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("failed to consume stream. {}", e.message());
+                            tracing::warn!("Failed to consume stream. {}", e.message());
                             continue 'start_stream;
                         }
                         _ => {

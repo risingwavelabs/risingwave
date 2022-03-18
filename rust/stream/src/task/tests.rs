@@ -13,7 +13,7 @@ use super::*;
 use crate::executor::{Barrier, Epoch, Message, Mutation};
 use crate::task::env::StreamEnvironment;
 
-fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
     ActorInfo {
         actor_id,
         host: Some(HostAddress {
@@ -80,6 +80,7 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
+                        hash_mapping: None,
                     }),
                     downstream_actor_id: vec![3],
                     upstream_actor_id: vec![0],
@@ -113,6 +114,7 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
+                        hash_mapping: None,
                     }),
                     downstream_actor_id: vec![7, 11],
                     upstream_actor_id: vec![1],
@@ -146,6 +148,7 @@ async fn test_stream_proto() {
                     dispatcher: Some(Dispatcher {
                         r#type: dispatcher::DispatcherType::Hash as i32,
                         column_indices: vec![0],
+                        hash_mapping: None,
                     }),
                     downstream_actor_id: vec![13],
                     upstream_actor_id: vec![3],

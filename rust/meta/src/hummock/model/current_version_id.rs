@@ -1,5 +1,5 @@
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
+use risingwave_pb::hummock::HummockVersionRefId;
 use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
@@ -10,6 +10,7 @@ use crate::storage::MetaStore;
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
 const HUMMOCK_VERSION_ID_KEY: &str = "current_version_id";
 
+/// `CurrentHummockVersionId` tracks the current version id.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentHummockVersionId {
     id: HummockVersionId,

@@ -16,6 +16,9 @@ use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+/// Buffer size of the receiver of the remote channel.
+const EXCHANGE_BUFFER_SIZE: usize = 1024;
+
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
@@ -29,7 +32,7 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = ExchangeDataStream;
     type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -89,13 +92,13 @@ impl ExchangeServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data_impl(
         &self,
         peer_addr: SocketAddr,
         pb_tsid: ProtoTaskOutputId,
     ) -> Result<Response<<Self as ExchangeService>::GetDataStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
         let tsid = TaskOutputId::try_from(&pb_tsid)?;
         debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
@@ -123,7 +126,7 @@ impl ExchangeServiceImpl {
         peer_addr: SocketAddr,
         mut receiver: Receiver<Message>,
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
-        let (tx, rx) = tokio::sync::mpsc::channel(10);
+        let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         debug!("Serve stream exchange RPC from {}", peer_addr);
         tokio::spawn(async move {
             loop {

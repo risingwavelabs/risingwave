@@ -29,25 +29,35 @@ mod info;
 
 #[derive(Debug, Default)]
 struct Notifier {
-    /// Get notified when scheduled barrier is about to send.
-    to_send: Option<oneshot::Sender<()>>,
+    /// Get notified when scheduled barrier is about to send or failed.
+    to_send: Option<oneshot::Sender<Result<()>>>,
 
-    /// Get notified when scheduled barrier is collected / finished.
-    collected: Option<oneshot::Sender<()>>,
+    /// Get notified when scheduled barrier is collected(finished) or failed.
+    collected: Option<oneshot::Sender<Result<()>>>,
 }
 
 impl Notifier {
     /// Notify when we are about to send a barrier.
     fn notify_to_send(&mut self) {
         if let Some(tx) = self.to_send.take() {
-            tx.send(()).ok();
+            tx.send(Ok(())).ok();
         }
     }
 
     /// Notify when we have collected a barrier from all actors.
     fn notify_collected(&mut self) {
         if let Some(tx) = self.collected.take() {
-            tx.send(()).ok();
+            tx.send(Ok(())).ok();
+        }
+    }
+
+    /// Notify when we failed to send a barrier or collected a barrier.
+    fn notify_failed(&mut self, err: RwError) {
+        if let Some(tx) = self.to_send.take() {
+            tx.send(Err(err.clone())).ok();
+        }
+        if let Some(tx) = self.collected.take() {
+            tx.send(Err(err)).ok();
         }
     }
 }
@@ -127,10 +137,7 @@ impl ScheduledBarriers {
 /// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
-pub struct BarrierManager<S>
-where
-    S: MetaStore,
-{
+pub struct BarrierManager<S> {
     cluster_manager: StoredClusterManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
@@ -198,87 +205,108 @@ where
                     .await;
                 let all_actor_infos = self
                     .fragment_manager
-                    .load_all_actors(command.creating_table_id())?;
+                    .load_all_actors(command.creating_table_id());
                 BarrierActorInfo::resolve(all_nodes, all_actor_infos)
             };
 
+            let new_epoch = self.epoch_generator.generate().into_inner();
             let command_context = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.clients.clone(),
                 &info,
+                prev_epoch,
+                new_epoch,
                 command,
             );
 
-            let mutation = command_context.to_mutation()?;
-
-            let new_epoch = self.epoch_generator.generate()?.into_inner();
-
-            let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
-                let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
-                let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
-
-                if actor_ids_to_collect.is_empty() {
-                    // No need to send or collect barrier for this node.
-                    assert!(actor_ids_to_send.is_empty());
-                    None
-                } else {
-                    let mutation = mutation.clone();
-                    let request_id = Uuid::new_v4().to_string();
-                    let barrier = Barrier {
-                        epoch: Some(risingwave_pb::data::Epoch {
-                            curr: new_epoch,
-                            prev: prev_epoch,
-                        }),
-                        mutation: Some(mutation),
-                        // TODO(chi): add distributed tracing
-                        span: vec![],
-                    };
-
-                    async move {
-                        let mut client = self.clients.get(node).await?;
-
-                        let request = InjectBarrierRequest {
-                            request_id,
-                            barrier: Some(barrier),
-                            actor_ids_to_send,
-                            actor_ids_to_collect,
-                        };
-                        tracing::trace!(
-                            target: "events::meta::barrier::inject_barrier",
-                            "inject barrier request: {:#?}", request
-                        );
-
-                        // This RPC returns only if this worker node has collected this barrier.
-                        client.inject_barrier(request).await.to_rw_result()?;
-
-                        Ok::<_, RwError>(())
-                    }
-                    .into()
-                }
-            });
-
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-
-            // Wait for all barriers collected
-            let timer = self.metrics.barrier_latency.start_timer();
-            let collect_result = try_join_all(collect_futures).await;
-
-            // Commit this epoch to Hummock
-            if prev_epoch != INVALID_EPOCH {
-                match collect_result {
-                    Ok(_) => self.hummock_manager.commit_epoch(prev_epoch).await?,
-                    Err(_) => self.hummock_manager.abort_epoch(prev_epoch).await?,
-                };
+            match self.run_inner(&command_context).await {
+                Ok(_) => {
+                    prev_epoch = new_epoch;
+                    notifiers.iter_mut().for_each(Notifier::notify_collected);
+                }
+                Err(e) => {
+                    notifiers
+                        .iter_mut()
+                        .for_each(|notify| notify.notify_failed(e.clone()));
+                }
             }
-            collect_result?;
-            prev_epoch = new_epoch;
-
-            timer.observe_duration();
-
-            command_context.post_collect().await?; // do some post stuffs
-            notifiers.iter_mut().for_each(Notifier::notify_collected);
         }
+    }
+
+    /// running a scheduled command.
+    async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
+        let mutation = command_context.to_mutation()?;
+        let info = command_context.info;
+
+        let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
+            let actor_ids_to_send = info.actor_ids_to_send(node_id).collect_vec();
+            let actor_ids_to_collect = info.actor_ids_to_collect(node_id).collect_vec();
+
+            if actor_ids_to_collect.is_empty() {
+                // No need to send or collect barrier for this node.
+                assert!(actor_ids_to_send.is_empty());
+                None
+            } else {
+                let mutation = mutation.clone();
+                let request_id = Uuid::new_v4().to_string();
+                let barrier = Barrier {
+                    epoch: Some(risingwave_pb::data::Epoch {
+                        curr: command_context.curr_epoch,
+                        prev: command_context.prev_epoch,
+                    }),
+                    mutation: Some(mutation),
+                    // TODO(chi): add distributed tracing
+                    span: vec![],
+                };
+
+                async move {
+                    let mut client = self.clients.get(node).await?;
+
+                    let request = InjectBarrierRequest {
+                        request_id,
+                        barrier: Some(barrier),
+                        actor_ids_to_send,
+                        actor_ids_to_collect,
+                    };
+                    tracing::trace!(
+                        target: "events::meta::barrier::inject_barrier",
+                        "inject barrier request: {:#?}", request
+                    );
+
+                    // This RPC returns only if this worker node has collected this barrier.
+                    client.inject_barrier(request).await.to_rw_result()?;
+
+                    Ok::<_, RwError>(())
+                }
+                .into()
+            }
+        });
+
+        // Wait for all barriers collected
+        let timer = self.metrics.barrier_latency.start_timer();
+
+        let collect_result = try_join_all(collect_futures).await;
+        // Commit this epoch to Hummock
+        if command_context.prev_epoch != INVALID_EPOCH {
+            match collect_result {
+                Ok(_) => {
+                    self.hummock_manager
+                        .commit_epoch(command_context.prev_epoch)
+                        .await?
+                }
+                Err(_) => {
+                    self.hummock_manager
+                        .abort_epoch(command_context.prev_epoch)
+                        .await?
+                }
+            };
+        }
+        collect_result?;
+
+        timer.observe_duration();
+        command_context.post_collect().await // do some post stuffs
     }
 }
 
@@ -311,8 +339,7 @@ where
             },
         )
         .await?;
-        rx.await.unwrap();
-        Ok(())
+        rx.await.unwrap()
     }
 
     /// Run a command and return when it's completely finished.
@@ -326,8 +353,7 @@ where
             },
         )
         .await?;
-        rx.await.unwrap();
-        Ok(())
+        rx.await.unwrap()
     }
 
     /// Wait for the next barrier to finish. Note that the barrier flowing in our stream graph is
@@ -341,8 +367,7 @@ where
         self.scheduled_barriers
             .attach_notifiers(once(notifier))
             .await;
-        rx.await.unwrap();
-        Ok(())
+        rx.await.unwrap()
     }
 }
 

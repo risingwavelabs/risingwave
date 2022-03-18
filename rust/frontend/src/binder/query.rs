@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
@@ -14,8 +15,21 @@ pub struct BoundQuery {
     pub order: Vec<FieldOrder>,
 }
 
+impl BoundQuery {
+    /// The names returned by this [`BoundQuery`].
+    pub fn names(&self) -> Vec<String> {
+        self.body.names()
+    }
+
+    /// The types returned by this [`BoundQuery`].
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.body.data_types()
+    }
+}
+
 impl Binder {
-    pub(super) fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+    /// Bind a [`Query`].
+    pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {

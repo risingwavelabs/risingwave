@@ -25,7 +25,7 @@ pub struct TableFragments {
     /// The table id.
     table_id: TableId,
     /// The table fragments.
-    fragments: BTreeMap<FragmentId, Fragment>,
+    pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
 }
