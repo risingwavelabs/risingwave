@@ -38,6 +38,7 @@ impl AggCall {
         let return_type = match agg_kind {
             AggKind::Min => inputs.get(0).unwrap().return_type(),
             AggKind::Max => inputs.get(0).unwrap().return_type(),
+            AggKind::Avg => inputs.get(0).unwrap().return_type(),
             AggKind::Sum => DataType::Int64,
             AggKind::Count => DataType::Int64,
             _ => todo!(),
