@@ -271,9 +271,9 @@ export default class StreamPlanParser {
 
     let rootNode;
     this.parsedActorMap.set(actorId, actor);
-    if (actorProto.dispatcher && actorProto.dispatcher.type) {
+    if (actorProto.dispatcher && actorProto.dispatcher[0].type) {
       let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes);
-      rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
+      rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher[0].type, actorProto.downstreamActorId);
       rootNode.nextNodes = [nodeBeforeDispatcher];
     } else {
       rootNode = this.parseNode(actorId, actorProto.nodes);
