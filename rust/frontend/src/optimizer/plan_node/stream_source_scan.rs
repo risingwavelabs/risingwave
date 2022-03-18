@@ -38,9 +38,9 @@ impl fmt::Display for StreamSourceScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamSourceScan {{ table: {}, columns: {:?} }}",
+            "StreamSourceScan {{ table: {}, columns: [{}] }}",
             self.logical.table_name(),
-            &self.logical.column_names()
+            self.logical.column_names().join(", ")
         )
     }
 }

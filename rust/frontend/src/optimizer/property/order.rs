@@ -27,14 +27,14 @@ impl Order {
 
 impl fmt::Display for Order {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("(")?;
+        f.write_str("[")?;
         for (i, field_order) in self.field_order.iter().enumerate() {
             if i > 0 {
                 f.write_str(", ")?;
             }
             field_order.fmt(f)?;
         }
-        f.write_str("(")
+        f.write_str("]")
     }
 }
 

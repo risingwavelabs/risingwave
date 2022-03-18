@@ -36,14 +36,15 @@ impl BatchSeqScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {BatchSeqScan}
+impl_plan_tree_node_for_leaf! { BatchSeqScan }
+
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalScan {{ table: {}, columns: {:?} }}",
+            "BatchScan {{ table: {}, columns: [{}] }}",
             self.logical.table_name(),
-            &self.logical.column_names()
+            self.logical.column_names().join(", ")
         )
     }
 }

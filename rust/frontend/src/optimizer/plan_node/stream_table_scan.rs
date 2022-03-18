@@ -54,9 +54,9 @@ impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamTableScan {{ table: {}, columns: {:?} }}",
+            "StreamTableScan {{ table: {}, columns: [{}] }}",
             self.logical.table_name(),
-            &self.logical.column_names()
+            self.logical.column_names().join(", ")
         )
     }
 }

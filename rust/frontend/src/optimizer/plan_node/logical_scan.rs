@@ -79,9 +79,9 @@ impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "LogicalScan {{ table: {}, columns: {:?} }}",
+            "LogicalScan {{ table: {}, columns: [{}] }}",
             self.table_name,
-            &self.column_names()
+            self.column_names().join(", ")
         )
     }
 }
