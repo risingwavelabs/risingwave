@@ -535,6 +535,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools-preview
 
       - name: Cache Cargo home
         uses: actions/cache@v2
