@@ -31,14 +31,12 @@ pub struct BatchSimpleAgg {
 impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let input = logical.input();
-        let input_dist = input.distribution();
-        let dist = match input_dist {
-            Distribution::Any => Distribution::Any,
-            Distribution::Single => Distribution::Single,
-            _ => panic!(),
-        };
-        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
         BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
