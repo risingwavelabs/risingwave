@@ -197,19 +197,9 @@ where
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
-        let req = request.into_inner();
-        let mview_id = req.get_table_id();
-        // 1. drop table in catalog. Ref count will be checked.
+        let table_id = request.into_inner().table_id;
         let version = self
-            .catalog_manager
-            .drop_table(mview_id)
-            .await
-            .map_err(tonic_err)?;
-
-        // 2. drop mv in stream manager
-        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
-        self.stream_manager
-            .drop_materialized_view(&TableRefId::from(&TableId::new(mview_id)))
+            .drop_materialized_view_inner(table_id)
             .await
             .map_err(tonic_err)?;
 
@@ -312,7 +302,7 @@ where
         &self,
         mut mview: Table,
         stream_node: StreamNode,
-    ) -> RwResult<(SourceId, CatalogVersion)> {
+    ) -> RwResult<(u32, CatalogVersion)> {
         use crate::stream::CreateMaterializedViewContext;
 
         // 0. Generate mview id.
@@ -343,5 +333,18 @@ where
         let version = self.catalog_manager.create_table(&mview).await?;
 
         Ok((mview.id, version))
+    }
+
+    async fn drop_materialized_view_inner(&self, table_id: u32) -> RwResult<CatalogVersion> {
+        // 1. Drop table in catalog. Ref count will be checked.
+        let version = self.catalog_manager.drop_table(table_id).await?;
+
+        // 2. drop mv in stream manager
+        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
+        self.stream_manager
+            .drop_materialized_view(&TableRefId::from(&TableId::new(table_id)))
+            .await?;
+
+        Ok(version)
     }
 }
