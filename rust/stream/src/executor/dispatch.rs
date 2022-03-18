@@ -15,6 +15,9 @@ use tracing::event;
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
 
+// FIXME: Avoid duplicate definition
+const VIRTUAL_KEY_COUNT: usize = 2048;
+
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
 pub trait Output: Debug + Send + Sync + 'static {
@@ -308,6 +311,7 @@ pub struct HashDataDispatcher {
     fragment_ids: Vec<u32>,
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
+    hash_mapping: Vec<ActorId>,
 }
 
 impl Debug for HashDataDispatcher {
@@ -320,11 +324,17 @@ impl Debug for HashDataDispatcher {
 }
 
 impl HashDataDispatcher {
-    pub fn new(fragment_ids: Vec<u32>, outputs: Vec<BoxedOutput>, keys: Vec<usize>) -> Self {
+    pub fn new(
+        fragment_ids: Vec<u32>,
+        outputs: Vec<BoxedOutput>,
+        keys: Vec<usize>,
+        hash_mapping: Vec<ActorId>,
+    ) -> Self {
         Self {
             fragment_ids,
             outputs,
             keys,
+            hash_mapping,
         }
     }
 }
@@ -359,7 +369,7 @@ impl Dispatcher for HashDataDispatcher {
             .get_hash_values(&self.keys, hash_builder)
             .unwrap()
             .iter()
-            .map(|hash| *hash as usize % num_outputs)
+            .map(|hash| *hash as usize % VIRTUAL_KEY_COUNT)
             .collect::<Vec<_>>();
 
         let (ops, columns, visibility) = chunk.into_inner();
@@ -372,7 +382,8 @@ impl Dispatcher for HashDataDispatcher {
                 hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                     // get visibility map for every output chunk
                     for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                        vis_map.push(*hash == output_idx);
+                        vis_map
+                            .push(self.hash_mapping[*hash] == self.outputs[output_idx].actor_id());
                     }
                     // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
                     // need to be rewritten to common Delete and Insert if they were dispatched to
@@ -596,6 +607,7 @@ pub use sender_consumer::SenderConsumer;
 
 #[cfg(test)]
 mod tests {
+    use core::num;
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
@@ -615,12 +627,13 @@ mod tests {
 
     #[derive(Debug)]
     pub struct MockOutput {
+        actor_id: ActorId,
         data: Arc<Mutex<Vec<Message>>>,
     }
 
     impl MockOutput {
-        pub fn new(data: Arc<Mutex<Vec<Message>>>) -> Self {
-            Self { data }
+        pub fn new(actor_id: ActorId, data: Arc<Mutex<Vec<Message>>>) -> Self {
+            Self { actor_id, data }
         }
     }
 
@@ -632,7 +645,7 @@ mod tests {
         }
 
         fn actor_id(&self) -> ActorId {
-            0
+            self.actor_id
         }
     }
 
@@ -649,12 +662,19 @@ mod tests {
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
+            .enumerate()
+            .map(|(actor_id, data)| {
+                Box::new(MockOutput::new(actor_id as u32, data.clone())) as BoxedOutput
+            })
             .collect::<Vec<_>>();
+        let hash_mapping = (0..num_outputs)
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
+            .collect_vec();
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
             key_indices.to_vec(),
+            hash_mapping,
         );
 
         let chunk = StreamChunk::new(
@@ -771,8 +791,8 @@ mod tests {
             "ReceiverExecutor".to_string(),
         ));
         let data_sink = Arc::new(Mutex::new(vec![]));
-        let output = Box::new(MockOutput::new(data_sink));
         let actor_id = 233;
+        let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
         let mut executor = Box::new(DispatchExecutor::new(
@@ -837,7 +857,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher() {
-        let num_outputs = 5;
+        let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;
         let dimension = 4;
         let key_indices = &[0, 2];
@@ -846,12 +866,20 @@ mod tests {
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
+            .enumerate()
+            .map(|(actor_id, data)| {
+                Box::new(MockOutput::new(actor_id as u32, data.clone())) as BoxedOutput
+            })
             .collect::<Vec<_>>();
+        let mut hash_mapping = (1..6)
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / 5])
+            .collect_vec();
+        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
             key_indices.to_vec(),
+            hash_mapping.clone(),
         );
 
         let mut ops = Vec::new();
@@ -878,7 +906,8 @@ mod tests {
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);
             }
-            let output_idx = hasher.finish() as usize % num_outputs;
+            let output_idx =
+                hash_mapping[hasher.finish() as usize % VIRTUAL_KEY_COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val)).unwrap();
             }
@@ -905,7 +934,7 @@ mod tests {
             // It is possible that there is no chunks, as a key doesn't belong to any hash bucket.
             assert!(guard.len() <= 1);
             if guard.is_empty() {
-                assert!(output_cols[output_idx].iter().all(|x| x.is_empty()));
+                assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
                 let message = guard.get(0).unwrap();
                 let real_chunk = match message {
