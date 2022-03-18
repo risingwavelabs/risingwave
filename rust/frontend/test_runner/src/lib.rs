@@ -158,19 +158,19 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.optimizer_error,
         &actual.optimizer_error,
     )?;
-    check_logical_plan("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
-    check_logical_plan(
+    check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
+    check_option_plan_eq(
         "optimized_logical_plan",
         &expected.optimized_logical_plan,
         &actual.optimized_logical_plan,
     )?;
-    check_logical_plan("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
-    check_logical_plan("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
+    check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
+    check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
 
     Ok(())
 }
 
-fn check_logical_plan(
+fn check_option_plan_eq(
     ctx: &str,
     expected_plan: &Option<String>,
     actual_plan: &Option<String>,

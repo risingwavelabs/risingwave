@@ -76,7 +76,7 @@ message MergeNode {
 message ExchangeNode {
   // The schema of input columns.
   repeated plan.Field fields = 1;
-  Dispatcher dispatcher = 2;
+  DispatchStrategy strategy = 2;
 }
 
 // ChainNode is used for mv on mv.
@@ -125,18 +125,27 @@ message StreamNode {
   string identity = 18;
 }
 
+enum DispatcherType {
+  INVALID = 0;
+  HASH = 1;
+  BROADCAST = 2;
+  SIMPLE = 3;
+}
+
+message DispatchStrategy {
+  DispatcherType type = 1;
+  repeated uint32 column_indices = 2;
+}
+
 // A dispatcher redistribute messages.
 // We encode both the type and other usage information in the proto.
 message Dispatcher {
-  enum DispatcherType {
-    INVALID = 0;
-    HASH = 1;
-    BROADCAST = 2;
-    SIMPLE = 3;
-  }
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
+  // The hash mapping for consistent hashing.
   common.HashMapping hash_mapping = 3;
+  // Number of downstreams decides how many endpoints a dispatcher should dispatch.
+  repeated uint32 downstream_actor_id = 5;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,
@@ -144,9 +153,7 @@ message StreamActor {
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
   StreamNode nodes = 3;
-  Dispatcher dispatcher = 4;
-  // Number of downstreams decides how many endpoints a dispatcher should dispatch.
-  repeated uint32 downstream_actor_id = 5;
+  repeated Dispatcher dispatcher = 4;
   // The actors that send messages to this actor.
   // Note that upstream actor ids are also stored in the proto of merge nodes.
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.

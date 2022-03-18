@@ -47,7 +47,7 @@ impl Binder {
     }
 
     /// Find compatible type for `left` and `right`.
-    fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
+    pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
         if (left == right || left.is_numeric() && right.is_numeric())
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
@@ -67,7 +67,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
+    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
         } else {

@@ -38,9 +38,7 @@ impl BatchSort {
 
 impl fmt::Display for BatchSort {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("BatchSort")
-            .field("order", self.order())
-            .finish()
+        write!(f, "BatchSort {{ order: {} }}", self.order())
     }
 }
 

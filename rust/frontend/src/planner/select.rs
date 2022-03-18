@@ -14,7 +14,7 @@ impl Planner {
             Some(t) => self.plan_table_ref(t)?,
         };
         // Plan the WHERE clause.
-        root = match select.selection {
+        root = match select.where_clause {
             None => root,
             Some(t) => LogicalFilter::create(root, t)?,
         };

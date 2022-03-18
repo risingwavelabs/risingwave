@@ -2,42 +2,42 @@
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 desc;
   batch_plan: |
-    BatchExchange { order: Order { field_order: [FieldOrder { index: 1, direct: Desc }] }, dist: Single }
-      BatchSort { order: Order { field_order: [FieldOrder { index: 1, direct: Desc }] } }
+    BatchExchange { order: [$1 DESC], dist: Single }
+      BatchSort { order: [$1 DESC] }
         BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
-          BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+          BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
   batch_plan: |
-    BatchExchange { order: Order { field_order: [FieldOrder { index: 1, direct: Asc }] }, dist: Single }
-      BatchSort { order: Order { field_order: [FieldOrder { index: 1, direct: Asc }] } }
+    BatchExchange { order: [$1 ASC], dist: Single }
+      BatchSort { order: [$1 ASC] }
         BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
-          BatchScan { table: "t", columns: ["_row_id", "v1", "v2"] }
+          BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;
   batch_plan: |
-    BatchExchange { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] }, dist: Single }
-      BatchSort { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] } }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
         BatchProject { exprs: [$0, ($0 + 1:Int32)], expr_alias: [Some("v1"), None] }
-          BatchScan { table: "t", columns: ["v1"] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.v1 from t order by v1;
   batch_plan: |
-    BatchExchange { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] }, dist: Single }
-      BatchSort { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] } }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
         BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
-          BatchScan { table: "t", columns: ["v1"] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 as a1 from t order by a1;
   batch_plan: |
-    BatchExchange { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] }, dist: Single }
-      BatchSort { order: Order { field_order: [FieldOrder { index: 0, direct: Asc }] } }
+    BatchExchange { order: [$0 ASC], dist: Single }
+      BatchSort { order: [$0 ASC] }
         BatchProject { exprs: [$0], expr_alias: [Some("a1")] }
-          BatchScan { table: "t", columns: ["v1"] }
+          BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;

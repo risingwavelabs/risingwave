@@ -35,7 +35,7 @@ impl StreamFilter {
 
 impl fmt::Display for StreamFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamFilter {{ predicate: {:?} }}", self.predicate())
+        write!(f, "StreamFilter {{ predicate: {} }}", self.predicate())
     }
 }
 
