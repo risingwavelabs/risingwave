@@ -2,11 +2,10 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use pgwire::pg_response::PgResponse;
-use risingwave_common::error::{Result};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
 
-use crate::binder::{Binder};
-
+use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
 

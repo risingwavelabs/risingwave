@@ -8,6 +8,7 @@ pub(crate) mod database_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod table_catalog;
 
+pub(crate) type SourceId = u32;
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;

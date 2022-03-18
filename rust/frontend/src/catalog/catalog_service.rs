@@ -6,8 +6,9 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Schema as ProstSchema, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
@@ -75,8 +76,41 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
+    // TODO: it just change the catalog, just to unit test,will be deprecated soon
+    pub async fn create_materialized_view_workaround(&self, table: ProstTable) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_materialized_view(
+                table,
+                StreamNode {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    // TODO: it just change the catalog, just to unit test,will be deprecated soon
+    pub async fn create_materialized_table_source_workaround(
+        &self,
+        table: ProstTable,
+        source: ProstSource,
+    ) -> Result<()> {
+        let (_, _, version) = self
+            .meta_client
+            .create_materialized_source(
+                source,
+                table,
+                StreamNode {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
     /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
+    pub async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
         todo!()
     }
 

@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
@@ -11,7 +11,7 @@ use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
-    Database as ProstDatabase, Schema as ProstSchema,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
@@ -33,6 +33,7 @@ use risingwave_pb::meta::{
     FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
     SubscribeRequest, SubscribeResponse,
 };
+use risingwave_pb::stream_plan::StreamNode;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
@@ -143,6 +144,36 @@ impl MetaClient {
         let resp = self.inner.create_schema(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.schema_id, resp.version))
+    }
+
+    pub async fn create_materialized_view(
+        &self,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateMaterializedViewRequest {
+            materialized_view: Some(table),
+            stream_node: Some(plan),
+        };
+        let resp = self.inner.create_materialized_view(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<(TableId, u32, CatalogVersion)> {
+        let request = CreateMaterializedSourceRequest {
+            materialized_view: Some(table),
+            stream_node: Some(plan),
+            source: Some(source),
+        };
+        let resp = self.inner.create_materialized_source(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
     /// Unregister the current node to the cluster.
