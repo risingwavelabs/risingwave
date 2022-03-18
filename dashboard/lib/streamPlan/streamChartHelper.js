@@ -4,6 +4,7 @@ import { getConnectedComponent, treeBfs } from "../algo";
 import { cloneDeep, max } from "lodash";
 import { newNumberArray } from "../util";
 import StreamPlanParser, { Actor } from "./parser";
+import { Group } from "../graaphEngine/canvasEngine";
 // Actor constant
 // 
 // =======================================================
@@ -109,7 +110,7 @@ export class StreamChartHelper {
 
   /**
    * 
-   * @param {d3.Selection} g The svg group to contain the graph 
+   * @param {Group} g The group element in canvas engine
    * @param {*} data The raw response from the meta node
    * @param {(e, node) => void} onNodeClick The callback function trigged when a node is click
    * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedWokerNode
@@ -440,28 +441,22 @@ export class StreamChartHelper {
 
   /**
    * @param {{
-   *   g: d3.Selection, 
+   *   g: Group, 
    *   rootNode: {id: any, nextNodes: []}, 
    *   nodeColor: string, 
    *   strokeColor?: string,
-   *   onNodeClicked?: (event, node) => void,
-   *   onMouseOver?: (event, node) => void,
-   *   onMouseOut?: (event, node) => void,
    *   baseX?: number,
    *   baseY?: number
    * }} props
-   * @param {d3.Selection} props.g The target group contains this tree.
+   * @param {Group} props.g The group element in canvas engine
    * @param {{id: any, nextNodes: []}} props.rootNode The root node of the tree in the actor
    * @param {string} props.nodeColor [optinal] The filled color of nodes.
    * @param {string} props.strokeColor [optinal] The color of the stroke.
-   * @param {(event, node) => void} props.onNodeClicked [optinal] The callback function when a node is clicked.
-   * @param {(event, node) => void} props.onMouseOver [optinal] The callback function when the mouse enters a node.
-   * @param {(event, node) => void} props.onMouseOut [optinal] The callback function when the mouse leaves a node.
    * @param {number} props.baseX [optinal] The x coordination of the lef-top corner. default: 0
    * @param {number} props.baseY [optinal] The y coordination of the lef-top corner. default: 0
-   * @returns {d3.Selection} The group element of this tree
+   * @returns {Group} The group element of this tree
    */
-  drawActorBox(props) {
+   drawActorBox(props) {
 
     if (props.g === undefined) {
       throw Error("Invalid Argument: Target group cannot be undefined.");
@@ -480,25 +475,12 @@ export class StreamChartHelper {
     const [boxWidth, boxHeight] = this.calculateActorBoxSize(rootNode);
     this.layoutActorBox(rootNode, baseX + boxWidth - actorBoxPadding, baseY + boxHeight / 2);
 
-    const onLinkClicked = (e) => {
-      onActorClicked(e, actor);
-    }
-
     const onNodeClicked = (e, node) => {
       this.onNodeClick && this.onNodeClick(e, node);
-      props.onNodeClicked && props.onNodeClicked(e, node);
-    }
-
-    const onMouseOut = (e, node) => {
-      props.onMouseOut && props.onMouseOut(e, node);
-    }
-
-    const onMouseOver = (e, node) => {
-      props.onMouseOver && props.onMouseOver(e, node);
     }
 
     /**
-     * @param {d3.Selection} g actor box group 
+     * @param {Group} g actor box group 
      * @param {number} x top-right corner of the label
      * @param {number} y top-right corner of the label
      * @param {Array<number>} actorIds 
@@ -534,7 +516,6 @@ export class StreamChartHelper {
       .attr("fill", this._actorBoxBackgroundColor(actor))
       .attr("rx", actorBoxRadius)
       .attr("stroke-width", actorBoxStroke)
-      .on("click", (e) => onActorClicked(e, actor));
 
     group.append("text")(`Fragment ${actor.fragmentId}`)
       .position(baseX, baseY - actorBoxStroke - fontSize)
@@ -568,14 +549,13 @@ export class StreamChartHelper {
     const linkGen = d3.linkHorizontal();
     for (let link of linkData) {
       group.append("path")(linkGen(link))
-        .attr("stroke-dasharray", "10, 10")
+        .attr("stroke-dasharray", `${internalLinkStrokeWidth / 2},${internalLinkStrokeWidth / 2}`)
         // .attr("d", linkGen(link))
         .attr("fill", "none")
         .attr("class", "actor-" + actor.actorId)
         .classed("interal-link", true)
         .attr("id", constructInternalLinkId(link.sourceNode, link.nextNode))
         .style("stroke-width", internalLinkStrokeWidth)
-        .on("click", onLinkClicked)
         .attr("stroke", linkColor);
     }
 
@@ -589,8 +569,6 @@ export class StreamChartHelper {
         .style('cursor', 'pointer')
         .style('stroke-width', operatorNodeStrokeWidth)
         .on("click", (e) => onNodeClicked(e, node))
-        .on("mouseover", (e) => onMouseOver(e, node))
-        .on("mouseout", (e) => onMouseOut(e, node))
       group.append("text")(node.type ? node.type : node.dispatcherType)
         .position(node.x, node.y + operatorNodeRadius + 10)
         .attr("font-size", fontSize);
@@ -607,17 +585,17 @@ export class StreamChartHelper {
   /**
    * 
    * @param {{
-   *   g: d3.Selection, 
+   *   g: Group, 
    *   actorDagList: Array, 
    *   baseX?: number, 
    *   baseY?: number
    * }} props
-   * @param {d3.Selection} props.g The target group contains this group.
+   * @param {Group} props.g The target group contains this group.
    * @param {Arrary} props.actorDagList A list of dag nodes constructed from actors
    * { id: actor.actorId, nextNodes: [], actor: actor }
    * @param {number} props.baseX [optional] The x coordination of left-top corner. default: 0.
    * @param {number} props.baseY [optional] The y coordination of left-top corner. default: 0.
-   * @returns {{group: d3.Selection, width: number, height: number}} The size of the flow
+   * @returns {{group: Group, width: number, height: number}} The size of the flow
    */
   drawFlow(props) {
 
@@ -735,8 +713,7 @@ export class StreamChartHelper {
     for (let s of linkData) {
       linkLayer
         .append("path")(s.d)
-        .attr("stroke-dasharray", "20, 20")
-        // .attr("d", s.d)
+        .attr("stroke-dasharray", `${outgoingLinkStrokeWidth},${outgoingLinkStrokeWidth}`)
         .attr("fill", "none")
         .attr("class", "actor-" + s.actor.actorId)
         .classed("outgoing-link", true)
@@ -748,7 +725,6 @@ export class StreamChartHelper {
     for (let s of linkData) {
       linkLayerBackground
         .append("path")(s.d)
-        // .attr("d", s.d)
         .attr("fill", "none")
         .style("stroke-width", outgoingLinkBgStrokeWidth)
         .attr("class", "actor-" + s.actor.actorId)
@@ -831,7 +807,7 @@ export class StreamChartHelper {
 /**
  * create a graph view based on raw input from the meta node, 
  * and append the svg component to the giving svg group.
- * @param {d3.Selection} g The parent svg group contain the graph. 
+ * @param {Group} g The parent group contain the graph. 
  * @param {any} data Raw response from the meta node. e.g. [{node: {...}, actors: {...}}, ...]
  * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
  * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedWokerNode

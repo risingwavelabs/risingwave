@@ -15,7 +15,12 @@ export class DrawElement {
     this.props = props;
     if (props.canvasElement) {
       props.engine.canvas.add(props.canvasElement);
+      props.canvasElement.on("mouse:down", (e) => {
+        console.log(e);
+      })
     }
+
+    this.eventHandler = new Map();
   }
 
   _attrMap(key, value) {
@@ -32,7 +37,7 @@ export class DrawElement {
 
   _afterPosition() {
     let ele = this.props.canvasElement;
-    ele && this.props.engine.addCanvasElement(ele);
+    ele && this.props.engine.addDrawElement(this);
   }
 
 
@@ -44,7 +49,12 @@ export class DrawElement {
   }
 
   on(event, callback) {
+    this.eventHandler.set(event, callback);
     return this;
+  }
+
+  getEventHandler(event){
+    return this.eventHandler.get(event);
   }
 
   style(key, value) {
@@ -328,6 +338,7 @@ export class CanvasEngine {
     this.clazzMap = new Map();
     this.topGroup = new Group({ engine: this });
     this.gridMapper = new GridMapper();
+    this.canvasElementToDrawElement = new Map();
 
     let that = this;
     canvas.on('mouse:wheel', function (opt) {
@@ -361,6 +372,8 @@ export class CanvasEngine {
       this.selection = false;
       this.lastPosX = evt.clientX;
       this.lastPosY = evt.clientY;
+
+      that.handleClickEvent(opt.target);
     });
 
     canvas.on('mouse:move', function (opt) {
@@ -379,6 +392,18 @@ export class CanvasEngine {
       this.isDragging = false;
       this.selection = true;
     });
+  }
+
+  async handleClickEvent(target) {
+    if(target === null){
+      return;
+    }
+
+    let ele = this.canvasElementToDrawElement.get(target);
+    let func = ele.getEventHandler("click");
+    if(func){
+      func();
+    }
   }
 
   async refreshView() {
@@ -403,7 +428,9 @@ export class CanvasEngine {
     this.canvas.requestRenderAll();
   }
 
-  addCanvasElement(canvasElement) {
+  addDrawElement(ele) {
+    let canvasElement = ele.props.canvasElement;
+    this.canvasElementToDrawElement.set(canvasElement, ele);
     this.gridMapper.addObject(
       canvasElement.left,
       canvasElement.left + canvasElement.width,
