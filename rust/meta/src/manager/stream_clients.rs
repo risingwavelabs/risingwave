@@ -1,30 +1,41 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, ToRwResult};
+use moka::future::Cache;
+use risingwave_common::error::ErrorCode::{self, InternalError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
 
 use crate::cluster::NodeId;
 
+pub type StreamClient = StreamServiceClient<Channel>;
+
 /// [`StreamClients`] maintains stream service clients to known compute nodes.
-#[derive(Default)]
 pub struct StreamClients {
-    /// Stores the [`StreamServiceClient`] mapping: `node_id` => client.
-    clients: DashMap<NodeId, StreamServiceClient<Channel>>,
+    /// Stores the [`StreamClient`] mapping: `node_id` => client.
+    clients: Cache<NodeId, StreamClient>,
+}
+
+impl Default for StreamClients {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StreamClients {
+    pub fn new() -> Self {
+        Self {
+            clients: Cache::new(u64::MAX),
+        }
+    }
+
     /// Get the stream service client for the given node. If the connection is not established, a
     /// new client will be created and returned.
     pub async fn get(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
-        let client = match self.clients.entry(node.id) {
-            Entry::Occupied(o) => o.get().to_owned(),
-            Entry::Vacant(v) => {
+        self.clients
+            .get_or_try_insert_with(node.id, async {
                 let addr = node.get_host()?.to_socket_addr()?;
                 let endpoint = Endpoint::from_shared(format!("http://{}", addr));
                 let client = StreamServiceClient::new(
@@ -35,15 +46,16 @@ impl StreamClients {
                         .await
                         .to_rw_result_with(format!("failed to connect to {}", node.get_id()))?,
                 );
-                v.insert(client).to_owned()
-            }
-        };
-
-        Ok(client)
+                Ok::<_, RwError>(client)
+            })
+            .await
+            .map_err(|e| {
+                ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
+            })
     }
 
     pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
-        self.clients.get(node_id).map(|client| client.to_owned())
+        self.clients.get(node_id)
     }
 }
 

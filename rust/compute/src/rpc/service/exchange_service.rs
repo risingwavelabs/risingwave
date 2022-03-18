@@ -16,6 +16,7 @@ use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+/// Buffer size of the receiver of the remote channel.
 const EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]

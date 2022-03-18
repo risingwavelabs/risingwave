@@ -196,6 +196,7 @@ mod stream_exchange;
 mod stream_filter;
 mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
 mod stream_source_scan;
@@ -227,6 +228,7 @@ pub use stream_exchange::StreamExchange;
 pub use stream_filter::StreamFilter;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
+pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source_scan::StreamSourceScan;
@@ -283,6 +285,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, Exchange }
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
         }
     };
 }
@@ -344,6 +347,7 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, SourceScan }
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
         }
     };
 }
