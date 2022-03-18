@@ -29,6 +29,22 @@ impl Binder {
             }
             let function_type = match function_name.value.as_str() {
                 "substr" => ExprType::Substr,
+                "length" => ExprType::Length,
+                "like" => ExprType::Like,
+                "upper" => ExprType::Upper,
+                "lower" => ExprType::Lower,
+                "trim" => ExprType::Trim,
+                "replace" => ExprType::Replace,
+                "position" => ExprType::Position,
+                "ltrim" => ExprType::Ltrim,
+                "rtrim" => ExprType::Rtrim,
+                "case" => ExprType::Case,
+                "is true" => ExprType::IsTrue,
+                "is not true" => ExprType::IsNotTrue,
+                "is false" => ExprType::IsFalse,
+                "is not false" => ExprType::IsNotFalse,
+                "is null" => ExprType::IsNull,
+                "is not null" => ExprType::IsNotNull,
                 _ => {
                     return Err(ErrorCode::NotImplementedError(format!(
                         "unsupported function: {:?}",

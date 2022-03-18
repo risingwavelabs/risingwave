@@ -376,12 +376,22 @@ impl StreamManagerCore {
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
+                let hash_mapping = dispatcher
+                    .hash_mapping
+                    .clone()
+                    .ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(
+                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
+                        ))
+                    })?
+                    .hash_mapping;
                 Box::new(DispatchExecutor::new(
                     input,
                     HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
+                        hash_mapping,
                     ),
                     actor_id,
                     self.context.clone(),

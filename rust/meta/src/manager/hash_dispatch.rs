@@ -5,14 +5,13 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
+use risingwave_common::hash::VIRTUAL_KEY_COUNT;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use tokio::sync::Mutex;
 
 use crate::cluster::ParallelUnitId;
 use crate::model::{ConsistentHashMapping, MetadataModel, VirtualKey};
 use crate::storage::MetaStore;
-
-const VIRTUAL_KEY_COUNT: usize = 2048;
 
 pub type HashDispatchManagerRef<S> = Arc<HashDispatchManager<S>>;
 

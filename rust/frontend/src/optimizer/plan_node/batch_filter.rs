@@ -36,7 +36,7 @@ impl BatchFilter {
 
 impl fmt::Display for BatchFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "BatchFilter {{ predicate: {:?} }}", self.predicate())
+        write!(f, "BatchFilter {{ predicate: {} }}", self.predicate())
     }
 }
 

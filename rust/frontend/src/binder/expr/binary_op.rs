@@ -27,6 +27,7 @@ impl Binder {
             BinaryOperator::GtEq => ExprType::GreaterThanOrEqual,
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
+            BinaryOperator::Like => ExprType::Like,
             _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", op)).into()),
         };
         let desc = format!(

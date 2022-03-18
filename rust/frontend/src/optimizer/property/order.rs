@@ -1,3 +1,5 @@
+use std::fmt;
+
 use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::expr::InputRefExpr;
@@ -23,6 +25,19 @@ impl Order {
     }
 }
 
+impl fmt::Display for Order {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (i, field_order) in self.field_order.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            field_order.fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FieldOrder {
@@ -40,12 +55,29 @@ impl FieldOrder {
     }
 }
 
+impl fmt::Display for FieldOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${} {}", self.index, self.direct)
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     Asc,
     Desc,
     Any, // only used in order requirement
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Direction::Asc => "ASC",
+            Direction::Desc => "DESC",
+            Direction::Any => "ANY",
+        };
+        f.write_str(s)
+    }
 }
 
 impl Direction {
