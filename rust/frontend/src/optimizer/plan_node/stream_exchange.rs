@@ -6,7 +6,6 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
-use crate::optimizer::property::order::WithOrder;
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
@@ -37,10 +36,7 @@ impl StreamExchange {
 
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamExchange")
-            .field("order", self.order())
-            .field("dist", self.distribution())
-            .finish()
+        write!(f, "StreamExchange {{ dist: {:?} }}", self.base.dist)
     }
 }
 
