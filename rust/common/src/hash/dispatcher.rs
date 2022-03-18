@@ -2,6 +2,8 @@ use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
 use crate::hash;
 use crate::types::{DataSize, DataType};
 
+pub const VIRTUAL_KEY_COUNT: usize = 2048;
+
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum HashKeyKind {

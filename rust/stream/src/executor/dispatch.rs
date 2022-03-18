@@ -8,15 +8,13 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::hash::VIRTUAL_KEY_COUNT;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
 use super::{Barrier, Executor, Message, Mutation, Result, StreamChunk, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
-
-// FIXME: Avoid duplicate definition
-const VIRTUAL_KEY_COUNT: usize = 2048;
 
 /// `Output` provides an interface for `Dispatcher` to send data into downstream actors.
 #[async_trait]
@@ -311,6 +309,8 @@ pub struct HashDataDispatcher {
     fragment_ids: Vec<u32>,
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
+    /// Mapping from virtual key to actor id, used for hash data dispatcher to dispatch tasks to
+    /// different downstream actors.
     hash_mapping: Vec<ActorId>,
 }
 
@@ -410,7 +410,11 @@ impl Dispatcher for HashDataDispatcher {
                     .zip_eq(ops)
                     .for_each(|((hash, visible), op)| {
                         for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(visible && self.hash_mapping[*hash] == self.outputs[output_idx].actor_id());
+                            vis_map.push(
+                                visible
+                                    && self.hash_mapping[*hash]
+                                        == self.outputs[output_idx].actor_id(),
+                            );
                         }
                         if !visible {
                             new_ops.push(op);
@@ -618,6 +622,7 @@ mod tests {
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
     use risingwave_common::column_nonnull;
+    use risingwave_common::hash::VIRTUAL_KEY_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
@@ -654,7 +659,7 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        let num_outputs = 2;  // actor id ranges from 1 to 2
+        let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
         let output_data_vecs = (0..num_outputs)
             .map(|_| Arc::new(Mutex::new(Vec::new())))
@@ -717,7 +722,7 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 5);
+                    assert_eq!(chunk1.cardinality(), 1);
                     assert!(
                         !chunk1.visibility().as_ref().unwrap().is_set(1).unwrap(),
                         "Should keep original invisible mark"
