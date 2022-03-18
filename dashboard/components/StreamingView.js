@@ -28,7 +28,6 @@ const ToolBoxTitle = styled('div')(() => ({
   fontWeight: 700
 }));
 
-
 export default function StreamingView(props) {
   const data = props.data || [];
   const mvList = props.mvList || [];
@@ -44,20 +43,31 @@ export default function StreamingView(props) {
   const [filterMode, setFilterMode] = useState("Chain View");
   const [selectedMvTableId, setSelectedMvTableId] = useState(null);
   const [showFullGraph, setShowFullGraph] = useState(true);
-
-  let view;
-  let engine;
-  let shownActorIdList = null;
-
-
   const canvasRef = useRef(null);
   const canvasOutterBox = useRef(null);
+  const engineRef = useRef(null);
+  const viewRef = useRef(null);
+
+  const setEngine = (e) => {
+    engineRef.current = e;
+  }
+
+  const getEngine = () => {
+    return engineRef.current;
+  }
+
+  const setView = (v) => {
+    viewRef.current = v;
+  }
+
+  const getView = () => {
+    return viewRef.current;
+  }
 
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
 
   const locateTo = (selector) => {
-    console.log(engine)
-    engine && engine.locateTo(selector);
+    getEngine() && getEngine().locateTo(selector);
   }
 
   const locateSearchPosition = () => {
@@ -108,34 +118,33 @@ export default function StreamingView(props) {
     setShowFullGraph(v);
   }
 
-  const locateToCurrentMviewActor = () => {
-    let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
-      .get(selectedMvTableId) || [];
-    if (shownActorIdList.length !== 0) {
-      locateTo(`actor-${shownActorIdList[0]}`)
+  const locateToCurrentMviewActor = (actorIdList) => {
+    if (actorIdList.length !== 0) {
+      locateTo(`actor-${actorIdList[0]}`)
     }
   }
 
   const onReset = () => {
-    engine.resetCamera();
+    getEngine().resetCamera();
   }
 
   const resizeCanvas = () => {
     if (canvasOutterBox.current) {
-      engine && engine.resize(canvasOutterBox.current.clientWidth, canvasOutterBox.current.clientHeight);
+      getEngine() && getEngine().resize(canvasOutterBox.current.clientWidth, canvasOutterBox.current.clientHeight);
     }
   }
 
-  const initGraph = () => {
-    engine = new CanvasEngine("c", canvasRef.current.clientHeight, canvasRef.current.cientWidth);
+  const initGraph = (shownActorIdList) => {
+    let newEngine = new CanvasEngine("c", canvasRef.current.clientHeight, canvasRef.current.clientWidth);
+    setEngine(newEngine);
     resizeCanvas();
-    view = createView(engine, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
+    let newView = createView(newEngine, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
+    setView(newView);
   };
 
   const windowSize = useWindowSize();
 
   useEffect(() => {
-    console.log("resize here")
     resizeCanvas();
   }, [windowSize])
 
@@ -146,12 +155,14 @@ export default function StreamingView(props) {
   // render the full graph
   useEffect(() => {
     if (canvasRef.current && showFullGraph) {
-      shownActorIdList = null;
-      initGraph();
+      initGraph(null);
 
-      mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(view.getMvTableIdToSingleViewActorList());
-      mvTableIdToChainViewActorList || setMvTableIdToChainViewActorList(view.getMvTableIdToChainViewActorList());
-      return () => engine.cleanGraph();
+      mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(getView().getMvTableIdToSingleViewActorList());
+      mvTableIdToChainViewActorList || setMvTableIdToChainViewActorList(getView().getMvTableIdToChainViewActorList());
+      return () => { 
+        console.log("clean graph");
+        getEngine().cleanGraph();
+      };
     }
   }, [selectedWorkerNode, showFullGraph]);
 
@@ -160,18 +171,18 @@ export default function StreamingView(props) {
     if (selectedMvTableId === null) {
       return;
     }
-    shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
-      .get(selectedMvTableId) || [];
-    if (showFullGraph) { // locate to the selected part
-      shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
-        .get(selectedMvTableId);
-    } else {
+    let shownActorIdList  = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
+        .get(selectedMvTableId) || [];
+    if ( ! showFullGraph) { // rerender graph if it is a partial graph
       if (canvasRef.current) {
-        initGraph();
-        return () => engine.cleanGraph();
+        initGraph(shownActorIdList);
+        return () => { 
+          console.log("clean graph");
+          getEngine().cleanGraph();
+        };
       }
     }
-    locateToCurrentMviewActor();
+    locateToCurrentMviewActor(shownActorIdList);
   }, [selectedWorkerNode, filterMode, selectedMvTableId, showFullGraph])
 
   return (
