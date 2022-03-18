@@ -1,8 +1,12 @@
+import { useEffect } from "react"
+
 export default function Custom404() {
+
+  useEffect(() => {
+    window.location = "/"
+  }, []);
+
   return <>
-    <h1>404 - Page Not Found</h1>
-    <a href="/" >
-      Back to home page
-    </a>
+    
   </>
 }

@@ -113,13 +113,15 @@ export class StreamChartHelper {
    * @param {Group} g The group element in canvas engine
    * @param {*} data The raw response from the meta node
    * @param {(e, node) => void} onNodeClick The callback function trigged when a node is click
+   * @param {(e, actor) => void} onActorClick
    * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedWokerNode
    * @param {Array<number>} shownActorIdList
    */
-  constructor(g, data, onNodeClick, selectedWokerNode, shownActorIdList) {
+  constructor(g, data, onNodeClick, onActorClick, selectedWokerNode, shownActorIdList) {
     this.topGroup = g;
     this.streamPlan = new StreamPlanParser(data, shownActorIdList);
     this.onNodeClick = onNodeClick;
+    this.onActorClick = onActorClick;
     this.selectedWokerNode = selectedWokerNode;
     this.selectedWokerNodeStr = this.selectedWokerNode ? selectedWokerNode.host.host + ":" + selectedWokerNode.host.port : "Show All";
   }
@@ -475,8 +477,12 @@ export class StreamChartHelper {
     const [boxWidth, boxHeight] = this.calculateActorBoxSize(rootNode);
     this.layoutActorBox(rootNode, baseX + boxWidth - actorBoxPadding, baseY + boxHeight / 2);
 
-    const onNodeClicked = (e, node) => {
-      this.onNodeClick && this.onNodeClick(e, node);
+    const onNodeClicked = (e, node, actor) => {
+      this.onNodeClick && this.onNodeClick(e, node, actor);
+    }
+
+    const onActorClick = (e, actor) => {
+      this.onActorClick && this.onActorClick(e, actor);
     }
 
     /**
@@ -516,6 +522,7 @@ export class StreamChartHelper {
       .attr("fill", this._actorBoxBackgroundColor(actor))
       .attr("rx", actorBoxRadius)
       .attr("stroke-width", actorBoxStroke)
+      .on("click", (e) => onActorClick(e, actor));
 
     group.append("text")(`Fragment ${actor.fragmentId}`)
       .position(baseX, baseY - actorBoxStroke - fontSize)
@@ -568,7 +575,7 @@ export class StreamChartHelper {
         .attr('fill', this._operatorColor(actor, node))
         .style('cursor', 'pointer')
         .style('stroke-width', operatorNodeStrokeWidth)
-        .on("click", (e) => onNodeClicked(e, node))
+        .on("click", (e) => onNodeClicked(e, node, actor))
       group.append("text")(node.type ? node.type : node.dispatcherType)
         .position(node.x, node.y + operatorNodeRadius + 10)
         .attr("font-size", fontSize);
@@ -809,13 +816,13 @@ export class StreamChartHelper {
  * and append the svg component to the giving svg group.
  * @param {Group} g The parent group contain the graph. 
  * @param {any} data Raw response from the meta node. e.g. [{node: {...}, actors: {...}}, ...]
- * @param {(clickEvent, node) => void} onNodeClick callback when a node (operator) is clicked.
+ * @param {(clickEvent, node, actor) => void} onNodeClick callback when a node (operator) is clicked.
  * @param {{type: string, node: {host: {host: string, port: number}}, id?: number}} selectedWokerNode
  * @returns {StreamChartHelper}
  */
-export default function createView(engine, data, onNodeClick, selectedWokerNode, shownActorIdList) {
+export default function createView(engine, data, onNodeClick, onActorClick, selectedWokerNode, shownActorIdList) {
   console.log(shownActorIdList, "shownActorList");
-  let streamChartHelper = new StreamChartHelper(engine.topGroup, data, onNodeClick, selectedWokerNode, shownActorIdList);
+  let streamChartHelper = new StreamChartHelper(engine.topGroup, data, onNodeClick, onActorClick, selectedWokerNode, shownActorIdList);
   streamChartHelper.drawManyFlow();
   return streamChartHelper;
 }

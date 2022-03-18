@@ -95,7 +95,7 @@ export class Group extends DrawElement {
   _appendCircle = () => {
     return new Circle({
       ...this.basicSetting, ...{
-        canvasElement: new fabric.Circle({ selectable: false })
+        canvasElement: new fabric.Circle({ selectable: false, hoverCursor: "pointer" })
       }
     });
   }
@@ -103,7 +103,7 @@ export class Group extends DrawElement {
   _appendRect = () => {
     return new Rectangle({
       ...this.basicSetting, ...{
-        canvasElement: new fabric.Rect({ selectable: false })
+        canvasElement: new fabric.Rect({ selectable: false, hoverCursor: "pointer" })
       }
     });
   }
@@ -479,7 +479,7 @@ export class CanvasEngine {
 
   resetCamera() {
     let zoom = this.canvas.getZoom();
-    zoom *= 0.999;
+    zoom *= 0.999;ƒ
     this.canvas.setZoom(zoom);
     let vpt = this.canvas.viewportTransform;
     vpt[4] = 0;

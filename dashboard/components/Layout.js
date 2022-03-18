@@ -194,10 +194,9 @@ export default function Layout(props) {
         </Drawer>
         <Main open={open}>
           <div style={{height: "68px"}}></div>
-          <div style={{width: "100%", height: "calc(100% - 68px)"}}>
+          <div style={{width: "calc(100vw - 275px)", height: "calc(100% - 68px)"}}>
             {props.children}
           </div>
-          {/* {props.children} */}
         </Main>
       </Box>
     </>
