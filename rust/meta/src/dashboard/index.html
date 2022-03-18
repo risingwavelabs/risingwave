@@ -425,6 +425,7 @@
       const selectedActors = actors.actors.filter(actor => fragmentIdOf(actor) == fragmentId)
       const actorIds = selectedActors.map(actor => actor.actorId)
       if (d.data.operatorId == "dispatcher") {
+        console.log("xxx", actor.dispatcher);
         const nodes = selectedActors.map(actor => ({ dispatcher: dispatcherNode(actor.dispatcher), downstreamActorId: actor.downstreamActorId }))
         showInfo(actorIds, selectedActors, nodes)
       } else {
@@ -532,9 +533,9 @@
   }
 
   const toV1Actor = (actor) => ({
+    ...actor,
     dispatcher: actor.dispatcher[0],
-    downstreamActorId: eraseDownstreamIfBroadcast(actor.dispatcher[0]),
-    ...actor
+    downstreamActorId: eraseDownstreamIfBroadcast(actor.dispatcher[0])
   })
 
   const loadActors = () => {
@@ -545,6 +546,8 @@
         data.forEach(data => {
           // bind node info with actor
           const nodeActors = data.actors.map(actor => ({ node: data.node, ...toV1Actor(actor) }))
+          console.log("init(before): ", data.actors[3]);
+          console.log("init(after): ", nodeActors[3]);
           allActors.push(...nodeActors)
         })
         const processedData = { actors: allActors }
