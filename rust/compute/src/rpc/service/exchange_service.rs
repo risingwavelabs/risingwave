@@ -31,7 +31,7 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = ExchangeDataStream;
     type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -91,7 +91,7 @@ impl ExchangeServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data_impl(
         &self,
         peer_addr: SocketAddr,

@@ -29,7 +29,7 @@ impl<S> HeartbeatService for HeartbeatServiceImpl<S>
 where
     S: MetaStore,
 {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn heartbeat(
         &self,
         request: Request<HeartbeatRequest>,

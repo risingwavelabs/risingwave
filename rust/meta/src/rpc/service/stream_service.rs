@@ -52,7 +52,7 @@ impl<S> StreamManagerService for StreamServiceImpl<S>
 where
     S: MetaStore,
 {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
@@ -88,7 +88,7 @@ where
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_materialized_view(
         &self,
         request: Request<DropMaterializedViewRequest>,
@@ -105,7 +105,7 @@ where
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();
 

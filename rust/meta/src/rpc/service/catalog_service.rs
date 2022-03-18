@@ -34,7 +34,7 @@ impl<S> CatalogService for CatalogServiceImpl<S>
 where
     S: MetaStore,
 {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_catalog(
         &self,
         request: Request<GetCatalogRequest>,
@@ -46,7 +46,7 @@ where
         }))
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn create(
         &self,
         request: Request<CreateRequest>,
@@ -98,7 +98,7 @@ where
         }))
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop(&self, request: Request<DropRequest>) -> Result<Response<DropResponse>, Status> {
         let req = request.into_inner();
         let result = match req.get_catalog_id().map_err(tonic_err)? {
