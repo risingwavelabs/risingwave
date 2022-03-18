@@ -38,7 +38,7 @@ impl fmt::Display for BatchExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "BatchExchange {{ order: {}, dist: {} }}",
+            "BatchExchange {{ order: {}, dist: {:?} }}",
             self.base.order, self.base.dist
         )
     }
