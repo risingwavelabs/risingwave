@@ -396,7 +396,7 @@ jobs:
           cd rust && cargo clippy --all-targets --locked -- -D warnings
       - name: Build Rust components
         run: |
-          cd rust && cargo build --features=all-in-one -- -D warnings
+          cd rust && cargo build --features=all-in-one
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave
