@@ -1,3 +1,7 @@
+use std::fmt;
+use std::fmt::Formatter;
+
+use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -100,6 +104,22 @@ impl Distribution {
     }
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
+    }
+}
+
+impl fmt::Display for Distribution {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Distribution::Any => "Any".to_owned(),
+            Distribution::Single => "Single".to_owned(),
+            Distribution::Broadcast => "Broadcast".to_owned(),
+            Distribution::AnyShard => "AnyShard".to_owned(),
+            Distribution::HashShard(keys) => {
+                let keys_str = keys.iter().map(|i| format!("${}", i)).join(", ");
+                format!("Hash({})", &keys_str)
+            }
+        };
+        f.write_str(&s)
     }
 }
 
