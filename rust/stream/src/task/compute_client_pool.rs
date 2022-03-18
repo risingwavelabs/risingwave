@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 
 use moka::future::Cache;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_rpc_client::ComputeClient;
 
 #[derive(Clone)]
