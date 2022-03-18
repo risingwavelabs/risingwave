@@ -54,6 +54,7 @@ pub async fn handle_create_table(
         pk_column_ids: vec![0],
         pk_orders: vec![OrderType::Ascending.to_prost() as i32],
         dependent_relations: vec![],
+        optional_associated_source_id: None,
     };
 
     let catalog_writer = session.env().catalog_writer();
