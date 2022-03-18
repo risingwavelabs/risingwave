@@ -9,9 +9,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::HashMapping;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode};
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::cluster::ParallelUnitId;
@@ -142,7 +141,7 @@ where
                     );
 
                     let is_simple_dispatcher =
-                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple;
+                        exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                     if is_simple_dispatcher {
                         current_fragment.set_singleton(true);
                     }
@@ -196,15 +195,23 @@ where
         let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 
         let node = current_fragment.get_node();
-        let blackhole_dispatcher = Dispatcher {
-            r#type: DispatcherType::Broadcast as i32,
-            ..Default::default()
-        };
+
         let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
-            &blackhole_dispatcher
+            Dispatcher {
+                r#type: DispatcherType::Broadcast as i32,
+                ..Default::default()
+            }
         } else {
             match node.get_node()? {
-                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
+                Node::ExchangeNode(exchange_node) => {
+                    // TODO: support multiple dispatchers
+                    let strategy = exchange_node.get_strategy()?;
+                    Dispatcher {
+                        r#type: strategy.r#type,
+                        column_indices: strategy.column_indices.clone(),
+                        ..Default::default()
+                    }
+                }
                 _ => {
                     return Err(RwError::from(InternalError(format!(
                         "{:?} should not found.",

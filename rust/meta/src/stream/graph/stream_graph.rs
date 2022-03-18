@@ -7,9 +7,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::common::HashMapping;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, FragmentId};
@@ -65,6 +64,7 @@ impl StreamActorBuilder {
             r#type: DispatcherType::Hash as i32,
             column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
             hash_mapping: Some(hash_mapping),
+            ..Default::default()
         })
     }
 
@@ -94,8 +94,13 @@ impl StreamActorBuilder {
             actor_id: self.actor_id,
             fragment_id: self.fragment_id,
             nodes: Some(self.nodes.deref().clone()),
-            dispatcher: self.dispatcher.clone(),
-            downstream_actor_id: self.downstream_actors.iter().copied().collect(),
+            dispatcher: match self.dispatcher.clone() {
+                Some(d) => vec![Dispatcher {
+                    downstream_actor_id: self.downstream_actors.iter().copied().collect(),
+                    ..d
+                }],
+                None => vec![],
+            },
             upstream_actor_id,
         }
     }

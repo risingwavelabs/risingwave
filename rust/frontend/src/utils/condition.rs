@@ -21,7 +21,7 @@ impl fmt::Display for Condition {
             write!(f, "{:?}", expr)?;
         }
         for expr in conjunctions {
-            write!(f, "AND {:?}", expr)?;
+            write!(f, " AND {:?}", expr)?;
         }
         Ok(())
     }
