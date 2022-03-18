@@ -20,6 +20,7 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use super::ComputeClientPool;
 use crate::executor::*;
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -51,10 +52,17 @@ pub struct StreamManagerCore {
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
 
-    /// The state store of Hummuck
+    /// The state store implement
     state_store: StateStoreImpl,
 
+    /// Metrics of the stream manager
     streaming_metrics: Arc<StreamingMetrics>,
+
+    /// The pool of compute clients.
+    ///
+    /// TODO: currently the client pool won't be cleared. Should remove compute clients when
+    /// disconnected.
+    compute_client_pool: ComputeClientPool,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -316,6 +324,7 @@ impl StreamManagerCore {
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
+            compute_client_pool: ComputeClientPool::new(1024),
         }
     }
 
@@ -613,14 +622,20 @@ impl StreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
+
+                        let pool = self.compute_client_pool.clone();
+
                         tokio::spawn(async move {
-                            let remote_input_res = RemoteInput::create(
-                                upstream_socket_addr,
-                                (up_id, actor_id),
-                                sender,
-                            )
-                            .await;
-                            match remote_input_res {
+                            let init_client = async move {
+                                let remote_input = RemoteInput::create(
+                                    pool.get_client_for_addr(&upstream_socket_addr).await?,
+                                    (up_id, actor_id),
+                                    sender,
+                                )
+                                .await?;
+                                Ok::<_, RwError>(remote_input)
+                            };
+                            match init_client.await {
                                 Ok(mut remote_input) => remote_input.run().await,
                                 Err(e) => {
                                     info!("Spawn remote input fails:{}", e);
@@ -628,7 +643,7 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    Ok(self.context.take_receiver(&(*up_id, actor_id))?)
+                    Ok::<_, RwError>(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -760,7 +775,7 @@ impl StreamManagerCore {
         let local_actor_ids: HashSet<ActorId> = HashSet::from_iter(
             actors
                 .iter()
-                .map(|actor| actor.clone().get_actor_id())
+                .map(|actor| actor.get_actor_id())
                 .collect::<Vec<_>>()
                 .into_iter(),
         );
