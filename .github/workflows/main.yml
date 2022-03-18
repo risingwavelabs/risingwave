@@ -109,6 +109,10 @@ jobs:
           chmod +x ./.risingwave/bin/compute-node
           chmod +x ./.risingwave/bin/frontend-v2
           chmod +x ./rust/target/debug/risedev-playground
+      - name: Install required components
+        run: |
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux -o Acquire::Retries=3
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
