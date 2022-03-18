@@ -25,6 +25,7 @@ impl LocalMeta {
             None,
             MetaStoreBackend::Mem,
             Duration::from_secs(3600),
+            None,
         )
         .await
         .unwrap();

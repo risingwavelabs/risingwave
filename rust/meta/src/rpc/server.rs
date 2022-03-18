@@ -45,6 +45,7 @@ pub async fn rpc_serve(
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
+    ui_path: Option<String>,
 ) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
@@ -64,6 +65,7 @@ pub async fn rpc_serve(
                 dashboard_addr,
                 meta_store_ref,
                 max_heartbeat_interval,
+                ui_path,
             )
             .await
         }
@@ -75,6 +77,7 @@ pub async fn rpc_serve(
                 dashboard_addr,
                 meta_store_ref,
                 max_heartbeat_interval,
+                ui_path,
             )
             .await
         }
@@ -87,6 +90,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     dashboard_addr: Option<SocketAddr>,
     meta_store_ref: Arc<S>,
     max_heartbeat_interval: Duration,
+    ui_path: Option<String>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
@@ -122,7 +126,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         // TODO: join dashboard service back to local thread.
-        tokio::spawn(dashboard_service.serve());
+        tokio::spawn(dashboard_service.serve(ui_path));
     }
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),

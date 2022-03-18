@@ -1,4 +1,3 @@
-use std::env;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -6,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
-use axum::response::IntoResponse;
+use axum::response::{Html, IntoResponse};
 use axum::routing::{get, get_service};
 use axum::Router;
 use risingwave_common::error::ErrorCode;
@@ -139,7 +138,7 @@ impl<S> DashboardService<S>
 where
     S: MetaStore,
 {
-    pub async fn serve(self) -> Result<()> {
+    pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
 
@@ -163,21 +162,29 @@ where
                 ]),
             );
 
-        let ui_path = env::var("PREFIX_UI")?;
-
-        let static_file_router = Router::new().nest(
-            "/",
-            get_service(ServeDir::new(ui_path)).handle_error(|error: std::io::Error| async move {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Unhandled internal error: {}", error),
+        let app = if let Some(ui_path) = ui_path {
+            let static_file_router = Router::new().nest(
+                "/",
+                get_service(ServeDir::new(ui_path)).handle_error(
+                    |error: std::io::Error| async move {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", error),
+                        )
+                    },
+                ),
+            );
+            Router::new()
+                .fallback(static_file_router)
+                .nest("/api", api_router)
+        } else {
+            Router::new()
+                .route(
+                    "/",
+                    get(|| async { Html::from(include_str!("index.html")) }),
                 )
-            }),
-        );
-
-        let app = Router::new()
-            .fallback(static_file_router)
-            .nest("/api", api_router);
+                .nest("/api", api_router)
+        };
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

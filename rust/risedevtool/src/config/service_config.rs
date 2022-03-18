@@ -29,6 +29,7 @@ pub struct MetaNodeConfig {
     pub exporter_port: u16,
     pub user_managed: bool,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
+    pub enable_dashboard_v2: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

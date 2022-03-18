@@ -59,6 +59,9 @@ pub struct MetaNodeOpts {
     /// Maximum allowed heartbeat interval in ms
     #[clap(long, default_value = "10000")]
     max_heartbeat_interval: u32,
+
+    #[clap(long)]
+    dashboard_ui_path: Option<String>,
 }
 
 /// Start meta node
@@ -85,6 +88,7 @@ pub async fn start(opts: MetaNodeOpts) {
         dashboard_addr,
         backend,
         max_heartbeat_interval,
+        opts.dashboard_ui_path,
     )
     .await
     .unwrap();
