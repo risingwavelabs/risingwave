@@ -1,7 +1,7 @@
-use std::sync::Arc;
-
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
+
+use crate::catalog::schema_catalog::SchemaCatalog;
 
 mod bind_context;
 mod delete;
@@ -24,12 +24,13 @@ pub use statement::BoundStatement;
 pub use table_ref::{BaseTableRef, BoundJoin, TableRef};
 pub use values::BoundValues;
 
-use crate::catalog::database_catalog::DatabaseCatalog;
+use crate::catalog::catalog_service::CatalogReadGuard;
 
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
-    #[allow(dead_code)]
-    catalog: Arc<DatabaseCatalog>,
+    // TODO: maybe we can only lock the database, but not the whole catalog.
+    catalog: CatalogReadGuard,
+    db_name: String,
     context: BindContext,
     /// A stack holding contexts of outer queries when binding a subquery.
     ///
@@ -38,9 +39,10 @@ pub struct Binder {
 }
 
 impl Binder {
-    pub fn new(catalog: Arc<DatabaseCatalog>) -> Binder {
+    pub fn new(catalog: CatalogReadGuard, db_name: String) -> Binder {
         Binder {
             catalog,
+            db_name,
             context: BindContext::new(),
             upper_contexts: vec![],
         }
@@ -51,6 +53,9 @@ impl Binder {
         self.bind_statement(stmt)
     }
 
+    fn get_schema_by_name(&self, schema_name: &str) -> Option<&SchemaCatalog> {
+        self.catalog.get_schema_by_name(&self.db_name, schema_name)
+    }
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
         self.upper_contexts.push(new_context);
@@ -59,6 +64,28 @@ impl Binder {
     fn pop_context(&mut self) {
         let old_context = self.upper_contexts.pop();
         self.context = old_context.unwrap();
+    }
+}
+
+#[cfg(test)]
+pub mod test_utils {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+
+    use super::Binder;
+    use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
+
+    #[cfg(test)]
+    pub fn mock_binder_with_catalog(catalog: Catalog, db_name: String) -> Binder {
+        let catalog = Arc::new(RwLock::new(catalog));
+        let catalog_reader = CatalogReader::new(catalog);
+        Binder::new(catalog_reader.read_guard(), db_name)
+    }
+    #[cfg(test)]
+    pub fn mock_binder() -> Binder {
+        mock_binder_with_catalog(Catalog::default(), "".to_string())
     }
 }
 

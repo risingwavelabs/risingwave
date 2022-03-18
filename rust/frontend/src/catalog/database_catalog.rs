@@ -1,60 +1,53 @@
 use std::collections::HashMap;
 
-use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
-
-#[derive(Clone)]
+use crate::catalog::{DatabaseId, SchemaId};
+#[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
+    name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,
 }
 
 impl DatabaseCatalog {
-    pub fn new(id: DatabaseId) -> Self {
+    pub fn create_schema(&mut self, proto: ProstSchema) {
+        let name = proto.name.clone();
+        let id = proto.id;
+        let schema = (&proto).into();
+        self.schema_by_name
+            .try_insert(name.clone(), schema)
+            .unwrap();
+        self.schema_name_by_id.try_insert(id, name).unwrap();
+    }
+
+    pub fn drop_schema(&mut self, schema_id: SchemaId) {
+        let name = self.schema_name_by_id.remove(&schema_id).unwrap();
+        self.schema_by_name.remove(&name).unwrap();
+    }
+
+    pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
+        self.schema_by_name.get(name)
+    }
+
+    pub fn get_schema_mut(&mut self, schema_id: SchemaId) -> Option<&mut SchemaCatalog> {
+        let name = self.schema_name_by_id.get(&schema_id).unwrap();
+        self.schema_by_name.get_mut(name)
+    }
+
+    pub fn id(&self) -> DatabaseId {
+        self.id
+    }
+}
+impl From<&ProstDatabase> for DatabaseCatalog {
+    fn from(db: &ProstDatabase) -> Self {
         Self {
-            id,
+            id: db.id,
+            name: db.name.clone(),
             schema_by_name: HashMap::new(),
             schema_name_by_id: HashMap::new(),
         }
-    }
-
-    pub fn create_schema_with_id(&mut self, schema_name: &str, schema_id: SchemaId) -> Result<()> {
-        self.schema_by_name
-            .try_insert(schema_name.to_string(), SchemaCatalog::new(schema_id))
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("schema", schema_name.to_string()))?;
-        self.schema_name_by_id
-            .try_insert(schema_id, schema_name.to_string())
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("schema id", schema_id.to_string()).into())
-    }
-
-    pub fn drop_schema(&mut self, schema_name: &str) -> Result<()> {
-        let schema = self.schema_by_name.remove(schema_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-        })?;
-        self.schema_name_by_id.remove(&schema.id()).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("schema id", schema.id().to_string()))
-        })?;
-        Ok(())
-    }
-
-    pub fn get_schema(&self, schema: &str) -> Option<&SchemaCatalog> {
-        self.schema_by_name.get(schema)
-    }
-
-    pub fn get_schema_mut(&mut self, schema: &str) -> Option<&mut SchemaCatalog> {
-        self.schema_by_name.get_mut(schema)
-    }
-
-    pub fn get_schema_name(&self, schema_id: SchemaId) -> Option<String> {
-        self.schema_name_by_id.get(&schema_id).cloned()
-    }
-
-    pub fn id(&self) -> u64 {
-        self.id
     }
 }

@@ -91,10 +91,11 @@ mod tests {
 
     use crate::expr::ExprType;
     use crate::test_utils::LocalFrontend;
+    use crate::FrontendOpts;
 
     #[tokio::test]
     async fn test_values_to_prost() {
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         // Values(1:I32)
         let plan = frontend
             .to_batch_plan("values(1)")

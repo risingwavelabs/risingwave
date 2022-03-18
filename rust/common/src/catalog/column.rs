@@ -43,8 +43,8 @@ pub struct ColumnDesc {
 }
 #[derive(Clone, Debug)]
 pub struct OrderedColumnDesc {
-    column_desc: ColumnDesc,
-    order: OrderType,
+    pub column_desc: ColumnDesc,
+    pub order: OrderType,
 }
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
@@ -69,6 +69,12 @@ impl From<ProstColumnDesc> for ColumnDesc {
             column_id: ColumnId::new(column_id),
             name,
         }
+    }
+}
+
+impl From<&ProstColumnDesc> for ColumnDesc {
+    fn from(prost: &ProstColumnDesc) -> Self {
+        prost.clone().into()
     }
 }
 

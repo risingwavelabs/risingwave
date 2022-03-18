@@ -12,6 +12,7 @@ use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{QueryContext, QueryContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
+use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
@@ -62,7 +63,7 @@ impl TestCaseResult {
 impl TestCase {
     /// Run the test case, and return the expected output.
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
-        let frontend = LocalFrontend::new().await;
+        let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
         let statements = Parser::parse_sql(&self.sql).unwrap();
 
@@ -96,20 +97,19 @@ impl TestCase {
 
     fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
         let session = context.borrow().session_ctx.clone();
-        let catalog = session
-            .env()
-            .catalog_mgr()
-            .get_database_snapshot(session.database())
-            .unwrap();
-        let mut binder = Binder::new(catalog);
-
         let mut ret = TestCaseResult::default();
 
-        let bound = match binder.bind(stmt.clone()) {
-            Ok(bound) => bound,
-            Err(err) => {
-                ret.binder_error = Some(err.to_string());
-                return Ok(ret);
+        let bound = {
+            let mut binder = Binder::new(
+                session.env().catalog_reader().read_guard(),
+                session.database().to_string(),
+            );
+            match binder.bind(stmt.clone()) {
+                Ok(bound) => bound,
+                Err(err) => {
+                    ret.binder_error = Some(err.to_string());
+                    return Ok(ret);
+                }
             }
         };
 

@@ -7,6 +7,9 @@ pub use column::*;
 pub use physical_table::*;
 pub use schema::{test_utils as schema_test_utils, Field, Schema};
 
+pub const DEFAULT_DATABASE_NAME: &str = "dev";
+pub const DEFAULT_SCHEMA_NAME: &str = "dev";
+
 pub type CatalogVersion = u64;
 
 pub enum CatalogId {
@@ -46,7 +49,7 @@ pub struct TableId {
     pub table_id: u32,
 }
 impl TableId {
-    pub fn new(table_id: u32) -> Self {
+    pub const fn new(table_id: u32) -> Self {
         TableId { table_id }
     }
 
@@ -54,6 +57,13 @@ impl TableId {
         self.table_id
     }
 }
+
+impl From<u32> for TableId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+
 impl fmt::Display for TableId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.table_id,)

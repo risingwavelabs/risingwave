@@ -1,46 +1,69 @@
 use std::collections::HashMap;
 
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::meta::Table;
+use risingwave_common::catalog::TableId;
+use risingwave_meta::manager::SourceId;
+use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, SchemaId};
+use crate::catalog::SchemaId;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SchemaCatalog {
-    schema_id: SchemaId,
+    id: SchemaId,
+    name: String,
     table_by_name: HashMap<String, TableCatalog>,
+    table_name_by_id: HashMap<TableId, String>,
+    source_by_name: HashMap<String, ProstSource>,
+    source_name_by_id: HashMap<SourceId, String>,
 }
 
 impl SchemaCatalog {
-    pub fn new(schema_id: SchemaId) -> Self {
-        Self {
-            schema_id,
-            table_by_name: HashMap::new(),
-        }
-    }
-    pub fn create_table(&mut self, table: &Table) -> Result<()> {
-        let table_name = &table.table_name;
-        let table_catalog = table.try_into()?;
+    pub fn create_table(&mut self, prost: &ProstTable) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let table = prost.into();
 
-        self.table_by_name
-            .try_insert(table_name.clone(), table_catalog)
-            .map(|_val| ())
-            .map_err(|_| CatalogError::Duplicated("table", table_name.clone()).into())
+        self.table_by_name.try_insert(name.clone(), table).unwrap();
+        self.table_name_by_id.try_insert(id, name).unwrap();
     }
 
-    pub fn drop_table(&mut self, table_name: &str) -> Result<()> {
-        self.table_by_name.remove(table_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("table", table_name.to_string()))
-        })?;
-        Ok(())
+    pub fn drop_table(&mut self, id: TableId) {
+        let name = self.table_name_by_id.remove(&id).unwrap();
+        self.table_by_name.remove(&name).unwrap();
+    }
+    pub fn create_source(&mut self, prost: ProstSource) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+
+        self.source_by_name.try_insert(name.clone(), prost).unwrap();
+        self.table_name_by_id.try_insert(id, name).unwrap();
+    }
+    pub fn drop_source(&mut self, id: SourceId) {
+        let name = self.source_name_by_id.remove(&id).unwrap();
+        self.source_by_name.remove(&name).unwrap();
     }
 
-    pub fn get_table(&self, table_name: &str) -> Option<&TableCatalog> {
+    pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
+    }
+    pub fn get_source_by_name(&self, source_name: &str) -> Option<&ProstSource> {
+        self.source_by_name.get(source_name)
     }
 
     pub fn id(&self) -> SchemaId {
-        self.schema_id
+        self.id
+    }
+}
+
+impl From<&ProstSchema> for SchemaCatalog {
+    fn from(schema: &ProstSchema) -> Self {
+        Self {
+            id: schema.id,
+            name: schema.name.clone(),
+            table_by_name: HashMap::new(),
+            table_name_by_id: HashMap::new(),
+            source_by_name: HashMap::new(),
+            source_name_by_id: HashMap::new(),
+        }
     }
 }
