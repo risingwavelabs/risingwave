@@ -54,6 +54,7 @@ pub async fn compute_node_serve(
         .register(addr, WorkerType::ComputeNode)
         .await
         .unwrap();
+    info!("Assigned worker node id {}", worker_id);
 
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> =
         vec![MetaClient::start_heartbeat_loop(

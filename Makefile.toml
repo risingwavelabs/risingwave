@@ -61,7 +61,7 @@ do
   echo "=== Dump log file $out_file ==="
   echo "==="
   echo ""
-  cat "$out_file" | tail -n 100
+  cat "$out_file" | tail -n 300
 done
 '''
 
@@ -266,4 +266,35 @@ exit 1
 script = """
 echo \"directly calling ./risedev dev-meta-node has been deprecated. Use ./risedev dev dev-meta-node instead.\"
 exit 1
+"""
+
+[tasks.install-sqllogictest]
+script = """
+#!/bin/bash
+set -e
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+"""
+
+[tasks.install-llvm-cov]
+script = """
+#!/bin/bash
+set -e
+cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 180e62
+"""
+
+[tasks.install-nextest]
+script = """
+#!/bin/bash
+set -e
+cargo install cargo-nextest
+"""
+
+[tasks.test-coverage]
+script = """
+#!/bin/bash
+set -e
+
+cd rust
+CARGO_TARGET_DIR=target/coverage
+cargo llvm-cov nextest
 """

@@ -92,7 +92,11 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
     // The fetched epoch is guaranteed to be GE than the cached ones.
     long epoch =
         this.metaClient
-            .pinSnapshot(PinSnapshotRequest.newBuilder().setContextId(this.workerNodeId).build())
+            .pinSnapshot(
+                PinSnapshotRequest.newBuilder()
+                    .setContextId(this.workerNodeId)
+                    .setLastPinned(~0L)
+                    .build())
             .getSnapshot()
             .getEpoch();
     synchronized (referenceCounts) {

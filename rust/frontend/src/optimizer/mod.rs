@@ -14,7 +14,7 @@ use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::LogicalProject;
-use self::rule::FilterJoinRule;
+use self::rule::*;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -87,19 +87,26 @@ impl PlanRoot {
         LogicalProject::create(self.logical_plan, exprs, expr_aliases)
     }
 
-    /// optimize and generate a batch query plan
-    pub fn gen_batch_query_plan(&self) -> PlanRef {
+    /// Apply logical optimization to the plan.
+    pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.logical_plan.clone();
 
         // Predicate Push-down
         plan = {
-            let rules = vec![FilterJoinRule::create()];
+            let rules = vec![FilterJoinRule::create(), FilterProjectRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
 
         // Prune Columns
         plan = plan.prune_col(&self.out_fields);
+
+        plan
+    }
+
+    /// optimize and generate a batch query plan
+    pub fn gen_batch_query_plan(&self) -> PlanRef {
+        let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order);
@@ -124,17 +131,7 @@ impl PlanRoot {
 
     /// optimize and generate a create materialize view plan
     pub fn gen_create_mv_plan(&self) -> PlanRef {
-        let mut plan = self.logical_plan.clone();
-
-        // Predicate Push-down
-        plan = {
-            let rules = vec![FilterJoinRule::create()];
-            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
-            heuristic_optimizer.optimize(plan)
-        };
-
-        // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        let mut plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         plan = plan.to_stream_with_dist_required(&self.required_dist);

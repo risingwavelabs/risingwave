@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 pub struct TestCase {
     pub sql: String,
     pub logical_plan: Option<String>,
+    pub optimized_logical_plan: Option<String>,
     pub batch_plan: Option<String>,
     pub stream_plan: Option<String>,
     pub binder_error: Option<String>,
@@ -34,6 +35,7 @@ pub struct TestCase {
 #[serde(deny_unknown_fields)]
 pub struct TestCaseResult {
     pub logical_plan: Option<String>,
+    pub optimized_logical_plan: Option<String>,
     pub batch_plan: Option<String>,
     pub stream_plan: Option<String>,
     pub binder_error: Option<String>,
@@ -47,6 +49,7 @@ impl TestCaseResult {
         TestCase {
             sql: sql.to_string(),
             logical_plan: self.logical_plan,
+            optimized_logical_plan: self.optimized_logical_plan,
             batch_plan: self.batch_plan,
             stream_plan: self.stream_plan,
             planner_error: self.planner_error,
@@ -123,6 +126,12 @@ impl TestCase {
             }
         };
 
+        // Only generate optimized_logical_plan if it is specified in test case
+        if self.optimized_logical_plan.is_some() {
+            ret.optimized_logical_plan =
+                Some(explain_plan(&logical_plan.gen_optimized_logical_plan()));
+        }
+
         // Only generate batch_plan if it is specified in test case
         if self.batch_plan.is_some() {
             ret.batch_plan = Some(explain_plan(&logical_plan.gen_dist_batch_query_plan()));
@@ -150,6 +159,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &actual.optimizer_error,
     )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
+    check_option_plan_eq(
+        "optimized_logical_plan",
+        &expected.optimized_logical_plan,
+        &actual.optimized_logical_plan,
+    )?;
     check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
 
