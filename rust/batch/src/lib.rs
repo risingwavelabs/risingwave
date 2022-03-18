@@ -14,6 +14,7 @@
 #![feature(test)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
+#![cfg_attr(coverage, feature(no_coverage))]
 
 pub mod execution;
 pub mod executor;
