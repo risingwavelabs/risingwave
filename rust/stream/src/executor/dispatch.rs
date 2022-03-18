@@ -654,7 +654,7 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        let num_outputs = 2;
+        let num_outputs = 2;  // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
         let output_data_vecs = (0..num_outputs)
             .map(|_| Arc::new(Mutex::new(Vec::new())))
@@ -663,12 +663,13 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(actor_id as u32, data.clone())) as BoxedOutput
+                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
             })
             .collect::<Vec<_>>();
-        let hash_mapping = (0..num_outputs)
+        let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
             .collect_vec();
+        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
@@ -716,7 +717,7 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 4);
+                    assert_eq!(chunk1.cardinality(), 5);
                     assert!(
                         !chunk1.visibility().as_ref().unwrap().is_set(1).unwrap(),
                         "Should keep original invisible mark"
@@ -867,11 +868,11 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(actor_id, data)| {
-                Box::new(MockOutput::new(actor_id as u32, data.clone())) as BoxedOutput
+                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
             })
             .collect::<Vec<_>>();
-        let mut hash_mapping = (1..6)
-            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / 5])
+        let mut hash_mapping = (1..num_outputs + 1)
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
             .collect_vec();
         hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
