@@ -16,8 +16,6 @@ pub struct TableCatalog {
     pk_desc: Vec<OrderedColumnDesc>,
 }
 
-pub const ROWID_NAME: &str = "_row_id";
-
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {

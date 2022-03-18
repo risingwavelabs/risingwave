@@ -11,6 +11,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::session::QueryContext;
+pub const ROWID_NAME: &str = "_row_id";
 
 pub async fn handle_create_table(
     context: QueryContext,
@@ -27,7 +28,7 @@ pub async fn handle_create_table(
     let column_catalogs = iter::once(Ok(ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
-            name: "_row_id".to_string(),
+            name: ROWID_NAME.to_string(),
             column_type: Some(DataType::Int32.to_protobuf()),
         }),
         is_hidden: true,
