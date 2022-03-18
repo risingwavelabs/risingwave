@@ -65,6 +65,18 @@
         StreamExchange { order: Order { field_order: [] }, dist: Single }
           StreamTableScan { logical: LogicalScan { table: "t", columns: [] } }
 - sql: |
+    create table t (v1 int);
+    select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [None] }
+        BatchScan { table: "t", columns: ["v1"] }
+  stream_plan: |
+    StreamMaterialize { table_id: 0 }
+      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [None] }
+        StreamExchange { order: Order { field_order: [] }, dist: Single }
+          StreamTableScan { logical: LogicalScan { table: "t", columns: ["v1"] } }
+- sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   batch_plan: |
