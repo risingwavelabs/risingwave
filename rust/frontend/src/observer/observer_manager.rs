@@ -57,19 +57,19 @@ impl ObserverManager {
                     match resp.info {
                         Some(Info::Database(_)) => {
                             panic!(
-                                "recive a outdate version catalog notify from meta {:?}",
+                                "received a deprecated catalog notification from meta {:?}",
                                 resp_clone
                             );
                         }
                         Some(Info::Schema(_)) => {
                             panic!(
-                                "recive a outdate version catalog notify from meta {:?}",
+                                "received a deprecated catalog notification from meta {:?}",
                                 resp_clone
                             );
                         }
                         Some(Info::Table(_)) => {
                             panic!(
-                                "recive a outdate version catalog notify from meta {:?}",
+                                "received a deprecated catalog notification from meta {:?}",
                                 resp_clone
                             );
                         }
