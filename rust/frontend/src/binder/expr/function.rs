@@ -21,6 +21,7 @@ impl Binder {
                 "sum" => Some(AggKind::Sum),
                 "min" => Some(AggKind::Min),
                 "max" => Some(AggKind::Max),
+                "avg" => Some(AggKind::Avg),
                 _ => None,
             };
             if let Some(kind) = agg_kind {

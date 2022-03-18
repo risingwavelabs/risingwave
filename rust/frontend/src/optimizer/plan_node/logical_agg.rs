@@ -12,7 +12,7 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary,
     StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -102,16 +102,44 @@ impl ExprRewriter for ExprHandler {
         let begin = self.project.len();
         self.project.extend(inputs);
         let end = self.project.len();
+        let inputs: Vec<usize> = (begin..end).collect();
 
-        self.agg_calls.push(PlanAggCall {
-            agg_kind,
-            return_type: return_type.clone(),
-            inputs: (begin..end).collect(),
-        });
-        ExprImpl::from(InputRef::new(
-            self.group_column_index.len() + self.agg_calls.len() - 1,
-            return_type,
-        ))
+        if agg_kind == AggKind::Avg {
+            // Rewrite avg to sum/count.
+            self.agg_calls.push(PlanAggCall {
+                agg_kind: AggKind::Sum,
+                return_type: return_type.clone(),
+                inputs: inputs.clone(),
+            });
+            let left = InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type.clone(),
+            );
+
+            self.agg_calls.push(PlanAggCall {
+                agg_kind: AggKind::Count,
+                return_type: DataType::Int64,
+                inputs,
+            });
+            let right = InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type,
+            );
+
+            ExprImpl::from(
+                FunctionCall::new(ExprType::Divide, vec![left.into(), right.into()]).unwrap(),
+            )
+        } else {
+            self.agg_calls.push(PlanAggCall {
+                agg_kind,
+                return_type: return_type.clone(),
+                inputs,
+            });
+            ExprImpl::from(InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type,
+            ))
+        }
     }
     // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {

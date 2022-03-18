@@ -33,8 +33,8 @@ impl StreamHashAgg {
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("StreamHashAgg")
-            .field("aggs", &self.agg_calls())
             .field("group_keys", &self.group_keys())
+            .field("aggs", &self.agg_calls())
             .finish()
     }
 }
