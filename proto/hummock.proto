@@ -81,14 +81,18 @@ message UncommittedEpoch {
   repeated SstableInfo tables = 2;
 }
 
+message HummockVersionRefId {
+  uint64 id = 1;
+}
+
 message HummockVersion {
-  message HummockVersionRefId {
-    uint64 id = 1;
-  }
   uint64 id = 1;
   repeated Level levels = 2;
   repeated UncommittedEpoch uncommitted_epochs = 3;
   uint64 max_committed_epoch = 4;
+  // Snapshots with epoch less than the safe epoch have been GCed.
+  // Reads against such an epoch will fail.
+  uint64 safe_epoch = 5;
 }
 
 message HummockSnapshot {
@@ -108,6 +112,7 @@ message AddTablesResponse {
 
 message PinVersionRequest {
   uint32 context_id = 1;
+  uint64 last_pinned = 2;
 }
 
 message PinVersionResponse {
@@ -126,6 +131,7 @@ message UnpinVersionResponse {
 
 message PinSnapshotRequest {
   uint32 context_id = 1;
+  uint64 last_pinned = 2;
 }
 
 message PinSnapshotResponse {

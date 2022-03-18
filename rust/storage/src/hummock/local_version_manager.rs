@@ -48,6 +48,10 @@ impl ScopedLocalVersion {
     pub fn max_committed_epoch(&self) -> u64 {
         self.version.max_committed_epoch
     }
+
+    pub fn safe_epoch(&self) -> u64 {
+        self.version.safe_epoch
+    }
 }
 
 /// The `LocalVersionManager` maintain a local copy of storage service's hummock version data.
@@ -204,7 +208,11 @@ impl LocalVersionManager {
         loop {
             min_interval.tick().await;
             if let Some(local_version_manager) = local_version_manager.upgrade() {
-                if let Ok(version) = hummock_meta_client.pin_version().await {
+                let last_pinned = match local_version_manager.current_version.read().as_ref() {
+                    None => INVALID_VERSION_ID,
+                    Some(v) => v.version.id,
+                };
+                if let Ok(version) = hummock_meta_client.pin_version(last_pinned).await {
                     local_version_manager.try_set_version(version);
                 }
             } else {

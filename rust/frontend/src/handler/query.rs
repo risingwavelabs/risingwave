@@ -6,8 +6,9 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
-use risingwave_rpc_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
+use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use risingwave_sqlparser::ast::Statement;
+use uuid::Uuid;
 
 use crate::binder::Binder;
 use crate::handler::util::{get_pg_field_descs, to_pg_rows};
@@ -47,7 +48,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
 
     // Build task id and task sink id
     let task_id = TaskId {
-        query_id: "".to_string(),
+        query_id: Uuid::new_v4().to_string(),
         stage_id: 0,
         task_id: 0,
     };
@@ -59,7 +60,12 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
     // TODO: hummock snapshot should maintain as cache instead of RPC each query.
     let meta_client = session.env().meta_client();
-    let pin_snapshot_req = PinSnapshotRequest { context_id: 0 };
+    let pin_snapshot_req = PinSnapshotRequest {
+        context_id: 0,
+        // u64::MAX always return the greatest current epoch. Use correct `last_pinned` when
+        // retrying this RPC.
+        last_pinned: u64::MAX,
+    };
     let epoch = meta_client
         .inner
         .pin_snapshot(pin_snapshot_req)
@@ -73,9 +79,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     compute_client
         .create_task(task_id.clone(), plan, epoch)
         .await?;
-    let mut source =
-        GrpcExchangeSource::create_with_client(compute_client.clone(), task_sink_id.clone())
-            .await?;
+    let mut source = compute_client.get_data(task_sink_id.clone()).await?;
     while let Some(chunk) = source.take_data().await? {
         rows.append(&mut to_pg_rows(chunk));
     }

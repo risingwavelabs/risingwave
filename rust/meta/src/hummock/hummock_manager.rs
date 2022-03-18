@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -5,11 +6,10 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockContextRefId, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
-    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionRefId, Level, LevelType,
+    SstableIdInfo, SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -121,6 +121,7 @@ where
                 ],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
+                safe_epoch: INVALID_EPOCH,
             };
             init_version.insert(self.meta_store_ref.as_ref()).await?;
             versioning_guard
@@ -182,10 +183,18 @@ where
         meta_store_ref.txn(trx).await.map_err(Into::into)
     }
 
-    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
+    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` helps to make `pin_version` retryable:
+    /// 1 Return the smallest already pinned version of `context_id` that is greater than
+    /// `last_pinned`, if any.
+    /// 2 Otherwise pin and return the current greatest version.
+    pub async fn pin_version(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: HummockVersionId,
+    ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
-        let version_id = versioning_guard.current_version_id.id();
-        // pin the version
         let mut context_pinned_version_copy = versioning_guard
             .pinned_versions
             .get(&context_id)
@@ -194,17 +203,37 @@ where
                 context_id,
                 version_id: vec![],
             });
-        context_pinned_version_copy.pin_version(version_id);
-        let mut transaction = Transaction::default();
-        context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
-            .await?;
 
-        // Update in-mem state after transaction succeeds.
-        versioning_guard.pinned_versions.insert(
-            context_pinned_version_copy.context_id,
-            context_pinned_version_copy,
-        );
+        let mut already_pinned = false;
+        let version_id = {
+            let partition_point = context_pinned_version_copy
+                .version_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_version_copy.version_id.len() {
+                already_pinned = true;
+                context_pinned_version_copy.version_id[partition_point]
+            } else {
+                versioning_guard.current_version_id.id()
+            }
+        };
+
+        if !already_pinned {
+            context_pinned_version_copy.pin_version(version_id);
+            let mut transaction = Transaction::default();
+            context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+                .await?;
+
+            // Update in-mem state after transaction succeeds.
+            versioning_guard.pinned_versions.insert(
+                context_pinned_version_copy.context_id,
+                context_pinned_version_copy,
+            );
+        }
 
         let ret = Ok(versioning_guard
             .hummock_versions
@@ -479,7 +508,14 @@ where
         Ok(hummock_version_copy)
     }
 
-    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+    /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` helps to `pin_snapshot` retryable, see `pin_version` for detail.
+    pub async fn pin_snapshot(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: HummockEpoch,
+    ) -> Result<HummockSnapshot> {
         let mut versioning_guard = self.versioning.write().await;
 
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
@@ -490,6 +526,7 @@ where
             .get(&version_id)
             .unwrap()
             .max_committed_epoch;
+
         let mut context_pinned_snapshot_copy = versioning_guard
             .pinned_snapshots
             .get(&context_id)
@@ -498,17 +535,37 @@ where
                 context_id,
                 snapshot_id: vec![],
             });
-        context_pinned_snapshot_copy.pin_snapshot(max_committed_epoch);
-        let mut transaction = Transaction::default();
-        context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
-            .await?;
 
-        // Update in-mem state after transaction succeeds.
-        versioning_guard.pinned_snapshots.insert(
-            context_pinned_snapshot_copy.context_id,
-            context_pinned_snapshot_copy,
-        );
+        let mut already_pinned = false;
+        let epoch = {
+            let partition_point = context_pinned_snapshot_copy
+                .snapshot_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_snapshot_copy.snapshot_id.len() {
+                already_pinned = true;
+                context_pinned_snapshot_copy.snapshot_id[partition_point]
+            } else {
+                max_committed_epoch
+            }
+        };
+
+        if !already_pinned {
+            context_pinned_snapshot_copy.pin_snapshot(epoch);
+            let mut transaction = Transaction::default();
+            context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+                .await?;
+
+            // Update in-mem state after transaction succeeds.
+            versioning_guard.pinned_snapshots.insert(
+                context_pinned_snapshot_copy.context_id,
+                context_pinned_snapshot_copy,
+            );
+        }
 
         #[cfg(test)]
         {
@@ -516,9 +573,7 @@ where
             self.check_state_consistency().await;
         }
 
-        Ok(HummockSnapshot {
-            epoch: max_committed_epoch,
-        })
+        Ok(HummockSnapshot { epoch })
     }
 
     pub async fn unpin_snapshot(
@@ -626,6 +681,7 @@ where
             .collect_vec();
 
         let compact_task_metrics = compact_task.metrics.take();
+        let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
         let mut transaction = Transaction::default();
         let mut compact_status_copy = compaction_guard.compact_status.clone();
@@ -675,6 +731,8 @@ where
                     .collect(),
                 uncommitted_epochs: old_version.uncommitted_epochs.clone(),
                 max_committed_epoch: old_version.max_committed_epoch,
+                // update safe epoch of hummock version
+                safe_epoch: max(old_version.safe_epoch, compacted_watermark),
             };
 
             new_version.upsert_in_transaction(&mut transaction)?;
@@ -953,6 +1011,7 @@ where
     }
 
     pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
+        tracing::debug!("context_id {} is released", context_id);
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         let pinned_version = versioning_guard.pinned_versions.get(&context_id);

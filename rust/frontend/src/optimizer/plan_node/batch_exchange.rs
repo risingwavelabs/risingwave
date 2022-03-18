@@ -35,8 +35,11 @@ impl BatchExchange {
 }
 
 impl fmt::Display for BatchExchange {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BatchExchange")
+            .field("order", self.order())
+            .field("dist", self.distribution())
+            .finish()
     }
 }
 

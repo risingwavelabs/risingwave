@@ -58,6 +58,8 @@ impl Condition {
         }
     }
 
+    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
+    // rather than using `AND` to combine them.
     pub fn as_expr(&self) -> ExprImpl {
         let mut iter = self.conjunctions.iter();
         if let Some(e) = iter.next() {

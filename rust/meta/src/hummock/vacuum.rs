@@ -87,11 +87,11 @@ where
     ) -> risingwave_common::error::Result<u64> {
         let mut vacuum_count: u64 = 0;
         let version_ids = vacuum.hummock_manager_ref.list_version_ids_asc().await?;
+        if version_ids.is_empty() {
+            return Ok(0);
+        }
         // Iterate version ids in ascending order. Skip the greatest version id.
-        for version_id in version_ids
-            .iter()
-            .take(std::cmp::max(0, version_ids.len() - 1))
-        {
+        for version_id in version_ids.iter().take(version_ids.len() - 1) {
             let pin_count = vacuum
                 .hummock_manager_ref
                 .get_version_pin_count(*version_id)
@@ -239,7 +239,10 @@ mod tests {
             compactor_manager.clone(),
         ));
 
-        let pinned_version = hummock_manager.pin_version(context_id).await.unwrap();
+        let pinned_version = hummock_manager
+            .pin_version(context_id, u64::MAX)
+            .await
+            .unwrap();
 
         // Vacuum no version because the smallest v0 is pinned.
         assert_eq!(

@@ -1,10 +1,12 @@
+#![cfg_attr(coverage, feature(no_coverage))]
+
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg(feature = "all-in-one")]
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 #[tokio::main]
 async fn main() {
     use std::collections::HashMap;
@@ -135,7 +137,7 @@ async fn main() {
 }
 
 #[cfg(not(feature = "all-in-one"))]
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 fn main() {
     panic!("please enable `all-in-one` flag when cargo build to use all-in-one binary");
 }

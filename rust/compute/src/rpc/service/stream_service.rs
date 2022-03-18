@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
-use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BroadcastActorInfoTableResponse, BuildActorsRequest,
-    BuildActorsResponse, DropActorsRequest, DropActorsResponse, InjectBarrierRequest,
-    InjectBarrierResponse, UpdateActorsRequest, UpdateActorsResponse,
-};
+use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::Barrier;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
 use tonic::{Request, Response, Status};
@@ -26,7 +23,7 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn update_actors(
         &self,
         request: Request<UpdateActorsRequest>,
@@ -42,7 +39,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn build_actors(
         &self,
         request: Request<BuildActorsRequest>,
@@ -63,7 +60,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn broadcast_actor_info_table(
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
@@ -82,7 +79,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_actors(
         &self,
         request: Request<DropActorsRequest>,
@@ -119,5 +116,53 @@ impl StreamService for StreamServiceImpl {
             request_id: req.request_id,
             status: None,
         }))
+    }
+
+    async fn create_source(
+        &self,
+        request: Request<CreateSourceRequest>,
+    ) -> Result<Response<CreateSourceResponse>, Status> {
+        use risingwave_pb::catalog::source::Info;
+
+        let source = request.into_inner().source.unwrap();
+        let id = TableId::new(source.id); // TODO: use SourceId instead
+
+        match source.info.unwrap() {
+            Info::StreamSource(_) => todo!("ddl v2: create stream source"),
+
+            Info::TableSource(info) => {
+                let columns = info
+                    .columns
+                    .into_iter()
+                    .map(|c| c.column_desc.unwrap().into())
+                    .collect_vec();
+
+                self.env
+                    .source_manager()
+                    .create_table_source_v2(&id, columns)
+                    .map_err(tonic_err)?;
+
+                info!("create table source, id: {}", id);
+            }
+        };
+
+        Ok(Response::new(CreateSourceResponse { status: None }))
+    }
+
+    async fn drop_source(
+        &self,
+        request: Request<DropSourceRequest>,
+    ) -> Result<Response<DropSourceResponse>, Status> {
+        let id = request.into_inner().source_id;
+        let id = TableId::new(id); // TODO: use SourceId instead
+
+        self.env
+            .source_manager()
+            .drop_source(&id)
+            .map_err(tonic_err)?;
+
+        info!("drop source, id: {}", id);
+
+        Ok(Response::new(DropSourceResponse { status: None }))
     }
 }

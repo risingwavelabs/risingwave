@@ -35,7 +35,8 @@ pub async fn handle_create_mv(
         .to_stream_prost();
     // TODO catalog writer to create mv
 
-    tracing::info!(name= ?name, plan = ?plan);
+    let json_plan = serde_json::to_string(&plan).unwrap();
+    tracing::info!(name= ?name, plan = ?json_plan);
 
     Ok(PgResponse::new(
         pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW,

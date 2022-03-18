@@ -1,5 +1,7 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::ffi::OsString;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,17 +35,24 @@ use risingwave_pb::meta::{
     ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
 };
 use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
 use tokio::sync::mpsc::{
-    self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
+    self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender, UnboundedSender,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tonic::Request;
 
-use crate::session::{FrontendEnv, SessionImpl};
+use crate::binder::Binder;
+use crate::optimizer::PlanRef;
+use crate::planner::Planner;
+use crate::session::{FrontendEnv, QueryContext, SessionImpl};
 use crate::FrontendOpts;
 
-/// a mock ['SessionManagerImpl'](super::SessionManagerImpl) for test
+/// LocalFrontend is an embedded frontend without starting meta and without
+/// starting frontend as a tcp server. a mock ['SessionManagerImpl'](super::SessionManagerImpl) for
+/// test
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
     pub observer_join_handle: JoinHandle<()>,
@@ -80,6 +89,31 @@ impl LocalFrontend {
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         let sql = sql.into();
         self.session_ref().run_statement(sql.as_str()).await
+    }
+
+    /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
+    pub async fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
+        let statements = Parser::parse_sql(&sql.into()).unwrap();
+        let statement = statements.get(0).unwrap();
+        if let Statement::Query(query) = statement {
+            let session = self.session_ref().clone();
+
+            let bound = {
+                let mut binder = Binder::new(
+                    session.env().catalog_reader().read_guard(),
+                    session.database().to_string(),
+                );
+                binder.bind(Statement::Query(query.clone()))?
+            };
+            Ok(
+                Planner::new(Rc::new(RefCell::new(QueryContext::new(session))))
+                    .plan(bound)
+                    .unwrap()
+                    .gen_batch_query_plan(),
+            )
+        } else {
+            unreachable!()
+        }
     }
 
     pub fn session_ref(&self) -> Arc<SessionImpl> {

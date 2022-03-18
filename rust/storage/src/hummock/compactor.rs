@@ -226,8 +226,9 @@ impl Compactor {
 
             let epoch = get_epoch(iter_key);
 
+            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
+            // and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
-                // Only retain latest key which satisfies epoch < watermark
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
                     iter.next().await?;
@@ -352,7 +353,7 @@ impl Compactor {
                     _ = min_interval.tick() => {},
                     // Shutdown compactor
                     _ = shutdown_rx.recv() => {
-                        tracing::info!("compactor is shutting down");
+                        tracing::info!("Compactor is shutting down");
                         return;
                     }
                 }
@@ -364,7 +365,7 @@ impl Compactor {
                 {
                     Ok(stream) => stream,
                     Err(e) => {
-                        tracing::warn!("failed to subscribe_compact_tasks. {}", RwError::from(e));
+                        tracing::warn!("Failed to subscribe_compact_tasks. {}", RwError::from(e));
                         continue 'start_stream;
                     }
                 };
@@ -377,7 +378,7 @@ impl Compactor {
                         },
                         // Shutdown compactor
                         _ = shutdown_rx.recv() => {
-                            tracing::info!("compactor is shutting down");
+                            tracing::info!("Compactor is shutting down");
                             return
                         }
                     };
@@ -397,8 +398,9 @@ impl Compactor {
                                 if let Err(e) =
                                     Compactor::compact(&sub_compact_context, compact_task).await
                                 {
-                                    tracing::warn!("failed to compact. {}", RwError::from(e));
+                                    tracing::warn!("Failed to compact SSTs. {}", RwError::from(e));
                                 }
+                                tracing::debug!("Finish compacting SSTs");
                             }
                             if let Some(vacuum_task) = vacuum_task {
                                 tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
@@ -409,12 +411,13 @@ impl Compactor {
                                 )
                                 .await
                                 {
-                                    tracing::warn!("failed to vacuum. {}", e);
+                                    tracing::warn!("Failed to vacuum SSTs. {}", e);
                                 }
+                                tracing::debug!("Finish vacuuming SSTs");
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("failed to consume stream. {}", e.message());
+                            tracing::warn!("Failed to consume stream. {}", e.message());
                             continue 'start_stream;
                         }
                         _ => {

@@ -9,6 +9,8 @@ impl Planner {
     pub(super) fn plan_table_ref(&mut self, table_ref: TableRef) -> Result<PlanRef> {
         match table_ref {
             TableRef::BaseTable(t) => self.plan_base_table_ref(*t),
+            // TODO: order is ignored in the subquery
+            TableRef::SubQuery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
             TableRef::Join(join) => self.plan_join(*join),
         }
     }

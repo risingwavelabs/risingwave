@@ -13,12 +13,12 @@ pub trait ExprRewriter {
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
-        let (func_type, inputs) = func_call.decompose();
+        let (func_type, inputs, ret) = func_call.decompose();
         let inputs = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        FunctionCall::new(func_type, inputs).unwrap().into()
+        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
     }
     fn rewrite_agg_call(&mut self, agg_call: AggCall) -> ExprImpl {
         let (func_type, inputs) = agg_call.decompose();

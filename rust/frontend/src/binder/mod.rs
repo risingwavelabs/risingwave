@@ -31,8 +31,11 @@ pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
     db_name: String,
-    // TODO: support subquery.
     context: BindContext,
+    /// A stack holding contexts of outer queries when binding a subquery.
+    ///
+    /// See [`Binder::bind_subquery`] for details.
+    upper_contexts: Vec<BindContext>,
 }
 
 impl Binder {
@@ -41,6 +44,7 @@ impl Binder {
             catalog,
             db_name,
             context: BindContext::new(),
+            upper_contexts: vec![],
         }
     }
 
@@ -74,4 +78,19 @@ pub mod test_utils {
     pub fn mock_binder() -> Binder {
         mock_binder_with_catalog(Catalog::default(), "".to_string())
     }
+
+    fn push_context(&mut self) {
+        let new_context = std::mem::take(&mut self.context);
+        self.upper_contexts.push(new_context);
+    }
+
+    fn pop_context(&mut self) {
+        let old_context = self.upper_contexts.pop();
+        self.context = old_context.unwrap();
+    }
 }
+
+/// The column name stored in [`BindContext`] for a column without an alias.
+const UNNAMED_COLUMN: &str = "?column?";
+/// The table name stored in [`BindContext`] for a subquery without an alias.
+const UNNAMED_SUBQUERY: &str = "?subquery?";
