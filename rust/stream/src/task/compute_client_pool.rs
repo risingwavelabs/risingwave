@@ -22,7 +22,8 @@ impl ComputeClientPool {
             .get_or_try_insert_with(*addr, async { ComputeClient::new(addr).await })
             .await
             .map_err(|e| {
-                ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
+                // TODO: change this to error when we completed failover and error handling
+                panic!("failed to create compute client: {:?}", e)
             })
     }
 }

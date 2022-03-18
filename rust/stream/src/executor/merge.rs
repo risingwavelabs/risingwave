@@ -125,7 +125,9 @@ impl Executor for ReceiverExecutor {
             .next()
             .instrument(tracing::trace_span!("idle"))
             .await
-            .unwrap(); // TODO: remove unwrap
+            .expect(
+                "upstream channel closed unexpectedly, please check error in upstream executors",
+            ); // TODO: remove unwrap
         Ok(msg)
     }
 
@@ -226,7 +228,11 @@ impl Executor for MergeExecutor {
                 self.active.push(fut.into_inner().unwrap());
             }
 
-            match message.unwrap() {
+            let message = message.expect(
+                "upstream channel closed unexpectedly, please check error in upstream executors",
+            );
+
+            match message {
                 Message::Chunk(chunk) => {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
