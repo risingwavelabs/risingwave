@@ -188,7 +188,7 @@ fn check_option_plan_eq(
 }
 
 fn check_plan_eq(ctx: &str, expected: &String, actual: &String) -> Result<()> {
-    if expected != actual {
+    if expected.trim() != actual.trim() {
         Err(anyhow!(
             "Expected {}:\n{}\nActual {}:\n{}",
             ctx,

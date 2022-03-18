@@ -172,3 +172,40 @@
     BatchExchange { order: Order { field_order: [] }, dist: Single }
       BatchProject { exprs: [1:Int32], expr_alias: [None] }
         BatchValues { rows: [[]] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int);
+    select v1, min(v2) + max(v3) * count(v1) from t group by v1;
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [Some("v1"), None] }
+        BatchHashAgg { group_keys: [0], aggs: [Min(1), Max(2), Count(3)] }
+          BatchExchange { order: Order { field_order: [] }, dist: HashShard([0]) }
+            BatchProject { exprs: [$0, $1, $2, $0], expr_alias: [None, None, None, None] }
+              BatchScan { table: "t", columns: ["v1", "v2", "v3"] }
+  stream_plan: |
+    StreamProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [Some("v1"), None] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamHashAgg { aggs: [Min(1), Max(2), Count(3)], group_keys: [0] }
+          StreamProject { exprs: [$0, $1, $2, $0], expr_alias: [None, None, None, None] }
+            StreamTableScan { logical: LogicalScan { table: "t", columns: ["v1", "v2", "v3"] } }
+- sql: |
+    create table t(v1 int, v2 int, v3 int);
+    select min(v1) + max(v2) * count(v3) from t;
+  batch_plan: |
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [($0 + ($1 * $2))], expr_alias: [None] }
+        BatchSimpleAgg { aggs: [Min(0), Max(1), Count(2)] }
+          BatchExchange { order: Order { field_order: [] }, dist: Single }
+            BatchProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+              BatchScan { table: "t", columns: ["v1", "v2", "v3"] }
+  stream_plan: |
+    StreamProject { exprs: [($0 + ($1 * $2))], expr_alias: [None] }
+      StreamExchange { order: Order { field_order: [] }, dist: Single }
+        StreamSimpleAgg { aggs: [Min(0), Max(1), Count(2)] }
+          StreamProject { exprs: [$0, $1, $2], expr_alias: [None, None, None] }
+            StreamTableScan { logical: LogicalScan { table: "t", columns: ["v1", "v2", "v3"] } }
+- sql: |
+    create table t(v1 int, v2 int);
+    select v1 from t group by v2;
+  planner_error: |-
+    Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function
