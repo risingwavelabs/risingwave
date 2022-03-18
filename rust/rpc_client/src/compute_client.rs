@@ -61,10 +61,7 @@ impl ComputeClient {
                 task_output_id: Some(output_id.clone()),
             })
             .await
-            .to_rw_result_with(format!(
-                "failed to create stream {:?} for output_id={:?}",
-                self.addr, output_id
-            ))?
+            .to_rw_result()?
             .into_inner())
     }
 
@@ -88,7 +85,7 @@ impl ComputeClient {
             .into_inner())
     }
 
-    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode) -> Result<()> {
+    pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
         let plan = PlanFragment {
             root: Some(plan),
             exchange_info: Some(ExchangeInfo {
@@ -100,7 +97,7 @@ impl ComputeClient {
             .create_task_inner(CreateTaskRequest {
                 task_id: Some(task_id),
                 plan: Some(plan),
-                ..Default::default()
+                epoch,
             })
             .await?;
         Ok(())
@@ -148,8 +145,7 @@ impl ExchangeSource for GrpcExchangeSource {
             None => return Ok(None),
             Some(r) => r,
         };
-        let task_data =
-            res.to_rw_result_with(format!("failed to take data from stream ({:?})", self.addr))?;
+        let task_data = res.to_rw_result()?;
         let data = DataChunk::from_protobuf(task_data.get_record_batch()?)?.compact()?;
 
         trace!(

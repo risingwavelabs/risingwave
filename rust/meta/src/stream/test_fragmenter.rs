@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
@@ -120,6 +121,7 @@ fn make_stream_node() -> StreamNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
+                hash_mapping: None,
             }),
             fields: vec![
                 make_field(TypeName::Int32),
@@ -236,7 +238,9 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 1);
+    let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
+    let mut fragmenter =
+        StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, hash_mapping);
 
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
@@ -269,84 +273,6 @@ async fn test_fragmenter() -> Result<()> {
     expected_upstream.insert(7, vec![]);
     expected_upstream.insert(8, vec![]);
     expected_upstream.insert(9, vec![]);
-
-    for actor in actors {
-        assert_eq!(
-            expected_downstream.get(&actor.get_actor_id()).unwrap(),
-            actor.get_downstream_actor_id(),
-        );
-        let mut node = actor.get_nodes().unwrap();
-        while !node.get_input().is_empty() {
-            node = node.get_input().get(0).unwrap();
-        }
-        match node.get_node().unwrap() {
-            Node::MergeNode(merge_node) => {
-                assert_eq!(
-                    expected_upstream
-                        .get(&actor.get_actor_id())
-                        .unwrap()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                    merge_node
-                        .get_upstream_actor_id()
-                        .iter()
-                        .collect::<HashSet<_>>(),
-                );
-            }
-            Node::SourceNode(_) => {
-                // check nothing.
-            }
-            _ => {
-                panic!("it should be MergeNode or SourceNode.");
-            }
-        }
-    }
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_fragmenter_multi_nodes() -> Result<()> {
-    let env = MetaSrvEnv::for_test().await;
-    let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 3);
-
-    let mut ctx = CreateMaterializedViewContext::default();
-    let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
-    let table_fragments = TableFragments::new(TableId::default(), graph);
-    let actors = table_fragments.actors();
-    let source_actor_ids = table_fragments.source_actor_ids();
-    let sink_actor_ids = table_fragments.sink_actor_ids();
-    assert_eq!(actors.len(), 13);
-    assert_eq!(source_actor_ids, vec![8, 9, 10, 11, 12, 13]);
-    assert_eq!(sink_actor_ids, vec![1]);
-    let mut expected_downstream = HashMap::new();
-    expected_downstream.insert(1, vec![]);
-    expected_downstream.insert(2, vec![1]);
-    expected_downstream.insert(3, vec![1]);
-    expected_downstream.insert(4, vec![1]);
-    expected_downstream.insert(5, vec![1]);
-    expected_downstream.insert(6, vec![1]);
-    expected_downstream.insert(7, vec![1]);
-    expected_downstream.insert(8, vec![2, 3, 4, 5, 6, 7]);
-    expected_downstream.insert(9, vec![2, 3, 4, 5, 6, 7]);
-    expected_downstream.insert(10, vec![2, 3, 4, 5, 6, 7]);
-    expected_downstream.insert(11, vec![2, 3, 4, 5, 6, 7]);
-    expected_downstream.insert(12, vec![2, 3, 4, 5, 6, 7]);
-    expected_downstream.insert(13, vec![2, 3, 4, 5, 6, 7]);
-
-    let mut expected_upstream = HashMap::new();
-    expected_upstream.insert(1, vec![2, 3, 4, 5, 6, 7]);
-    expected_upstream.insert(2, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(3, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(4, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(5, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(6, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(7, vec![8, 9, 10, 11, 12, 13]);
-    expected_upstream.insert(8, vec![]);
-    expected_upstream.insert(9, vec![]);
-    expected_upstream.insert(10, vec![]);
 
     for actor in actors {
         assert_eq!(

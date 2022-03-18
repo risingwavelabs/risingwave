@@ -1,16 +1,21 @@
-#![allow(dead_code)]
 pub mod plan_node;
+pub use plan_node::PlanRef;
+pub mod property;
+
+mod heuristic;
+mod plan_rewriter;
+mod plan_visitor;
+mod rule;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
-pub use plan_node::PlanRef;
-pub mod plan_pass;
-pub mod property;
-pub mod rule;
-
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
-use self::plan_node::LogicalProject;
+use self::heuristic::{ApplyOrder, HeuristicOptimizer};
+use self::plan_node::{LogicalProject, StreamMaterialize};
+use self::rule::*;
+use crate::catalog::TableId;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -58,6 +63,7 @@ impl PlanRoot {
     }
 
     /// Get a reference to the plan root's schema.
+    #[allow(dead_code)]
     fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -82,12 +88,32 @@ impl PlanRoot {
         LogicalProject::create(self.logical_plan, exprs, expr_aliases)
     }
 
+    /// Apply logical optimization to the plan.
+    pub fn gen_optimized_logical_plan(&self) -> PlanRef {
+        let mut plan = self.logical_plan.clone();
+
+        // Predicate Push-down
+        plan = {
+            let rules = vec![FilterJoinRule::create(), FilterProjectRule::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
+        // Prune Columns
+        plan = plan.prune_col(&self.out_fields);
+
+        plan
+    }
+
     /// optimize and generate a batch query plan
     pub fn gen_batch_query_plan(&self) -> PlanRef {
-        // TODO: add a `HeuristicOptimizer` here
-        let mut plan = self.logical_plan.prune_col(&self.out_fields);
+        let mut plan = self.gen_optimized_logical_plan();
+
+        // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order);
-        // TODO: plan.to_distributed_with_required()
+
+        // TODO: Enable this when distributed e2e is OK.
+        // plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist);
         // FIXME: add a Batch Project for the Plan, to remove the unnecessary column in the result.
         // TODO: do a final column pruning after add the batch project, but now the column
         // pruning is not used in batch node, need to think.
@@ -95,16 +121,30 @@ impl PlanRoot {
         plan
     }
 
+    /// optimize and generate a batch query plan.
+    /// Currently only used by test runner (Have distributed plan but not schedule yet).
+    /// Will be removed after dist execution.
+    pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
+        let plan = self.gen_batch_query_plan();
+
+        plan.to_distributed_with_required(&self.required_order, &self.required_dist)
+    }
+
     /// optimize and generate a create materialize view plan
     pub fn gen_create_mv_plan(&self) -> PlanRef {
-        // TODO: add a `HeuristicOptimizer` here
-        let mut plan = self.logical_plan.prune_col(&self.out_fields);
+        let mut plan = self.gen_optimized_logical_plan();
+
+        // Convert to physical plan node
         plan = plan.to_stream_with_dist_required(&self.required_dist);
-        // FIXME: add `Materialize` operator on the top of plan
+
+        // TODO: get the correct table id
+        plan = StreamMaterialize::new(self.logical_plan.ctx(), plan, TableId::new(0)).into();
+
         // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
         // result.
         // TODO: do a final column pruning after add the streaming project, but now
         // the column pruning is not used in streaming node, need to think.
+
         plan
     }
 }

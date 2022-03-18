@@ -27,6 +27,7 @@ const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
 const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
+// TODO: All DDLs should be RPC requests from the meta service. Remove this.
 pub(super) struct CreateSourceExecutor {
     table_id: TableId,
     config: SourceConfig,

@@ -17,10 +17,9 @@ impl Column {
         Column { array }
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstColumn> {
-        let array = self.array.to_protobuf()?;
-        let column = ProstColumn { array: Some(array) };
-        Ok(column)
+    pub fn to_protobuf(&self) -> ProstColumn {
+        let array = self.array.to_protobuf();
+        ProstColumn { array: Some(array) }
     }
 
     pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> Result<Self> {
@@ -68,7 +67,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &I32Array = new_col.array_ref().as_int32();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -93,7 +92,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &BoolArray = new_col.array_ref().into();
         arr.iter().enumerate().for_each(|(i, x)| match i % 3 {
@@ -116,7 +115,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         let arr: &Utf8Array = new_col.array_ref().as_utf8();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
@@ -140,7 +139,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &DecimalArray = new_col.array_ref().as_decimal();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -167,7 +166,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateArray = new_col.array_ref().as_naivedate();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -197,7 +196,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveTimeArray = new_col.array_ref().as_naivetime();
         arr.iter().enumerate().for_each(|(i, x)| {
@@ -231,7 +230,7 @@ mod tests {
             }
         }
         let col = Column::new(Arc::new(ArrayImpl::from(builder.finish().unwrap())));
-        let new_col = Column::from_protobuf(&col.to_protobuf()?, cardinality).unwrap();
+        let new_col = Column::from_protobuf(&col.to_protobuf(), cardinality).unwrap();
         assert_eq!(new_col.array.len(), cardinality);
         let arr: &NaiveDateTimeArray = new_col.array_ref().as_naivedatetime();
         arr.iter().enumerate().for_each(|(i, x)| {

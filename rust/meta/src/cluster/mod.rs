@@ -29,9 +29,10 @@ pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
 pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 
-const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 8;
+const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+#[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
 impl PartialEq<Self> for WorkerKey {
@@ -105,7 +106,7 @@ where
                 let parallel_units = if r#type == WorkerType::ComputeNode {
                     self.generate_cn_parallel_units(
                         DEFAULT_WORK_NODE_PARALLEL_DEGREE as usize,
-                        &host_address,
+                        worker_id as u32,
                     )
                     .await?
                 } else {
@@ -158,12 +159,8 @@ where
                 // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Add,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Add, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -206,12 +203,8 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify(
-                            Operation::Delete,
-                            &Info::Node(worker_node),
-                            crate::manager::NotificationTarget::Frontend,
-                        )
-                        .await?
+                        .notify_fe(Operation::Delete, &Info::Node(worker_node))
+                        .await;
                 }
 
                 Ok(())
@@ -223,7 +216,7 @@ where
     }
 
     pub async fn heartbeat(&self, worker_id: u32) -> Result<()> {
-        tracing::debug!("heartbeat from {}", worker_id);
+        tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
         // 1. Get unique key. TODO: avoid this step
         let key = match core.get_worker_by_id(worker_id) {
@@ -293,6 +286,9 @@ where
                     }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
+                            cluster_manager_ref
+                                .notification_manager_ref
+                                .delete_sender(WorkerKey(key.clone()));
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
                                 worker.worker_id(),
@@ -333,23 +329,35 @@ where
         core.list_worker_node(worker_type, worker_state)
     }
 
-    pub async fn get_worker_count(&self, worker_type: WorkerType) -> usize {
+    pub async fn get_worker_count(&self, worker_type: Option<WorkerType>) -> usize {
         let core = self.core.read().await;
         core.get_worker_count(worker_type)
     }
 
     pub async fn list_parallel_units(
         &self,
-        parallel_unit_type: ParallelUnitType,
+        parallel_unit_type: Option<ParallelUnitType>,
     ) -> Vec<ParallelUnit> {
         let core = self.core.read().await;
         core.list_parallel_units(parallel_unit_type)
     }
 
+    pub async fn get_parallel_unit_count(
+        &self,
+        parallel_unit_type: Option<ParallelUnitType>,
+    ) -> usize {
+        let core = self.core.read().await;
+        core.get_parallel_unit_count(parallel_unit_type)
+    }
+
+    pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
+        self.dispatch_manager_ref.get_worker_mapping().await
+    }
+
     async fn generate_cn_parallel_units(
         &self,
         parallel_degree: usize,
-        host: &HostAddress,
+        node_id: u32,
     ) -> Result<Vec<ParallelUnit>> {
         let start_id = self
             .id_gen_manager_ref
@@ -360,14 +368,14 @@ where
         let single_parallel_unit = ParallelUnit {
             id: start_id as u32,
             r#type: ParallelUnitType::Single as i32,
-            node_host: Some(host.clone()),
+            worker_node_id: node_id,
         };
         parallel_units.push(single_parallel_unit);
         (start_id + 1..start_id + parallel_degree).for_each(|id| {
             let hash_parallel_unit = ParallelUnit {
                 id: id as u32,
                 r#type: ParallelUnitType::Hash as i32,
-                node_host: Some(host.clone()),
+                worker_node_id: node_id,
             };
             parallel_units.push(hash_parallel_unit);
         });
@@ -475,17 +483,36 @@ impl StoredClusterManagerCore {
             .collect::<Vec<_>>()
     }
 
-    fn get_worker_count(&self, worker_type: WorkerType) -> usize {
+    fn get_worker_count(&self, worker_type: Option<WorkerType>) -> usize {
         self.workers
             .iter()
-            .filter(|(_, worker)| worker.worker_type() == worker_type)
+            .filter(|(_, worker)| match worker_type {
+                Some(worker_type) => worker.worker_type() == worker_type,
+                None => true,
+            })
             .count()
     }
 
-    fn list_parallel_units(&self, parallel_unit_type: ParallelUnitType) -> Vec<ParallelUnit> {
+    fn list_parallel_units(
+        &self,
+        parallel_unit_type: Option<ParallelUnitType>,
+    ) -> Vec<ParallelUnit> {
         match parallel_unit_type {
-            ParallelUnitType::Single => self.single_parallel_units.clone(),
-            ParallelUnitType::Hash => self.hash_parallel_units.clone(),
+            Some(ParallelUnitType::Single) => self.single_parallel_units.clone(),
+            Some(ParallelUnitType::Hash) => self.hash_parallel_units.clone(),
+            None => {
+                let mut all_parallel_units = self.single_parallel_units.clone();
+                all_parallel_units.extend(self.hash_parallel_units.clone());
+                all_parallel_units
+            }
+        }
+    }
+
+    fn get_parallel_unit_count(&self, parallel_unit_type: Option<ParallelUnitType>) -> usize {
+        match parallel_unit_type {
+            Some(ParallelUnitType::Single) => self.single_parallel_units.len(),
+            Some(ParallelUnitType::Hash) => self.hash_parallel_units.len(),
+            None => self.single_parallel_units.len() + self.hash_parallel_units.len(),
         }
     }
 
@@ -526,6 +553,7 @@ mod tests {
                 .await
                 .unwrap(),
         );
+
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),
@@ -571,8 +599,7 @@ mod tests {
         let mapping = cluster_manager
             .dispatch_manager_ref
             .get_worker_mapping()
-            .await
-            .unwrap();
+            .await;
         let unique_parallel_units = HashSet::<u32>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),
@@ -588,10 +615,10 @@ mod tests {
         hash_parallel_count: usize,
     ) {
         let single_parallel_units = cluster_manager
-            .list_parallel_units(ParallelUnitType::Single)
+            .list_parallel_units(Some(ParallelUnitType::Single))
             .await;
         let hash_parallel_units = cluster_manager
-            .list_parallel_units(ParallelUnitType::Hash)
+            .list_parallel_units(Some(ParallelUnitType::Hash))
             .await;
         assert_eq!(single_parallel_units.len(), single_parallel_count);
         assert_eq!(hash_parallel_units.len(), hash_parallel_count);

@@ -181,18 +181,21 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstDataChunk> {
-        ensure!(self.visibility.is_none());
+    pub fn to_protobuf(&self) -> ProstDataChunk {
+        assert!(
+            self.visibility.is_none(),
+            "must be compacted before transfer"
+        );
         let mut proto = ProstDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
         for arr in &self.columns {
-            column_ref.push(arr.to_protobuf()?);
+            column_ref.push(arr.to_protobuf());
         }
 
-        Ok(proto)
+        proto
     }
 
     /// `compact` will convert the chunk to compact format.
@@ -528,5 +531,11 @@ mod tests {
 +---+---+
 "
         );
+    }
+
+    #[test]
+    fn test_no_column_chunk() {
+        let chunk = DataChunk::new_dummy(10);
+        assert_eq!(chunk.rows().count(), 10);
     }
 }

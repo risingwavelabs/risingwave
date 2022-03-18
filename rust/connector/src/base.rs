@@ -1,5 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use bytes::Bytes;
+use serde::{Deserialize, Serialize};
 
 pub enum SourceOffset {
     Number(i64),
@@ -12,6 +14,13 @@ pub trait SourceMessage {
     fn serialize(&self) -> Result<String>;
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct InnerMessage {
+    pub payload: Option<Bytes>,
+    pub offset: String,
+    pub split_id: String,
+}
+
 pub trait SourceSplit {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
@@ -19,8 +28,8 @@ pub trait SourceSplit {
 
 #[async_trait]
 pub trait SourceReader: Sized {
-    async fn next(&mut self) -> Result<Option<Vec<Vec<u8>>>>;
-    async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()>;
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
 }
 
 #[async_trait]

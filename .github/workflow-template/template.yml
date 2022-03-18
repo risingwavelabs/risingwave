@@ -6,8 +6,9 @@ on:
 
 env:
   RUST_TOOLCHAIN: nightly-2022-03-09
-  CACHE_KEY_SUFFIX: v20220309
+  CACHE_KEY_SUFFIX: v20220318
   CARGO_TERM_COLOR: always
+  RW_CI: true
 
 jobs:
   frontend-check:
@@ -152,10 +153,11 @@ jobs:
       # if the degradation is reasonable or to be fixed soon.
 
       - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
-          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -164,10 +166,11 @@ jobs:
           ~/cargo-make/makers check-logs
 
       - name: e2e test rust frontend
+        timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-v2
-          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          ~/cargo-make/makers dev ci-v2
+          sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
 
       - name: Kill cluster
         run: |
@@ -176,10 +179,11 @@ jobs:
           ~/cargo-make/makers check-logs
 
       - name: e2e test streaming 3-node w/o cache
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 100s sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          RW_NO_CACHE=1 ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -188,10 +192,11 @@ jobs:
           ~/cargo-make/makers check-logs
 
       - name: e2e test batch 3-node
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 130s sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -201,7 +206,7 @@ jobs:
 
       # --- Post Tasks ---
 
-      - name: Dump last 100 lines of logs on failure
+      - name: Dump last 300 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
 
@@ -326,7 +331,7 @@ jobs:
       - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -343,7 +348,7 @@ jobs:
       - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
+          ~/cargo-make/makers dev ci-1node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
@@ -355,7 +360,7 @@ jobs:
       - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
+          ~/cargo-make/makers dev ci-3node
           timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Kill cluster
@@ -530,6 +535,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools-preview
 
       - name: Cache Cargo home
         uses: actions/cache@v2
@@ -542,14 +548,15 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-test
 
-      - name: Install cargo-tarpaulin
+      - name: Install required tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-tarpaulin
+          cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 1b0d581
+          cargo install cargo-nextest
 
       - name: Run rust test with coverage
         run: |
-          make rust_test_with_coverage
+          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info
 
       - uses: codecov/codecov-action@v2
         with:

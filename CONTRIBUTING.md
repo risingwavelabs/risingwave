@@ -10,10 +10,10 @@ We support both unit tests and end-to-end tests.
 
 ### Unit Testing
 
-To run unit tests for Rust, run the following commands under the root directory:
+To run unit tests for Rust, run the following commands under the `rust` directory:
 
 ```shell
-make rust_test
+cargo test --workspace
 ```
 
 To run unit tests for Java, run the following commands under the root directory:
@@ -35,14 +35,14 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 To run end-to-end tests with multiple compute-nodes, run the script:
 
 ```shell
-./risedev ci-3node
+./risedev dev ci-3node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
 To run end-to-end tests with state store, run the script:
 
 ```shell
-./risedev ci-1node
+./risedev dev ci-1node
 sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
 ```
 
@@ -50,7 +50,11 @@ It will start processes in the background. After testing, you can run the follow
 
 ```shell
 ./risedev k
+./risedev clean-data
 ```
+
+As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
+some unexpected decode error, try `./risedev clean-data` first.
 
 ## Monitoring
 

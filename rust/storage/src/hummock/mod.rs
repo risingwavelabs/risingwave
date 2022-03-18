@@ -10,8 +10,10 @@ use itertools::Itertools;
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
+use risingwave_common::error::Result;
 pub use sstable::*;
 pub mod compactor;
+mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
@@ -27,13 +29,15 @@ mod sstable_store;
 mod state_store;
 #[cfg(test)]
 mod state_store_tests;
+#[cfg(test)]
+mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
 mod version_cmp;
 
 pub use error::*;
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::LevelType;
 use value::*;
 
@@ -42,7 +46,6 @@ use self::iterator::{
     UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
-use self::shared_buffer::SharedBufferManager;
 pub use self::sstable_store::*;
 pub use self::state_store::*;
 use self::utils::{bloom_filter_sstables, range_overlap};
@@ -50,6 +53,8 @@ use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
+use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
+use crate::hummock::utils::validate_epoch;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -61,56 +66,10 @@ pub const INVALID_EPOCH: HummockEpoch = 0;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
-#[derive(Default, Debug, Clone)]
-pub struct HummockOptions {
-    /// Target size of the SSTable.
-    pub sstable_size: u32,
-
-    /// Size of each block in bytes in SST.
-    pub block_size: u32,
-
-    /// False positive probability of bloom filter.
-    pub bloom_false_positive: f64,
-
-    /// Data directory for storing data and metadata objects.
-    pub data_directory: String,
-
-    /// checksum algorithm.
-    pub checksum_algo: ChecksumAlg,
-    /// enable async checkpoint or not
-    pub async_checkpoint_enabled: bool,
-}
-
-impl HummockOptions {
-    #[cfg(test)]
-    pub fn default_for_test() -> Self {
-        Self {
-            sstable_size: 256 * (1 << 20),
-            block_size: 64 * (1 << 10),
-            bloom_false_positive: 0.1,
-            data_directory: "hummock_001".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn small_for_test() -> Self {
-        Self {
-            sstable_size: 4 * (1 << 10),
-            block_size: 1 << 10,
-            bloom_false_positive: 0.1,
-            data_directory: "hummock_001_small".to_string(),
-            checksum_algo: ChecksumAlg::XxHash64,
-            async_checkpoint_enabled: true,
-        }
-    }
-}
-
 /// Hummock is the state store backend.
 #[derive(Clone)]
 pub struct HummockStorage {
-    options: Arc<HummockOptions>,
+    options: Arc<StorageConfig>,
 
     local_version_manager: Arc<LocalVersionManager>,
 
@@ -124,7 +83,7 @@ pub struct HummockStorage {
 impl HummockStorage {
     /// Create a [`HummockStorage`] with default stats. Should only used by tests.
     pub async fn with_default_stats(
-        options: HummockOptions,
+        options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -142,15 +101,13 @@ impl HummockStorage {
 
     /// Create a [`HummockStorage`].
     pub async fn new(
-        options: HummockOptions,
+        options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
-        let options = Arc::new(options);
-
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             options.clone(),
             local_version_manager.clone(),
@@ -165,10 +122,10 @@ impl HummockStorage {
             shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await;
+        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
 
         let instance = Self {
-            options,
+            options: options.clone(),
             local_version_manager,
             hummock_meta_client,
             sstable_store,
@@ -187,6 +144,8 @@ impl HummockStorage {
         let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
 
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Query shared buffer. Return the value without iterating SSTs if found
         if let Some(v) = self
@@ -258,6 +217,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
@@ -312,6 +273,8 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
+        // check epoch validity
+        validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
         let overlapped_sstable_iters = self
@@ -371,10 +334,10 @@ impl HummockStorage {
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = kv_pairs
-            .map(|i| {
+            .map(|(key, value)| {
                 (
-                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
-                    i.1,
+                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                    value,
                 )
             })
             .collect_vec();
@@ -411,7 +374,7 @@ impl HummockStorage {
         self.shared_buffer_manager.sync(epoch).await
     }
 
-    fn get_builder(options: &HummockOptions) -> SSTableBuilder {
+    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
         // TODO: use different option values (especially table_size) for compaction
         SSTableBuilder::new(SSTableBuilderOptions {
             table_capacity: options.sstable_size,
@@ -425,7 +388,7 @@ impl HummockStorage {
         &self.hummock_meta_client
     }
 
-    pub fn options(&self) -> &Arc<HummockOptions> {
+    pub fn options(&self) -> &Arc<StorageConfig> {
         &self.options
     }
 
@@ -437,8 +400,8 @@ impl HummockStorage {
         &self.local_version_manager
     }
 
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) {
-        self.local_version_manager.wait_epoch(epoch).await;
+    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        Ok(self.local_version_manager.wait_epoch(epoch).await?)
     }
 
     pub fn shared_buffer_manager(&self) -> &SharedBufferManager {

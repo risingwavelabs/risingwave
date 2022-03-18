@@ -3,6 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
 use risingwave_storage::hummock::{
@@ -32,9 +33,9 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
         self.hummock_manager
-            .pin_version(self.context_id)
+            .pin_version(self.context_id, last_pinned)
             .await
             .map_err(HummockError::meta_error)
     }
@@ -46,9 +47,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch> {
         self.hummock_manager
-            .pin_snapshot(self.context_id)
+            .pin_snapshot(self.context_id, last_pinned)
             .await
             .map(|e| e.epoch)
             .map_err(HummockError::meta_error)
@@ -113,6 +114,10 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
     ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> HummockResult<()> {
         unimplemented!()
     }
 }

@@ -3,20 +3,19 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::iterator::UserIterator;
-use super::{HummockOptions, HummockStorage};
+use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
 
 #[tokio::test]
-/// Fix this when we finished epoch management.
-#[ignore]
 async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = Arc::new(default_config_for_test());
 
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_storage = HummockStorage::with_default_stats(
@@ -159,7 +158,7 @@ async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
 async fn test_reload_storage() {
     let object_store = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
-    let hummock_options = HummockOptions::default_for_test();
+    let hummock_options = Arc::new(default_config_for_test());
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
@@ -206,7 +205,7 @@ async fn test_reload_storage() {
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::with_default_stats(
-        HummockOptions::default_for_test(),
+        Arc::new(default_config_for_test()),
         sstable_store,
         local_version_manager,
         hummock_meta_client,

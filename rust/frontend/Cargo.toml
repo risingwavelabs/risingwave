@@ -25,6 +25,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
+serde_json = "1"
 smallvec = { version = "1.6.1", features = ["serde"] }
 thiserror = "1"
 tokio = { version = "1", features = [
@@ -41,8 +42,4 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 uuid = "0.8"
 
 [dev-dependencies]
-anyhow = "1"
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.8"
 tempfile = "3"
-walkdir = "2"

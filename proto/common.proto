@@ -39,7 +39,7 @@ enum ParallelUnitType {
 message ParallelUnit {
   uint32 id = 1;
   ParallelUnitType type = 2;
-  HostAddress node_host = 3;
+  uint32 worker_node_id = 3;
 }
 
 message WorkerNode {
@@ -63,5 +63,7 @@ message Cluster {
 }
 
 message HashMapping {
-  repeated uint32 parallel_units = 1;
+  // For meta, the mapping stores parallel unit id. For compute node, the mapping stores
+  // corresponding actor id.
+  repeated uint32 hash_mapping = 1;
 }

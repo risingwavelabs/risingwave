@@ -39,7 +39,7 @@ mod tests {
         frontend.run_sql(sql_create_table).await.unwrap();
         frontend.run_sql(sql_drop_table).await.unwrap();
 
-        let catalog_manager = frontend.session().ctx.env().catalog_mgr();
+        let catalog_manager = frontend.session().env().catalog_mgr();
 
         assert!(catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")

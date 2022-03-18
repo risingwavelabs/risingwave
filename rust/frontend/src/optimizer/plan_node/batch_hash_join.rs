@@ -17,6 +17,9 @@ use crate::optimizer::property::{Distribution, Order, WithSchema};
 pub struct BatchHashJoin {
     pub base: BatchBase,
     logical: LogicalJoin,
+
+    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 }
 
@@ -70,7 +73,8 @@ impl PlanTreeNodeBinary for BatchHashJoin {
         todo!()
     }
 }
-impl_plan_tree_node_for_binary! {BatchHashJoin}
+
+impl_plan_tree_node_for_binary! { BatchHashJoin }
 
 impl WithSchema for BatchHashJoin {
     fn schema(&self) -> &Schema {

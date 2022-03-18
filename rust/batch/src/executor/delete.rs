@@ -13,6 +13,7 @@ use super::BoxedExecutor;
 use crate::executor::{BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
 /// [`DeleteExecutor`] implements table deletion with values from its child executor.
+// TODO: concurrent `DELETE` may cause problems. A scheduler might be required.
 pub struct DeleteExecutor {
     /// Target table id.
     table_id: TableId,

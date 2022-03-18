@@ -179,6 +179,7 @@ impl Parser {
                 Keyword::EXECUTE => Ok(self.parse_execute()?),
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
+                Keyword::FLUSH => Ok(Statement::Flush),
                 _ => self.expected("an SQL statement", Token::Word(w)),
             },
             Token::LParen => {

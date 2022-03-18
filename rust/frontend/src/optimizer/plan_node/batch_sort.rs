@@ -1,9 +1,12 @@
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::{ColumnOrder, OrderByNode};
 
 use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithOrder, WithSchema};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
@@ -34,8 +37,10 @@ impl BatchSort {
 }
 
 impl fmt::Display for BatchSort {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BatchSort")
+            .field("order", self.order())
+            .finish()
     }
 }
 
@@ -64,4 +69,25 @@ impl ToDistributedBatch for BatchSort {
     }
 }
 
-impl ToBatchProst for BatchSort {}
+impl ToBatchProst for BatchSort {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        let column_orders_without_type = self.base.order.to_protobuf();
+        let column_types = self
+            .base
+            .order
+            .field_order
+            .iter()
+            .map(|field_order| self.schema[field_order.index].data_type.to_protobuf())
+            .collect_vec();
+        let column_orders = column_orders_without_type
+            .into_iter()
+            .zip_eq(column_types.into_iter())
+            .map(|((input_ref, order_type), return_type)| ColumnOrder {
+                order_type: order_type as i32,
+                input_ref: Some(input_ref),
+                return_type: Some(return_type),
+            })
+            .collect_vec();
+        NodeBody::OrderBy(OrderByNode { column_orders })
+    }
+}

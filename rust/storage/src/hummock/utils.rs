@@ -2,7 +2,7 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use super::{HummockResult, Sstable};
+use super::{HummockError, HummockResult, Sstable};
 
 pub fn bloom_filter_sstables(
     tables: Vec<Arc<Sstable>>,
@@ -48,4 +48,12 @@ where
     };
 
     !too_left && !too_right
+}
+
+pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
+    if epoch < safe_epoch {
+        return Err(HummockError::expired_epoch(safe_epoch, epoch));
+    }
+
+    Ok(())
 }

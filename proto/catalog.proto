@@ -24,7 +24,9 @@ message StreamSourceInfo {
   int32 row_id_index = 4;
 }
 
-message TableSourceInfo {}
+message TableSourceInfo {
+  repeated plan.ColumnCatalog columns = 1;
+}
 
 message Source {
   uint32 id = 1;
@@ -41,7 +43,7 @@ message Source {
 message VirtualTable {
   uint32 id = 1;
   string name = 2;
-  repeated plan.ColumnCatalog column_catalog = 3;
+  repeated plan.ColumnCatalog columns = 3;
 }
 
 message Table {
@@ -49,10 +51,13 @@ message Table {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
-  repeated plan.ColumnCatalog column_catalog = 5;
+  repeated plan.ColumnCatalog columns = 5;
   repeated int32 pk_column_ids = 6;
   repeated plan.OrderType pk_orders = 7;
-  repeated uint32 dependent_tables = 8;
+  repeated uint32 dependent_relations = 8;
+  oneof optional_associated_source_id {
+    uint32 associated_source_id = 9;
+  }
 }
 
 message Schema {
@@ -66,19 +71,8 @@ message Database {
   string name = 2;
 }
 
-message GetCatalogRequest {}
-
-message GetCatalogResponse {
-  common.Status status = 1;
-  repeated Database database = 2;
-  repeated Schema schema = 3;
-  repeated Source source = 4;
-  repeated Table table = 5;
-  repeated VirtualTable view = 6;
-}
-
 message CreateDatabaseRequest {
-  string name = 1;
+  Database db = 1;
 }
 
 message CreateDatabaseResponse {
@@ -88,8 +82,7 @@ message CreateDatabaseResponse {
 }
 
 message CreateSchemaRequest {
-  uint32 database_id = 1;
-  string name = 2;
+  Schema schema = 1;
 }
 
 message CreateSchemaResponse {
@@ -179,15 +172,14 @@ message DropMaterializedViewResponse {
 }
 
 service CatalogService {
-  rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
-  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
-  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
+  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
   rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
-  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
+  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
+  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
 }

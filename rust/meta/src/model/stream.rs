@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
@@ -24,7 +25,7 @@ pub struct TableFragments {
     /// The table id.
     table_id: TableId,
     /// The table fragments.
-    fragments: BTreeMap<FragmentId, Fragment>,
+    pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
 }
@@ -65,6 +66,10 @@ impl TableFragments {
             fragments,
             actor_status: BTreeMap::default(),
         }
+    }
+
+    pub fn fragments(&self) -> Vec<&Fragment> {
+        self.fragments.values().collect_vec()
     }
 
     /// Set the actor locations.

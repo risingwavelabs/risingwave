@@ -21,12 +21,24 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> Result<ProstField> {
-        Ok(ProstField {
-            data_type: Some(self.data_type.to_protobuf()?),
+    pub fn to_prost(&self) -> ProstField {
+        ProstField {
+            data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
-        })
+        }
     }
+}
+
+/// `schema_unamed` builds a `Schema` with the given types, but without names.
+#[macro_export]
+macro_rules! schema_unamed {
+    ($($t:expr),*) => {{
+        $crate::catalog::Schema {
+            fields: vec![
+                $( $crate::catalog::Field::unnamed($t) ),*
+            ],
+        }
+    }};
 }
 
 /// the schema of the executor's return data
@@ -64,6 +76,14 @@ impl Schema {
         self.fields
             .iter()
             .map(|field| field.data_type.create_array_builder(capacity))
+            .collect()
+    }
+
+    pub fn to_prost(&self) -> Vec<ProstField> {
+        self.fields
+            .clone()
+            .into_iter()
+            .map(|field| field.to_prost())
             .collect()
     }
 }

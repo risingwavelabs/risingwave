@@ -142,6 +142,8 @@ const mvActors = (actors, mvId) => `
   <div id="message-${mvId}" class="w-full flex flex-row"></div>
 </div>`
 
+  const dispatcherNode = (node) => (({ hashMapping, ...o }) => o)(node)
+
   /// Remove `input` from node object
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
 
@@ -423,7 +425,7 @@ const mvActors = (actors, mvId) => `
       const selectedActors = actors.actors.filter(actor => fragmentIdOf(actor) == fragmentId)
       const actorIds = selectedActors.map(actor => actor.actorId)
       if (d.data.operatorId == "dispatcher") {
-        const nodes = selectedActors.map(actor => ({ dispatcher: actor.dispatcher, downstreamActorId: actor.downstreamActorId }))
+        const nodes = selectedActors.map(actor => ({ dispatcher: dispatcherNode(actor.dispatcher), downstreamActorId: actor.downstreamActorId }))
         showInfo(actorIds, selectedActors, nodes)
       } else {
         findInfo(actorIds, selectedActors.map(actor => actor.nodes), d.data.operatorId, (actorIds, nodes) => showInfo(actorIds, selectedActors, nodes))

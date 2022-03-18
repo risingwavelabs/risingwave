@@ -27,7 +27,6 @@ impl HummockStateStore {
     }
 }
 
-// Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
@@ -68,8 +67,8 @@ impl StateStore for HummockStateStore {
         )))
     }
 
-    async fn wait_epoch(&self, epoch: u64) {
-        self.storage.wait_epoch(epoch).await;
+    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
+        self.storage.wait_epoch(epoch).await
     }
 
     async fn sync(&self, epoch: Option<u64>) -> Result<()> {

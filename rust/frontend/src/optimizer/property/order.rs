@@ -1,4 +1,7 @@
+use itertools::Itertools;
 use paste::paste;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan::OrderType;
 
 use super::super::plan_node::*;
 use super::Convention;
@@ -11,11 +14,30 @@ pub struct Order {
     pub field_order: Vec<FieldOrder>,
 }
 
+impl Order {
+    pub fn to_protobuf(&self) -> Vec<(InputRefExpr, OrderType)> {
+        self.field_order
+            .iter()
+            .map(FieldOrder::to_protobuf)
+            .collect_vec()
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
+}
+
+impl FieldOrder {
+    pub fn to_protobuf(&self) -> (InputRefExpr, OrderType) {
+        let input_ref_expr = InputRefExpr {
+            column_idx: self.index as i32,
+        };
+        let order_type = self.direct.to_protobuf();
+        (input_ref_expr, order_type)
+    }
 }
 
 #[allow(dead_code)]
@@ -24,6 +46,16 @@ pub enum Direction {
     Asc,
     Desc,
     Any, // only used in order requirement
+}
+
+impl Direction {
+    pub fn to_protobuf(&self) -> OrderType {
+        match self {
+            Self::Asc => OrderType::Ascending,
+            Self::Desc => OrderType::Descending,
+            _ => unimplemented!(),
+        }
+    }
 }
 
 #[allow(dead_code)]

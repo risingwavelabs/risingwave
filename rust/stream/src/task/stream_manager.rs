@@ -20,9 +20,10 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
+use super::ComputeClientPool;
 use crate::executor::*;
 use crate::task::{
-    ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
+    ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
 };
 
@@ -37,24 +38,31 @@ pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
-    handles: HashMap<u32, ActorHandle>,
+    handles: HashMap<ActorId, ActorHandle>,
 
     pub(crate) context: Arc<SharedContext>,
 
     /// Stores all actor information.
-    actor_infos: HashMap<u32, ActorInfo>,
+    actor_infos: HashMap<ActorId, ActorInfo>,
 
-    /// Stores all actor information.
-    actors: HashMap<u32, stream_plan::StreamActor>,
+    /// Stores all actor information, taken after actor built.
+    actors: HashMap<ActorId, stream_plan::StreamActor>,
 
     /// Mock source, `actor_id = 0`.
     /// TODO: remove this
     mock_source: ConsumableChannelPair,
 
-    /// The state store of Hummuck
+    /// The state store implement
     state_store: StateStoreImpl,
 
+    /// Metrics of the stream manager
     streaming_metrics: Arc<StreamingMetrics>,
+
+    /// The pool of compute clients.
+    ///
+    /// TODO: currently the client pool won't be cleared. Should remove compute clients when
+    /// disconnected.
+    compute_client_pool: ComputeClientPool,
 }
 
 /// `StreamManager` manages all stream executors in this project.
@@ -81,7 +89,7 @@ pub struct ExecutorParams {
     pub input: Vec<Box<dyn Executor>>,
 
     /// Id of the actor.
-    pub actor_id: u32,
+    pub actor_id: ActorId,
     pub executor_stats: Arc<StreamingMetrics>,
 }
 
@@ -124,8 +132,8 @@ impl StreamManager {
     fn send_barrier(
         &self,
         barrier: &Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = u32>,
-        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<oneshot::Receiver<()>> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
@@ -139,8 +147,8 @@ impl StreamManager {
     pub async fn send_and_collect_barrier(
         &self,
         barrier: &Barrier,
-        actor_ids_to_send: impl IntoIterator<Item = u32>,
-        actor_ids_to_collect: impl IntoIterator<Item = u32>,
+        actor_ids_to_send: impl IntoIterator<Item = ActorId>,
+        actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<()> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
@@ -176,7 +184,7 @@ impl StreamManager {
         Ok(())
     }
 
-    pub fn drop_actor(&self, actors: &[u32]) -> Result<()> {
+    pub fn drop_actor(&self, actors: &[ActorId]) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         for id in actors {
             core.drop_actor(*id);
@@ -219,7 +227,7 @@ impl StreamManager {
     }
 
     #[cfg(test)]
-    pub async fn wait_actors(&self, actor_ids: &[u32]) -> Result<()> {
+    pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap();
@@ -237,7 +245,7 @@ impl StreamManager {
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
-    pub fn build_actors(&self, actors: &[u32], env: StreamEnvironment) -> Result<()> {
+    pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock().unwrap();
         core.build_actors(actors, env)
     }
@@ -316,6 +324,7 @@ impl StreamManagerCore {
             mock_source: (Some(tx), Some(rx)),
             state_store,
             streaming_metrics,
+            compute_client_pool: ComputeClientPool::new(1024),
         }
     }
 
@@ -332,7 +341,7 @@ impl StreamManagerCore {
         )
     }
 
-    fn get_actor_info(&self, actor_id: &u32) -> Result<&ActorInfo> {
+    fn get_actor_info(&self, actor_id: &ActorId) -> Result<&ActorInfo> {
         self.actor_infos.get(actor_id).ok_or_else(|| {
             RwError::from(ErrorCode::InternalError(
                 "actor not found in info table".into(),
@@ -345,8 +354,8 @@ impl StreamManagerCore {
         &mut self,
         input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
-        actor_id: u32,
-        downstreams: &[u32],
+        actor_id: ActorId,
+        downstreams: &[ActorId],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
         let outputs = downstreams
@@ -401,7 +410,7 @@ impl StreamManagerCore {
     fn create_nodes_inner(
         &mut self,
         fragment_id: u32,
-        actor_id: u32,
+        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         input_pos: usize,
         env: StreamEnvironment,
@@ -461,7 +470,7 @@ impl StreamManagerCore {
     fn create_nodes(
         &mut self,
         fragment_id: u32,
-        actor_id: u32,
+        actor_id: ActorId,
         node: &stream_plan::StreamNode,
         env: StreamEnvironment,
     ) -> Result<Box<dyn Executor>> {
@@ -472,7 +481,7 @@ impl StreamManagerCore {
 
     fn wrap_executor_for_debug(
         mut executor: Box<dyn Executor>,
-        actor_id: u32,
+        actor_id: ActorId,
         input_pos: usize,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Box<dyn Executor>> {
@@ -593,8 +602,8 @@ impl StreamManagerCore {
 
     pub(crate) fn get_receive_message(
         &mut self,
-        actor_id: u32,
-        upstreams: &[u32],
+        actor_id: ActorId,
+        upstreams: &[ActorId],
     ) -> Result<Vec<Receiver<Message>>> {
         assert!(!upstreams.is_empty());
 
@@ -613,14 +622,20 @@ impl StreamManagerCore {
                         let sender = self.context.take_sender(&(*up_id, actor_id))?;
                         // spawn the `RemoteInput`
                         let up_id = *up_id;
+
+                        let pool = self.compute_client_pool.clone();
+
                         tokio::spawn(async move {
-                            let remote_input_res = RemoteInput::create(
-                                upstream_socket_addr,
-                                (up_id, actor_id),
-                                sender,
-                            )
-                            .await;
-                            match remote_input_res {
+                            let init_client = async move {
+                                let remote_input = RemoteInput::create(
+                                    pool.get_client_for_addr(&upstream_socket_addr).await?,
+                                    (up_id, actor_id),
+                                    sender,
+                                )
+                                .await?;
+                                Ok::<_, RwError>(remote_input)
+                            };
+                            match init_client.await {
                                 Ok(mut remote_input) => remote_input.run().await,
                                 Err(e) => {
                                     info!("Spawn remote input fails:{}", e);
@@ -628,7 +643,7 @@ impl StreamManagerCore {
                             }
                         });
                     }
-                    Ok(self.context.take_receiver(&(*up_id, actor_id))?)
+                    Ok::<_, RwError>(self.context.take_receiver(&(*up_id, actor_id))?)
                 }
             })
             .collect::<Result<Vec<_>>>()?;
@@ -645,7 +660,7 @@ impl StreamManagerCore {
         Ok(rxs)
     }
 
-    fn build_actors(&mut self, actors: &[u32], env: StreamEnvironment) -> Result<()> {
+    fn build_actors(&mut self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         for actor_id in actors {
             let actor_id = *actor_id;
             let actor = self.actors.remove(&actor_id).unwrap();
@@ -672,11 +687,11 @@ impl StreamManagerCore {
         Ok(())
     }
 
-    pub fn take_all_handles(&mut self) -> Result<HashMap<u32, ActorHandle>> {
+    pub fn take_all_handles(&mut self) -> Result<HashMap<ActorId, ActorHandle>> {
         Ok(std::mem::take(&mut self.handles))
     }
 
-    pub fn remove_actor_handles(&mut self, actor_ids: &[u32]) -> Result<Vec<ActorHandle>> {
+    pub fn remove_actor_handles(&mut self, actor_ids: &[ActorId]) -> Result<Vec<ActorHandle>> {
         actor_ids
             .iter()
             .map(|actor_id| {
@@ -709,7 +724,7 @@ impl StreamManagerCore {
 
     /// `drop_actor` is invoked by the leader node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
-    fn drop_actor(&mut self, actor_id: u32) {
+    fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
 
@@ -721,7 +736,7 @@ impl StreamManagerCore {
 
     fn build_channel_for_chain_node(
         &self,
-        actor_id: u32,
+        actor_id: ActorId,
         stream_node: &stream_plan::StreamNode,
     ) -> Result<()> {
         if let Node::ChainNode(_) = stream_node.node.as_ref().unwrap() {
@@ -757,10 +772,10 @@ impl StreamManagerCore {
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
     ) -> Result<()> {
-        let local_actor_ids: HashSet<u32> = HashSet::from_iter(
+        let local_actor_ids: HashSet<ActorId> = HashSet::from_iter(
             actors
                 .iter()
-                .map(|actor| actor.clone().get_actor_id())
+                .map(|actor| actor.get_actor_id())
                 .collect::<Vec<_>>()
                 .into_iter(),
         );

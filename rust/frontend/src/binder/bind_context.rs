@@ -7,14 +7,16 @@ use risingwave_common::types::DataType;
 #[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
+    pub column_name: String,
     pub index: usize,
     pub data_type: DataType,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, index: usize, data_type: DataType) -> Self {
+    pub fn new(table_name: String, column_name: String, index: usize, data_type: DataType) -> Self {
         ColumnBinding {
             table_name,
+            column_name,
             index,
             data_type,
         }
@@ -36,6 +38,7 @@ impl Display for Clause {
     }
 }
 
+#[derive(Default)]
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,

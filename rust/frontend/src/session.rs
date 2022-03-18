@@ -26,7 +26,7 @@ use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
 pub struct QueryContext {
-    pub session_ctx: Arc<SessionContext>,
+    pub session_ctx: Arc<SessionImpl>,
     pub next_id: i32,
 }
 /// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
@@ -34,7 +34,7 @@ pub struct QueryContext {
 pub type QueryContextRef = Rc<RefCell<QueryContext>>;
 
 impl QueryContext {
-    pub fn new(session_ctx: Arc<SessionContext>) -> Self {
+    pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
         Self {
             session_ctx,
             next_id: 0,
@@ -50,7 +50,7 @@ impl QueryContext {
     #[cfg(test)]
     pub async fn mock() -> Self {
         Self {
-            session_ctx: Arc::new(SessionContext::mock().await),
+            session_ctx: Arc::new(SessionImpl::mock().await),
             next_id: 0,
         }
     }
@@ -173,15 +173,11 @@ impl FrontendEnv {
 }
 
 pub struct SessionImpl {
-    pub ctx: Arc<SessionContext>,
-}
-
-pub struct SessionContext {
     env: FrontendEnv,
     database: String,
 }
 
-impl SessionContext {
+impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
         Self { env, database }
     }
@@ -203,15 +199,6 @@ impl SessionContext {
     }
 }
 
-impl SessionImpl {
-    pub fn new(env: FrontendEnv, database: String) -> Self {
-        let context = SessionContext { env, database };
-        Self {
-            ctx: Arc::new(context),
-        }
-    }
-}
-
 pub struct SessionManagerImpl {
     env: FrontendEnv,
     observer_join_handle: JoinHandle<()>,
@@ -220,10 +207,8 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(&self) -> Box<dyn Session> {
-        Box::new(SessionImpl {
-            ctx: Arc::new(SessionContext::new(self.env.clone(), "dev".to_string())),
-        })
+    fn connect(&self) -> Arc<dyn Session> {
+        Arc::new(SessionImpl::new(self.env.clone(), "dev".to_string()))
     }
 }
 
@@ -249,13 +234,21 @@ impl SessionManagerImpl {
 #[async_trait::async_trait]
 impl Session for SessionImpl {
     async fn run_statement(
-        &self,
+        self: Arc<Self>,
         sql: &str,
     ) -> std::result::Result<PgResponse, Box<dyn std::error::Error + Send + Sync>> {
         // Parse sql.
         let mut stmts = Parser::parse_sql(sql)?;
         // With pgwire, there would be at most 1 statement in the vec.
-        assert_eq!(stmts.len(), 1);
+        assert!(stmts.len() <= 1);
+        if stmts.is_empty() {
+            return Ok(PgResponse::new(
+                pgwire::pg_response::StatementType::EMPTY,
+                0,
+                vec![],
+                vec![],
+            ));
+        }
         let stmt = stmts.swap_remove(0);
         let rsp = handle(self, stmt).await?;
         Ok(rsp)

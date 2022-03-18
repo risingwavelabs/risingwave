@@ -169,9 +169,10 @@ mod tests {
     use bytes::{Bytes, BytesMut};
     use itertools::Itertools;
 
-    use super::super::{SSTableBuilder, SSTableBuilderOptions};
+    use super::super::SSTableBuilderOptions;
     use super::*;
-    use crate::hummock::{CachePolicy, HummockValue, Sstable, SstableStore};
+    use crate::hummock::test_utils::gen_test_sstable;
+    use crate::hummock::{CachePolicy, HummockValue, SstableStore};
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -184,29 +185,22 @@ mod tests {
             checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         };
 
-        let mut b = SSTableBuilder::new(opt);
-        for i in 0..10 {
-            b.add(
-                format!("key_test_{}", i).as_bytes(),
-                HummockValue::Put(
-                    &format!("val_{}", i)
-                        .as_str()
-                        .as_bytes()
-                        .iter()
-                        .cloned()
-                        .collect_vec(),
-                ),
-            );
-        }
-        let (data, meta) = b.finish();
-
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_store = SstableStore::new(obj_client, REMOTE_DIR.to_string());
-        let sst = Sstable { id: 0, meta };
-        sstable_store
-            .put(&sst, data, CachePolicy::Fill)
-            .await
-            .unwrap();
+        let sstable_store = Arc::new(SstableStore::new(obj_client, REMOTE_DIR.to_string()));
+
+        let sst = gen_test_sstable(
+            opt,
+            0,
+            (0..10).map(|i| {
+                let string_to_byte_vec =
+                    |s: String| s.as_str().as_bytes().iter().cloned().collect_vec();
+                let key = string_to_byte_vec(format!("key_test_{}", i));
+                let value_buffer = string_to_byte_vec(format!("val_{}", i));
+                (key, HummockValue::Put(value_buffer))
+            }),
+            sstable_store.clone(),
+        )
+        .await;
         let block = sstable_store.get(&sst, 0, CachePolicy::Fill).await.unwrap();
 
         let mut blk_iter = BlockIterator::new(block);

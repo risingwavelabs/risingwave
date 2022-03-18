@@ -4,7 +4,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::{CompactorManager, HummockManager};
+use crate::hummock::{CompactorManager, HummockManager, VacuumTrigger};
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
@@ -14,6 +14,7 @@ where
 {
     hummock_manager: Arc<HummockManager<S>>,
     compactor_manager: Arc<CompactorManager>,
+    vacuum_trigger: Arc<VacuumTrigger<S>>,
 }
 
 impl<S> HummockServiceImpl<S>
@@ -23,10 +24,12 @@ where
     pub fn new(
         hummock_manager: Arc<HummockManager<S>>,
         compactor_manager: Arc<CompactorManager>,
+        vacuum_trigger: Arc<VacuumTrigger<S>>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
             compactor_manager,
+            vacuum_trigger,
         }
     }
 }
@@ -41,7 +44,10 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_version(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_version(req.context_id, req.last_pinned)
+            .await;
         match result {
             Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
                 status: None,
@@ -113,7 +119,10 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_snapshot(req.context_id, req.last_pinned)
+            .await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
                 status: None,
@@ -128,14 +137,16 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .unpin_snapshot(req.context_id, req.snapshot.unwrap())
-            .await;
-        match result {
-            Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+        if let Some(snapshot) = req.snapshot {
+            if let Err(e) = self
+                .hummock_manager
+                .unpin_snapshot(req.context_id, snapshot)
+                .await
+            {
+                return Err(e.to_grpc_status());
+            }
         }
+        Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
 
     async fn commit_epoch(
@@ -184,5 +195,18 @@ where
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
         let rx = self.compactor_manager.add_compactor().await;
         Ok(Response::new(RwReceiverStream::new(rx)))
+    }
+
+    async fn report_vacuum_task(
+        &self,
+        request: Request<ReportVacuumTaskRequest>,
+    ) -> Result<Response<ReportVacuumTaskResponse>, Status> {
+        if let Some(vacuum_task) = request.into_inner().vacuum_task {
+            self.vacuum_trigger
+                .report_vacuum_task(vacuum_task)
+                .await
+                .map_err(|e| e.to_grpc_status())?;
+        }
+        Ok(Response::new(ReportVacuumTaskResponse { status: None }))
     }
 }

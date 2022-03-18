@@ -10,8 +10,7 @@ use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
-use crate::base::{SourceMessage, SourceReader};
-use crate::kafka::source::message::KafkaMessage;
+use crate::base::{InnerMessage, SourceReader};
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
@@ -25,7 +24,7 @@ pub struct KafkaSplitReader {
 
 #[async_trait]
 impl SourceReader for KafkaSplitReader {
-    async fn next(&mut self) -> Result<Option<Vec<Vec<u8>>>> {
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         let mut stream = self
             .partition_queue
             .stream()
@@ -55,35 +54,35 @@ impl SourceReader for KafkaSplitReader {
                 }
             }
 
-            ret.push(KafkaMessage::from(msg).serialize()?.into_bytes());
+            ret.push(InnerMessage::from(msg));
         }
 
         Ok(Some(ret))
     }
 
-    async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()> {
-        let split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
+        let kafka_split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
         let mut tpl = TopicPartitionList::new();
 
-        let offset = match split.start_offset {
+        let offset = match kafka_split.start_offset {
             KafkaOffset::None | KafkaOffset::Earliest => Offset::Beginning,
             KafkaOffset::Latest => Offset::End,
             KafkaOffset::Offset(offset) => Offset::Offset(offset),
             KafkaOffset::Timestamp(_) => unimplemented!(),
         };
 
-        tpl.add_partition_offset(self.topic.as_str(), split.partition, offset)
+        tpl.add_partition_offset(self.topic.as_str(), kafka_split.partition, offset)
             .map_err(|e| anyhow!(e))?;
 
         self.consumer.assign(&tpl).map_err(|e| anyhow!(e))?;
 
         let partition_queue = self
             .consumer
-            .split_partition_queue(self.topic.as_str(), split.partition)
+            .split_partition_queue(self.topic.as_str(), kafka_split.partition)
             .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
 
         self.partition_queue = partition_queue;
-        self.assigned_split = split;
+        self.assigned_split = kafka_split;
 
         Ok(())
     }

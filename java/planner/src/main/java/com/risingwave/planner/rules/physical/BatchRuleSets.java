@@ -1,26 +1,7 @@
 package com.risingwave.planner.rules.physical;
 
-import com.risingwave.planner.rel.logical.RwLogicalAggregate;
-import com.risingwave.planner.rel.logical.RwLogicalFilter;
-import com.risingwave.planner.rel.logical.RwLogicalGenerateSeries;
-import com.risingwave.planner.rel.logical.RwLogicalInsert;
-import com.risingwave.planner.rel.logical.RwLogicalJoin;
-import com.risingwave.planner.rel.logical.RwLogicalProject;
-import com.risingwave.planner.rel.logical.RwLogicalScan;
-import com.risingwave.planner.rel.logical.RwLogicalSort;
-import com.risingwave.planner.rel.logical.RwLogicalValues;
-import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
-import com.risingwave.planner.rel.physical.RwBatchFilter;
-import com.risingwave.planner.rel.physical.RwBatchGenerateSeries;
-import com.risingwave.planner.rel.physical.RwBatchHashAgg;
-import com.risingwave.planner.rel.physical.RwBatchInsert;
-import com.risingwave.planner.rel.physical.RwBatchLimit;
-import com.risingwave.planner.rel.physical.RwBatchProject;
-import com.risingwave.planner.rel.physical.RwBatchScan;
-import com.risingwave.planner.rel.physical.RwBatchSort;
-import com.risingwave.planner.rel.physical.RwBatchSortAgg;
-import com.risingwave.planner.rel.physical.RwBatchSourceScan;
-import com.risingwave.planner.rel.physical.RwBatchValues;
+import com.risingwave.planner.rel.logical.*;
+import com.risingwave.planner.rel.physical.*;
 import com.risingwave.planner.rel.physical.join.RwBatchHashJoin;
 import com.risingwave.planner.rel.physical.join.RwBatchNestedLoopJoin;
 import com.risingwave.planner.rel.physical.join.RwBatchSortMergeJoin;
@@ -125,6 +106,7 @@ public class BatchRuleSets {
   public static final RuleSet LOGICAL_CONVERTER_RULES =
       RuleSets.ofList(
           RwLogicalInsert.LogicalInsertConverterRule.INSTANCE,
+          RwLogicalDelete.LogicalDeleteConverterRule.INSTANCE,
           RwLogicalProject.RwProjectConverterRule.INSTANCE,
           RwLogicalFilter.RwFilterConverterRule.INSTANCE,
           RwLogicalAggregate.RwBatchAggregateConverterRule.INSTANCE,
@@ -147,6 +129,7 @@ public class BatchRuleSets {
           BatchScanConverterRule.INSTANCE,
           RwBatchSort.RwBatchSortConverterRule.INSTANCE,
           RwBatchInsert.BatchInsertConverterRule.INSTANCE,
+          RwBatchDelete.BatchDeleteConverterRule.INSTANCE,
           RwBatchValues.BatchValuesConverterRule.INSTANCE,
           RwBatchHashJoin.BatchHashJoinConverterRule.INSTANCE,
           RwBatchNestedLoopJoin.BatchNestedLoopJoinConverterRule.INSTANCE,
@@ -165,6 +148,7 @@ public class BatchRuleSets {
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchSort.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchValues.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchInsert.class),
+          RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchDelete.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchSourceScan.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchScan.class),
           RisingWaveBatchPhyRel.getDistributedConvertRule(RwBatchGenerateSeries.class));

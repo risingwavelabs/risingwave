@@ -1,4 +1,5 @@
 #![feature(map_try_insert)]
+#![feature(let_chains)]
 
 #[macro_use]
 pub mod catalog;
@@ -20,7 +21,7 @@ use clap::Parser;
 use pgwire::pg_server::pg_serve;
 use session::SessionManagerImpl;
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
