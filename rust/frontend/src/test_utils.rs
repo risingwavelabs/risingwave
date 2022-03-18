@@ -250,16 +250,61 @@ impl MetaClientInner for FrontendMockMetaClient {
 
     async fn create_materialized_source(
         &self,
-        _req: CreateMaterializedSourceRequest,
+        req: CreateMaterializedSourceRequest,
     ) -> Result<CreateMaterializedSourceResponse> {
-        unimplemented!()
+        let CreateMaterializedSourceRequest {
+            source,
+            materialized_view: mv,
+            stream_node: _,
+        } = req;
+        let source_id = self.gen_id();
+        let table_id = self.gen_id();
+        let mut source = source.unwrap();
+        let mut table = mv.unwrap();
+        source.id = source_id;
+        table.id = table_id;
+        self.mock_catalog
+            .lock()
+            .await
+            .notify(Operation::Add, &Info::TableV2(table))
+            .await;
+        let version = self
+            .mock_catalog
+            .lock()
+            .await
+            .notify(Operation::Add, &Info::Source(source))
+            .await;
+        Ok(CreateMaterializedSourceResponse {
+            status: None,
+            source_id,
+            table_id,
+            version,
+        })
     }
 
     async fn create_materialized_view(
         &self,
-        _req: CreateMaterializedViewRequest,
+        req: CreateMaterializedViewRequest,
     ) -> Result<CreateMaterializedViewResponse> {
-        unimplemented!()
+        let CreateMaterializedViewRequest {
+            materialized_view: mv,
+            stream_node: _,
+        } = req;
+        let table_id = self.gen_id();
+        let mut table = mv.unwrap();
+        table.id = table_id;
+        let version = self
+            .mock_catalog
+            .lock()
+            .await
+            .notify(Operation::Add, &Info::TableV2(table))
+            .await;
+
+        Ok(CreateMaterializedViewResponse {
+            status: None,
+            table_id,
+            version,
+        })
     }
 }
 
