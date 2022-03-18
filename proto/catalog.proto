@@ -170,13 +170,13 @@ message DropMaterializedViewResponse {
 
 service CatalogService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
-  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
-  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
+  rpc CreateSchema(CreateSchemaRequest) returns (CreateSchemaResponse);
   rpc DropSchema(DropSchemaRequest) returns (DropSchemaResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
-  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
+  rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
+  rpc CreateMaterializedSource(CreateMaterializedSourceRequest) returns (CreateMaterializedSourceResponse);
+  rpc DropMaterializedSource(DropMaterializedSourceRequest) returns (DropMaterializedSourceResponse);
 }

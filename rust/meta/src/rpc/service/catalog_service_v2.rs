@@ -86,6 +86,23 @@ where
         }))
     }
 
+    async fn drop_database(
+        &self,
+        request: Request<DropDatabaseRequest>,
+    ) -> Result<Response<DropDatabaseResponse>, Status> {
+        let req = request.into_inner();
+        let database_id = req.get_database_id();
+        let version = self
+            .catalog_manager
+            .drop_database(database_id)
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(DropDatabaseResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_schema(
         &self,
         request: Request<CreateSchemaRequest>,
@@ -111,6 +128,23 @@ where
         }))
     }
 
+    async fn drop_schema(
+        &self,
+        request: Request<DropSchemaRequest>,
+    ) -> Result<Response<DropSchemaResponse>, Status> {
+        let req = request.into_inner();
+        let schema_id = req.get_schema_id();
+        let version = self
+            .catalog_manager
+            .drop_schema(schema_id)
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(DropSchemaResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_source(
         &self,
         request: Request<CreateSourceRequest>,
@@ -125,11 +159,17 @@ where
         }))
     }
 
-    async fn create_materialized_source(
+    async fn drop_source(
         &self,
-        _request: Request<CreateMaterializedSourceRequest>,
-    ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
-        todo!()
+        request: Request<DropSourceRequest>,
+    ) -> Result<Response<DropSourceResponse>, Status> {
+        let source_id = request.into_inner().source_id;
+        let version = self.drop_source_inner(source_id).await.map_err(tonic_err)?;
+
+        Ok(Response::new(DropSourceResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn create_materialized_view(
@@ -177,67 +217,13 @@ where
         }))
     }
 
-    async fn drop_database(
-        &self,
-        request: Request<DropDatabaseRequest>,
-    ) -> Result<Response<DropDatabaseResponse>, Status> {
-        let req = request.into_inner();
-        let database_id = req.get_database_id();
-        let version = self
-            .catalog_manager
-            .drop_database(database_id)
-            .await
-            .map_err(tonic_err)?;
-        Ok(Response::new(DropDatabaseResponse {
-            status: None,
-            version,
-        }))
-    }
-
-    async fn drop_schema(
-        &self,
-        request: Request<DropSchemaRequest>,
-    ) -> Result<Response<DropSchemaResponse>, Status> {
-        let req = request.into_inner();
-        let schema_id = req.get_schema_id();
-        let version = self
-            .catalog_manager
-            .drop_schema(schema_id)
-            .await
-            .map_err(tonic_err)?;
-        Ok(Response::new(DropSchemaResponse {
-            status: None,
-            version,
-        }))
-    }
-
-    async fn drop_source(
-        &self,
-        request: Request<DropSourceRequest>,
-    ) -> Result<Response<DropSourceResponse>, Status> {
-        let source_id = request.into_inner().source_id;
-        let version = self.drop_source_inner(source_id).await.map_err(tonic_err)?;
-
-        Ok(Response::new(DropSourceResponse {
-            status: None,
-            version,
-        }))
-    }
-
-    async fn drop_materialized_source(
-        &self,
-        _request: Request<DropMaterializedSourceRequest>,
-    ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
-        todo!()
-    }
-
     async fn drop_materialized_view(
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         let req = request.into_inner();
         let mview_id = req.get_table_id();
-        // 1. drop table in catalog
+        // 1. drop table in catalog. Ref count will be checked.
         let version = self
             .catalog_manager
             .drop_table(mview_id)
@@ -255,6 +241,20 @@ where
             status: None,
             version,
         }))
+    }
+
+    async fn create_materialized_source(
+        &self,
+        _request: Request<CreateMaterializedSourceRequest>,
+    ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
+        todo!()
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        _request: Request<DropMaterializedSourceRequest>,
+    ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
+        todo!()
     }
 }
 
@@ -314,7 +314,7 @@ where
     }
 
     async fn drop_source_inner(&self, source_id: SourceId) -> RwResult<CatalogVersion> {
-        // 1. Update the source catalog.
+        // 1. Drop source in catalog. Ref count will be checked.
         let version = self.catalog_manager.drop_source(source_id).await?;
 
         // 2. Drop source on compute nodes.
