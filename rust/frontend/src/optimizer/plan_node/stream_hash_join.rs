@@ -44,7 +44,12 @@ impl StreamHashJoin {
 
 impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamHashJoin(predicate: {})", self.eq_join_predicate())
+        write!(
+            f,
+            "StreamHashJoin {{ type: {:?}, predicate: {} }}",
+            self.logical.join_type(),
+            self.eq_join_predicate()
+        )
     }
 }
 
