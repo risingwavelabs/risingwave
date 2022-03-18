@@ -392,6 +392,51 @@ where
 
 
 statement ok
+create materialized view tpch_q15 as
+select
+	s_suppkey,
+	s_name,
+	s_address,
+	s_phone,
+	total_revenue
+from
+	supplier,
+	(
+		select
+		l_suppkey,
+		sum(l_extendedprice * (1 - l_discount)) as total_revenue
+	from
+		lineitem
+	where
+		l_shipdate >= date '1993-01-01'
+		and l_shipdate < date '1993-01-01' + interval '3' month
+	group by
+		l_suppkey
+	) as revenue0 (supplier_no, total_revenue)
+where
+	s_suppkey = supplier_no
+	and total_revenue = (
+		select
+			max(total_revenue) as max_revenue
+		from
+			(
+				select
+				l_suppkey,
+				sum(l_extendedprice * (1 - l_discount)) as total_revenue
+			from
+				lineitem
+			where
+				l_shipdate >= date '1993-01-01'
+				and l_shipdate < date '1993-01-01' + interval '3' month
+			group by
+				l_suppkey
+			) as revenue0 (supplier_no, total_revenue)
+	)
+order by
+	s_suppkey;
+
+
+statement ok
 create materialized view tpch_q17 as
 select
 	ROUND(sum(l_extendedprice) / 7.0, 16) as avg_yearly
@@ -447,6 +492,45 @@ order by
 	o_totalprice desc,
 	o_orderdate
 LIMIT 100;
+
+
+statement ok
+create materialized view tpch_q19 as
+select
+	sum(l_extendedprice* (1 - l_discount)) as revenue
+from
+	lineitem,
+	part
+where
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#52'
+		and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+		and l_quantity >= 1 and l_quantity <= 11
+		and p_size between 1 and 5
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	)
+	or
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#24'
+		and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+		and l_quantity >= 30 and l_quantity <= 40
+		and p_size between 1 and 10
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	)
+	or
+	(
+		p_partkey = l_partkey
+		and p_brand = 'Brand#32'
+		and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+		and l_quantity >= 10 and l_quantity <= 20
+		and p_size between 1 and 15
+		and l_shipmode in ('AIR', 'AIR REG')
+		and l_shipinstruct = 'DELIVER IN PERSON'
+	);
 
 
 statement ok

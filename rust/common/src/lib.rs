@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -13,6 +14,7 @@
 #![feature(binary_heap_drain_sorted)]
 #![feature(is_sorted)]
 #![feature(backtrace)]
+#![feature(fn_traits)]
 
 #[macro_use]
 pub mod error;
@@ -26,8 +28,8 @@ pub mod catalog;
 pub mod collection;
 pub mod config;
 pub mod expr;
+pub mod hash;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;
 pub mod vector_op;
-pub mod worker_id;

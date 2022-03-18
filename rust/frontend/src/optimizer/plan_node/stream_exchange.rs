@@ -1,31 +1,49 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::dispatcher::DispatcherType;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
 
-use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use crate::optimizer::property::order::WithOrder;
+use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
+/// `StreamExchange` imposes a particular distribution on its input
+/// without changing its content.
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
+    pub base: StreamBase,
     input: PlanRef,
     schema: Schema,
-    dist: Distribution,
 }
+
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
+        let base = StreamBase {
+            dist,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         StreamExchange {
             input,
             schema,
-            dist,
+            base,
         }
     }
 }
+
 impl fmt::Display for StreamExchange {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("StreamExchange")
+            .field("order", self.order())
+            .field("dist", self.distribution())
+            .finish()
     }
 }
+
 impl PlanTreeNodeUnary for StreamExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -35,16 +53,31 @@ impl PlanTreeNodeUnary for StreamExchange {
     }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
-impl WithDistribution for StreamExchange {
-    fn distribution(&self) -> &Distribution {
-        &self.dist
-    }
-}
-impl WithOrder for StreamExchange {}
 
 impl WithSchema for StreamExchange {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
-impl ToStreamProst for StreamExchange {}
+
+impl ToStreamProst for StreamExchange {
+    fn to_stream_prost_body(&self) -> Node {
+        Node::ExchangeNode(ExchangeNode {
+            fields: self.schema.to_prost(),
+            dispatcher: Some(Dispatcher {
+                r#type: match &self.base.dist {
+                    Distribution::HashShard(_) => DispatcherType::Hash,
+                    Distribution::Single => DispatcherType::Simple,
+                    Distribution::Broadcast => DispatcherType::Broadcast,
+                    _ => panic!("Do not allow Any or AnyShard in serialization process"),
+                } as i32,
+                column_indices: match &self.base.dist {
+                    Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
+                    _ => vec![],
+                },
+                // Frontend does not have the info of hash mapping, which is set by meta.
+                hash_mapping: None,
+            }),
+        })
+    }
+}

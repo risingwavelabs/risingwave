@@ -56,8 +56,8 @@ mod handlers {
     impl IntoResponse for DashboardError {
         fn into_response(self) -> axum::response::Response {
             let mut resp = Json(json!({
-              "error": format!("{}", self.0),
-              "info":  format!("{:?}", self.0),
+                "error": format!("{}", self.0),
+                "info":  format!("{:?}", self.0),
             }))
             .into_response();
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
@@ -72,11 +72,15 @@ mod handlers {
         srv.add_test_data().await.map_err(err)?;
 
         use risingwave_pb::common::WorkerType;
-        let result = srv.cluster_manager.list_worker_node(
-            WorkerType::from_i32(ty)
-                .ok_or_else(|| anyhow!("invalid worker type"))
-                .map_err(err)?,
-        );
+        let result = srv
+            .cluster_manager
+            .list_worker_node(
+                WorkerType::from_i32(ty)
+                    .ok_or_else(|| anyhow!("invalid worker type"))
+                    .map_err(err)?,
+                None,
+            )
+            .await;
         Ok(result.into())
     }
 
@@ -89,7 +93,7 @@ mod handlers {
             .await
             .map_err(err)?
             .iter()
-            .filter(|t| t.is_materialized_view)
+            .filter(|t| t.is_materialized_view())
             .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
             .collect::<Vec<_>>();
         Ok(Json(materialized_views))
@@ -100,10 +104,11 @@ mod handlers {
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
-        let node_actors = srv.fragment_manager.load_all_node_actors().map_err(err)?;
+        let node_actors = srv.fragment_manager.all_node_actors().map_err(err)?;
         let nodes = srv
             .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode);
+            .list_worker_node(WorkerType::ComputeNode, None)
+            .await;
         let actors = nodes
             .iter()
             .map(|node| ActorLocation {
@@ -123,7 +128,7 @@ mod handlers {
             .list_table_fragments()
             .map_err(err)?
             .iter()
-            .map(|f| (f.table_id().table_id(), f.actors()))
+            .map(|f| (f.table_id().table_id() as i32, f.actors()))
             .collect::<Vec<_>>();
 
         Ok(Json(table_fragments))
@@ -150,9 +155,12 @@ where
             )
             .layer(
                 // TODO: allow wildcard CORS is dangerous! Should remove this in production.
-                CorsLayer::new()
-                    .allow_origin(cors::any())
-                    .allow_methods(vec![Method::GET, Method::POST, Method::PUT, Method::DELETE]),
+                CorsLayer::new().allow_origin(cors::Any).allow_methods(vec![
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                ]),
             );
 
         let ui_path = env::var("PREFIX_UI")?;
@@ -189,15 +197,14 @@ where
         use risingwave_pb::common::{HostAddress, WorkerType};
 
         // TODO: remove adding frontend register when frontend implement register.
+        let host = HostAddress {
+            host: "127.0.0.1".to_string(),
+            port: 4567,
+        };
         self.cluster_manager
-            .add_worker_node(
-                HostAddress {
-                    host: "127.0.0.1".to_string(),
-                    port: 4567,
-                },
-                WorkerType::Frontend,
-            )
+            .add_worker_node(host.clone(), WorkerType::Frontend)
             .await?;
+        self.cluster_manager.activate_worker_node(host).await?;
 
         Ok(())
     }

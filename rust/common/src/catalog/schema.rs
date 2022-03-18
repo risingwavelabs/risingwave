@@ -1,6 +1,7 @@
 use std::ops::Index;
 
-use risingwave_pb::plan::{ColumnDesc, Field as ProstField};
+#[allow(unused_imports)]
+use risingwave_pb::plan::{ColumnDesc, ExchangeInfo, Field as ProstField};
 
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
@@ -15,13 +16,29 @@ pub struct Field {
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // force it to display in single-line style
-        write!(
-            f,
-            "Field {{ name = {}, data_type = {:?} }}",
-            self.name, self.data_type
-        )
+        write!(f, "{}:{:?}", self.name, self.data_type)
     }
+}
+
+impl Field {
+    pub fn to_prost(&self) -> ProstField {
+        ProstField {
+            data_type: Some(self.data_type.to_protobuf()),
+            name: self.name.to_string(),
+        }
+    }
+}
+
+/// `schema_unamed` builds a `Schema` with the given types, but without names.
+#[macro_export]
+macro_rules! schema_unamed {
+    ($($t:expr),*) => {{
+        $crate::catalog::Schema {
+            fields: vec![
+                $( $crate::catalog::Field::unnamed($t) ),*
+            ],
+        }
+    }};
 }
 
 /// the schema of the executor's return data
@@ -54,21 +71,6 @@ impl Schema {
         &self.fields
     }
 
-    // TODO(eric): Remove this
-    pub fn try_from<'a, I: IntoIterator<Item = &'a ColumnDesc>>(cols: I) -> Result<Self> {
-        Ok(Self {
-            fields: cols
-                .into_iter()
-                .map(|col| {
-                    Ok(Field {
-                        data_type: DataType::from(col.get_column_type()?),
-                        name: col.get_name().to_string(),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?,
-        })
-    }
-
     /// Create array builders for all fields in this schema.
     pub fn create_array_builders(&self, capacity: usize) -> Result<Vec<ArrayBuilderImpl>> {
         self.fields
@@ -76,11 +78,25 @@ impl Schema {
             .map(|field| field.data_type.create_array_builder(capacity))
             .collect()
     }
+
+    pub fn to_prost(&self) -> Vec<ProstField> {
+        self.fields
+            .clone()
+            .into_iter()
+            .map(|field| field.to_prost())
+            .collect()
+    }
 }
 
 impl Field {
-    pub fn with_name(data_type: DataType, name: String) -> Self {
-        Self { data_type, name }
+    pub fn with_name<S>(data_type: DataType, name: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            data_type,
+            name: name.into(),
+        }
     }
 
     pub fn unnamed(data_type: DataType) -> Self {
@@ -107,5 +123,46 @@ impl Index<usize> for Schema {
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.fields[index]
+    }
+}
+
+#[allow(unused)]
+pub mod test_utils {
+    use super::*;
+
+    fn field_n<const N: usize>(data_type: DataType) -> Schema {
+        Schema::new(vec![Field::unnamed(data_type); N])
+    }
+
+    fn int32_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Int32)
+    }
+
+    /// Create a util schema **for test only** with two int32 fields.
+    pub fn ii() -> Schema {
+        int32_n::<2>()
+    }
+
+    /// Create a util schema **for test only** with three int32 fields.
+    pub fn iii() -> Schema {
+        int32_n::<3>()
+    }
+
+    fn varchar_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Varchar)
+    }
+
+    /// Create a util schema **for test only** with three varchar fields.
+    pub fn sss() -> Schema {
+        varchar_n::<3>()
+    }
+
+    fn decimal_n<const N: usize>() -> Schema {
+        field_n::<N>(DataType::Decimal)
+    }
+
+    /// Create a util schema **for test only** with three decimal fields.
+    pub fn ddd() -> Schema {
+        decimal_n::<3>()
     }
 }

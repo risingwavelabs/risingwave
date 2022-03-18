@@ -1,8 +1,7 @@
 use std::str;
 
 use async_trait::async_trait;
-use risingwave_common::array::RwError;
-use risingwave_common::error::ErrorCode;
+use risingwave_common::error::{ErrorCode, RwError};
 
 use crate::storage::transaction::Transaction;
 use crate::storage::{Key, Value};
@@ -17,7 +16,7 @@ pub trait Snapshot: Sync + Send + 'static {
 
 /// `MetaStore` defines the functions used to operate metadata.
 #[async_trait]
-pub trait MetaStore: Sync + Send + 'static {
+pub trait MetaStore: Clone + Sync + Send + 'static {
     type Snapshot: Snapshot;
 
     fn snapshot(&self) -> Self::Snapshot;
@@ -37,17 +36,14 @@ pub trait MetaStore: Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Vec<u8>> {
         self.snapshot().get_cf(cf, key).await
     }
-
-    fn get_transaction(&self) -> Transaction {
-        Transaction::new()
-    }
 }
 
 // Error of metastore
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum Error {
     ItemNotFound(String),
     TransactionAbort(),
+    Internal(anyhow::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -59,6 +55,10 @@ impl From<Error> for RwError {
             Error::TransactionAbort() => {
                 RwError::from(ErrorCode::InternalError("transaction aborted".to_owned()))
             }
+            Error::Internal(e) => RwError::from(ErrorCode::InternalError(format!(
+                "meta internal error: {}",
+                e
+            ))),
         }
     }
 }

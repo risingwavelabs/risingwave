@@ -9,17 +9,12 @@ import com.risingwave.catalog.CreateTableInfo;
 import com.risingwave.catalog.SchemaCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.common.exception.PgErrorCode;
-import com.risingwave.common.exception.PgException;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.execution.handler.util.CreateTaskBroadcaster;
 import com.risingwave.execution.result.DdlResult;
 import com.risingwave.pgwire.msg.StatementType;
 import com.risingwave.planner.sql.SqlConverter;
-import com.risingwave.proto.plan.CreateSourceNode;
-import com.risingwave.proto.plan.ExchangeInfo;
-import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.*;
 import com.risingwave.rpc.Messages;
 import com.risingwave.sql.node.SqlCreateSource;
 import com.risingwave.sql.node.SqlTableOption;
@@ -44,13 +39,14 @@ public class CreateSourceHandler implements SqlHandler {
   private static PlanFragment serialize(TableCatalog table) {
     TableCatalog.TableId tableId = table.getId();
     CreateSourceNode.Builder createSourceNodeBuilder = CreateSourceNode.newBuilder();
+    var sourceInfoBuilder = StreamSourceInfo.newBuilder();
 
     ImmutableList<ColumnCatalog> allColumns = table.getAllColumns(false);
-    createSourceNodeBuilder.setRowIdIndex(-1);
+    sourceInfoBuilder.setRowIdIndex(-1);
 
     if (allColumns.stream().noneMatch(column -> column.getDesc().isPrimary())) {
       allColumns = table.getAllColumns(true);
-      createSourceNodeBuilder.setRowIdIndex(0);
+      sourceInfoBuilder.setRowIdIndex(0);
     }
 
     for (ColumnCatalog columnCatalog : allColumns) {
@@ -59,36 +55,20 @@ public class CreateSourceHandler implements SqlHandler {
 
       columnDescBuilder
           .setName(columnCatalog.getName())
-          .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
           .setColumnType(columnCatalog.getDesc().getDataType().getProtobufType())
-          .setColumnId(columnCatalog.getId().getValue())
-          .setIsPrimary(columnCatalog.getDesc().isPrimary());
+          .setColumnId(columnCatalog.getId().getValue());
 
       createSourceNodeBuilder.addColumnDescs(columnDescBuilder);
     }
-    createSourceNodeBuilder.putAllProperties(table.getProperties());
-
-    switch (table.getRowFormat().toLowerCase()) {
-      case "json":
-        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.JSON);
-        break;
-      case "avro":
-        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.AVRO);
-        break;
-      case "protobuf":
-        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.PROTOBUF);
-        break;
-      case "debezium-json":
-        createSourceNodeBuilder.setFormat(CreateSourceNode.RowFormatType.DEBEZIUM_JSON);
-        break;
-      default:
-        throw new PgException(PgErrorCode.PROTOCOL_VIOLATION, "unsupported row format");
-    }
-
-    createSourceNodeBuilder.setSchemaLocation(table.getRowSchemaLocation());
+    sourceInfoBuilder.putAllProperties(table.getProperties());
+    sourceInfoBuilder.setRowFormat(table.getRowFormat());
+    sourceInfoBuilder.setRowSchemaLocation(table.getRowSchemaLocation());
 
     CreateSourceNode createSourceNode =
-        createSourceNodeBuilder.setTableRefId(Messages.getTableRefId(tableId)).build();
+        createSourceNodeBuilder
+            .setTableRefId(Messages.getTableRefId(tableId))
+            .setInfo(sourceInfoBuilder)
+            .build();
 
     ExchangeInfo exchangeInfo =
         ExchangeInfo.newBuilder().setMode(ExchangeInfo.DistributionMode.SINGLE).build();
@@ -135,7 +115,7 @@ public class CreateSourceHandler implements SqlHandler {
 
     createSourceInfoBuilder.setProperties(properties);
     createSourceInfoBuilder.setSource(true);
-    createSourceInfoBuilder.setRowFormat(sql.getRowFormat().getValueAs(String.class));
+    createSourceInfoBuilder.setRowFormatFromString(sql.getRowFormat().getValueAs(String.class));
     createSourceInfoBuilder.setRowSchemaLocation(
         sql.getRowSchemaLocation().getValueAs(String.class));
 

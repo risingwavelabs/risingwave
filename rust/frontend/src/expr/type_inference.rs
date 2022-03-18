@@ -177,12 +177,15 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         ExprType::GreaterThan,
         ExprType::GreaterThanOrEqual,
     ];
-    let logical_exprs = vec![ExprType::And, ExprType::Or, ExprType::Not];
-    let bool_check_exprs = vec![
+    // Exprs that accept two bools and return a bool.
+    let bool_binary_exprs = vec![ExprType::And, ExprType::Or];
+    // Exprs that accept one bool and return a bool.
+    let bool_unary_exprs = vec![
         ExprType::IsTrue,
         ExprType::IsNotTrue,
         ExprType::IsFalse,
         ExprType::IsNotFalse,
+        ExprType::Not,
     ];
     let null_check_exprs = vec![
         ExprType::IsNull,
@@ -205,15 +208,15 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             DataTypeName::Boolean,
         );
     }
-    for expr in logical_exprs {
+    for expr in bool_binary_exprs {
         map.insert(
             FuncSign::new_binary(expr, DataTypeName::Boolean, DataTypeName::Boolean),
             DataTypeName::Boolean,
         );
     }
-    for expr in bool_check_exprs {
+    for expr in bool_unary_exprs {
         map.insert(
-            FuncSign::new_binary(expr, DataTypeName::Boolean, DataTypeName::Boolean),
+            FuncSign::new_unary(expr, DataTypeName::Boolean),
             DataTypeName::Boolean,
         );
     }
@@ -224,9 +227,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     map
 }
 lazy_static::lazy_static! {
-  static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
-    build_type_derive_map()
-  };
+    static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
+        build_type_derive_map()
+    };
 }
 #[cfg(test)]
 mod tests {

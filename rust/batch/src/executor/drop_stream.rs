@@ -6,6 +6,7 @@ use risingwave_source::SourceManagerRef;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
 
+// TODO: All DDLs should be RPC requests from the meta service. Remove this.
 pub(super) struct DropStreamExecutor {
     table_id: TableId,
     source_manager: SourceManagerRef,

@@ -2,8 +2,14 @@ use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
@@ -25,6 +31,37 @@ pub struct ChainExecutor {
     column_idxs: Vec<usize>,
     /// Logical Operator Info
     op_info: String,
+}
+
+pub struct ChainExecutorBuilder {}
+
+impl ExecutorBuilder for ChainExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
+        let snapshot = params.input.remove(1);
+        let mview = params.input.remove(0);
+
+        // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
+        // column_ids. Now simply treat column_id as column_idx.
+        // TODO(bugen): how can we know the way of mapping?
+        let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
+
+        // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
+        // its schema.
+        let schema = snapshot.schema().clone();
+        Ok(Box::new(ChainExecutor::new(
+            snapshot,
+            mview,
+            schema,
+            column_idxs,
+            params.op_info,
+        )))
+    }
 }
 
 impl ChainExecutor {
@@ -75,13 +112,13 @@ impl ChainExecutor {
         match msg {
             Err(e) => {
                 // TODO: Refactor this once we find a better way to know the upstream is done.
-                if let ErrorCode::EOF = e.inner() {
+                if let ErrorCode::Eof = e.inner() {
                     self.state = ChainState::ReadingMView;
                     return self.read_mview().await;
                 }
                 Err(e)
             }
-            Ok(msg) => self.mapping(msg),
+            Ok(msg) => Ok(msg),
         }
     }
 
@@ -94,9 +131,9 @@ impl ChainExecutor {
             )
             .into()),
             Message::Barrier(barrier) => {
-                self.snapshot.init(barrier.epoch)?;
+                self.snapshot.init(barrier.epoch.prev)?;
                 self.state = ChainState::ReadingSnapshot;
-                return self.read_snapshot().await;
+                Ok(Message::Barrier(barrier))
             }
         }
     }
@@ -137,14 +174,11 @@ impl Executor for ChainExecutor {
 mod test {
 
     use async_trait::async_trait;
-    use risingwave_common::array::{Array, I32Array, Op, RwError, StreamChunk};
-    use risingwave_common::catalog::Schema;
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::error::{ErrorCode, Result};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::column_desc::ColumnEncodingType;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_common::error::{ErrorCode, Result, RwError};
+    use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -168,7 +202,7 @@ mod test {
                     if let Message::Barrier(_) = m {
                         // warning: translate all of the barrier types to the EOF here. May be an
                         // error in some circumstances.
-                        Err(RwError::from(ErrorCode::EOF))
+                        Err(RwError::from(ErrorCode::Eof))
                     } else {
                         Ok(m)
                     }
@@ -207,16 +241,7 @@ mod test {
 
     #[tokio::test]
     async fn test_basic() {
-        let columns = vec![ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            encoding: ColumnEncodingType::Raw as i32,
-            name: "v1".to_string(),
-            ..Default::default()
-        }];
-        let schema = Schema::try_from(&columns).unwrap();
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
         let first = Box::new(MockSnapshot::with_chunks(
             schema.clone(),
             PkIndices::new(),
@@ -238,7 +263,7 @@ mod test {
             schema.clone(),
             PkIndices::new(),
             vec![
-                Message::Barrier(Barrier::new(0)),
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(StreamChunk::new(
                     vec![Op::Insert],
                     vec![column_nonnull! { I32Array, [3] }],

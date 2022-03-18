@@ -31,9 +31,9 @@ impl StreamingRowCountAgg {
                     row_cnt = num;
                 }
                 other => panic!(
-          "type mismatch in streaming aggregator StreamingRowCountAgg init: expected i64, get {}",
-          other.get_ident()
-        ),
+                    "type mismatch in streaming aggregator StreamingRowCountAgg init: expected i64, get {}",
+                    other.get_ident()
+                ),
             }
         }
         Self { row_cnt }

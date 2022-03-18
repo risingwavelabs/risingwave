@@ -69,7 +69,7 @@ impl MockSource {
     }
 
     pub fn push_barrier(&mut self, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new(epoch);
+        let mut barrier = Barrier::new_test_barrier(epoch);
         if stop {
             barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()));
         }
@@ -84,7 +84,8 @@ impl Executor for MockSource {
         match self.msgs.pop_front() {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(
-                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(self.epoch)
+                    .with_mutation(Mutation::Stop(HashSet::default())),
             )),
         }
     }
@@ -157,7 +158,7 @@ impl MockAsyncSource {
     }
 
     pub fn push_barrier(tx: &mut UnboundedSender<Message>, epoch: u64, stop: bool) {
-        let mut barrier = Barrier::new(epoch);
+        let mut barrier = Barrier::new_test_barrier(epoch);
         if stop {
             barrier = barrier.with_mutation(Mutation::Stop(HashSet::default()))
         }
@@ -172,7 +173,8 @@ impl Executor for MockAsyncSource {
         match self.rx.recv().await {
             Some(msg) => Ok(msg),
             None => Ok(Message::Barrier(
-                Barrier::new(self.epoch).with_mutation(Mutation::Stop(HashSet::default())),
+                Barrier::new_test_barrier(self.epoch)
+                    .with_mutation(Mutation::Stop(HashSet::default())),
             )),
         }
     }
@@ -196,36 +198,4 @@ impl Executor for MockAsyncSource {
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
-}
-
-pub mod schemas {
-    use risingwave_common::catalog::*;
-    use risingwave_common::types::DataType;
-
-    fn field_n<const N: usize>(data_type: DataType) -> Schema {
-        Schema::new(vec![Field::unnamed(data_type); N])
-    }
-
-    fn int32_n<const N: usize>() -> Schema {
-        field_n::<N>(DataType::Int32)
-    }
-
-    /// Create a util schema **for test only** with two int32 fields.
-    pub fn ii() -> Schema {
-        int32_n::<2>()
-    }
-
-    /// Create a util schema **for test only** with three int32 fields.
-    pub fn iii() -> Schema {
-        int32_n::<3>()
-    }
-
-    fn varchar_n<const N: usize>() -> Schema {
-        field_n::<N>(DataType::Varchar)
-    }
-
-    /// Create a util schema **for test only** with three varchar fields.
-    pub fn sss() -> Schema {
-        varchar_n::<3>()
-    }
 }

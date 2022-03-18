@@ -1,59 +1,111 @@
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, ToBatch, ToStream};
+use super::{ColPrunable, LogicalBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::WithSchema;
+use crate::session::QueryContextRef;
 
-#[derive(Debug, Clone, Default)]
-#[allow(dead_code)]
+/// `LogicalScan` returns contents of a table or other equivalent object
+#[derive(Debug, Clone)]
 pub struct LogicalScan {
+    pub base: LogicalBase,
+    table_name: String,
     table_id: TableId,
     columns: Vec<ColumnId>,
-    schema: Schema,
 }
 
 impl LogicalScan {
     /// Create a LogicalScan node. Used internally by optimizer.
-    pub fn new(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Self {
+    pub fn new(
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+        schema: Schema,
+        ctx: QueryContextRef,
+    ) -> Self {
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         Self {
+            table_name,
             table_id,
             columns,
-            schema,
+            base,
         }
     }
 
     /// Create a LogicalScan node. Used by planner.
-    pub fn create(table_id: TableId, columns: Vec<ColumnId>, schema: Schema) -> Result<Self> {
-        Ok(Self::new(table_id, columns, schema))
+    pub fn create(
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+        schema: Schema,
+        ctx: QueryContextRef,
+    ) -> Result<PlanRef> {
+        Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
+    }
+
+    pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
+        let columns = self
+            .schema()
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect::<Vec<_>>();
+        f.field("table", &self.table_name)
+            .field("columns", &columns);
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id.table_id
     }
 }
 
-impl WithSchema for LogicalScan {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
 impl_plan_tree_node_for_leaf! {LogicalScan}
-impl WithOrder for LogicalScan {}
-impl WithDistribution for LogicalScan {}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        let mut s = f.debug_struct("LogicalScan");
+        self.fmt_fields(&mut s);
+        s.finish()
     }
 }
-impl ColPrunable for LogicalScan {}
+
+impl ColPrunable for LogicalScan {
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
+        let (columns, fields) = required_cols
+            .ones()
+            .map(|id| (self.columns[id], self.schema().fields[id].clone()))
+            .unzip();
+
+        Self::new(
+            self.table_name.clone(),
+            self.table_id,
+            columns,
+            Schema { fields },
+            self.base.ctx.clone(),
+        )
+        .into()
+    }
+}
+
 impl ToBatch for LogicalScan {
     fn to_batch(&self) -> PlanRef {
-        BatchSeqScan::new(self.clone()).into_plan_ref()
+        BatchSeqScan::new(self.clone()).into()
     }
 }
+
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
-        todo!()
+        StreamTableScan::new(self.clone()).into()
     }
 }

@@ -1,0 +1,31 @@
+statement ok
+create source debezium_json_mysql_source ( id int primary key, name varchar(255), description varchar(512), weight float) with ( 'upstream.source' = 'kafka', 'kafka.bootstrap.servers'='localhost:29092', 'kafka.topic' = 'dbserver1.inventory.products') row format 'debezium-json'
+
+statement ok
+create materialized view debezium_json_mysql_mv as select * from debezium_json_mysql_source;
+
+# Wait for source
+sleep 5s
+
+# Flush into storage
+statement ok
+flush;
+
+query I rowsort
+select id from debezium_json_mysql_mv
+----
+108
+104
+103
+105
+106
+101
+107
+102
+109
+
+statement ok
+drop materialized view debezium_json_mysql_mv
+
+statement ok
+drop source debezium_json_mysql_source

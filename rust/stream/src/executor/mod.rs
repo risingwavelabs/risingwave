@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
@@ -10,34 +11,39 @@ pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
 pub use filter::*;
+use futures::Stream;
 pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
+pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
 pub use project::*;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayImpl, DataChunk, StreamChunk};
+use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation as ProstMutation;
 use risingwave_pb::data::stream_message::StreamMessage;
 use risingwave_pb::data::{
-    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, NothingMutation, StopMutation,
-    StreamMessage as ProstStreamMessage, UpdateMutation,
+    Actors as MutationActors, AddMutation, Barrier as ProstBarrier, Epoch as ProstEpoch,
+    NothingMutation, StopMutation, StreamMessage as ProstStreamMessage, UpdateMutation,
 };
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 pub use source::*;
 pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::task::ENABLE_BARRIER_AGGREGATION;
+use crate::task::{ActorId, ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 mod aggregation;
@@ -51,9 +57,10 @@ mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
+mod lookup;
 mod managed_state;
 mod merge;
-mod monitor;
+pub mod monitor;
 mod mview;
 mod project;
 mod source;
@@ -66,18 +73,57 @@ mod integration_tests;
 #[cfg(test)]
 mod test_utils;
 
+pub const INVALID_EPOCH: u64 = 0;
+
 pub trait ExprFn = Fn(&DataChunk) -> Result<Bitmap> + Send + Sync + 'static;
+
+/// Boxed stream of [`StreamMessage`].
+pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
-    Stop(HashSet<u32>),
-    UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
-    AddOutput(HashMap<u32, Vec<ActorInfo>>),
+    Stop(HashSet<ActorId>),
+    UpdateOutputs(HashMap<ActorId, Vec<ActorInfo>>),
+    AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Epoch {
+    pub curr: u64,
+    pub prev: u64,
+}
+
+impl Epoch {
+    pub fn new(curr: u64, prev: u64) -> Self {
+        assert!(curr > prev);
+        Self { curr, prev }
+    }
+
+    pub fn inc(&self) -> Self {
+        Self {
+            curr: self.curr + 1,
+            prev: self.prev + 1,
+        }
+    }
+
+    pub fn new_test_epoch(curr: u64) -> Self {
+        assert!(curr > 0);
+        Self::new(curr, curr - 1)
+    }
+}
+
+impl Default for Epoch {
+    fn default() -> Self {
+        Self {
+            curr: 1,
+            prev: INVALID_EPOCH,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct Barrier {
-    pub epoch: u64,
+    pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub span: tracing::Span,
 }
@@ -86,7 +132,7 @@ impl Default for Barrier {
     fn default() -> Self {
         Self {
             span: tracing::Span::none(),
-            epoch: 0,
+            epoch: Epoch::default(),
             mutation: None,
         }
     }
@@ -94,9 +140,9 @@ impl Default for Barrier {
 
 impl Barrier {
     /// Create a plain barrier.
-    pub fn new(epoch: u64) -> Self {
+    pub fn new_test_barrier(epoch: u64) -> Self {
         Self {
-            epoch,
+            epoch: Epoch::new_test_epoch(epoch),
             ..Default::default()
         }
     }
@@ -140,7 +186,10 @@ impl Barrier {
             epoch, mutation, ..
         }: Barrier = self.clone();
         ProstBarrier {
-            epoch,
+            epoch: Some(ProstEpoch {
+                curr: epoch.curr,
+                prev: epoch.prev,
+            }),
             mutation: match mutation.as_deref() {
                 None => Some(ProstMutation::Nothing(NothingMutation {})),
                 Some(Mutation::Stop(actors)) => Some(ProstMutation::Stop(StopMutation {
@@ -191,7 +240,7 @@ impl Barrier {
                         .actors
                         .iter()
                         .map(|(&f, actors)| (f, actors.get_info().clone()))
-                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
@@ -200,19 +249,19 @@ impl Barrier {
                     adds.actors
                         .iter()
                         .map(|(&id, actors)| (id, actors.get_info().clone()))
-                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
         };
-        let epoch = prost.get_epoch();
+        let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {
             span: if ENABLE_BARRIER_AGGREGATION {
-                trace_span!("barrier", epoch = %epoch, mutation = ?mutation)
+                trace_span!("barrier", epoch = ?epoch, mutation = ?mutation)
             } else {
                 tracing::Span::none()
             },
-            epoch,
+            epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
         })
     }
@@ -224,23 +273,34 @@ pub enum Message {
     Barrier(Barrier),
 }
 
+impl<'a> TryFrom<&'a Message> for &'a Barrier {
+    type Error = ();
+
+    fn try_from(m: &'a Message) -> std::result::Result<Self, Self::Error> {
+        match m {
+            Message::Chunk(_) => Err(()),
+            Message::Barrier(b) => Ok(b),
+        }
+    }
+}
+
 impl Message {
     /// Return true if the message is a stop barrier, meaning the stream
     /// will not continue, false otherwise.
     pub fn is_terminate(&self) -> bool {
         matches!(
-          self,
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            self,
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         )
     }
 
     pub fn to_protobuf(&self) -> Result<ProstStreamMessage> {
         let prost = match self {
             Self::Chunk(stream_chunk) => {
-                let prost_stream_chunk = stream_chunk.to_protobuf()?;
+                let prost_stream_chunk = stream_chunk.to_protobuf();
                 StreamMessage::StreamChunk(prost_stream_chunk)
             }
             Self::Barrier(barrier) => StreamMessage::Barrier(barrier.clone().to_protobuf()),
@@ -261,6 +321,13 @@ impl Message {
             }
         };
         Ok(res)
+    }
+
+    pub fn as_chunk(&self) -> Option<&StreamChunk> {
+        match self {
+            Self::Chunk(chunk) => Some(chunk),
+            _ => None,
+        }
     }
 }
 
@@ -301,16 +368,124 @@ pub trait Executor: Send + Debug + 'static {
     }
 }
 
+#[derive(Debug)]
+pub enum ExecutorState {
+    /// Waiting for the first barrier
+    Init,
+    /// Can read from and write to storage
+    Active(u64),
+}
+
+impl ExecutorState {
+    pub fn epoch(&self) -> u64 {
+        match self {
+            ExecutorState::Init => panic!("Executor is not active when getting the epoch"),
+            ExecutorState::Active(epoch) => *epoch,
+        }
+    }
+}
+
+pub trait StatefulExecutor: Executor {
+    fn executor_state(&self) -> &ExecutorState;
+
+    fn update_executor_state(&mut self, new_state: ExecutorState);
+
+    /// Try initializing the executor if not done.
+    /// Return:
+    /// - Some(Epoch) if the executor is successfully initialized
+    /// - None if the executor has been intialized
+    fn try_init_executor<'a>(
+        &'a mut self,
+        msg: impl TryInto<&'a Barrier, Error = ()>,
+    ) -> Option<Barrier> {
+        match self.executor_state() {
+            ExecutorState::Init => {
+                if let Ok(barrier) = msg.try_into() {
+                    // Move to Active state
+                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                    Some(barrier.clone())
+                } else {
+                    panic!("The first message the executor receives is not a barrier");
+                }
+            }
+            ExecutorState::Active(_) => None,
+        }
+    }
+}
+
 pub type PkIndices = Vec<usize>;
 pub type PkIndicesRef<'a> = &'a [usize];
 pub type PkDataTypes = SmallVec<[DataType; 1]>;
 
-/// Get inputs by given `pk_indices` from `columns`.
-pub fn pk_input_arrays<'a>(pk_indices: PkIndicesRef, columns: &'a [Column]) -> Vec<&'a ArrayImpl> {
+/// Get clones of inputs by given `pk_indices` from `columns`.
+pub fn pk_input_arrays(pk_indices: PkIndicesRef, columns: &[Column]) -> Vec<ArrayRef> {
+    pk_indices
+        .iter()
+        .map(|pk_idx| columns[*pk_idx].array())
+        .collect()
+}
+
+/// Get references to inputs by given `pk_indices` from `columns`.
+pub fn pk_input_array_refs<'a>(
+    pk_indices: PkIndicesRef,
+    columns: &'a [Column],
+) -> Vec<&'a ArrayImpl> {
     pk_indices
         .iter()
         .map(|pk_idx| columns[*pk_idx].array_ref())
         .collect()
+}
+
+pub trait ExecutorBuilder {
+    fn new_boxed_executor(
+        executor_params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>>;
+}
+
+#[macro_export]
+macro_rules! build_executor {
+    ($source: expr,$node: expr,$store: expr,$stream: expr, $($proto_type_name:path => $data_type:ty),*) => {
+        match $node.get_node().unwrap() {
+            $(
+                $proto_type_name(..) => {
+                    <$data_type>::new_boxed_executor($source,$node,$store,$stream)
+                },
+            )*
+            _ => Err(RwError::from(
+                ErrorCode::InternalError(format!(
+                    "unsupported node:{:?}",
+                    $node.get_node().unwrap()
+                )),
+            )),
+        }
+    }
+}
+
+pub fn create_executor(
+    executor_params: ExecutorParams,
+    stream: &mut StreamManagerCore,
+    node: &stream_plan::StreamNode,
+    store: impl StateStore,
+) -> Result<Box<dyn Executor>> {
+    let real_executor = build_executor! { executor_params,node,store,stream,
+        Node::SourceNode => SourceExecutorBuilder,
+        Node::ProjectNode => ProjectExecutorBuilder,
+        Node::TopNNode => TopNExecutorBuilder,
+        Node::AppendOnlyTopNNode => AppendOnlyTopNExecutorBuilder,
+        Node::LocalSimpleAggNode => LocalSimpleAggExecutorBuilder,
+        Node::GlobalSimpleAggNode => SimpleAggExecutorBuilder,
+        Node::HashAggNode => HashAggExecutorBuilder,
+        Node::HashJoinNode => HashJoinExecutorBuilder,
+        Node::ChainNode => ChainExecutorBuilder,
+        Node::BatchPlanNode => BatchQueryExecutorBuilder,
+        Node::MergeNode => MergeExecutorBuilder,
+        Node::MaterializeNode => MaterializeExecutorBuilder,
+        Node::FilterNode => FilterExecutorBuilder
+    }?;
+    Ok(real_executor)
 }
 
 /// `SimpleExecutor` accepts a single chunk as input.

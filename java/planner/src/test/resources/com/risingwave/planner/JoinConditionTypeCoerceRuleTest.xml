@@ -1,0 +1,17 @@
+<Root>
+    <TestCase name="testJoinConditionEqualsTypesNotEquals01">
+        <Resource name="sql">
+            <![CDATA[SELECT a FROM T1 LEFT JOIN (SELECT COUNT(*) AS cnt FROM T2) AS x ON a = x.cnt]]>
+        </Resource>
+        <Resource name="plan">
+            <![CDATA[
+LogicalProject(a=[$0])
+  LogicalJoin(condition=[=($5, $6)], joinType=[left])
+    LogicalProject(a=[$0], b=[$1], c=[$2], d=[$3], e=[$4], a0=[CAST($0):BIGINT NOT NULL])
+      LogicalTableScan(table=[[test_schema, t1]])
+    LogicalAggregate(group=[{}], cnt=[COUNT()])
+      LogicalTableScan(table=[[test_schema, t2]])
+]]>
+        </Resource>
+    </TestCase>
+</Root>

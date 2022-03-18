@@ -1,64 +1,93 @@
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::{ColumnOrder, OrderByNode};
 
-use super::{IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::optimizer::property::{Distribution, Order, WithOrder, WithSchema};
 
+/// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
+/// collation required by user or parent plan node.
 #[derive(Debug, Clone)]
 pub struct BatchSort {
-    order: Order,
+    pub base: BatchBase,
     input: PlanRef,
     schema: Schema,
-    dist: Distribution,
 }
+
 impl BatchSort {
     pub fn new(input: PlanRef, order: Order) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
+        let base = BatchBase {
+            order,
+            dist,
+            ctx: ctx.clone(),
+            id: ctx.borrow_mut().get_id(),
+        };
         BatchSort {
             input,
-            order,
+            base,
             schema,
-            dist,
         }
     }
 }
+
 impl fmt::Display for BatchSort {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("BatchSort")
+            .field("order", self.order())
+            .finish()
     }
 }
+
 impl PlanTreeNodeUnary for BatchSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.order.clone())
+        Self::new(input, self.base.order.clone())
     }
 }
 impl_plan_tree_node_for_unary! {BatchSort}
-impl WithOrder for BatchSort {
-    fn order(&self) -> &Order {
-        &self.order
-    }
-}
-impl WithDistribution for BatchSort {
-    fn distribution(&self) -> &Distribution {
-        &self.dist
-    }
-}
+
 impl WithSchema for BatchSort {
     fn schema(&self) -> &Schema {
         &self.schema
     }
 }
+
 impl ToDistributedBatch for BatchSort {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
             .input()
             .to_distributed_with_required(self.input_order_required(), Distribution::any());
-        self.clone_with_input(new_input).into_plan_ref()
+        self.clone_with_input(new_input).into()
     }
 }
-impl ToBatchProst for BatchSort {}
+
+impl ToBatchProst for BatchSort {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        let column_orders_without_type = self.base.order.to_protobuf();
+        let column_types = self
+            .base
+            .order
+            .field_order
+            .iter()
+            .map(|field_order| self.schema[field_order.index].data_type.to_protobuf())
+            .collect_vec();
+        let column_orders = column_orders_without_type
+            .into_iter()
+            .zip_eq(column_types.into_iter())
+            .map(|((input_ref, order_type), return_type)| ColumnOrder {
+                order_type: order_type as i32,
+                input_ref: Some(input_ref),
+                return_type: Some(return_type),
+            })
+            .collect_vec();
+        NodeBody::OrderBy(OrderByNode { column_orders })
+    }
+}

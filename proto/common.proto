@@ -28,13 +28,31 @@ message ActorInfo {
 enum WorkerType {
   FRONTEND = 0;
   COMPUTE_NODE = 1;
-  UNKNOWN = 2;
+  RISE_CTL = 2;
+}
+
+enum ParallelUnitType {
+  SINGLE = 0;
+  HASH = 1;
+}
+
+message ParallelUnit {
+  uint32 id = 1;
+  ParallelUnitType type = 2;
+  uint32 worker_node_id = 3;
 }
 
 message WorkerNode {
+  enum State {
+    STARTING = 0;
+    RUNNING = 1;
+  }
   uint32 id = 1;
   WorkerType type = 2;
   HostAddress host = 3;
+  State state = 4;
+  // a mapping from logical key to parallel unit, with logical key as the index of array
+  repeated ParallelUnit parallel_units = 5;
 }
 
 // A cluster can be either a set of OLAP compute nodes, or a set of streaming compute nodes.
@@ -42,4 +60,10 @@ message Cluster {
   uint32 id = 1;
   repeated common.WorkerNode nodes = 2;
   map<string, string> config = 3;
+}
+
+message HashMapping {
+  // For meta, the mapping stores parallel unit id. For compute node, the mapping stores
+  // corresponding actor id.
+  repeated uint32 hash_mapping = 1;
 }

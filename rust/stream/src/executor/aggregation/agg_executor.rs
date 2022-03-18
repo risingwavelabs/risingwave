@@ -1,7 +1,9 @@
+use std::fmt::Debug;
+
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, Op, Row, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
@@ -11,10 +13,7 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, Message, PkDataTypes};
-
-/// Hash key for [`HashAggExecutor`].
-pub type HashKey = Row;
+use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
 /// States for [`SimpleAggExecutor`] and [`HashAggExecutor`].
 pub struct AggState<S: StateStore> {
@@ -23,6 +22,14 @@ pub struct AggState<S: StateStore> {
 
     /// Previous outputs of managed states. Initializing with `None`.
     pub prev_states: Option<Vec<Datum>>,
+}
+
+impl<S: StateStore> Debug for AggState<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AggState")
+            .field("prev_states", &self.prev_states)
+            .finish()
+    }
 }
 
 /// We assume the first state of aggregation is always `StreamingRowCountAgg`.
@@ -70,24 +77,21 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`HashAggExecutor`], a key should be passed in to build group key columns.
-    /// Returns whether this state is empty (and may be deleted).
+    /// that for [`HashAggExecutor`].
+    ///
+    /// Returns how many rows are appended in buidlers.
     pub async fn build_changes(
         &mut self,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
-        key: Option<&HashKey>,
         epoch: u64,
-    ) -> Result<bool> {
+    ) -> Result<usize> {
         if !self.is_dirty() {
-            return Ok(false);
+            return Ok(0);
         }
 
         let row_count = self.row_count(epoch).await?;
         let prev_row_count = self.prev_row_count();
-
-        // First several columns are used for group keys in HashAgg.
-        let agg_call_offset = key.map(|k| k.0.len()).unwrap_or_default();
 
         trace!(
             "prev_row_count = {}, row_count = {}",
@@ -95,56 +99,41 @@ impl<S: StateStore> AggState<S> {
             row_count
         );
 
-        match (prev_row_count, row_count) {
+        let appended = match (prev_row_count, row_count) {
             (0, 0) => {
                 // previous state is empty, current state is also empty.
                 // FIXME: for `SimpleAgg`, should we still build some changes when `row_count` is 0
                 // while other aggs may not be `0`?
+
+                0
             }
 
             (0, _) => {
                 // previous state is empty, current state is not empty, insert one `Insert` op.
                 new_ops.push(Op::Insert);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                    }
-                }
-
-                for (builder, state) in builders[agg_call_offset..]
-                    .iter_mut()
-                    .zip_eq(self.managed_states.iter_mut())
-                {
+                for (builder, state) in builders.iter_mut().zip_eq(self.managed_states.iter_mut()) {
                     let data = state.get_output(epoch).await?;
                     trace!("append_datum (0 -> N): {:?}", &data);
                     builder.append_datum(&data)?;
                 }
+
+                1
             }
 
             (_, 0) => {
                 // previous state is not empty, current state is empty, insert one `Delete` op.
                 new_ops.push(Op::Delete);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                    }
-                }
-
-                for (builder, state) in builders[agg_call_offset..]
+                for (builder, state) in builders
                     .iter_mut()
                     .zip_eq(self.prev_states.as_ref().unwrap().iter())
                 {
                     trace!("append_datum (N -> 0): {:?}", &state);
                     builder.append_datum(state)?;
                 }
+
+                1
             }
 
             _ => {
@@ -152,18 +141,8 @@ impl<S: StateStore> AggState<S> {
                 new_ops.push(Op::UpdateDelete);
                 new_ops.push(Op::UpdateInsert);
 
-                if let Some(key) = key {
-                    let key_length = key.0.len();
-                    for (builder, datum) in
-                        builders.iter_mut().take(key_length).zip_eq(key.0.iter())
-                    {
-                        builder.append_datum(datum)?;
-                        builder.append_datum(datum)?;
-                    }
-                }
-
                 for (builder, prev_state, cur_state) in itertools::multizip((
-                    builders[agg_call_offset..].iter_mut(),
+                    builders.iter_mut(),
                     self.prev_states.as_ref().unwrap().iter(),
                     self.managed_states.iter_mut(),
                 )) {
@@ -177,21 +156,21 @@ impl<S: StateStore> AggState<S> {
                     builder.append_datum(prev_state)?;
                     builder.append_datum(&cur_state)?;
                 }
-            }
-        }
 
-        // unmark dirty
+                2
+            }
+        };
+
         self.prev_states = None;
 
-        let empty = row_count == 0;
-        Ok(empty)
+        Ok(appended)
     }
 }
 
 /// Trait for [`SimpleAggExecutor`] and [`HashAggExecutor`], providing an implementaion of
 /// [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
-pub trait AggExecutor: Executor {
+pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
 
@@ -203,17 +182,24 @@ pub trait AggExecutor: Executor {
     async fn flush_data(&mut self) -> Result<Option<StreamChunk>>;
 
     fn input(&mut self) -> &mut dyn Executor;
-
-    /// Get back the current epoch used for storage reads and writes.
-    /// This epoch is the one carried by most recent barrier flowing through the executor.
-    fn current_epoch(&self) -> u64;
-
-    /// Update the current epoch to `new_epoch`, which is carried by a barrier.
-    fn update_epoch(&mut self, new_epoch: u64);
 }
 
-/// Get aggregation inputs by `agg_calls` and `columns`.
-pub fn agg_input_arrays<'a>(
+/// Get clones of aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
+    agg_calls
+        .iter()
+        .map(|agg| {
+            agg.args
+                .val_indices()
+                .iter()
+                .map(|val_idx| columns[*val_idx].array())
+                .collect()
+        })
+        .collect()
+}
+
+/// Get references to aggregation inputs by `agg_calls` and `columns`.
+pub fn agg_input_array_refs<'a>(
     agg_calls: &[AggCall],
     columns: &'a [Column],
 ) -> Vec<Vec<&'a ArrayImpl>> {
@@ -237,23 +223,28 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
 
     loop {
         let msg = executor.input().next().await?;
+        if executor.try_init_executor(&msg).is_some() {
+            // Pass through the first msg directly after initializing the executor
+            return Ok(msg);
+        }
         match msg {
             Message::Chunk(chunk) => executor.apply_chunk(chunk).await?,
             Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                 return Ok(Message::Barrier(barrier));
             }
             Message::Barrier(barrier) => {
-                let epoch = barrier.epoch;
-                if let Some(chunk) = executor.flush_data().await? {
+                let epoch = barrier.epoch.curr;
+                // TODO: handle epoch rollback, and set cached_barrier_message.
+                return if let Some(chunk) = executor.flush_data().await? {
                     // Cache the barrier_msg and send it later.
                     *executor.cached_barrier_message_mut() = Some(barrier);
-                    executor.update_epoch(epoch);
-                    return Ok(Message::Chunk(chunk));
+                    executor.update_executor_state(ExecutorState::Active(epoch));
+                    Ok(Message::Chunk(chunk))
                 } else {
                     // No fresh data need to flush, just forward the barrier.
-                    executor.update_epoch(epoch);
-                    return Ok(Message::Barrier(barrier));
-                }
+                    executor.update_executor_state(ExecutorState::Active(epoch));
+                    Ok(Message::Barrier(barrier))
+                };
             }
         }
     }
@@ -286,7 +277,7 @@ pub fn generate_agg_schema(
 /// Generate initial [`AggState`] from `agg_calls`. For [`HashAggExecutor`], the group key should be
 /// provided.
 pub async fn generate_agg_state<S: StateStore>(
-    key: Option<&HashKey>,
+    key: Option<&Row>,
     agg_calls: &[AggCall],
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,

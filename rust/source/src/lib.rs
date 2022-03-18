@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -18,6 +19,7 @@ pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 pub use table_v2::*;
 
@@ -70,14 +72,14 @@ pub trait Source: Send + Sync + 'static {
     fn batch_reader(
         &self,
         context: Self::ReaderContext,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
     ) -> Result<Self::BatchReader>;
 
     /// Create a stream reader
     fn stream_reader(
         &self,
         context: Self::ReaderContext,
-        column_ids: Vec<i32>,
+        column_ids: Vec<ColumnId>,
     ) -> Result<Self::StreamReader>;
 }
 

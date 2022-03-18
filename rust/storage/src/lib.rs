@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -16,16 +17,15 @@
 #![feature(map_first_last)]
 #![feature(let_chains)]
 
-use risingwave_common::types::DataType;
-
+pub mod cell_based_row_deserializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
-pub mod metrics;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;
-mod store;
+pub mod store;
+pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
@@ -42,24 +42,8 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
-pub use store::{StateStore, StateStoreImpl, StateStoreIter};
-
-#[derive(Clone, Debug)]
-pub struct TableColumnDesc {
-    pub data_type: DataType,
-    pub column_id: i32,
-    pub name: String, // for debugging
-}
-
-impl TableColumnDesc {
-    pub fn new_without_name(column_id: i32, data_type: DataType) -> TableColumnDesc {
-        TableColumnDesc {
-            data_type,
-            column_id,
-            name: String::new(),
-        }
-    }
-}
+pub use store::{StateStore, StateStoreIter};
+pub use store_impl::StateStoreImpl;
 
 pub enum TableScanOptions {
     SequentialScan,

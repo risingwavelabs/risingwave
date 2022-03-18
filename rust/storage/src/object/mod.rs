@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
@@ -38,7 +40,9 @@ pub trait ObjectStore: Send + Sync {
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Vec<u8>>;
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Bytes>;
+
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>>;
 
     /// Obtain the object metadata.
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata>;
@@ -46,3 +50,5 @@ pub trait ObjectStore: Send + Sync {
     /// Delete blob permanently.
     async fn delete(&self, path: &str) -> Result<()>;
 }
+
+pub type ObjectStoreRef = Arc<dyn ObjectStore>;

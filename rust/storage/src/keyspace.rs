@@ -32,6 +32,12 @@ impl Segment {
         Self::FixedLength(id.to_be_bytes().to_vec())
     }
 
+    /// A segment without any special encoding. Only use this when you are sure that the segment is
+    /// at the last place.
+    pub fn raw(prefix: Vec<u8>) -> Self {
+        Self::FixedLength(prefix)
+    }
+
     /// Encode this segment to a mutable buffer.
     pub fn encode(&self, buf: &mut impl BufMut) {
         match self {
@@ -95,7 +101,7 @@ impl<S: StateStore> Keyspace<S> {
             prefix: Vec::with_capacity(5),
         };
         root.push(Segment::root(b't'));
-        root.push(Segment::u32(id.table_id() as u32));
+        root.push(Segment::u32(id.table_id));
         root
     }
 

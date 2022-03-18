@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{mem, vec};
 
@@ -7,11 +6,10 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::{
-    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
-    Key256, Key32, Key64, KeySerialized, PrecomputedBuildHasher,
+use risingwave_common::error::Result;
+use risingwave_common::hash::{
+    calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
-use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -23,16 +21,14 @@ use crate::task::TaskId;
 
 type AggHashMap<K> = HashMap<K, Vec<BoxedAggState>, PrecomputedBuildHasher>;
 
-struct HashAggExecutorBuilderDispatcher<K> {
-    _marker: PhantomData<K>,
-}
+struct HashAggExecutorBuilderDispatcher;
 
 /// A dispatcher to help create specialized hash agg executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashAggExecutorBuilderDispatcher<K> {
+impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Input = HashAggExecutorBuilder;
     type Output = BoxedExecutor;
 
-    fn dispatch(input: HashAggExecutorBuilder) -> Self::Output {
+    fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
         Box::new(HashAggExecutor::<K>::new(input))
     }
 }
@@ -91,10 +87,9 @@ impl HashAggExecutorBuilder {
             identity,
         };
 
-        Ok(hash_key_dispatch!(
+        Ok(HashAggExecutorBuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
-            HashAggExecutorBuilderDispatcher,
-            builder
+            builder,
         ))
     }
 }
@@ -103,11 +98,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let proto_child = source
-            .plan_node()
-            .get_children()
-            .get(0)
-            .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
+        let proto_child = &source.plan_node().get_children()[0];
         let child = source.clone_for_plan(proto_child).build()?;
 
         let hash_agg_node = try_match_expand!(
@@ -160,20 +151,18 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         while let Some(chunk) = self.child.next().await? {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut err_flag = None;
+                let mut err_flag = Ok(());
                 let states: &mut Vec<BoxedAggState> = self.groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
-                        .map(|state_factory| state_factory.create_agg_state())
+                        .map(AggStateFactory::create_agg_state)
                         .collect::<Result<Vec<_>>>()
                         .unwrap_or_else(|x| {
-                            err_flag = Some(x);
+                            err_flag = Err(x);
                             vec![]
                         })
                 });
-                if let Some(err) = err_flag {
-                    return Err(err);
-                }
+                err_flag?;
                 // TODO: currently not a vectorized implementation
                 states
                     .iter_mut()

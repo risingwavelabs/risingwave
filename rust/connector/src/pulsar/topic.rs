@@ -1,4 +1,4 @@
-use risingwave_common::array::InternalError;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use urlencoding::encode;
 
@@ -97,9 +97,9 @@ pub fn parse_topic(topic: &str) -> Result<ParsedTopic> {
         PERSISTENT_DOMAIN | NON_PERSISTENT_DOMAIN => parts[0],
         _ => {
             return Err(RwError::from(InternalError(format!(
-      "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
-      parts[0]
-    ))))
+                "The domain only can be specified as 'persistent' or 'non-persistent'. Input domain is '{}'",
+                parts[0]
+            ))))
         }
     };
 

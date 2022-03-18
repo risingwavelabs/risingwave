@@ -23,7 +23,7 @@ impl BatchServiceImpl {
 
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
         &self,
         request: Request<CreateTaskRequest>,
@@ -34,6 +34,7 @@ impl TaskService for BatchServiceImpl {
             self.env.clone(),
             req.get_task_id().expect("no task id found"),
             req.get_plan().expect("no plan found").clone(),
+            req.epoch,
         );
         match res {
             Ok(_) => Ok(Response::new(CreateTaskResponse { status: None })),
@@ -44,7 +45,7 @@ impl TaskService for BatchServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_task_info(
         &self,
         _: Request<GetTaskInfoRequest>,
@@ -52,7 +53,7 @@ impl TaskService for BatchServiceImpl {
         todo!()
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn abort_task(
         &self,
         _: Request<AbortTaskRequest>,

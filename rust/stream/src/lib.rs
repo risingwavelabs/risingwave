@@ -1,3 +1,4 @@
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -14,10 +15,13 @@
 #![feature(map_first_last)]
 #![feature(let_chains)]
 #![feature(hash_drain_filter)]
+#![feature(drain_filter)]
+#![feature(generators)]
 
 #[macro_use]
 extern crate log;
 extern crate test;
 
+pub mod common;
 pub mod executor;
 pub mod task;

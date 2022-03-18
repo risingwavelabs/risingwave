@@ -51,19 +51,18 @@ pub enum ErrorCode {
     TaskNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
-
-    #[error(r#"invalid input syntax for {0} type: "{1}""#)]
-    InvalidInputSyntax(String, String),
+    #[error("Invalid input syntax: {0}")]
+    InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(MemComparableError),
 
     #[error("Error while interact with meta service: {0}")]
     MetaError(String),
 
-    /// EOF represents an upstream node will not generate new data. This error is rare in our
+    /// `Eof` represents an upstream node will not generate new data. This error is rare in our
     /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
     #[error("End of the stream")]
-    EOF,
+    Eof,
 
     #[error("Unknown error: {0}")]
     UnknownError(String),
@@ -198,11 +197,11 @@ impl ErrorCode {
             ErrorCode::TaskNotFound => 10,
             ErrorCode::ProstError(_) => 11,
             ErrorCode::ItemNotFound(_) => 13,
-            ErrorCode::InvalidInputSyntax(_, _) => 14,
+            ErrorCode::InvalidInputSyntax(_) => 14,
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
-            ErrorCode::EOF => 22,
+            ErrorCode::Eof => 22,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -271,8 +270,10 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
 }
 
 impl ToErrorStr for tonic::Status {
+    /// [`tonic::Status`] means no transportation error but only application-level failure.
+    /// In this case we focus on the message rather than other fields.
     fn to_error_str(self) -> String {
-        format!("grpc tonic error: {}", self)
+        self.message().to_string()
     }
 }
 

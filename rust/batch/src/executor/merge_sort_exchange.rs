@@ -8,13 +8,11 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::sort_util::{
-    fetch_orders, HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE,
-};
+use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
+use risingwave_rpc_client::ExchangeSource;
 
-use crate::execution::exchange_source::ExchangeSource;
 use crate::executor::{
     BoxedExecutor, BoxedExecutorBuilder, CreateSource, DefaultCreateSource, Executor,
     ExecutorBuilder,
@@ -189,7 +187,13 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
         )?;
 
         let server_addr = *source.env.server_address();
-        let order_pairs = Arc::new(fetch_orders(sort_merge_node.get_column_orders()).unwrap());
+
+        let order_pairs = sort_merge_node
+            .column_orders
+            .iter()
+            .map(OrderPair::from_prost)
+            .collect();
+        let order_pairs = Arc::new(order_pairs);
 
         let exchange_node = sort_merge_node.get_exchange_node()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();

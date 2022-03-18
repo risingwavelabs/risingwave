@@ -2,9 +2,11 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
-    AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
-    PinSnapshotRequest, PinVersionRequest, SstableInfo, UnpinSnapshotRequest, UnpinVersionRequest,
+    AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
+    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest, VacuumTask,
 };
+use tonic::Streaming;
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::mock::MockHummockMetaService;
@@ -24,10 +26,13 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service
-            .pin_version(PinVersionRequest { context_id: 0 });
+            .pin_version(PinVersionRequest {
+                context_id: 0,
+                last_pinned,
+            });
         Ok(response.pinned_version.unwrap())
     }
 
@@ -40,10 +45,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch> {
         let epoch = self
             .mock_hummock_meta_service
-            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
+            .pin_snapshot(PinSnapshotRequest {
+                context_id: 0,
+                last_pinned,
+            })
             .snapshot
             .unwrap()
             .epoch;
@@ -82,10 +90,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        unimplemented!()
-    }
-
     async fn report_compaction_task(
         &self,
         _compact_task: CompactTask,
@@ -94,11 +98,23 @@ impl HummockMetaClient for MockHummockMetaClient {
         unimplemented!()
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
-        unimplemented!()
+    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
+        self.mock_hummock_meta_service
+            .commit_epoch(CommitEpochRequest { epoch });
+        Ok(())
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
         unimplemented!()
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> HummockResult<()> {
+        Ok(())
     }
 }

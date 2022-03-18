@@ -21,9 +21,12 @@ impl HummockStateStore {
     pub fn new(storage: HummockStorage) -> Self {
         Self { storage }
     }
+
+    pub fn storage(&self) -> &HummockStorage {
+        &self.storage
+    }
 }
 
-// Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
@@ -36,14 +39,8 @@ impl StateStore for HummockStateStore {
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
         self.storage
-            .write_batch(
-                kv_pairs
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
+            .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
-
         Ok(())
     }
 
@@ -52,13 +49,10 @@ impl StateStore for HummockStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        let timer = self.storage.stats.iter_seek_latency.start_timer();
         let inner = self.storage.range_scan(key_range, epoch).await?;
-        self.storage.stats.iter_counts.inc();
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
-        timer.observe_duration();
-        Ok(HummockStateStoreIter(res))
+        Ok(HummockStateStoreIter::new(res))
     }
 
     async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
@@ -68,16 +62,41 @@ impl StateStore for HummockStateStore {
     {
         let mut res = self.storage.reverse_range_scan(key_range, epoch).await?;
         res.rewind().await?;
-        Ok(HummockStateStoreIter(DirectedUserIterator::Backward(res)))
+        Ok(HummockStateStoreIter::new(DirectedUserIterator::Backward(
+            res,
+        )))
     }
 
-    async fn update_local_version(&self) -> Result<()> {
-        self.storage.update_local_version().await?;
+    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
+        self.storage.wait_epoch(epoch).await
+    }
+
+    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
+        self.storage.sync(epoch).await?;
+        Ok(())
+    }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        self.storage
+            .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+            .await?;
         Ok(())
     }
 }
 
-pub struct HummockStateStoreIter<'a>(DirectedUserIterator<'a>);
+pub struct HummockStateStoreIter<'a> {
+    inner: DirectedUserIterator<'a>,
+}
+
+impl<'a> HummockStateStoreIter<'a> {
+    fn new(inner: DirectedUserIterator<'a>) -> Self {
+        Self { inner }
+    }
+}
 
 #[async_trait]
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
@@ -85,7 +104,7 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let iter = &mut self.0;
+        let iter = &mut self.inner;
 
         if iter.is_valid() {
             let kv = (

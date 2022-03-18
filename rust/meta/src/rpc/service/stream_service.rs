@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -24,7 +21,7 @@ where
 
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
     fragment_manager_ref: FragmentManagerRef<S>,
-    cluster_manager: Arc<StoredClusterManager<S>>,
+    cluster_manager: StoredClusterManagerRef<S>,
 
     #[allow(dead_code)]
     epoch_generator: EpochGeneratorRef,
@@ -37,7 +34,7 @@ where
     pub fn new(
         sm: StreamManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: StoredClusterManagerRef<S>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
@@ -55,7 +52,7 @@ impl<S> StreamManagerService for StreamServiceImpl<S>
 where
     S: MetaStore,
 {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn create_materialized_view(
         &self,
         request: Request<CreateMaterializedViewRequest>,
@@ -63,15 +60,19 @@ where
         use crate::stream::CreateMaterializedViewContext;
 
         let req = request.into_inner();
-        let worker_count = self
-            .cluster_manager
-            .get_worker_count(WorkerType::ComputeNode);
+
+        tracing::debug!(
+            plan = serde_json::to_string_pretty(&req).unwrap().as_str(),
+            "create materialized view"
+        );
+
+        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
 
         let mut fragmenter = StreamFragmenter::new(
             self.id_gen_manager_ref.clone(),
             self.fragment_manager_ref.clone(),
-            worker_count as u32,
+            hash_mapping,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)
@@ -87,21 +88,16 @@ where
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_materialized_view(
         &self,
         request: Request<DropMaterializedViewRequest>,
     ) -> TonicResponse<DropMaterializedViewResponse> {
-        let _req = request.into_inner();
+        let req = request.into_inner();
 
-        // FIXME: We can't handle drop mv on mv now. Since TABLE_V2 is enabled, dropping
-        // materialized view on backend is temporarily disabled.
-        return Ok(Response::new(DropMaterializedViewResponse { status: None }));
-
-        #[allow(unreachable_code)]
         match self
             .sm
-            .drop_materialized_view(_req.get_table_ref_id().map_err(tonic_err)?)
+            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),
@@ -109,7 +105,7 @@ where
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();
 

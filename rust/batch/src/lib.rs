@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -13,6 +14,7 @@
 #![feature(test)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
+#![cfg_attr(coverage, feature(no_coverage))]
 
 pub mod execution;
 pub mod executor;

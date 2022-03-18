@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use risingwave_pb::data::Array as ProstArray;
 
-use super::NULL_VAL_FOR_HASH;
+use super::{ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
@@ -18,15 +18,6 @@ pub struct IntervalArray {
 pub struct IntervalArrayBuilder {
     bitmap: BitmapBuilder,
     interval_buffer: Vec<IntervalUnit>,
-}
-
-impl IntervalArrayBuilder {
-    pub fn new(capacity: usize) -> Result<Self> {
-        Ok(Self {
-            bitmap: BitmapBuilder::with_capacity(capacity),
-            interval_buffer: Vec::with_capacity(capacity),
-        })
-    }
 }
 
 impl IntervalArray {
@@ -61,7 +52,7 @@ impl Array for IntervalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         unimplemented!("To protobuf of Interval Array is not implemented for now")
     }
 
@@ -85,7 +76,8 @@ impl Array for IntervalArray {
 
 impl ArrayBuilder for IntervalArrayBuilder {
     type ArrayType = IntervalArray;
-    fn new(capacity: usize) -> Result<Self> {
+
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             interval_buffer: Vec::with_capacity(capacity),

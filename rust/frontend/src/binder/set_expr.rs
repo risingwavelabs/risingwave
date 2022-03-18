@@ -1,4 +1,5 @@
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::SetExpr;
 
 use crate::binder::{Binder, BoundSelect, BoundValues};
@@ -9,6 +10,29 @@ use crate::binder::{Binder, BoundSelect, BoundValues};
 pub enum BoundSetExpr {
     Select(Box<BoundSelect>),
     Values(Box<BoundValues>),
+}
+
+impl BoundSetExpr {
+    /// The names returned by this [`BoundSetExpr`].
+    pub fn names(&self) -> Vec<String> {
+        match self {
+            BoundSetExpr::Select(s) => s.names(),
+            BoundSetExpr::Values(v) => v.schema.fields().iter().map(|f| f.name.clone()).collect(),
+        }
+    }
+
+    /// The types returned by this [`BoundSetExpr`].
+    pub fn data_types(&self) -> Vec<DataType> {
+        match self {
+            BoundSetExpr::Select(s) => s.data_types(),
+            BoundSetExpr::Values(v) => v
+                .schema
+                .fields()
+                .iter()
+                .map(|f| f.data_type.clone())
+                .collect(),
+        }
+    }
 }
 
 impl Binder {

@@ -1,12 +1,13 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
-use risingwave_pb::plan::ColumnDesc;
-use risingwave_sqlparser::ast::{ColumnDef, DataType as AstDataType, ObjectName};
+use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
+use crate::binder::expr::bind_data_type;
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::QueryContext;
 
 fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
     columns
@@ -16,30 +17,20 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
             Ok(ColumnDesc {
                 column_id: idx as i32,
                 name: col.name.to_string(),
-                column_type: Some(convert_data_type(&col.data_type).to_protobuf()?),
-                ..Default::default()
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
             })
         })
         .collect::<Result<_>>()
 }
 
-fn convert_data_type(data_type: &AstDataType) -> DataType {
-    match data_type {
-        AstDataType::SmallInt(_) => DataType::Int16,
-        AstDataType::Int(_) => DataType::Int32,
-        AstDataType::BigInt(_) => DataType::Int64,
-        AstDataType::Float(_) => DataType::Float32,
-        AstDataType::Double => DataType::Float64,
-        _ => unimplemented!("Unsupported data type {:?} in create table", data_type),
-    }
-}
-
-pub(super) async fn handle_create_table(
-    session: &RwSession,
+pub async fn handle_create_table(
+    context: QueryContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
+    let session = context.session_ctx;
     let mut table = Table {
+        info: Info::TableSource(TableSourceInfo::default()).into(),
         ..Default::default()
     };
 
@@ -65,16 +56,13 @@ mod tests {
     use std::collections::HashMap;
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use crate::catalog::table_catalog::ROWID_NAME;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_create_table_handler() {
-        let meta = LocalMeta::start().await;
         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
         let frontend = LocalFrontend::new().await;
         frontend.run_sql(sql).await.unwrap();
@@ -86,16 +74,15 @@ mod tests {
         let columns = table
             .columns()
             .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
+            .map(|col| (col.name().into(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
         expected_map.insert("v1".to_string(), DataType::Int16);
         expected_map.insert("v2".to_string(), DataType::Int32);
         expected_map.insert("v3".to_string(), DataType::Int64);
-        expected_map.insert("v4".to_string(), DataType::Float32);
+        expected_map.insert("v4".to_string(), DataType::Float64);
         expected_map.insert("v5".to_string(), DataType::Float64);
         assert_eq!(columns, expected_map);
-        meta.stop().await;
     }
 }

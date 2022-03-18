@@ -4,7 +4,7 @@ use std::mem::size_of;
 use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
-use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
+use super::{Array, ArrayBuilder, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
@@ -47,7 +47,7 @@ impl Array for BoolArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<bool>());
 
         for v in self.iter().flatten() {
@@ -59,12 +59,13 @@ impl Array for BoolArray {
             compression: CompressionType::None as i32,
             body: output_buffer,
         };
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values: vec![values],
             array_type: ArrayType::Bool as i32,
-        })
+            struct_array_data: None,
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -96,7 +97,7 @@ pub struct BoolArrayBuilder {
 impl ArrayBuilder for BoolArrayBuilder {
     type ArrayType = BoolArray;
 
-    fn new(capacity: usize) -> Result<Self> {
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),

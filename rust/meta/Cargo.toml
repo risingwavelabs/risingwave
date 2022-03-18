@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 
 [dependencies]
@@ -9,7 +9,6 @@ async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.4"
-bincode = "1.3.3"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -17,6 +16,7 @@ clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 dashmap = "5"
 either = "1"
+etcd-client = "0.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
@@ -31,15 +31,14 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = "0.13"
 prost = "0.9"
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
 smallvec = "1"
-tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = [
     "rt",
@@ -54,14 +53,9 @@ tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.2", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
-tracing-subscriber = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 
 [dev-dependencies]
+assert_matches = "1"
 rand = "0.8"
-
-[[bin]]
-name = "meta-node"
-path = "src/bin/meta_node.rs"
-
-[build-dependencies]
+tempfile = "3"

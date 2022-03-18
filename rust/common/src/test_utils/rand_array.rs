@@ -91,7 +91,7 @@ impl RandValue for bool {
 
 impl RandValue for StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        StructValue {}
+        StructValue::new(vec![])
     }
 }
 
@@ -143,15 +143,14 @@ mod tests {
     #[test]
     fn test_create_array() {
         macro_rules! gen_rand_array {
-      ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-        $(
-          {
-            let array = seed_rand_array::<$array>(10, 1024);
-            assert_eq!(10, array.len());
-
-          }
-        )*
-      };
+            ([], $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
+            $(
+                {
+                    let array = seed_rand_array::<$array>(10, 1024);
+                    assert_eq!(10, array.len());
+                }
+            )*
+        };
     }
 
         for_all_variants! { gen_rand_array }

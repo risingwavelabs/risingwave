@@ -1,3 +1,4 @@
+use std::str::from_utf8;
 use std::{thread, time};
 
 use anyhow::{anyhow, Result};
@@ -5,10 +6,12 @@ use async_trait::async_trait;
 use aws_sdk_kinesis::error::GetRecordsError;
 use aws_sdk_kinesis::model::ShardIteratorType;
 use aws_sdk_kinesis::output::GetRecordsOutput;
-use aws_sdk_kinesis::{Client as kinesis_client, DateTime, SdkError};
+use aws_sdk_kinesis::types::SdkError;
+use aws_sdk_kinesis::Client as kinesis_client;
+use aws_smithy_types::DateTime;
 use http::uri::Uri;
 
-use crate::base::SourceReader;
+use crate::base::{InnerMessage, SourceReader};
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
@@ -25,10 +28,7 @@ pub struct KinesisSplitReader {
 
 #[async_trait]
 impl SourceReader for KinesisSplitReader {
-    type Message = KinesisMessage;
-    type Split = KinesisSplit;
-
-    async fn next(&mut self) -> Result<Option<Vec<Self::Message>>> {
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(
                 "you should call `assign_split` before calling `next`".to_string(),
@@ -78,7 +78,7 @@ impl SourceReader for KinesisSplitReader {
                 continue;
             }
 
-            let mut record_collection: Vec<Self::Message> = Vec::new();
+            let mut record_collection: Vec<InnerMessage> = Vec::new();
             for record in records {
                 if !is_stopping(
                     record.sequence_number.as_ref().unwrap(),
@@ -87,13 +87,17 @@ impl SourceReader for KinesisSplitReader {
                     return Ok(Some(record_collection));
                 }
                 self.latest_sequence_num = record.sequence_number().unwrap().to_string();
-                record_collection.push(Self::Message::new(self.shard_id.clone(), record));
+                record_collection.push(InnerMessage::from(KinesisMessage::new(
+                    self.shard_id.clone(),
+                    record,
+                )));
             }
             return Ok(Some(record_collection));
         }
     }
 
-    async fn assign_split(&mut self, split: Self::Split) -> Result<()> {
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
+        let split: KinesisSplit = serde_json::from_str(from_utf8(split)?)?;
         self.shard_id = split.shard_id.clone();
         match &split.start_position.clone() {
             KinesisOffset::Earliest | KinesisOffset::None => {
@@ -234,108 +238,5 @@ fn is_stopping(cur_seq_num: &str, split: &KinesisSplit) -> bool {
             false
         }
         _ => true,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use aws_sdk_kinesis::Region;
-
-    use super::*;
-
-    const STREAM_NAME: &str = "kinesis_test_stream";
-
-    async fn push_to_mq(client: &kinesis_client) -> Result<(String, String)> {
-        let mut first_sequence_num: String = "".into();
-        // let mut first_timestamp: String = "".into();
-        let mut first_shard_id: String = "".into();
-        for i in 0..99 {
-            let blob = aws_sdk_kinesis::Blob::new(i.to_string());
-            let resp = client
-                .put_record()
-                .data(blob)
-                .partition_key(format!("{}", i))
-                .stream_name(STREAM_NAME)
-                .send()
-                .await?;
-
-            if i == 0 {
-                first_sequence_num = resp.sequence_number.unwrap();
-                first_shard_id = resp.shard_id.unwrap();
-            }
-        }
-
-        Ok((first_shard_id, first_sequence_num))
-    }
-
-    async fn new_client() -> kinesis_client {
-        let region = "cn-north-1".to_string();
-        let config = aws_config::from_env()
-            .region(Region::new(region.clone()))
-            .load()
-            .await;
-
-        aws_sdk_kinesis::Client::new(&config)
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_load_from_sequence_number() {
-        let client = new_client().await;
-        let (shard_id, sequence_num) = push_to_mq(&client).await.unwrap();
-        println!(
-            "first message: shard_id {:?}, seq num: {:?}",
-            shard_id, sequence_num
-        );
-
-        let mock_split = KinesisSplit {
-            shard_id: shard_id.clone(),
-            start_position: KinesisOffset::SequenceNumber(sequence_num.clone()),
-            end_position: KinesisOffset::None,
-        };
-        println!("mock split: {:#?}", mock_split);
-
-        let demo_aws_config_info = AwsConfigInfo {
-            stream_name: STREAM_NAME.to_string(),
-            region: Some("cn-north-1".to_string()),
-            credentials: None,
-        };
-        let mut split_reader = KinesisSplitReader::new(demo_aws_config_info, None).await;
-        split_reader.assign_split(mock_split).await.unwrap();
-
-        let resp = &split_reader.next().await.unwrap().unwrap()[0];
-        println!("first message: {:#?}", resp);
-        assert_eq!(sequence_num, resp.sequence_number);
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_load_from_timestamp() {
-        let client = new_client().await;
-        let start_timestamp = chrono::prelude::Utc::now().timestamp();
-        let (shard_id, sequence_num) = push_to_mq(&client).await.unwrap();
-        println!(
-            "start timestamp {:?}, first message: shard_id {:?}, seq num: {:?}",
-            start_timestamp, shard_id, sequence_num
-        );
-
-        let mock_split = KinesisSplit {
-            shard_id: shard_id.clone(),
-            start_position: KinesisOffset::Timestamp(start_timestamp),
-            end_position: KinesisOffset::None,
-        };
-        println!("mock split: {:#?}", mock_split);
-
-        let demo_aws_config_info = AwsConfigInfo {
-            stream_name: STREAM_NAME.to_string(),
-            region: Some("cn-north-1".to_string()),
-            credentials: None,
-        };
-        let mut split_reader = KinesisSplitReader::new(demo_aws_config_info, None).await;
-        split_reader.assign_split(mock_split).await.unwrap();
-
-        let resp = &split_reader.next().await.unwrap().unwrap()[0];
-        println!("first message: {:#?}", resp);
-        assert_eq!(sequence_num, resp.sequence_number);
     }
 }

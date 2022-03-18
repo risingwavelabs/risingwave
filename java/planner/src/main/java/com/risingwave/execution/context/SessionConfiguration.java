@@ -41,7 +41,7 @@ public class SessionConfiguration {
       if (entry == null) {
         throw new PgException(
             PgErrorCode.CONFIG_FILE_ERROR,
-            "Config %s is missing and has no default value!",
+            "Config '%s' is missing and has no default value!",
             stringKey);
       } else {
         return (T) entry.getDefaultValue();

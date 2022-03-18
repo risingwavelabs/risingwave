@@ -33,16 +33,15 @@ pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::Array as ProstArray;
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
 pub use stream_chunk::{Op, StreamChunk};
-pub use struct_array::{StructArray, StructArrayBuilder, StructValue};
+pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -75,7 +74,12 @@ pub trait ArrayBuilder: Send + Sync + Sized + 'static {
     type ArrayType: Array<Builder = Self>;
 
     /// Create a new builder with `capacity`.
-    fn new(capacity: usize) -> Result<Self>;
+    fn new(capacity: usize) -> Result<Self> {
+        // No metadata by default.
+        Self::new_with_meta(capacity, ArrayMeta::Simple)
+    }
+
+    fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self>;
 
     /// Append a value to builder.
     fn append(
@@ -142,7 +146,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> Result<ProstArray>;
+    fn to_protobuf(&self) -> ProstArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -166,6 +170,16 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     }
 
     fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl>;
+
+    fn array_meta(&self) -> ArrayMeta {
+        ArrayMeta::Simple
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ArrayMeta {
+    Simple, // Simple array without given any extra metadata.
+    Struct { children: Arc<[DataType]> },
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -178,7 +192,7 @@ trait CompactableArray: Array {
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Result<Self> {
         use itertools::Itertools;
-        let mut builder = A::Builder::new(cardinality)?;
+        let mut builder = A::Builder::new_with_meta(cardinality, self.array_meta())?;
         for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
             if visible {
                 builder.append(elem)?;
@@ -432,7 +446,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> Result<ProstArray> {
+            pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }
@@ -500,19 +514,37 @@ impl ArrayImpl {
     pub fn iter(&self) -> ArrayImplIterator<'_> {
         ArrayImplIterator::new(self)
     }
+
+    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> Result<Self> {
+        use self::column_proto_readers::*;
+        use crate::array::value_reader::*;
+        let array = match array.array_type() {
+            ProstArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
+            ProstArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
+            ProstArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
+            ProstArrayType::Float32 => {
+                read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
+            }
+            ProstArrayType::Float64 => {
+                read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
+            }
+            ProstArrayType::Bool => read_bool_array(array, cardinality)?,
+            ProstArrayType::Utf8 => {
+                read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
+            }
+            ProstArrayType::Decimal => {
+                read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
+            }
+            ProstArrayType::Date => read_naivedate_array(array, cardinality)?,
+            ProstArrayType::Time => read_naivetime_array(array, cardinality)?,
+            ProstArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
+            ProstArrayType::Struct => StructArray::from_protobuf(array)?,
+        };
+        Ok(array)
+    }
 }
 
 pub type ArrayRef = Arc<ArrayImpl>;
-
-pub fn from_builder<A, F>(f: F) -> Result<A>
-where
-    A: Array,
-    F: FnOnce(&mut A::Builder) -> Result<()>,
-{
-    let mut builder = A::Builder::new(0)?;
-    f(&mut builder)?;
-    builder.finish()
-}
 
 impl PartialEq for ArrayImpl {
     fn eq(&self, other: &Self) -> bool {
@@ -531,7 +563,7 @@ mod tests {
         A: Array + 'a,
         F: Fn(Option<A::RefItem<'a>>) -> bool,
     {
-        let mut builder = A::Builder::new(data.len())?;
+        let mut builder = A::Builder::new_with_meta(data.len(), data.array_meta())?;
         for i in 0..data.len() {
             if pred(data.value_at(i)) {
                 builder.append(data.value_at(i))?;

@@ -1,9 +1,11 @@
 extend = [
-  {path = "rust/risedev/grafana.toml"},
-  {path = "rust/risedev/prometheus.toml"},
-  {path = "rust/risedev/minio.toml"},
-  {path = "rust/risedev/jaeger.toml"},
-  {path = "rust/risedev/risedev-components.toml"},
+  {path = "rust/risedevtool/grafana.toml"},
+  {path = "rust/risedevtool/prometheus.toml"},
+  {path = "rust/risedevtool/minio.toml"},
+  {path = "rust/risedevtool/etcd.toml"},
+  {path = "rust/risedevtool/jaeger.toml"},
+  {path = "rust/risedevtool/risedev-components.toml"},
+  {path = "rust/frontend/test_runner/planner_test.toml"},
 ]
 
 env_files = [
@@ -11,7 +13,7 @@ env_files = [
 ]
 
 [env]
-RUST_BACKTRACE = 1
+RISEDEV_CARGO_BUILD_FLAGS = { value = "--features=all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
 
 [config]
 skip_core_tasks = true
@@ -34,11 +36,22 @@ rm -rf "${PREFIX_LOG}"
 rm -rf "${PREFIX_CONFIG}"
 '''
 
+
+[tasks.l]
+category = "Misc"
+description = "Open logs with VSCode"
+script = '''
+#!/bin/bash
+set -xe
+
+code "${PREFIX_LOG}"
+'''
+
 [tasks.logs]
 category = "Misc"
 description = "Dump logs in a folder"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 for out_file in ${PREFIX_LOG}/*.log
@@ -48,7 +61,7 @@ do
   echo "=== Dump log file $out_file ==="
   echo "==="
   echo ""
-  cat "$out_file" | tail -n 100
+  cat "$out_file" | tail -n 300
 done
 '''
 
@@ -56,13 +69,13 @@ done
 category = "Misc"
 description = "Check if there is panic in log"
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 
 for out_file in ${PREFIX_LOG}/*.log
 do
-  if grep "panic" "$out_file" -C 10; then
-    echo "\"panic\" found in $out_file, please check if there's any bugs in this PR."
+  if grep "panicked at" "$out_file" -C 100; then
+    echo "\"panicked at\" found in $out_file, please check if there's any bugs in this PR."
     echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1
   fi
@@ -74,7 +87,7 @@ category = "RisingWave"
 description = "Copy RisingWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
@@ -82,6 +95,22 @@ rm -f "${PREFIX_BIN}/frontend-v2"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+
+rm -rf "${PREFIX_BIN}/risingwave"
+mkdir -p "${PREFIX_BIN}/risingwave"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+
+rm -rf "${PREFIX_USR_BIN}"
+mkdir -p "${PREFIX_USR_BIN}"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
+ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
 '''
 
 [tasks.build-risingwave]
@@ -93,8 +122,10 @@ rm -rf "${PREFIX_UI}"
 git worktree prune
 git worktree add "${PREFIX_UI}" dashboard-artifact
 #!@shell
+#!/bin/bash
 set -e
-cd rust && cargo build --profile ${RISINGWAVE_BUILD_PROFILE}
+echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
+cd rust && cargo build -p risingwave_cmd -p risedev --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CARGO_BUILD_FLAGS}
 '''
 
 [tasks.build-frontend]
@@ -102,7 +133,7 @@ category = "RisingWave"
 description = "Build RisingWave frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!@shell
+#!/bin/bash
 set -e
 cd java && ./gradlew build -x test
 '''
@@ -112,7 +143,7 @@ category = "RisingWave"
 description = "Post build RisingWave frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
@@ -123,7 +154,7 @@ ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
-#!@shell
+#!/bin/bash
 
 set -e
 
@@ -131,8 +162,8 @@ cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
 cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
-cp "rust/risedev/run_command.sh" "${PREFIX_BIN}/run_command.sh"
-cp "rust/risedev/welcome.sh" "${PREFIX_BIN}/welcome.sh"
+cp "rust/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+cp "rust/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.pre-start-playground]
@@ -141,6 +172,7 @@ description = "Prepare playground by downloading necessary tools and build requi
 dependencies = [
   "download-minio",
   "download-mcli",
+  "download-etcd",
   "download-grafana",
   "download-prometheus",
   "download-jaeger",
@@ -150,19 +182,54 @@ dependencies = [
   "post-build-frontend",
   "prepare-config"
 ]
-script = '''
-#!@shell
 
-set -e
-tmux -V
-echo "Note: please make sure tmux version >= 3.2a"
-'''
+[tasks.p]
+alias = "playground"
 
 [tasks.playground]
-alias = "dev"
+category = "RiseDev - Start"
+description = "Start single-binary playground"
+script = '''
+#!/bin/bash
+
+set -e
+
+cd rust
+echo "Use \`./risedev d\` instead if you want to start a full cluster."
+RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
+'''
 
 [tasks.d]
 alias = "dev"
+
+[tasks.dev]
+category = "RiseDev - Start"
+dependencies = [
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["${@}"]
+description = "Start a RisingWave playground"
+
+[tasks.kill-risedev]
+category = "RiseDev - Stop"
+description = "kill playground"
+script = '''
+#!/bin/bash
+set -e
+tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
+tmux kill-session -t risedev
+'''
+
+[tasks.kill]
+alias = "kill-risedev"
+
+[tasks.k]
+alias = "kill-risedev"
+
+[tasks.fill-kafka]
+command = "scripts/source/prepare_source.sh"
+
 
 [tasks.ci-v2]
 category = "RiseDev - Start"
@@ -173,67 +240,65 @@ command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["ci-v2"]
 description = "Start a RisingWave playground ci-v2 config"
 
-[tasks.dev]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["default"]
-description = "Start a RisingWave playground with default config"
 
 [tasks.ci-3node]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["ci-3node"]
-description = "Start a RisingWave playground with ci-3node config"
+script = """
+echo \"directly calling ./risedev ci-3node has been deprecated. Use ./risedev dev ci-3node instead.\"
+exit 1
+"""
 
 [tasks.ci-1node]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["ci-1node"]
-description = "Start a RisingWave playground ci-1node config"
+script = """
+echo \"directly calling ./risedev ci-1node has been deprecated. Use ./risedev dev ci-1node instead.\"
+exit 1
+"""
 
 
 [tasks.dev-compute-node]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["dev-compute-node"]
-description = "Start a RisingWave playground with dev-compute-node config"
+script = """
+echo \"directly calling ./risedev dev-compute-node has been deprecated. Use ./risedev dev dev-compute-node instead.\"
+exit 1
+"""
 
 [tasks.dev-frontend]
-category = "RiseDev - Start"
-dependencies = [
-  "pre-start-playground"
-]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
-args = ["dev-frontend"]
-description = "Start a RisingWave playground with dev-frontend config"
+script = """
+echo \"directly calling ./risedev dev-frontend has been deprecated. Use ./risedev dev dev-frontend instead.\"
+exit 1
+"""
 
-[tasks.kill-playground]
-category = "RiseDev - Stop"
-description = "kill playground"
-script = '''
-#!@shell
+[tasks.dev-meta-node]
+script = """
+echo \"directly calling ./risedev dev-meta-node has been deprecated. Use ./risedev dev dev-meta-node instead.\"
+exit 1
+"""
+
+[tasks.install-sqllogictest]
+script = """
+#!/bin/bash
 set -e
-tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
-tmux kill-session -t risedev
-'''
+cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+"""
 
-[tasks.kill]
-alias = "kill-playground"
+[tasks.install-llvm-cov]
+script = """
+#!/bin/bash
+set -e
+cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 180e62
+"""
 
-[tasks.k]
-alias = "kill-playground"
+[tasks.install-nextest]
+script = """
+#!/bin/bash
+set -e
+cargo install cargo-nextest
+"""
 
-[tasks.fill-kafka]
-command = "scripts/source/prepare_source.sh"
+[tasks.test-coverage]
+script = """
+#!/bin/bash
+set -e
+
+cd rust
+CARGO_TARGET_DIR=target/coverage
+cargo llvm-cov nextest
+"""

@@ -3,10 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::plan::{
-    PlanFragment, QueryId as ProstQueryId, StageId as ProstStageId, TaskId as ProstTaskId,
-    TaskSinkId as ProstSinkId,
-};
+use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
 use risingwave_pb::task_service::task_info::TaskStatus;
 use risingwave_pb::task_service::GetDataResponse;
 use tracing_futures::Instrument;
@@ -24,17 +21,17 @@ pub struct TaskId {
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Default)]
-pub struct TaskSinkId {
+pub struct TaskOutputId {
     pub task_id: TaskId,
-    pub sink_id: u32,
+    pub output_id: u32,
 }
 
 /// More compact formatter compared to derived `fmt::Debug`.
-impl Debug for TaskSinkId {
+impl Debug for TaskOutputId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
-            "TaskSinkId {{ query_id: \"{}\", stage_id: {}, task_id: {}, sink_id: {} }}",
-            self.task_id.query_id, self.task_id.stage_id, self.task_id.task_id, self.sink_id
+            "TaskOutputId {{ query_id: \"{}\", stage_id: {}, task_id: {}, output_id: {} }}",
+            self.task_id.query_id, self.task_id.stage_id, self.task_id.task_id, self.output_id
         ))
     }
 }
@@ -47,14 +44,13 @@ pub(in crate) enum TaskState {
     Failed,
 }
 
-impl TryFrom<&ProstTaskId> for TaskId {
-    type Error = RwError;
-    fn try_from(prost: &ProstTaskId) -> Result<Self> {
-        Ok(TaskId {
-            task_id: prost.get_task_id(),
-            stage_id: prost.get_stage_id()?.get_stage_id(),
-            query_id: String::from(prost.get_stage_id()?.get_query_id()?.get_trace_id()),
-        })
+impl From<&ProstTaskId> for TaskId {
+    fn from(prost: &ProstTaskId) -> Self {
+        TaskId {
+            task_id: prost.task_id,
+            stage_id: prost.stage_id,
+            query_id: prost.query_id.clone(),
+        }
     }
 }
 
@@ -62,53 +58,49 @@ impl TaskId {
     pub fn to_prost(&self) -> ProstTaskId {
         ProstTaskId {
             task_id: self.task_id,
-            stage_id: Some(ProstStageId {
-                query_id: Some(ProstQueryId {
-                    trace_id: self.query_id.clone(),
-                }),
-                stage_id: self.stage_id,
-            }),
+            stage_id: self.stage_id,
+            query_id: self.query_id.clone(),
         }
     }
 }
 
-impl TryFrom<&ProstSinkId> for TaskSinkId {
+impl TryFrom<&ProstOutputId> for TaskOutputId {
     type Error = RwError;
-    fn try_from(prost: &ProstSinkId) -> Result<Self> {
-        Ok(TaskSinkId {
-            task_id: TaskId::try_from(prost.get_task_id()?)?,
-            sink_id: prost.get_sink_id(),
+    fn try_from(prost: &ProstOutputId) -> Result<Self> {
+        Ok(TaskOutputId {
+            task_id: TaskId::from(prost.get_task_id()?),
+            output_id: prost.get_output_id(),
         })
     }
 }
 
-impl TaskSinkId {
-    pub fn to_prost(&self) -> ProstSinkId {
-        ProstSinkId {
+impl TaskOutputId {
+    pub fn to_prost(&self) -> ProstOutputId {
+        ProstOutputId {
             task_id: Some(self.task_id.to_prost()),
-            sink_id: self.sink_id,
+            output_id: self.output_id,
         }
     }
 }
 
-pub struct TaskSink {
+pub struct TaskOutput {
     task_manager: Arc<BatchManager>,
     receiver: BoxChanReceiver,
-    sink_id: TaskSinkId,
+    output_id: TaskOutputId,
 }
 
-impl TaskSink {
+impl TaskOutput {
     /// Writes the data in serialized format to `ExchangeWriter`.
     pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
-        let task_id = self.sink_id.task_id.clone();
+        let task_id = self.output_id.task_id.clone();
         self.task_manager.check_if_task_running(&task_id)?;
         loop {
             match self.receiver.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
                     let chunk = chunk.compact()?;
-                    trace!("Task sink: {:?}, data: {:?}", self.sink_id, chunk);
-                    let pb = chunk.to_protobuf()?;
+                    trace!("Task output: {:?}, data: {:?}", self.output_id, chunk);
+                    let pb = chunk.to_protobuf();
                     let resp = GetDataResponse {
                         record_batch: Some(pb),
                         ..Default::default()
@@ -137,13 +129,13 @@ impl TaskSink {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        let task_id = self.sink_id.task_id.clone();
+        let task_id = self.output_id.task_id.clone();
         self.task_manager.check_if_task_running(&task_id)?;
         self.receiver.recv().await
     }
 
-    pub fn id(&self) -> &TaskSinkId {
-        &self.sink_id
+    pub fn id(&self) -> &TaskOutputId {
+        &self.output_id
     }
 }
 
@@ -166,17 +158,25 @@ pub struct BatchTaskExecution {
 
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
+
+    epoch: u64,
 }
 
 impl BatchTaskExecution {
-    pub fn new(prost_tid: &ProstTaskId, plan: PlanFragment, env: BatchEnvironment) -> Result<Self> {
+    pub fn new(
+        prost_tid: &ProstTaskId,
+        plan: PlanFragment,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Result<Self> {
         Ok(BatchTaskExecution {
-            task_id: TaskId::try_from(prost_tid)?,
+            task_id: TaskId::from(prost_tid),
             plan,
             state: Mutex::new(TaskStatus::Pending),
             receivers: Mutex::new(Vec::new()),
             env,
             failure: Arc::new(Mutex::new(None)),
+            epoch,
         })
     }
 
@@ -196,6 +196,7 @@ impl BatchTaskExecution {
             self.plan.root.as_ref().unwrap(),
             &self.task_id.clone(),
             self.env.clone(),
+            self.epoch,
         )
         .build()?;
 
@@ -217,10 +218,10 @@ impl BatchTaskExecution {
                 // close it after task error has been set.
                 if let Err(e) = BatchTaskExecution::try_execute(exec, &mut sender)
                     .instrument(tracing::trace_span!(
-                      "batch_execute",
-                      task_id = ?task_id.task_id,
-                      stage_id = ?task_id.stage_id,
-                      query_id = ?task_id.query_id,
+                        "batch_execute",
+                        task_id = ?task_id.task_id,
+                        stage_id = ?task_id.stage_id,
+                        query_id = ?task_id.query_id,
                     ))
                     .await
                 {
@@ -249,27 +250,27 @@ impl BatchTaskExecution {
         Ok(())
     }
 
-    pub fn get_task_sink(&self, sink_id: &ProstSinkId) -> Result<TaskSink> {
-        let task_id = TaskId::try_from(sink_id.get_task_id()?)?;
-        let receiver = self.receivers.lock().unwrap()[sink_id.get_sink_id() as usize]
+    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+        let task_id = TaskId::from(output_id.get_task_id()?);
+        let receiver = self.receivers.lock().unwrap()[output_id.get_output_id() as usize]
             .take()
             .ok_or_else(|| {
                 ErrorCode::InternalError(format!(
-                    "Task{:?}'s sink{} has already been taken.",
+                    "Task{:?}'s output{} has already been taken.",
                     task_id,
-                    sink_id.get_sink_id(),
+                    output_id.get_output_id(),
                 ))
             })?;
-        let task_sink = TaskSink {
+        let task_output = TaskOutput {
             task_manager: self.env.task_manager(),
             receiver,
-            sink_id: sink_id.try_into()?,
+            output_id: output_id.try_into()?,
         };
-        Ok(task_sink)
+        Ok(task_output)
     }
 
-    pub fn get_error(&self) -> Result<Option<RwError>> {
-        Ok(self.failure.lock().unwrap().clone())
+    pub fn get_error(&self) -> Option<RwError> {
+        self.failure.lock().unwrap().clone()
     }
 
     pub fn check_if_running(&self) -> Result<()> {
@@ -289,19 +290,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_task_sink_id_debug() {
+    fn test_task_output_id_debug() {
         let task_id = TaskId {
             task_id: 1,
             stage_id: 2,
             query_id: "abc".to_string(),
         };
-        let task_sink_id = TaskSinkId {
+        let task_output_id = TaskOutputId {
             task_id,
-            sink_id: 3,
+            output_id: 3,
         };
         assert_eq!(
-            format!("{:?}", task_sink_id),
-            "TaskSinkId { query_id: \"abc\", stage_id: 2, task_id: 1, sink_id: 3 }"
+            format!("{:?}", task_output_id),
+            "TaskOutputId { query_id: \"abc\", stage_id: 2, task_id: 1, output_id: 3 }"
         );
     }
 }

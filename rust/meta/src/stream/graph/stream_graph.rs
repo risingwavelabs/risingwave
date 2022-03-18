@@ -6,12 +6,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
+use risingwave_pb::common::HashMapping;
 use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
 
 use crate::cluster::NodeId;
-use crate::model::{ActorId, FragmentId, TableRawId};
+use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
@@ -59,11 +60,11 @@ impl StreamActorBuilder {
         })
     }
 
-    #[allow(dead_code)]
-    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<usize>) {
+    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<u32>, hash_mapping: HashMapping) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,
             column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
+            hash_mapping: Some(hash_mapping),
         })
     }
 
@@ -190,6 +191,7 @@ where
         }
         ctx.dispatches = dispatches;
         ctx.upstream_node_actors = upstream_node_actors;
+        ctx.table_sink_map = table_sink_map;
         Ok(graph)
     }
 
@@ -201,7 +203,7 @@ where
     /// ids if it is a [`ChainNode`].
     pub fn build_inner(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -272,7 +274,7 @@ where
 
     fn resolve_chain_node(
         &self,
-        table_sink_map: &mut HashMap<TableRawId, Vec<ActorId>>,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
@@ -281,9 +283,8 @@ where
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
-            let table_raw_id = chain_node.table_ref_id.as_ref().unwrap().table_id;
             let upstream_actor_ids = HashSet::<ActorId>::from_iter(
-                match table_sink_map.entry(table_raw_id) {
+                match table_sink_map.entry(table_id) {
                     Entry::Vacant(v) => {
                         let actor_ids = self
                             .fragment_manager_ref
@@ -297,7 +298,7 @@ where
 
             dispatch_upstreams.extend(upstream_actor_ids.iter());
             let chain_upstream_table_node_actors =
-                self.fragment_manager_ref.get_table_node_actors(&table_id)?;
+                self.fragment_manager_ref.table_node_actors(&table_id)?;
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {

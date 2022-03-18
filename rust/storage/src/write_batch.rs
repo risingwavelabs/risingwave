@@ -1,11 +1,7 @@
-use std::mem::size_of_val;
-use std::sync::Arc;
-
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use crate::hummock::HummockError;
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{Keyspace, StateStore};
 
 /// [`WriteBatch`] wrap a list of key-value pairs and an associated [`StateStore`].
@@ -13,8 +9,6 @@ pub struct WriteBatch<S: StateStore> {
     store: S,
 
     batch: Vec<(Bytes, Option<Bytes>)>,
-
-    state_store_stats: Arc<StateStoreStats>,
 }
 
 impl<S> WriteBatch<S>
@@ -26,7 +20,6 @@ where
         Self {
             store,
             batch: Vec::new(),
-            state_store_stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -35,7 +28,6 @@ where
         Self {
             store,
             batch: Vec::with_capacity(capacity),
-            state_store_stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -51,15 +43,20 @@ where
     }
 
     /// Preprocess the batch to make it sorted. It returns `false` if duplicate keys are found.
-    pub fn preprocess(&mut self) -> bool {
+    pub fn preprocess(&mut self) -> Result<()> {
         if self.is_empty() {
-            return true;
+            return Ok(());
         }
 
         let original_length = self.batch.len();
         self.batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
         self.batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
-        original_length == self.batch.len()
+
+        if original_length == self.batch.len() {
+            Ok(())
+        } else {
+            Err(HummockError::invalid_write_batch().into())
+        }
     }
 
     /// Returns `true` if the batch contains no key-value pairs.
@@ -68,35 +65,16 @@ where
     }
 
     /// Ingest this batch into the associated state store.
-    /// `Err` results should be unwrapped by callers.
     pub async fn ingest(mut self, epoch: u64) -> Result<()> {
-        if !self.preprocess() {
-            return Err(HummockError::invalid_write_batch().into());
-        }
-
-        let kv_pair_num = self.batch.len() as u64;
-        if kv_pair_num == 0 {
-            return Ok(());
-        }
-        self.state_store_stats.batched_write_counts.inc();
-        self.state_store_stats
-            .batch_write_tuple_counts
-            .inc_by(kv_pair_num);
-
-        // self.state_store_stats.batch_write_size.reset();
-        let mut write_batch_size = 0_usize;
-        for (key, value) in self.batch.clone() {
-            write_batch_size += size_of_val(key.as_ref());
-            if value.is_some() {
-                write_batch_size += size_of_val(value.as_ref().unwrap());
-            }
-        }
-        self.state_store_stats
-            .batch_write_size
-            .observe(write_batch_size as f64);
-        let timer = self.state_store_stats.batch_write_latency.start_timer();
+        self.preprocess()?;
         self.store.ingest_batch(self.batch, epoch).await?;
-        timer.observe_duration();
+        Ok(())
+    }
+
+    /// Ingest this batch into the associated state store, without being persisted.
+    pub async fn replicate_remote(mut self, epoch: u64) -> Result<()> {
+        self.preprocess()?;
+        self.store.replicate_batch(self.batch, epoch).await?;
         Ok(())
     }
 

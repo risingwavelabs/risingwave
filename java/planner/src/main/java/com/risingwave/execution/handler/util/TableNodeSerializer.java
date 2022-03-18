@@ -5,15 +5,10 @@ import com.risingwave.catalog.ColumnDesc;
 import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.common.datatype.RisingWaveDataType;
-import com.risingwave.planner.rel.streaming.RwStreamMaterializedView;
+import com.risingwave.planner.rel.streaming.RwStreamMaterialize;
 import com.risingwave.proto.data.DataType;
 import com.risingwave.proto.expr.InputRefExpr;
-import com.risingwave.proto.plan.ColumnOrder;
-import com.risingwave.proto.plan.CreateTableNode;
-import com.risingwave.proto.plan.ExchangeInfo;
-import com.risingwave.proto.plan.OrderType;
-import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.PlanNode;
+import com.risingwave.proto.plan.*;
 import com.risingwave.rpc.Messages;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -35,7 +30,7 @@ public class TableNodeSerializer {
    * @return The `PlanFragment` proto of the table catalog.
    */
   public static PlanFragment createProtoFromCatalog(
-      TableCatalog catalog, boolean isTableV2, RwStreamMaterializedView root) {
+      TableCatalog catalog, boolean isTableV2, RwStreamMaterialize root) {
     TableCatalog.TableId tableId = catalog.getId();
     CreateTableNode.Builder builder = CreateTableNode.newBuilder();
 
@@ -45,22 +40,21 @@ public class TableNodeSerializer {
     // Add sort key for materialized views.
     // TODO: clean the code and make them compact.
     if (catalog instanceof MaterializedViewCatalog) {
+      var info = MaterializedViewInfo.newBuilder();
+
       // Add columns.
       for (Pair<String, ColumnDesc> pair : root.getColumns()) {
         com.risingwave.proto.plan.ColumnDesc.Builder columnDescBuilder =
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(pair.getKey())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
-            .setColumnType(pair.getValue().getDataType().getProtobufType())
-            .setIsPrimary(false);
+            .setColumnType(pair.getValue().getDataType().getProtobufType());
         builder.addColumnDescs(columnDescBuilder);
       }
 
       MaterializedViewCatalog materializedViewCatalog = (MaterializedViewCatalog) catalog;
-      builder.setIsMaterializedView(true);
       // Set primary key columns.
-      builder.addAllPkIndices(materializedViewCatalog.getPrimaryKeyColumnIds());
+      info.addAllPkIndices(materializedViewCatalog.getPrimaryKeyIndices());
 
       // Set column orders.
       // Sort key serialization starts. The column that is in primary key but not sort key should be
@@ -96,7 +90,7 @@ public class TableNodeSerializer {
           columnOrders.add(columnOrder);
         }
       }
-      for (var primaryKeyIndex : materializedViewCatalog.getPrimaryKeyColumnIds()) {
+      for (var primaryKeyIndex : materializedViewCatalog.getPrimaryKeyIndices()) {
         if (!columnAdded.contains(primaryKeyIndex)) {
           RexInputRef inputRef =
               root.getCluster().getRexBuilder().makeInputRef(root.getInput(), primaryKeyIndex);
@@ -115,14 +109,17 @@ public class TableNodeSerializer {
           columnAdded.add(primaryKeyIndex);
         }
       }
-      builder.addAllColumnOrders(columnOrders);
+      info.addAllColumnOrders(columnOrders);
       // Add associated TableId to MV.
       var associatedTableId = root.getAssociatedTableId();
       if (associatedTableId != null) {
-        builder.setAssociatedTableRefId(Messages.getTableRefId(associatedTableId));
+        info.setAssociatedTableRefId(Messages.getTableRefId(associatedTableId));
       }
+
+      builder.setMaterializedView(info);
     } else {
       // If not materialized view then build regular table node.
+      var info = TableSourceInfo.newBuilder();
       // Add columns.
       List<ColumnCatalog> allColumns = catalog.getAllColumns(true);
       if (isTableV2) {
@@ -134,13 +131,11 @@ public class TableNodeSerializer {
             com.risingwave.proto.plan.ColumnDesc.newBuilder();
         columnDescBuilder
             .setName(column.getName())
-            .setEncoding(com.risingwave.proto.plan.ColumnDesc.ColumnEncodingType.RAW)
             .setColumnType(column.getDesc().getDataType().getProtobufType())
-            .setIsPrimary(catalog.getPrimaryKeyColumnIds().contains(column.getId().getValue()))
             .setColumnId(column.getId().getValue());
         builder.addColumnDescs(columnDescBuilder);
       }
-      builder.setIsMaterializedView(false);
+      builder.setTableSource(info);
     }
 
     // Add exchange node on top.

@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
+import "common.proto";
 import "expr.proto";
 import "plan.proto";
 
@@ -30,12 +31,13 @@ message FilterNode {
 // A materialized view is regarded as a table,
 // hence we copy the CreateTableNode definition in OLAP PlanNode.
 // In addition, we also specify primary key to MV for efficient point lookup during update and deletion.
-message MViewNode {
+message MaterializeNode {
   plan.TableRefId table_ref_id = 1;
-  plan.TableRefId associated_table_ref_id = 5;
-  repeated plan.ColumnDesc column_descs = 2;
-  repeated int32 pk_indices = 3;
-  repeated plan.ColumnOrder column_orders = 4;
+  plan.TableRefId associated_table_ref_id = 2;
+  // Column indexes and orders of primary key
+  repeated plan.ColumnOrder column_orders = 3;
+  // Column IDs of input schema
+  repeated int32 column_ids = 4;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
@@ -95,7 +97,7 @@ message ChainNode {
 message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 pk_indices = 2;
-  repeated int32 column_ids = 3;
+  repeated plan.ColumnDesc column_descs = 3;
 }
 
 message StreamNode {
@@ -103,7 +105,7 @@ message StreamNode {
     SourceNode source_node = 4;
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
-    MViewNode mview_node = 7;
+    MaterializeNode materialize_node = 7;
     SimpleAggNode local_simple_agg_node = 16;
     SimpleAggNode global_simple_agg_node = 8;
     HashAggNode hash_agg_node = 9;
@@ -134,6 +136,7 @@ message Dispatcher {
   }
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
+  common.HashMapping hash_mapping = 3;
 }
 
 // A StreamActor is a running fragment of the overall stream graph,

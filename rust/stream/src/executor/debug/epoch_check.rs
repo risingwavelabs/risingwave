@@ -29,7 +29,7 @@ impl super::DebugExecutor for EpochCheckExecutor {
         let message = self.input.next().await?;
 
         if let Message::Barrier(b) = &message {
-            let new_epoch = b.epoch;
+            let new_epoch = b.epoch.curr;
             let stale = self
                 .last_epoch
                 .map(|last_epoch| last_epoch > new_epoch)
@@ -37,12 +37,12 @@ impl super::DebugExecutor for EpochCheckExecutor {
 
             if stale {
                 panic!(
-          "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
-          self.input.identity(),
-          self.last_epoch,
-          new_epoch,
-          b
-        );
+                    "epoch check failed on {}: last epoch is {:?}, while the epoch of incoming barrier is {}.\nstale barrier: {:?}",
+                    self.input.identity(),
+                    self.last_epoch,
+                    new_epoch,
+                    b
+                );
             }
             self.last_epoch = Some(new_epoch);
         }
@@ -77,9 +77,9 @@ mod tests {
 
         let mut checked = EpochCheckExecutor::new(Box::new(source));
         assert_matches!(checked.next().await.unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch == 114);
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch == 114);
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch == 514);
+        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
+        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch.curr == 114);
+        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
     }
 
     #[should_panic]
@@ -93,8 +93,8 @@ mod tests {
 
         let mut checked = EpochCheckExecutor::new(Box::new(source));
         assert_matches!(checked.next().await.unwrap(), Message::Chunk(_));
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch == 514);
-        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch == 514);
+        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
+        assert_matches!(checked.next().await.unwrap(), Message::Barrier(b) if b.epoch.curr == 514);
 
         checked.next().await.unwrap(); // should panic
     }

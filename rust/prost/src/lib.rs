@@ -1,6 +1,8 @@
 #![allow(clippy::all)]
 
 #[rustfmt::skip]
+pub mod catalog;
+#[rustfmt::skip]
 pub mod common;
 #[rustfmt::skip]
 pub mod data;
@@ -19,6 +21,9 @@ pub mod stream_service;
 #[rustfmt::skip]
 pub mod hummock;
 
+#[rustfmt::skip]
+#[path = "catalog.serde.rs"]
+pub mod catalog_serde;
 #[rustfmt::skip]
 #[path = "common.serde.rs"]
 pub mod common_serde;

@@ -284,6 +284,9 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
+    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2,
+    /// 3},
+    Array(Vec<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -447,6 +450,16 @@ impl fmt::Display for Expr {
             Expr::Row(exprs) => write!(
                 f,
                 "ROW({})",
+                exprs
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+                    .as_slice()
+                    .join(", ")
+            ),
+            Expr::Array(exprs) => write!(
+                f,
+                "ARRAY[{}]",
                 exprs
                     .iter()
                     .map(|v| v.to_string())
@@ -804,6 +817,10 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// FLUSH the current barrier.
+    ///
+    /// Note: RisingWave specific statement.
+    Flush,
 }
 
 impl fmt::Display for Statement {
@@ -1146,6 +1163,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::Flush => {
+                write!(f, "FLUSH")
             }
         }
     }

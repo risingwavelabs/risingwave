@@ -1,18 +1,20 @@
 [package]
 edition = "2021"
 name = "risingwave_connector"
-version = "0.1.2"
+version = "0.1.3"
 
 [dependencies]
 anyhow = "1"
 async-std = { version = "1" }
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = "0.6"
-aws-sdk-kinesis = "0.6"
-aws-smithy-http = "0.36"
-aws-smithy-types = "0.36"
-aws-types = { version = "0.6", features = ["hardcoded-credentials"] }
+aws-config = "0.8"
+aws-sdk-kinesis = "0.8"
+aws-sdk-s3 = "0.8.0"
+aws-sdk-sqs = "0.8.0"
+aws-smithy-http = "0.38"
+aws-smithy-types = "0.38"
+aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -20,6 +22,7 @@ crc32fast = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
+globset = "0.4.8"
 http = "0.2"
 hyper = "0.14"
 itertools = "0.10"
@@ -32,8 +35,8 @@ prost = "0.9"
 protobuf = "2"
 pulsar = { git = "https://github.com/shanicky/pulsar-rs.git", rev = "3b6353943833057f4379a354c1754a4e86fa57ff" }
 rdkafka = { version = "0.28", features = ["cmake-build"] }
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"

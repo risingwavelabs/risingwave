@@ -1,18 +1,45 @@
+use itertools::Itertools;
+use paste::paste;
+use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::plan::OrderType;
+
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
+use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
 }
+
+impl Order {
+    pub fn to_protobuf(&self) -> Vec<(InputRefExpr, OrderType)> {
+        self.field_order
+            .iter()
+            .map(FieldOrder::to_protobuf)
+            .collect_vec()
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
 }
+
+impl FieldOrder {
+    pub fn to_protobuf(&self) -> (InputRefExpr, OrderType) {
+        let input_ref_expr = InputRefExpr {
+            column_idx: self.index as i32,
+        };
+        let order_type = self.direct.to_protobuf();
+        (input_ref_expr, order_type)
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
@@ -20,8 +47,18 @@ pub enum Direction {
     Desc,
     Any, // only used in order requirement
 }
-#[allow(dead_code)]
 
+impl Direction {
+    pub fn to_protobuf(&self) -> OrderType {
+        match self {
+            Self::Asc => OrderType::Ascending,
+            Self::Desc => OrderType::Descending,
+            _ => unimplemented!(),
+        }
+    }
+}
+
+#[allow(dead_code)]
 impl Direction {
     pub fn satisfies(&self, other: &Direction) -> bool {
         match other {
@@ -46,7 +83,7 @@ impl Order {
     }
     pub fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
-        BatchSort::new(plan, self.clone()).into_plan_ref()
+        BatchSort::new(plan, self.clone()).into()
     }
     pub fn satisfies(&self, other: &Order) -> bool {
         if self.field_order.len() < other.field_order.len() {
@@ -67,12 +104,39 @@ impl Order {
         self.field_order.is_empty()
     }
 }
+
 pub trait WithOrder {
-    // use the default impl will not affect correctness, but insert unnecessary Sort in plan
-    fn order(&self) -> &Order {
-        Order::any()
+    /// the order property of the PlanNode's output
+    fn order(&self) -> &Order;
+}
+
+macro_rules! impl_with_order_base {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithOrder for [<$convention $name>] {
+                fn order(&self) -> &Order {
+                    &self.base.order
+                }
+            }
+        })*
     }
 }
+for_batch_plan_nodes! { impl_with_order_base }
+
+macro_rules! impl_with_order_any {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl WithOrder for [<$convention $name>] {
+                fn order(&self) -> &Order {
+                    Order::any()
+                }
+            }
+        })*
+    }
+}
+for_logical_plan_nodes! { impl_with_order_any }
+for_stream_plan_nodes! { impl_with_order_any }
+
 #[cfg(test)]
 mod tests {
     use super::{Direction, FieldOrder, Order};

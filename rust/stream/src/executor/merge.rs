@@ -1,70 +1,37 @@
-// TODO: remove this after remote channel is actually used.
-#![allow(dead_code)]
-
-use std::net::SocketAddr;
-use std::time::Duration;
-
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
 use futures::{SinkExt, StreamExt};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::ToRwResult;
-use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
-use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse};
-use tonic::transport::{Channel, Endpoint};
-use tonic::{Request, Streaming};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::task_service::GetStreamResponse;
+use risingwave_rpc_client::ComputeClient;
+use risingwave_storage::StateStore;
+use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
-use crate::executor::{Mutation, PkIndices};
-use crate::task::UpDownActorIds;
+use crate::executor::{ExecutorBuilder, Mutation, PkIndices};
+use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
-    client: ExchangeServiceClient<Channel>,
     stream: Streaming<GetStreamResponse>,
     sender: Sender<Message>,
-
-    /// Address of the remote endpoint.
-    addr: SocketAddr,
-    up_down_ids: UpDownActorIds,
 }
 
 impl RemoteInput {
+    /// Create a remote input from compute client and related info. Should provide the corresponding
+    /// compute client of where the actor is placed.
     pub async fn create(
-        addr: SocketAddr,
+        client: ComputeClient,
         up_down_ids: UpDownActorIds,
         sender: Sender<Message>,
     ) -> Result<Self> {
-        let mut client = ExchangeServiceClient::new(
-            Endpoint::from_shared(format!("http://{}", addr))
-                .map_err(|e| InternalError(format!("{}", e)))?
-                .connect_timeout(Duration::from_secs(5))
-                .connect()
-                .await
-                .to_rw_result_with(format!("RemoteInput failed to connect to {}", addr))?,
-        );
-        let req = GetStreamRequest {
-            up_fragment_id: up_down_ids.0,
-            down_fragment_id: up_down_ids.1,
-        };
-        let stream = client
-            .get_stream(Request::new(req))
-            .await
-            .to_rw_result_with(format!(
-                "failed to create stream from remote_input {} from fragment {} to fragment {}",
-                addr, up_down_ids.0, up_down_ids.1
-            ))?
-            .into_inner();
-        Ok(Self {
-            client,
-            stream,
-            sender,
-            addr,
-            up_down_ids,
-        })
+        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
+        Ok(Self { stream, sender })
     }
 
     pub async fn run(&mut self) {
@@ -120,6 +87,20 @@ impl std::fmt::Debug for ReceiverExecutor {
     }
 }
 
+pub struct MergeExecutorBuilder {}
+
+impl ExecutorBuilder for MergeExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
+        stream.create_merge_node(params, node)
+    }
+}
+
 impl ReceiverExecutor {
     pub fn new(
         schema: Schema,
@@ -144,7 +125,9 @@ impl Executor for ReceiverExecutor {
             .next()
             .instrument(tracing::trace_span!("idle"))
             .await
-            .unwrap(); // TODO: remove unwrap
+            .expect(
+                "upstream channel closed unexpectedly, please check error in upstream executors",
+            ); // TODO: remove unwrap
         Ok(msg)
     }
 
@@ -245,7 +228,11 @@ impl Executor for MergeExecutor {
                 self.active.push(fut.into_inner().unwrap());
             }
 
-            match message.unwrap() {
+            let message = message.expect(
+                "upstream channel closed unexpectedly, please check error in upstream executors",
+            );
+
+            match message {
                 Message::Chunk(chunk) => {
                     self.active.push(from);
                     return Ok(Message::Chunk(chunk));
@@ -316,9 +303,9 @@ mod tests {
     use risingwave_pb::task_service::exchange_service_server::{
         ExchangeService, ExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse, GetStreamRequest};
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Response, Status};
+    use tonic::{Request, Response, Status};
 
     use super::*;
 
@@ -357,13 +344,14 @@ mod tests {
                     tx.send(Message::Chunk(build_test_chunk(epoch)))
                         .await
                         .unwrap();
-                    tx.send(Message::Barrier(Barrier::new(epoch)))
+                    tx.send(Message::Barrier(Barrier::new_test_barrier(epoch)))
                         .await
                         .unwrap();
                     tokio::time::sleep(Duration::from_millis(1)).await;
                 }
                 tx.send(Message::Barrier(
-                    Barrier::new(1000).with_mutation(Mutation::Stop(HashSet::default())),
+                    Barrier::new_test_barrier(1000)
+                        .with_mutation(Mutation::Stop(HashSet::default())),
                 ))
                 .await
                 .unwrap();
@@ -375,20 +363,20 @@ mod tests {
             // expect n chunks
             for _ in 0..CHANNEL_NUMBER {
                 assert_matches!(merger.next().await.unwrap(), Message::Chunk(chunk) => {
-                  assert_eq!(chunk.ops().len() as u64, epoch);
+                    assert_eq!(chunk.ops().len() as u64, epoch);
                 });
             }
             // expect a barrier
             assert_matches!(merger.next().await.unwrap(), Message::Barrier(Barrier{epoch:barrier_epoch,mutation:_,..}) => {
-              assert_eq!(barrier_epoch, epoch);
+                assert_eq!(barrier_epoch.curr, epoch);
             });
         }
         assert_matches!(
-          merger.next().await.unwrap(),
-          Message::Barrier(Barrier {
-            mutation,
-            ..
-          }) if mutation.as_deref().unwrap().is_stop()
+            merger.next().await.unwrap(),
+            Message::Barrier(Barrier {
+                mutation,
+                ..
+            }) if mutation.as_deref().unwrap().is_stop()
         );
 
         for handle in handles {
@@ -419,7 +407,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
             // send stream_chunk
-            let stream_chunk = StreamChunk::default().to_protobuf().unwrap();
+            let stream_chunk = StreamChunk::default().to_protobuf();
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -432,10 +420,7 @@ mod tests {
             .await
             .unwrap();
             // send barrier
-            let barrier = Barrier {
-                epoch: 12345,
-                ..Barrier::default()
-            };
+            let barrier = Barrier::new_test_barrier(12345);
             tx.send(Ok(GetStreamResponse {
                 message: Some(StreamMessage {
                     stream_message: Some(
@@ -455,7 +440,7 @@ mod tests {
     async fn test_stream_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
-        let addr = "127.0.0.1:12346".parse().unwrap();
+        let addr = "127.0.0.1:12348".parse().unwrap();
 
         // Start a server.
         let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
@@ -478,17 +463,20 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
-            let mut remote_input = RemoteInput::create(addr, (0, 0), tx).await.unwrap();
+            let mut remote_input =
+                RemoteInput::create(ComputeClient::new(&addr).await.unwrap(), (0, 0), tx)
+                    .await
+                    .unwrap();
             remote_input.run().await
         });
         assert_matches!(rx.next().await.unwrap(), Message::Chunk(chunk) => {
-          let (ops, columns, visibility) = chunk.into_inner();
-          assert_eq!(ops.len() as u64, 0);
-          assert_eq!(columns.len() as u64, 0);
-          assert_eq!(visibility, None);
+            let (ops, columns, visibility) = chunk.into_inner();
+            assert_eq!(ops.len() as u64, 0);
+            assert_eq!(columns.len() as u64, 0);
+            assert_eq!(visibility, None);
         });
         assert_matches!(rx.next().await.unwrap(), Message::Barrier(Barrier { epoch: barrier_epoch, mutation: _, .. }) => {
-          assert_eq!(barrier_epoch, 12345);
+            assert_eq!(barrier_epoch.curr, 12345);
         });
         assert!(rpc_called.load(Ordering::SeqCst));
         input_handle.await.unwrap();

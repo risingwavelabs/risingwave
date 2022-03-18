@@ -1,15 +1,11 @@
 use std::convert::TryInto;
-use std::marker::PhantomData;
 use std::mem::take;
 
 use either::Either;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::collection::hash_map::{
-    calc_hash_key_kind, hash_key_dispatch, HashKey, HashKeyDispatcher, HashKeyKind, Key128, Key16,
-    Key256, Key32, Key64, KeySerialized,
-};
 use risingwave_common::error::Result;
+use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -218,13 +214,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     }
                     None => {
                         return if probe_table.join_type().need_join_remaining() {
-                            if let Some(ret_data_chunk) = probe_table.join_remaining()? {
-                                self.state = ProbeRemaining(probe_table);
-                                Ok(Some(ret_data_chunk))
-                            } else {
-                                self.state = Done;
-                                probe_table.consume_left()
-                            }
+                            self.state = ProbeRemaining(probe_table);
+                            Ok(None)
                         } else {
                             self.state = Done;
                             probe_table.consume_left()
@@ -275,16 +266,14 @@ pub struct HashJoinExecutorBuilder {
     task_id: TaskId,
 }
 
-struct HashJoinExecutorBuilderDispatcher<K> {
-    _marker: PhantomData<K>,
-}
+struct HashJoinExecutorBuilderDispatcher;
 
 /// A dispatcher to help create specialized hash join executor.
-impl<K: HashKey> HashKeyDispatcher<K> for HashJoinExecutorBuilderDispatcher<K> {
+impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
     type Input = HashJoinExecutorBuilder;
     type Output = BoxedExecutor;
 
-    fn dispatch(input: HashJoinExecutorBuilder) -> Self::Output {
+    fn dispatch<K: HashKey>(input: HashJoinExecutorBuilder) -> Self::Output {
         Box::new(HashJoinExecutor::<K>::new(
             input.left_child,
             input.right_child,
@@ -370,10 +359,9 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             task_id: context.task_id.clone(),
         };
 
-        Ok(hash_key_dispatch!(
+        Ok(HashJoinExecutorBuilderDispatcher::dispatch_by_kind(
             hash_key_kind,
-            HashJoinExecutorBuilderDispatcher,
-            builder
+            builder,
         ))
     }
 }
@@ -388,8 +376,8 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::collection::hash_map::Key32;
     use risingwave_common::error::Result;
+    use risingwave_common::hash::Key32;
     use risingwave_common::types::DataType;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
@@ -563,8 +551,8 @@ mod tests {
                 ));
 
                 let column2 = Column::new(Arc::new(
-          array! {F64Array, [Some(5.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
-        ));
+                array! {F64Array, [Some(5.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -717,9 +705,8 @@ mod tests {
         ));
 
         let column2 = Column::new(Arc::new(
-      array! {F64Array, [None, None, None, Some(5.7f64), None, None, Some(7.5f64), Some(5.7f64),
-      None, None, None, None]}
-      .into(),
+            array! {F64Array, [None, None, None, Some(5.7f64), None, None, Some(7.5f64), Some(5.7f64),
+                None, None, None, None]}.into(),
     ));
 
         let expected_chunk =
@@ -738,10 +725,10 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              None, Some(3.9f32), Some(3.9f32), Some(6.6), None,
-              None, None, None, None, None,
-              None, None, None, None, None,
-              None, None, None, None, None
+                None, Some(3.9f32), Some(3.9f32), Some(6.6), None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None
             ]}
             .into(),
         ));
@@ -770,24 +757,24 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32),
-              None, Some(6.6f32), None, None, Some(0.7f32),
-              None, Some(5.5f32), None, None, None,
-              None, None, None, None, None,
-              None, None, None, None, None,
-              None
+                Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32),
+                None, Some(6.6f32), None, None, Some(0.7f32),
+                None, Some(5.5f32), None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None
             ]}
             .into(),
         ));
 
         let column2 = Column::new(Arc::new(
             array! {F64Array, [
-              None, None, None, Some(5.7f64), None,
-              None, Some(7.5f64), Some(5.7f64), None, None,
-              None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
-              None, None, Some(8.0f64), None, Some(9.1f64),
-              None, None, Some(9.6f64), None, Some(8.18f64),
-              None
+                None, None, None, Some(5.7f64), None,
+                None, Some(7.5f64), Some(5.7f64), None, None,
+                None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
+                None, None, Some(8.0f64), None, Some(9.1f64),
+                None, None, Some(9.6f64), None, Some(8.18f64),
+                None
             ]}
             .into(),
         ));
@@ -804,7 +791,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              Some(6.1f32), Some(8.4f32), None, Some(0.7f32), None, Some(5.5f32)
+                Some(6.1f32), Some(8.4f32), None, Some(0.7f32), None, Some(5.5f32)
             ]}
             .into(),
         ));
@@ -820,7 +807,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              None, Some(3.9f32), Some(6.6f32), None
+                None, Some(3.9f32), Some(6.6f32), None
             ]}
             .into(),
         ));
@@ -836,9 +823,9 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F64Array, [
-              Some(6.1f64), Some(8.9f64), Some(3.5f64), None, None,
-              Some(8.0f64), None, Some(9.1f64), None, None,
-              Some(9.6f64), None, Some(8.18f64), None
+                Some(6.1f64), Some(8.9f64), Some(3.5f64), None, None,
+                Some(8.0f64), None, Some(9.1f64), None, None,
+                Some(9.6f64), None, Some(8.18f64), None
             ]}
             .into(),
         ));
@@ -854,7 +841,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F64Array, [
-              None, Some(5.7f64), None, Some(7.5f64)
+                None, Some(5.7f64), None, Some(7.5f64)
             ]}
             .into(),
         ));

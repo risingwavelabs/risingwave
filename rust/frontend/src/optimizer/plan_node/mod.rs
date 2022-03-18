@@ -11,7 +11,7 @@
 //! - each field in the node struct are private
 //! - recommend to implement the construction of Node in a unified `new()` function, if have multi
 //!   methods to construct, make they have a consistent behavior
-//! - all field should be valued in construction, so the porperties' derivation should be finished
+//! - all field should be valued in construction, so the properties' derivation should be finished
 //!   in the `new()` function.
 
 use std::fmt::{Debug, Display};
@@ -20,10 +20,15 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
+use risingwave_common::catalog::Schema;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
+use super::property::{
+    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
+};
+
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
 ///
@@ -38,8 +43,9 @@ pub trait PlanNode:
     + WithOrder
     + WithDistribution
     + WithSchema
+    + WithContext
+    + WithId
     + ColPrunable
-    + IntoPlanRef
     + ToBatch
     + ToStream
     + ToDistributedBatch
@@ -51,15 +57,65 @@ pub trait PlanNode:
 impl_downcast!(PlanNode);
 pub type PlanRef = Rc<dyn PlanNode>;
 
+#[derive(Clone, Debug, Copy)]
+pub struct PlanNodeId(pub i32);
+
+/// the common fields of logical nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
+pub struct LogicalBase {
+    pub id: PlanNodeId,
+    pub schema: Schema,
+    pub ctx: QueryContextRef,
+}
+
+/// the common fields of batch nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+
+#[derive(Clone, Debug)]
+pub struct BatchBase {
+    pub id: PlanNodeId,
+    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
+    /// correctness, but insert unnecessary sort in plan
+    pub order: Order,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    pub dist: Distribution,
+
+    pub ctx: QueryContextRef,
+}
+
+/// the common fields of stream nodes, please make a field named `base` in
+/// every planNode and correctly valued it when construct the planNode.
+#[derive(Clone, Debug)]
+pub struct StreamBase {
+    pub id: PlanNodeId,
+    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
+    /// will not affect correctness, but insert unnecessary exchange in plan
+    pub dist: Distribution,
+    pub ctx: QueryContextRef, /* TODO: pk derive
+                               * pub pk_indices: Vec<u32> */
+}
+
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
-    pub fn explain(&self, level: usize, f: &mut dyn std::fmt::Write) -> std::fmt::Result {
+    pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         writeln!(f, "{}{}", " ".repeat(level * 2), self)?;
         for input in self.inputs() {
             input.explain(level + 1, f)?;
         }
         Ok(())
     }
+
+    /// Explain the plan node and return a string.
+    pub fn explain_to_string(&self) -> Result<String> {
+        let mut output = String::new();
+        self.explain(0, &mut output)
+            .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
+        Ok(output)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
@@ -75,8 +131,15 @@ impl dyn PlanNode {
         }
     }
 
-    #[allow(unreachable_code)]
+    /// Serialize the plan node and its children to a stream plan proto.
+    ///
+    /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
+    /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
+        if let Some(stream_scan) = self.as_stream_table_scan() {
+            return stream_scan.adhoc_to_stream_prost();
+        }
+
         let node = Some(self.to_stream_prost_body());
         let input = self
             .inputs()
@@ -84,12 +147,13 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost())
             .collect();
         let identity = format!("{:?}", self);
+        // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
             identity,
             node,
-            operator_id: todo!(),
-            pk_indices: todo!(),
+            operator_id: 0,
+            pk_indices: vec![],
         }
     }
 }
@@ -106,27 +170,20 @@ pub use eq_join_predicate::*;
 mod to_prost;
 pub use to_prost::*;
 
-// SOME Intellisense DONT UNDERSTAND THIS.
-//
-// /// Define module for each plan node.
-// macro_rules! def_mod_and_use {
-//   ([], $( { $convention:ident, $name:ident }),*) => {
-//       $(paste! {
-//           mod [<$convention:snake _ $name:snake>];
-//           pub use [<$convention:snake _ $name:snake>]::[<$convention $name>];
-//       })*
-//   }
-// }
-// for_all_plan_nodes! {def_mod_and_use }
-
+mod batch_delete;
 mod batch_exchange;
+mod batch_filter;
+mod batch_hash_agg;
 mod batch_hash_join;
+mod batch_insert;
 mod batch_limit;
 mod batch_project;
 mod batch_seq_scan;
+mod batch_simple_agg;
 mod batch_sort;
-mod batch_sort_merge_join;
+mod batch_values;
 mod logical_agg;
+mod logical_delete;
 mod logical_filter;
 mod logical_insert;
 mod logical_join;
@@ -136,17 +193,29 @@ mod logical_scan;
 mod logical_topn;
 mod logical_values;
 mod stream_exchange;
+mod stream_filter;
+mod stream_hash_agg;
 mod stream_hash_join;
+mod stream_materialize;
 mod stream_project;
-mod stream_table_source;
+mod stream_simple_agg;
+mod stream_source_scan;
+mod stream_table_scan;
+
+pub use batch_delete::BatchDelete;
 pub use batch_exchange::BatchExchange;
+pub use batch_filter::BatchFilter;
+pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
+pub use batch_insert::BatchInsert;
 pub use batch_limit::BatchLimit;
 pub use batch_project::BatchProject;
 pub use batch_seq_scan::BatchSeqScan;
+pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
-pub use batch_sort_merge_join::BatchSortMergeJoin;
+pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
+pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
 pub use logical_join::LogicalJoin;
@@ -156,9 +225,17 @@ pub use logical_scan::LogicalScan;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
+pub use stream_filter::StreamFilter;
+pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
+pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
-pub use stream_table_source::StreamTableSource;
+pub use stream_simple_agg::StreamSimpleAgg;
+pub use stream_source_scan::StreamSourceScan;
+pub use stream_table_scan::StreamTableScan;
+
+use crate::optimizer::property::{WithContext, WithId};
+use crate::session::QueryContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
@@ -169,37 +246,48 @@ pub use stream_table_source::StreamTableSource;
 /// macro_rules! use_plan {
 ///     ([], $({ $convention:ident, $name:ident }),*) => {};
 /// }
-/// frontend::for_all_plan_nodes! { use_plan }
+/// risingwave_frontend::for_all_plan_nodes! { use_plan }
 /// ```
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_plan_nodes {
-    ($macro:tt $(, $x:tt)*) => {
-      $macro! {
-          [$($x),*]
-          ,{ Logical, Agg}
-          ,{ Logical, Filter}
-          ,{ Logical, Project}
-          ,{ Logical, Scan}
-          ,{ Logical, Insert}
-          ,{ Logical, Join}
-          ,{ Logical, Values}
-          ,{ Logical, Limit}
-          ,{ Logical, TopN}
-          // ,{ Logical, Sort} we don't need a LogicalSort, just require the Order
-          ,{ Batch, Project}
-          ,{ Batch, SeqScan}
-          ,{ Batch, HashJoin}
-          ,{ Batch, SortMergeJoin}
-          ,{ Batch, Sort}
-          ,{ Batch, Exchange}
-          ,{ Batch, Limit}
-          ,{ Stream, Project}
-          ,{ Stream, TableSource}
-          ,{ Stream, HashJoin}
-          ,{ Stream, Exchange}
-      }
-  };
+    ($macro:ident $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ Logical, Agg }
+            ,{ Logical, Filter }
+            ,{ Logical, Project }
+            ,{ Logical, Scan }
+            ,{ Logical, Insert }
+            ,{ Logical, Delete }
+            ,{ Logical, Join }
+            ,{ Logical, Values }
+            ,{ Logical, Limit }
+            ,{ Logical, TopN }
+            // ,{ Logical, Sort } we don't need a LogicalSort, just require the Order
+            ,{ Batch, SimpleAgg }
+            ,{ Batch, HashAgg }
+            ,{ Batch, Project }
+            ,{ Batch, Filter }
+            ,{ Batch, Insert }
+            ,{ Batch, Delete }
+            ,{ Batch, SeqScan }
+            ,{ Batch, HashJoin }
+            ,{ Batch, Values }
+            ,{ Batch, Sort }
+            ,{ Batch, Exchange }
+            ,{ Batch, Limit }
+            ,{ Stream, Project }
+            ,{ Stream, Filter }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
+            ,{ Stream, HashJoin }
+            ,{ Stream, Exchange }
+            ,{ Stream, HashAgg }
+            ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
+        }
+    };
 }
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
@@ -207,15 +295,16 @@ macro_rules! for_logical_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Logical, Agg}
-            ,{ Logical, Filter}
-            ,{ Logical, Project}
-            ,{ Logical, Scan}
-            ,{ Logical, Insert}
-            ,{ Logical, Join}
-            ,{ Logical, Values}
-            ,{ Logical, Limit}
-            ,{ Logical, TopN}
+            ,{ Logical, Agg }
+            ,{ Logical, Filter }
+            ,{ Logical, Project }
+            ,{ Logical, Scan }
+            ,{ Logical, Insert }
+            ,{ Logical, Delete }
+            ,{ Logical, Join }
+            ,{ Logical, Values }
+            ,{ Logical, Limit }
+            ,{ Logical, TopN }
             // ,{ Logical, Sort} not sure if we will support Order by clause in subquery/view/MV
             // if we dont support thatk, we don't need LogicalSort, just require the Order at the top of query
         }
@@ -228,13 +317,18 @@ macro_rules! for_batch_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Batch, Project}
-            ,{ Batch, SeqScan}
-            ,{ Batch, HashJoin}
-            ,{ Batch, Limit}
-            ,{ Batch, SortMergeJoin}
-            ,{ Batch, Sort}
-            ,{ Batch, Exchange}
+            ,{ Batch, SimpleAgg }
+            ,{ Batch, HashAgg }
+            ,{ Batch, Project }
+            ,{ Batch, Filter }
+            ,{ Batch, SeqScan }
+            ,{ Batch, HashJoin }
+            ,{ Batch, Values }
+            ,{ Batch, Limit }
+            ,{ Batch, Sort }
+            ,{ Batch, Exchange }
+            ,{ Batch, Insert }
+            ,{ Batch, Delete }
         }
     };
 }
@@ -245,55 +339,53 @@ macro_rules! for_stream_plan_nodes {
     ($macro:tt $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
-            ,{ Stream, Project}
-            ,{ Stream, TableSource}
-            ,{ Stream, HashJoin}
-            ,{ Stream, Exchange}
+            ,{ Stream, Project }
+            ,{ Stream, Filter }
+            ,{ Stream, HashJoin }
+            ,{ Stream, Exchange }
+            ,{ Stream, TableScan }
+            ,{ Stream, SourceScan }
+            ,{ Stream, HashAgg }
+            ,{ Stream, SimpleAgg }
+            ,{ Stream, Materialize }
         }
     };
 }
 
 /// impl PlanNodeType fn for each node.
 macro_rules! enum_plan_node_type {
-  ([], $( { $convention:ident, $name:ident }),*) => {
-    paste!{
-
-      /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
-      #[derive(PartialEq, Debug)]
-      pub enum PlanNodeType{
-        $(  [<$convention $name>] ),*
-      }
-
-      $(impl PlanNode for [<$convention $name>] {
-          fn node_type(&self) -> PlanNodeType{
-            PlanNodeType::[<$convention $name>]
-          }
-        })*
-    }
-  }
-}
-for_all_plan_nodes! {enum_plan_node_type }
-
-pub trait IntoPlanRef {
-    fn into_plan_ref(self) -> PlanRef;
-    fn clone_as_plan_ref(&self) -> PlanRef;
-}
-/// impl fn plan_ref for each node.
-macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            $(impl IntoPlanRef for [<$convention $name>] {
-                fn into_plan_ref(self) -> PlanRef {
-                    std::rc::Rc::new(self)
-                }
-                fn clone_as_plan_ref(&self) -> PlanRef{
-                    self.clone().into_plan_ref()
+            /// each enum value represent a PlanNode struct type, help us to dispatch and downcast
+            #[derive(PartialEq, Debug)]
+            pub enum PlanNodeType {
+                $( [<$convention $name>] ),*
+            }
+
+            $(impl PlanNode for [<$convention $name>] {
+                fn node_type(&self) -> PlanNodeType{
+                    PlanNodeType::[<$convention $name>]
                 }
             })*
         }
     }
 }
-for_all_plan_nodes! {impl_plan_ref }
+for_all_plan_nodes! { enum_plan_node_type }
+
+/// impl fn plan_ref for each node.
+macro_rules! impl_plan_ref {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        paste!{
+            $(impl From<[<$convention $name>]> for PlanRef {
+                fn from(plan: [<$convention $name>]) -> Self {
+                    std::rc::Rc::new(plan)
+                }
+            })*
+        }
+    }
+}
+
+for_all_plan_nodes! { impl_plan_ref }
 
 /// impl plan node downcast fn for each node.
 macro_rules! impl_down_cast_fn {
@@ -308,4 +400,5 @@ macro_rules! impl_down_cast_fn {
         }
     }
 }
-for_all_plan_nodes! {impl_down_cast_fn }
+
+for_all_plan_nodes! { impl_down_cast_fn }

@@ -27,7 +27,7 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructValue};
+use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -130,12 +130,12 @@ impl DataType {
         }
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstDataType> {
-        Ok(ProstDataType {
+    pub fn to_protobuf(&self) -> ProstDataType {
+        ProstDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
             ..Default::default()
-        })
+        }
     }
 
     pub fn data_size(&self) -> DataSize {
@@ -259,42 +259,42 @@ pub trait ScalarRef<'a>:
 /// `{ enum variant name, function suffix name, scalar type, scalar ref type }`
 #[macro_export]
 macro_rules! for_all_scalar_variants {
-  ($macro:tt $(, $x:tt)*) => {
-    $macro! {
-      [$($x),*],
-      { Int16, int16, i16, i16 },
-      { Int32, int32, i32, i32 },
-      { Int64, int64, i64, i64 },
-      { Float32, float32, OrderedF32, OrderedF32 },
-      { Float64, float64, OrderedF64, OrderedF64 },
-      { Utf8, utf8, String, &'scalar str },
-      { Bool, bool, bool, bool },
-      { Decimal, decimal, Decimal, Decimal  },
-      { Interval, interval, IntervalUnit, IntervalUnit },
-      { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
-      { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
-      { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
-      { Struct, struct, StructValue, StructValue }
-    }
-  };
+    ($macro:tt $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*],
+            { Int16, int16, i16, i16 },
+            { Int32, int32, i32, i32 },
+            { Int64, int64, i64, i64 },
+            { Float32, float32, OrderedF32, OrderedF32 },
+            { Float64, float64, OrderedF64, OrderedF64 },
+            { Utf8, utf8, String, &'scalar str },
+            { Bool, bool, bool, bool },
+            { Decimal, decimal, Decimal, Decimal  },
+            { Interval, interval, IntervalUnit, IntervalUnit },
+            { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
+            { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
+            { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
+            { Struct, struct, StructValue, StructRef<'scalar> }
+        }
+    };
 }
 
 /// Define `ScalarImpl` and `ScalarRefImpl` with macro.
 macro_rules! scalar_impl_enum {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-    /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
-    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum ScalarImpl {
-      $( $variant_name($scalar) ),*
-    }
+    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        /// `ScalarImpl` embeds all possible scalars in the evaluation framework.
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum ScalarImpl {
+            $( $variant_name($scalar) ),*
+        }
 
-    /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
-    /// framework.
-    #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
-    pub enum ScalarRefImpl<'scalar> {
-      $( $variant_name($scalar_ref) ),*
-    }
-  };
+        /// `ScalarRefImpl` embeds all possible scalar references in the evaluation
+        /// framework.
+        #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        pub enum ScalarRefImpl<'scalar> {
+            $( $variant_name($scalar_ref) ),*
+        }
+    };
 }
 
 for_all_scalar_variants! { scalar_impl_enum }
@@ -388,16 +388,16 @@ impl ToOwnedDatum for DatumRef<'_> {
 /// `for_all_native_types` includes all native variants of our scalar types.
 #[macro_export]
 macro_rules! for_all_native_types {
-($macro:tt $(, $x:tt)*) => {
-    $macro! {
-      [$($x),*],
-      { i16, Int16 },
-      { i32, Int32 },
-      { i64, Int64 },
-      { $crate::types::OrderedF32, Float32 },
-      { $crate::types::OrderedF64, Float64 }
-    }
-  };
+    ($macro:tt $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*],
+            { i16, Int16 },
+            { i32, Int32 },
+            { i64, Int64 },
+            { $crate::types::OrderedF32, Float32 },
+            { $crate::types::OrderedF64, Float64 }
+        }
+    };
 }
 
 /// `impl_convert` implements several conversions for `Scalar`.
@@ -406,75 +406,75 @@ macro_rules! for_all_native_types {
 /// * `&ScalarImpl -> &Scalar` with `impl.as_int16()`.
 /// * `ScalarImpl -> Scalar` with `impl.into_int16()`.
 macro_rules! impl_convert {
-  ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-    $(
-      impl From<$scalar> for ScalarImpl {
-        fn from(val: $scalar) -> Self {
-          ScalarImpl::$variant_name(val)
-        }
-      }
-
-      impl TryFrom<ScalarImpl> for $scalar {
-        type Error = RwError;
-
-        fn try_from(val: ScalarImpl) -> Result<Self> {
-          match val {
-            ScalarImpl::$variant_name(scalar) => Ok(scalar),
-            other_scalar => Err(ErrorCode::InternalError(
-              format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
-            ).into())
-          }
-        }
-      }
-
-      impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
-        fn from(val: $scalar_ref) -> Self {
-          ScalarRefImpl::$variant_name(val)
-        }
-      }
-
-      impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
-        type Error = RwError;
-
-        fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
-          match val {
-            ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
-            other_scalar => Err(ErrorCode::InternalError(
-              format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
-            ).into())
-          }
-        }
-      }
-
-      paste! {
-        impl ScalarImpl {
-          pub fn [<as_ $suffix_name>](&self) -> &$scalar {
-            match self {
-              Self::$variant_name(ref scalar) => scalar,
-              other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        $(
+            impl From<$scalar> for ScalarImpl {
+                fn from(val: $scalar) -> Self {
+                    ScalarImpl::$variant_name(val)
+                }
             }
-          }
 
-          pub fn [<into_ $suffix_name>](self) -> $scalar {
-            match self {
-              Self::$variant_name(scalar) => scalar,
-              other_scalar =>  panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
-            }
-          }
-        }
+            impl TryFrom<ScalarImpl> for $scalar {
+                type Error = RwError;
 
-        impl <'scalar> ScalarRefImpl<'scalar> {
-          // Note that this conversion consume self.
-          pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
-            match self {
-              Self::$variant_name(inner) => inner,
-              other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                fn try_from(val: ScalarImpl) -> Result<Self> {
+                    match val {
+                        ScalarImpl::$variant_name(scalar) => Ok(scalar),
+                        other_scalar => Err(ErrorCode::InternalError(
+                            format!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+                        ).into())
+                    }
+                }
             }
-          }
+
+            impl <'scalar> From<$scalar_ref> for ScalarRefImpl<'scalar> {
+                fn from(val: $scalar_ref) -> Self {
+                    ScalarRefImpl::$variant_name(val)
+                }
+            }
+
+            impl <'scalar> TryFrom<ScalarRefImpl<'scalar>> for $scalar_ref {
+                type Error = RwError;
+
+                fn try_from(val: ScalarRefImpl<'scalar>) -> Result<Self> {
+                    match val {
+                        ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
+                        other_scalar => Err(ErrorCode::InternalError(
+                            format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                        ).into())
+                    }
+                }
+            }
+
+        paste! {
+            impl ScalarImpl {
+            pub fn [<as_ $suffix_name>](&self) -> &$scalar {
+                match self {
+                Self::$variant_name(ref scalar) => scalar,
+                other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+                }
+            }
+
+            pub fn [<into_ $suffix_name>](self) -> $scalar {
+                match self {
+                Self::$variant_name(scalar) => scalar,
+                other_scalar =>  panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+                }
+            }
+            }
+
+            impl <'scalar> ScalarRefImpl<'scalar> {
+            // Note that this conversion consume self.
+            pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
+                match self {
+                Self::$variant_name(inner) => inner,
+                other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                }
+            }
+            }
         }
-      }
-    )*
-  };
+        )*
+    };
 }
 
 for_all_scalar_variants! { impl_convert }
@@ -492,29 +492,29 @@ impl From<f64> for ScalarImpl {
 }
 
 macro_rules! impl_scalar_impl_ref_conversion {
- ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-   impl ScalarImpl {
-     /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
-     pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
-       match self {
-         $(
-           Self::$variant_name(inner) => ScalarRefImpl::<'_>::$variant_name(inner.as_scalar_ref())
-         ), *
-       }
-     }
-   }
+    ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+        impl ScalarImpl {
+            /// Converts [`ScalarImpl`] to [`ScalarRefImpl`]
+            pub fn as_scalar_ref_impl(&self) -> ScalarRefImpl<'_> {
+                match self {
+                    $(
+                        Self::$variant_name(inner) => ScalarRefImpl::<'_>::$variant_name(inner.as_scalar_ref())
+                    ), *
+                }
+            }
+        }
 
-   impl<'a> ScalarRefImpl<'a> {
-     /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
-     pub fn into_scalar_impl(self) -> ScalarImpl {
-       match self {
-         $(
-           Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
-         ), *
-       }
-     }
-   }
-};
+        impl<'a> ScalarRefImpl<'a> {
+            /// Converts [`ScalarRefImpl`] to [`ScalarImpl`]
+            pub fn into_scalar_impl(self) -> ScalarImpl {
+                match self {
+                    $(
+                        Self::$variant_name(inner) => ScalarImpl::$variant_name(inner.to_owned_scalar())
+                    ), *
+                }
+            }
+        }
+    };
 }
 
 for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
@@ -525,22 +525,22 @@ for_all_scalar_variants! { impl_scalar_impl_ref_conversion }
 impl std::hash::Hash for ScalarImpl {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         macro_rules! impl_all_hash {
-      ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
-        match $self {
-          $( Self::$scalar_type(inner) => {
-            inner.hash_wrapper(state);
-          }, )*
-          Self::Bool(b) => b.hash(state),
-          Self::Utf8(s) => s.hash(state),
-          Self::Decimal(decimal) => decimal.hash(state),
-          Self::Interval(interval) => interval.hash(state),
-          Self::NaiveDate(naivedate) => naivedate.hash(state),
-          Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
-          Self::NaiveTime(naivetime) => naivetime.hash(state),
-          Self::Struct(v) => v.hash(state),
+            ([$self:ident], $({ $variant_type:ty, $scalar_type:ident } ),*) => {
+                match $self {
+                    $( Self::$scalar_type(inner) => {
+                        inner.hash_wrapper(state);
+                    }, )*
+                    Self::Bool(b) => b.hash(state),
+                    Self::Utf8(s) => s.hash(state),
+                    Self::Decimal(decimal) => decimal.hash(state),
+                    Self::Interval(interval) => interval.hash(state),
+                    Self::NaiveDate(naivedate) => naivedate.hash(state),
+                    Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
+                    Self::NaiveTime(naivetime) => naivetime.hash(state),
+                    Self::Struct(v) => v.hash(state),
+                }
+            };
         }
-      };
-    }
         for_all_native_types! { impl_all_hash, self }
     }
 }
@@ -548,14 +548,14 @@ impl std::hash::Hash for ScalarImpl {
 impl ToString for ScalarImpl {
     fn to_string(&self) -> String {
         macro_rules! impl_to_string {
-      ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        match self {
-          $( Self::$variant_name(ref inner) => {
-            inner.to_string()
-          }, )*
+            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(ref inner) => {
+                        inner.to_string()
+                    }, )*
+                }
+            }
         }
-      }
-    }
 
         for_all_scalar_variants! { impl_to_string }
     }
@@ -564,14 +564,14 @@ impl ToString for ScalarImpl {
 impl ToString for ScalarRefImpl<'_> {
     fn to_string(&self) -> String {
         macro_rules! impl_to_string {
-      ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        match self {
-          $( Self::$variant_name(inner) => {
-            inner.to_string()
-          }, )*
+            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match self {
+                    $( Self::$variant_name(inner) => {
+                        inner.to_string()
+                    }, )*
+                }
+            }
         }
-      }
-    }
 
         for_all_scalar_variants! { impl_to_string }
     }

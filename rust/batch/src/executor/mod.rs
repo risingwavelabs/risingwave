@@ -19,6 +19,7 @@ use top_n::*;
 
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
+pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
 pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
@@ -31,6 +32,7 @@ use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
+mod delete;
 mod drop_stream;
 mod drop_table;
 mod filter;
@@ -85,6 +87,7 @@ pub struct ExecutorBuilder<'a> {
     plan_node: &'a PlanNode,
     task_id: &'a TaskId,
     env: BatchEnvironment,
+    epoch: u64,
 }
 
 macro_rules! build_executor {
@@ -100,11 +103,17 @@ macro_rules! build_executor {
 }
 
 impl<'a> ExecutorBuilder<'a> {
-    pub fn new(plan_node: &'a PlanNode, task_id: &'a TaskId, env: BatchEnvironment) -> Self {
+    pub fn new(
+        plan_node: &'a PlanNode,
+        task_id: &'a TaskId,
+        env: BatchEnvironment,
+        epoch: u64,
+    ) -> Self {
         Self {
             plan_node,
             task_id,
             env,
+            epoch,
         }
     }
 
@@ -121,32 +130,33 @@ impl<'a> ExecutorBuilder<'a> {
 
     #[must_use]
     pub fn clone_for_plan(&self, plan_node: &'a PlanNode) -> Self {
-        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone())
+        ExecutorBuilder::new(plan_node, self.task_id, self.env.clone(), self.epoch)
     }
 
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
-          NodeBody::CreateTable => CreateTableExecutor,
-          NodeBody::RowSeqScan => RowSeqScanExecutor,
-          NodeBody::Insert => InsertExecutor,
-          NodeBody::DropTable => DropTableExecutor,
-          NodeBody::Exchange => ExchangeExecutor,
-          NodeBody::Filter => FilterExecutor,
-          NodeBody::Project => ProjectionExecutor,
-          NodeBody::SortAgg => SortAggExecutor,
-          NodeBody::OrderBy => OrderByExecutor,
-          NodeBody::CreateSource => CreateSourceExecutor,
-          NodeBody::SourceScan => StreamScanExecutor,
-          NodeBody::TopN => TopNExecutor,
-          NodeBody::Limit => LimitExecutor,
-          NodeBody::Values => ValuesExecutor,
-          NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
-          NodeBody::HashJoin => HashJoinExecutorBuilder,
-          NodeBody::SortMergeJoin => SortMergeJoinExecutor,
-          NodeBody::DropSource => DropStreamExecutor,
-          NodeBody::HashAgg => HashAggExecutorBuilder,
-          NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-          NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
+            NodeBody::CreateTable => CreateTableExecutor,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
+            NodeBody::DropTable => DropTableExecutor,
+            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Filter => FilterExecutor,
+            NodeBody::Project => ProjectionExecutor,
+            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::CreateSource => CreateSourceExecutor,
+            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::TopN => TopNExecutor,
+            NodeBody::Limit => LimitExecutor,
+            NodeBody::Values => ValuesExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::DropSource => DropStreamExecutor,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))
@@ -178,7 +188,8 @@ mod tests {
             stage_id: 1,
             query_id: "test_query_id".to_string(),
         };
-        let builder = ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test());
+        let builder =
+            ExecutorBuilder::new(&plan_node, task_id, BatchEnvironment::for_test(), u64::MAX);
         let child_plan = &PlanNode {
             ..Default::default()
         };

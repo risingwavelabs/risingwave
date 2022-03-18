@@ -6,40 +6,32 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.metanode";
 option optimize_for = SPEED;
 
+import "catalog.proto";
 import "common.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
+// will be deprecated and replaced by catalog.Table and catalog.Source
 message Table {
-  enum DistributionType {
-    INVALID = 0;
-    ALL = 1;
-    KEY = 2;
-  }
   plan.TableRefId table_ref_id = 1;
   string table_name = 2;
   repeated plan.ColumnDesc column_descs = 3;
-  bool is_materialized_view = 4;
-  bool is_source = 5;
-  bool append_only = 6;
-  repeated uint32 pk_columns = 7;
-  DistributionType dist_type = 8;
-  map<string, string> properties = 9;
-  string row_format = 10;
-  string row_schema_location = 11;
-  // Fields for materialized view
-  repeated plan.ColumnOrder column_orders = 12;
-  bool is_associated = 13;
-  uint64 version = 14;
-  repeated plan.TableRefId dependent_tables = 15;
+  uint64 version = 4;
+  oneof info {
+    plan.StreamSourceInfo stream_source = 5;
+    plan.TableSourceInfo table_source = 6;
+    plan.MaterializedViewInfo materialized_view = 7;
+  }
 }
 
+// will be deprecated and replaced by catalog.Database
 message Database {
   plan.DatabaseRefId database_ref_id = 1;
   string database_name = 2;
   uint64 version = 3;
 }
 
+// will be deprecated and replaced by catalog.Schema
 message Schema {
   plan.SchemaRefId schema_ref_id = 1;
   string schema_name = 2;
@@ -60,7 +52,7 @@ service EpochService {
 }
 
 // Below for catalog service.
-
+// will be deprecated and replaced by catalog.CatalogService
 message CreateRequest {
   uint32 node_id = 1;
   oneof catalog_body {
@@ -70,12 +62,14 @@ message CreateRequest {
   }
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message CreateResponse {
   common.Status status = 1;
   int32 id = 2;
   uint64 version = 3;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message DropRequest {
   uint32 node_id = 1;
   oneof catalog_id {
@@ -85,25 +79,30 @@ message DropRequest {
   }
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message DropResponse {
   common.Status status = 1;
+  uint64 version = 2;
 }
 
-message GetCatalogRequest {
-  uint32 node_id = 1;
-}
+// will be deprecated and replaced by NotificationService
+message GetCatalogRequest {}
 
+// will be deprecated and replaced by SubscribeFrontendSnapshot
 message Catalog {
-  repeated Database databases = 1;
-  repeated Schema schemas = 2;
-  repeated Table tables = 3;
+  uint64 version = 1;
+  repeated Database databases = 2;
+  repeated Schema schemas = 3;
+  repeated Table tables = 4;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message GetCatalogResponse {
   common.Status status = 1;
   Catalog catalog = 2;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 service CatalogService {
   rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
   rpc Create(CreateRequest) returns (CreateResponse);
@@ -125,12 +124,22 @@ service HeartbeatService {
 }
 
 // Below for stream manager.
+
+// Fragments of a Materialized View
 message TableFragments {
-  enum State {
-    CREATING = 0;
-    CREATED = 1;
-    DROPPING = 2;
-    DROPPED = 3;
+  // Current state of actor
+  enum ActorState {
+    // Initial state after creation
+    INACTIVE = 0;
+    // Running normally
+    RUNNING = 1;
+  }
+  // Runtime information of an actor
+  message ActorStatus {
+    // Current on which node
+    uint32 node_id = 1;
+    // Current state
+    ActorState state = 2;
   }
   message Fragment {
     enum FragmentType {
@@ -138,14 +147,18 @@ message TableFragments {
       SINK = 1;
       OTHERS = 2;
     }
+    enum FragmentDistributionType {
+      SINGLE = 0;
+      HASH = 1;
+    }
     uint32 fragment_id = 1;
     FragmentType fragment_type = 2;
-    repeated stream_plan.StreamActor actors = 3;
+    FragmentDistributionType distribution_type = 3;
+    repeated stream_plan.StreamActor actors = 4;
   }
   plan.TableRefId table_ref_id = 1;
-  State state = 2;
-  map<uint32, Fragment> fragments = 3;
-  map<uint32, uint32> actor_locations = 4;
+  map<uint32, Fragment> fragments = 2;
+  map<uint32, ActorStatus> actor_status = 3;
 }
 
 // TODO: remove this when dashboard refactored.
@@ -154,6 +167,7 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message CreateMaterializedViewRequest {
   uint32 node_id = 1;
   // TODO: remove this, do catalog init in Meta and return in response.
@@ -161,15 +175,18 @@ message CreateMaterializedViewRequest {
   stream_plan.StreamNode stream_node = 3;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message CreateMaterializedViewResponse {
   common.Status status = 1;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message DropMaterializedViewRequest {
   uint32 node_id = 1;
   plan.TableRefId table_ref_id = 2;
 }
 
+// will be deprecated and replaced by catalog.CatalogService
 message DropMaterializedViewResponse {
   common.Status status = 1;
 }
@@ -181,8 +198,9 @@ message FlushResponse {
 }
 
 service StreamManagerService {
-  // TODO: migration mv catalog creation/drop in.
+  // will be deprecated and replaced by catalog.CreateMaterializedSource and catalog.CreateMaterializedView
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
+  // will be deprecated and replaced by catalog.DropMaterializedSource and catalog.DropMaterializedView
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
@@ -197,9 +215,16 @@ message AddWorkerNodeResponse {
   common.WorkerNode node = 2;
 }
 
+message ActivateWorkerNodeRequest {
+  common.HostAddress host = 1;
+}
+
+message ActivateWorkerNodeResponse {
+  common.Status status = 1;
+}
+
 message DeleteWorkerNodeRequest {
-  common.WorkerType worker_type = 1;
-  common.WorkerNode node = 2;
+  common.HostAddress host = 1;
 }
 
 message DeleteWorkerNodeResponse {
@@ -208,6 +233,8 @@ message DeleteWorkerNodeResponse {
 
 message ListAllNodesRequest {
   common.WorkerType worker_type = 1;
+  // Whether to include nodes still starting
+  bool include_starting_nodes = 2;
 }
 
 message ListAllNodesResponse {
@@ -217,6 +244,7 @@ message ListAllNodesResponse {
 
 service ClusterService {
   rpc AddWorkerNode(AddWorkerNodeRequest) returns (AddWorkerNodeResponse);
+  rpc ActivateWorkerNode(ActivateWorkerNodeRequest) returns (ActivateWorkerNodeResponse);
   rpc DeleteWorkerNode(DeleteWorkerNodeRequest) returns (DeleteWorkerNodeResponse);
   rpc ListAllNodes(ListAllNodesRequest) returns (ListAllNodesResponse);
 }
@@ -227,20 +255,39 @@ message SubscribeRequest {
   common.HostAddress host = 2;
 }
 
+message MetaSnapshot {
+  repeated common.WorkerNode nodes = 1;
+  repeated catalog.Database database = 2;
+  repeated catalog.Schema schema = 3;
+  repeated catalog.Source source = 4;
+  repeated catalog.Table table = 5;
+  repeated catalog.VirtualTable view = 6;
+}
+
 message SubscribeResponse {
   enum Operation {
     INVALID = 0;
     ADD = 1;
     DELETE = 2;
     UPDATE = 3;
+    SNAPSHOT = 4;
   }
   common.Status status = 1;
   Operation operation = 2;
+  uint64 version = 3;
   oneof info {
-    common.WorkerNode node = 3;
-    Database database = 4;
-    Schema schema = 5;
-    Table table = 6;
+    common.WorkerNode node = 4;
+    // will be deprecated and replaced by database_v2
+    Database database = 5;
+    // will be deprecated and replaced by schema_v2
+    Schema schema = 6;
+    // will be deprecated and replaced by table_v2
+    Table table = 7;
+    catalog.Database database_v2 = 8;
+    catalog.Schema schema_v2 = 9;
+    catalog.Table table_v2 = 10;
+    catalog.Source source = 11;
+    MetaSnapshot fe_snapshot = 12;
   }
 }
 

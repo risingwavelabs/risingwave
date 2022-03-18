@@ -11,8 +11,8 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, test_key,
-        test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_iterator_test_sstable, iterator_test_key_of,
+        iterator_test_value_of, mock_sstable_store, test_key, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::sstable::SSTableIterator;
@@ -24,7 +24,9 @@ mod test {
                 TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1))
-                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
+                    .map_value(move |id, x| {
+                        iterator_test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    })
                     .finish()
             })
             .unzip();
@@ -100,11 +102,19 @@ mod test {
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table0 =
+            gen_iterator_test_sstable(0, default_builder_opt_for_test(), sstable_store.clone())
+                .await;
+        let table1 =
+            gen_iterator_test_sstable(1, default_builder_opt_for_test(), sstable_store.clone())
+                .await;
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(SSTableIterator::new(Arc::new(table0))),
-            Box::new(SSTableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(
+                Arc::new(table0),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(Arc::new(table1), sstable_store)),
         ];
 
         let mut mi = MergeIterator::new(iters);

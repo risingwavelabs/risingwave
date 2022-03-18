@@ -1,9 +1,8 @@
-use std::marker::PhantomData;
-
 use risingwave_pb::expr::expr_node::Type;
 
 use crate::array::{
-    Array, BoolArray, DecimalArray, I32Array, NaiveDateArray, NaiveDateTimeArray, Utf8Array,
+    Array, BoolArray, DecimalArray, I32Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray,
+    Utf8Array,
 };
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
@@ -16,6 +15,7 @@ use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
+use crate::vector_op::tumble::tumble_start;
 
 /// A placeholder function that return bool in [`gen_binary_expr_atm`]
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
@@ -37,50 +37,66 @@ pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
 /// * $i1: left array type
 /// * $i2: right array type
 /// * $cast: The cast type in that the operation will calculate
-/// * $func: The scalar function for expression, it's a generic function and specialized by the type
-///   of `$i1, $i2, $cast`
+/// * $The scalar function for expression, it's a generic function and specialized by the type of
+///   `$i1, $i2, $cast`
 macro_rules! gen_atm_impl {
-  ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident} ),*) => {
-    match ($l.return_type(), $r.return_type()) {
-      $(
-          ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-            Box::new(BinaryExpression::< $i1! { type_array },  $i2! { type_array }, $cast! { type_array }, _> {
-              expr_ia1: $l,
-              expr_ia2: $r,
-              return_type: $ret,
-              func: $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
-              _phantom: PhantomData,
-            })
-          }
-      ),*
-      _ => {
-        unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
-      }
-    }
-  };
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident} ),*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    Box::new(
+                        BinaryExpression::<
+                            $i1! { type_array },
+                            $i2! { type_array },
+                            $cast! { type_array },
+                            _
+                        >::new(
+                            $l,
+                            $r,
+                            $ret,
+                            $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
+                        )
+                    )
+                },
+            )*
+            _ => {
+                unimplemented!("The expression ({:?}, {:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type(), $ret)
+            }
+        }
+    };
 }
 
 /// This macro helps create comparison expression. Its output array is a bool array
 /// Similar to `gen_atm_impl`.
 macro_rules! gen_cmp_impl {
-  ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func: ident} ),*) => {
-    match ($l.return_type(), $r.return_type()) {
-      $(
-          ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
-            Box::new(BinaryExpression::< $i1! { type_array },  $i2! { type_array }, BoolArray, _> {
-              expr_ia1: $l,
-              expr_ia2: $r,
-              return_type: $ret,
-              func: $func::< <$i1! { type_array } as Array>::OwnedItem, <$i2! { type_array } as Array>::OwnedItem, <$cast! { type_array } as Array>::OwnedItem>,
-              _phantom: PhantomData,
-            })
-          }
-      ),*
-      _ => {
-        unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
-      }
-    }
-  };
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident} ),*) => {
+        match ($l.return_type(), $r.return_type()) {
+            $(
+                ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
+                    Box::new(
+                        BinaryExpression::<
+                            $i1! { type_array },
+                            $i2! { type_array },
+                            BoolArray,
+                            _
+                        >::new(
+                            $l,
+                            $r,
+                            $ret,
+                            $func::<
+                                <$i1! { type_array } as Array>::OwnedItem,
+                                <$i2! { type_array } as Array>::OwnedItem,
+                                <$cast! { type_array } as Array>::OwnedItem
+                            >,
+                        )
+                    )
+                }
+            ),*
+            _ => {
+                unimplemented!("The expression ({:?}, {:?}) using vectorized expression framework is not supported yet!", $l.return_type(), $r.return_type())
+            }
+        }
+    };
 }
 
 /// Based on the data type of `$l`, `$r`, `$ret`, return corresponding expression struct with scalar
@@ -95,74 +111,62 @@ macro_rules! gen_binary_expr_cmp {
     ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
-                    expr_ia1: $l,
-                    expr_ia2: $r,
-                    return_type: $ret,
-                    func: $str_f,
-                    _phantom: PhantomData,
-                })
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
+                    $l, $r, $ret, $str_f,
+                ))
             }
             (DataType::Varchar, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
-                    expr_ia1: $l,
-                    expr_ia2: $r,
-                    return_type: $ret,
-                    func: $str_f,
-                    _phantom: PhantomData,
-                })
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
+                    $l, $r, $ret, $str_f,
+                ))
             }
             (DataType::Char, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
-                    expr_ia1: $l,
-                    expr_ia2: $r,
-                    return_type: $ret,
-                    func: $str_f,
-                    _phantom: PhantomData,
-                })
+                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
+                    $l, $r, $ret, $str_f,
+                ))
             }
             _ => {
                 $macro! {
-                  [$l, $r, $ret],
-                  { int16, int16, int16, $general_f },
-                  { int16, int32, int32, $general_f },
-                  { int16, int64, int64, $general_f },
-                  { int16, float32, float64, $general_f },
-                  { int16, float64, float64, $general_f },
-                  { int32, int16, int32, $general_f },
-                  { int32, int32, int32, $general_f },
-                  { int32, int64, int64, $general_f },
-                  { int32, float32, float64, $general_f },
-                  { int32, float64, float64, $general_f },
-                  { int64, int16,int64, $general_f },
-                  { int64, int32,int64, $general_f },
-                  { int64, int64, int64, $general_f },
-                  { int64, float32, float64 , $general_f},
-                  { int64, float64, float64, $general_f },
-                  { float32, int16, float64, $general_f },
-                  { float32, int32, float64, $general_f },
-                  { float32, int64, float64 , $general_f},
-                  { float32, float32, float32, $general_f },
-                  { float32, float64, float64, $general_f },
-                  { float64, int16, float64, $general_f },
-                  { float64, int32, float64, $general_f },
-                  { float64, int64, float64, $general_f },
-                  { float64, float32, float64, $general_f },
-                  { float64, float64, float64, $general_f },
-                  { decimal, int16, decimal, $general_f },
-                  { decimal, int32, decimal, $general_f },
-                  { decimal, int64, decimal, $general_f },
-                  { decimal, float32, float64, $general_f },
-                  { decimal, float64, float64, $general_f },
-                  { int16, decimal, decimal, $general_f },
-                  { int32, decimal, decimal, $general_f },
-                  { int64, decimal, decimal, $general_f },
-                  { decimal, decimal, decimal, $general_f },
-                  { float32, decimal, float64, $general_f },
-                  { float64, decimal, float64, $general_f },
-                  { timestamp, timestamp, timestamp, $general_f },
-                  { date, date, date, $general_f },
-                  { boolean, boolean, boolean, $general_f }
+                    [$l, $r, $ret],
+                    { int16, int16, int16, $general_f },
+                    { int16, int32, int32, $general_f },
+                    { int16, int64, int64, $general_f },
+                    { int16, float32, float64, $general_f },
+                    { int16, float64, float64, $general_f },
+                    { int32, int16, int32, $general_f },
+                    { int32, int32, int32, $general_f },
+                    { int32, int64, int64, $general_f },
+                    { int32, float32, float64, $general_f },
+                    { int32, float64, float64, $general_f },
+                    { int64, int16,int64, $general_f },
+                    { int64, int32,int64, $general_f },
+                    { int64, int64, int64, $general_f },
+                    { int64, float32, float64 , $general_f},
+                    { int64, float64, float64, $general_f },
+                    { float32, int16, float64, $general_f },
+                    { float32, int32, float64, $general_f },
+                    { float32, int64, float64 , $general_f},
+                    { float32, float32, float32, $general_f },
+                    { float32, float64, float64, $general_f },
+                    { float64, int16, float64, $general_f },
+                    { float64, int32, float64, $general_f },
+                    { float64, int64, float64, $general_f },
+                    { float64, float32, float64, $general_f },
+                    { float64, float64, float64, $general_f },
+                    { decimal, int16, decimal, $general_f },
+                    { decimal, int32, decimal, $general_f },
+                    { decimal, int64, decimal, $general_f },
+                    { decimal, float32, float64, $general_f },
+                    { decimal, float64, float64, $general_f },
+                    { int16, decimal, decimal, $general_f },
+                    { int32, decimal, decimal, $general_f },
+                    { int64, decimal, decimal, $general_f },
+                    { decimal, decimal, decimal, $general_f },
+                    { float32, decimal, float64, $general_f },
+                    { float64, decimal, float64, $general_f },
+                    { timestamp, timestamp, timestamp, $general_f },
+                    { date, date, date, $general_f },
+                    { boolean, boolean, boolean, $general_f }
                 }
             }
         }
@@ -189,47 +193,47 @@ macro_rules! gen_binary_expr_atm {
         $ret:expr
     ) => {
         $macro! {
-          [$l, $r, $ret],
-          { int16, int16, int16, $general_f },
-          { int16, int32, int32, $general_f },
-          { int16, int64, int64, $general_f },
-          { int16, float32, float64, $general_f },
-          { int16, float64, float64, $general_f },
-          { int32, int16, int32, $general_f },
-          { int32, int32, int32, $general_f },
-          { int32, int64, int64, $general_f },
-          { int32, float32, float64, $general_f },
-          { int32, float64, float64, $general_f },
-          { int64, int16,int64, $general_f },
-          { int64, int32,int64, $general_f },
-          { int64, int64, int64, $general_f },
-          { int64, float32, float64 , $general_f},
-          { int64, float64, float64, $general_f },
-          { float32, int16, float64, $general_f },
-          { float32, int32, float64, $general_f },
-          { float32, int64, float64 , $general_f},
-          { float32, float32, float32, $general_f },
-          { float32, float64, float64, $general_f },
-          { float64, int16, float64, $general_f },
-          { float64, int32, float64, $general_f },
-          { float64, int64, float64, $general_f },
-          { float64, float32, float64, $general_f },
-          { float64, float64, float64, $general_f },
-          { decimal, int16, decimal, $general_f },
-          { decimal, int32, decimal, $general_f },
-          { decimal, int64, decimal, $general_f },
-          { decimal, float32, decimal, $general_f },
-          { decimal, float64, decimal, $general_f },
-          { int16, decimal, decimal, $general_f },
-          { int32, decimal, decimal, $general_f },
-          { int64, decimal, decimal, $general_f },
-          { decimal, decimal, decimal, $general_f },
-          { float32, decimal, float64, $general_f },
-          { float64, decimal, float64, $general_f },
-          { timestamp, timestamp, interval, $timestamp_timestamp_f },
-          { date, date, int32, $date_date_f },
-          { date, interval, timestamp, $date_interval_f },
-          { interval, date, timestamp, $interval_date_f }
+            [$l, $r, $ret],
+            { int16, int16, int16, $general_f },
+            { int16, int32, int32, $general_f },
+            { int16, int64, int64, $general_f },
+            { int16, float32, float64, $general_f },
+            { int16, float64, float64, $general_f },
+            { int32, int16, int32, $general_f },
+            { int32, int32, int32, $general_f },
+            { int32, int64, int64, $general_f },
+            { int32, float32, float64, $general_f },
+            { int32, float64, float64, $general_f },
+            { int64, int16,int64, $general_f },
+            { int64, int32,int64, $general_f },
+            { int64, int64, int64, $general_f },
+            { int64, float32, float64 , $general_f},
+            { int64, float64, float64, $general_f },
+            { float32, int16, float64, $general_f },
+            { float32, int32, float64, $general_f },
+            { float32, int64, float64 , $general_f},
+            { float32, float32, float32, $general_f },
+            { float32, float64, float64, $general_f },
+            { float64, int16, float64, $general_f },
+            { float64, int32, float64, $general_f },
+            { float64, int64, float64, $general_f },
+            { float64, float32, float64, $general_f },
+            { float64, float64, float64, $general_f },
+            { decimal, int16, decimal, $general_f },
+            { decimal, int32, decimal, $general_f },
+            { decimal, int64, decimal, $general_f },
+            { decimal, float32, decimal, $general_f },
+            { decimal, float64, decimal, $general_f },
+            { int16, decimal, decimal, $general_f },
+            { int32, decimal, decimal, $general_f },
+            { int64, decimal, decimal, $general_f },
+            { decimal, decimal, decimal, $general_f },
+            { float32, decimal, float64, $general_f },
+            { float64, decimal, float64, $general_f },
+            { timestamp, timestamp, interval, $timestamp_timestamp_f },
+            { date, date, int32, $date_date_f },
+            { date, interval, timestamp, $date_interval_f },
+            { interval, date, timestamp, $interval_date_f }
         }
     };
 }
@@ -237,25 +241,19 @@ macro_rules! gen_binary_expr_atm {
 fn build_extract_expr(ret: DataType, l: BoxedExpression, r: BoxedExpression) -> BoxedExpression {
     match r.return_type() {
         DataType::Date => Box::new(
-            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _> {
-                expr_ia1: l,
-                expr_ia2: r,
-                return_type: ret,
-                func: extract_from_date,
-                _phantom: PhantomData,
-            },
+            BinaryExpression::<Utf8Array, NaiveDateArray, DecimalArray, _>::new(
+                l,
+                r,
+                ret,
+                extract_from_date,
+            ),
         ),
-        DataType::Timestamp => {
-            Box::new(
-                BinaryExpression::<Utf8Array, NaiveDateTimeArray, DecimalArray, _> {
-                    expr_ia1: l,
-                    expr_ia2: r,
-                    return_type: ret,
-                    func: extract_from_timestamp,
-                    _phantom: PhantomData,
-                },
-            )
-        }
+        DataType::Timestamp => Box::new(BinaryExpression::<
+            Utf8Array,
+            NaiveDateTimeArray,
+            DecimalArray,
+            _,
+        >::new(l, r, ret, extract_from_timestamp)),
         _ => {
             unimplemented!("Extract ( {:?} ) is not supported yet!", r.return_type())
         }
@@ -311,14 +309,22 @@ pub fn new_binary_expr(
         }
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(
-            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _> {
-                expr_ia1: l,
-                expr_ia2: r,
-                return_type: ret,
-                func: round_digits,
-                _phantom: PhantomData,
-            },
+            BinaryExpression::<DecimalArray, I32Array, DecimalArray, _>::new(
+                l,
+                r,
+                ret,
+                round_digits,
+            ),
         ),
+        Type::TumbleStart => Box::new(BinaryExpression::<
+            NaiveDateTimeArray,
+            IntervalArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(l, r, ret, tumble_start)),
+        Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
+            l, r, ret, position,
+        )),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
@@ -333,27 +339,12 @@ pub fn new_like_default(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _> {
+    Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: like_default,
-        _phantom: PhantomData,
-    })
-}
-
-pub fn new_position_expr(
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
-    return_type: DataType,
-) -> BoxedExpression {
-    Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _> {
-        expr_ia1,
-        expr_ia2,
-        return_type,
-        func: position,
-        _phantom: PhantomData,
-    })
+        like_default,
+    ))
 }
 
 #[cfg(test)]

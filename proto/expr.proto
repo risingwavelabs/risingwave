@@ -34,6 +34,7 @@ message ExprNode {
     // date functions
     EXTRACT = 101;
     PG_SLEEP = 102;
+    TUMBLE_START = 103;
     // other functions
     CAST = 201;
     SUBSTR = 202;
@@ -102,6 +103,7 @@ message AggCall {
     COUNT = 4;
     AVG = 5;
     STRING_AGG = 6;
+    SINGLE_VALUE = 7;
   }
   message Arg {
     InputRefExpr input = 1;

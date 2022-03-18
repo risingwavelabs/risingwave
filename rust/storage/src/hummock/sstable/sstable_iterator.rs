@@ -4,10 +4,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, SSTable, SeekPos};
+use super::{BlockIterator, SeekPos, Sstable};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
+use crate::hummock::SstableStoreRef;
 
 pub trait SSTableIteratorBase: HummockIterator {}
 
@@ -15,7 +16,7 @@ pub trait SSTableIteratorType {
     type SSTableIterator: SSTableIteratorBase;
     const DIRECTION: usize;
 
-    fn new(table: Arc<SSTable>) -> Self::SSTableIterator;
+    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator;
 }
 
 /// Iterates on a table.
@@ -26,16 +27,19 @@ pub struct SSTableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    /// Reference to the table
-    pub table: Arc<SSTable>,
+    /// Reference to the sst
+    pub sst: Arc<Sstable>,
+
+    sstable_store: SstableStoreRef,
 }
 
 impl SSTableIterator {
-    pub fn new(table: Arc<SSTable>) -> Self {
+    pub fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: 0,
-            table,
+            sst: table,
+            sstable_store,
         }
     }
 
@@ -44,13 +48,17 @@ impl SSTableIterator {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: table_id = {}, block_id = {}",
-            self.table.id,
+            self.sst.id,
             idx,
         );
-        if idx >= self.table.block_count() {
+        if idx >= self.sst.block_count() {
             self.block_iter = None;
         } else {
-            let mut block_iter = BlockIterator::new(self.table.block(idx).await?);
+            let block = self
+                .sstable_store
+                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
+                .await?;
+            let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek(key, SeekPos::Origin);
             } else {
@@ -108,7 +116,7 @@ impl HummockIterator for SSTableIterator {
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
-            .table
+            .sst
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -136,8 +144,8 @@ impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
     const DIRECTION: usize = FORWARD;
 
-    fn new(table: Arc<SSTable>) -> Self::SSTableIterator {
-        SSTableIterator::new(table)
+    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+        SSTableIterator::new(table, sstable_store)
     }
 }
 
@@ -146,28 +154,34 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
 
-    use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::key::key_with_epoch;
-    use crate::hummock::sstable::builder::tests::gen_test_sstable;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
 
     #[tokio::test]
     async fn test_table_iterator() {
         // build remote table
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = SSTableIterator::new(Arc::new(table));
+        let mut sstable_iter = SSTableIterator::new(Arc::new(table), sstable_store);
         let mut cnt = 0;
         sstable_iter.rewind().await.unwrap();
 
         while sstable_iter.is_valid() {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, builder_test_key_of(cnt));
+            assert_bytes_eq!(key, test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
@@ -178,29 +192,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_seek() {
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
-        let mut sstable_iter = SSTableIterator::new(table.clone());
+        let mut sstable_iter = SSTableIterator::new(table.clone(), sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter.seek(&builder_test_key_of(i)).await.unwrap();
+            sstable_iter.seek(&test_key_of(i)).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_bytes_eq!(key, builder_test_key_of(i));
+            assert_bytes_eq!(key, test_key_of(i));
         }
 
         // Seek to key #500 and start iterating.
-        sstable_iter.seek(&builder_test_key_of(500)).await.unwrap();
+        sstable_iter.seek(&test_key_of(500)).await.unwrap();
         for i in 500..TEST_KEYS_COUNT {
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(i));
+            assert_eq!(key, test_key_of(i));
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -210,7 +227,7 @@ mod tests {
         let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, builder_test_key_of(0));
+        assert_eq!(key, test_key_of(0));
 
         // Seek to > last key
         let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
@@ -235,7 +252,7 @@ mod tests {
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(idx));
+            assert_eq!(key, test_key_of(idx));
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());

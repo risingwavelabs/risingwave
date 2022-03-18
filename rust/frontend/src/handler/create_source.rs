@@ -1,35 +1,47 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
+use risingwave_pb::meta::table::Info;
 use risingwave_pb::meta::Table;
+use risingwave_pb::plan::{RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::QueryContext;
 
 fn create_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Table> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
+    let info = StreamSourceInfo {
+        append_only: true,
+        row_format: RowFormatType::Protobuf as i32,
+        row_schema_location: schema.row_schema_location.0.clone(),
+        ..Default::default()
+    };
+
     Ok(Table {
         column_descs,
-        row_format: schema.row_schema_location.0.clone(),
-        row_schema_location: schema.row_schema_location.0.clone(),
+        info: Some(Info::StreamSource(info)),
         ..Default::default()
     })
 }
 
 pub(super) async fn handle_create_source(
-    session: &RwSession,
+    context: QueryContext,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
+    let session = context.session_ctx;
     let mut table = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
+    match table.info.as_mut().unwrap() {
+        Info::StreamSource(info) => {
+            info.properties = stmt.with_properties.into();
+        }
+        _ => unreachable!(),
+    }
     table.table_name = stmt.source_name.value.clone();
-    table.is_source = true;
-    table.properties = stmt.with_properties.into();
-    table.append_only = true;
 
     let catalog_mgr = session.env().catalog_mgr();
     catalog_mgr
@@ -50,7 +62,6 @@ mod tests {
     use std::io::Write;
 
     use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
     use tempfile::NamedTempFile;
 
     use crate::catalog::table_catalog::ROWID_NAME;
@@ -63,10 +74,10 @@ mod tests {
     syntax = "proto3";
     package test;
     message TestRecord {
-      int32 id = 1;
-      string city = 3;
-      int64 zipcode = 4;
-      float rate = 5;
+        int32 id = 1;
+        string city = 3;
+        int64 zipcode = 4;
+        float rate = 5;
     }"#;
         let temp_file = tempfile::Builder::new()
             .prefix("temp")
@@ -80,14 +91,11 @@ mod tests {
     }
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn handle_create_source() {
-        let meta = LocalMeta::start().await;
-
         let proto_file = create_proto_file();
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') 
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );
@@ -99,7 +107,7 @@ mod tests {
         let columns = table
             .columns()
             .iter()
-            .map(|(col_name, col)| (col_name.clone(), col.data_type()))
+            .map(|col| (col.name().into(), col.data_type()))
             .collect::<HashMap<String, DataType>>();
         let mut expected_map = HashMap::new();
         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
@@ -108,7 +116,5 @@ mod tests {
         expected_map.insert("zipcode".to_string(), DataType::Int64);
         expected_map.insert("rate".to_string(), DataType::Float32);
         assert_eq!(columns, expected_map);
-
-        meta.stop().await;
     }
 }

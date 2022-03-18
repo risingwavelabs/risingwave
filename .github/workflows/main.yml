@@ -11,9 +11,10 @@ on:
     branches: [main]
   workflow_dispatch:
 env:
-  RUST_TOOLCHAIN: nightly-2022-02-21
-  CACHE_KEY_SUFFIX: v20220222
+  RUST_TOOLCHAIN: nightly-2022-03-09
+  CACHE_KEY_SUFFIX: v20220318
   CARGO_TERM_COLOR: always
+  RW_CI: true
 jobs:
   frontend-check:
     name: frontend-check
@@ -110,8 +111,8 @@ jobs:
           chmod +x ./rust/target/debug/risedev-playground
       - name: Install required components
         run: |
-          apt-get update -yy
-          apt-get install --upgrade -yy tmux postgresql
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
@@ -131,46 +132,50 @@ jobs:
       - name: Prepare RiseDev playground
         run: ~/cargo-make/makers pre-start-playground
       - name: e2e test streaming 3-node
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test rust frontend
+        timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-v2
-          timeout 1m sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          ~/cargo-make/makers dev ci-v2
+          sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test streaming 3-node w/o cache
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+          RW_NO_CACHE=1 ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test batch 3-node
+        timeout-minutes: 2
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
-          timeout 3m sqllogictest -p 4567 -d dev './e2e_test/batch/**/*.slt'
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
+          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
-      - name: Dump last 100 lines of logs on failure
+      - name: Dump last 300 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs
       - uses: actions/upload-artifact@v2
@@ -211,8 +216,8 @@ jobs:
           password: ${{ secrets.WUTAO_PAT }}
       - name: Install required components
         run: |
-          sudo apt-get update -yy
-          sudo apt-get install --upgrade -yy tmux postgresql
+          sudo apt-get update -yy -o Acquire::Retries=3
+          sudo apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
       - name: Setup kafka cluster
         run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
@@ -270,7 +275,7 @@ jobs:
       - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
           RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
@@ -285,8 +290,8 @@ jobs:
       - name: e2e test source
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-1node
-          timeout 70s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
+          ~/cargo-make/makers dev ci-1node
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -295,8 +300,8 @@ jobs:
       - name: e2e test source 3-node
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers ci-3node
-          timeout 30s sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
+          ~/cargo-make/makers dev ci-3node
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -447,6 +452,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: llvm-tools-preview
       - name: Cache Cargo home
         uses: actions/cache@v2
         id: cache
@@ -457,13 +463,14 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-test
-      - name: Install cargo-tarpaulin
+      - name: Install required tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-tarpaulin
+          cargo install cargo-llvm-cov --git https://github.com/skyzh/cargo-llvm-cov --rev 1b0d581
+          cargo install cargo-nextest
       - name: Run rust test with coverage
         run: |
-          make rust_test_with_coverage
+          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -480,7 +487,7 @@ jobs:
       - name: Install required tools
         run: |
           wget https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${BINARY}.tar.gz -O - | tar xz && sudo mv ${BINARY} /usr/bin/yq
-          sudo apt install -y protobuf-compiler
+          sudo apt install -y protobuf-compiler -o Acquire::Retries=3
           curl -sSL \
             https://github.com/uber/prototool/releases/download/v1.8.0/prototool-$(uname -s)-$(uname -m).tar.gz | \
             sudo tar -C /usr/local --strip-components 1 -xz

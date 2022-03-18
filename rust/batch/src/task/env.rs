@@ -2,19 +2,17 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
-use risingwave_common::worker_id::WorkerIdRef;
 use risingwave_source::{SourceManager, SourceManagerRef};
-use risingwave_storage::table::{TableManager, TableManagerRef};
+use risingwave_storage::StateStoreImpl;
 
 use crate::task::BatchManager;
+
+pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
 #[derive(Clone)]
 pub struct BatchEnvironment {
-    /// The table manager.
-    table_manager: TableManagerRef,
-
     /// Endpoint the batch task manager listens on.
     server_addr: SocketAddr,
 
@@ -27,26 +25,29 @@ pub struct BatchEnvironment {
     /// Batch related configurations.
     config: Arc<BatchConfig>,
 
-    /// Reference to the worker node id.
-    worker_id_ref: WorkerIdRef,
+    /// Current worker node id.
+    worker_id: WorkerNodeId,
+
+    /// State store for table scanning.
+    state_store: StateStoreImpl,
 }
 
 impl BatchEnvironment {
     pub fn new(
-        table_manager: TableManagerRef,
         source_manager: SourceManagerRef,
         task_manager: Arc<BatchManager>,
         server_addr: SocketAddr,
         config: Arc<BatchConfig>,
-        worker_id_ref: WorkerIdRef,
+        worker_id: WorkerNodeId,
+        state_store: StateStoreImpl,
     ) -> Self {
         BatchEnvironment {
-            table_manager,
             server_addr,
             task_manager,
             source_manager,
             config,
-            worker_id_ref,
+            worker_id,
+            state_store,
         }
     }
 
@@ -54,24 +55,18 @@ impl BatchEnvironment {
     #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_source::MemSourceManager;
-        use risingwave_storage::table::SimpleTableManager;
+        use risingwave_storage::monitor::StateStoreMetrics;
 
         BatchEnvironment {
-            table_manager: Arc::new(SimpleTableManager::with_in_memory_store()),
             task_manager: Arc::new(BatchManager::new()),
             server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
-            worker_id_ref: WorkerIdRef::for_test(),
+            worker_id: WorkerNodeId::default(),
+            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
+                StateStoreMetrics::unused(),
+            )),
         }
-    }
-
-    pub fn table_manager(&self) -> &dyn TableManager {
-        &*self.table_manager
-    }
-
-    pub fn table_manager_ref(&self) -> TableManagerRef {
-        self.table_manager.clone()
     }
 
     pub fn server_address(&self) -> &SocketAddr {
@@ -94,7 +89,11 @@ impl BatchEnvironment {
         self.config.as_ref()
     }
 
-    pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.get()
+    pub fn worker_id(&self) -> WorkerNodeId {
+        self.worker_id
+    }
+
+    pub fn state_store(&self) -> StateStoreImpl {
+        self.state_store.clone()
     }
 }

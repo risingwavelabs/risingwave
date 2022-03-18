@@ -11,14 +11,10 @@ import static com.risingwave.planner.rules.physical.BatchRuleSets.LOGICAL_REWRIT
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.*;
+import com.risingwave.common.config.StreamPlannerConfigurations;
 import com.risingwave.execution.context.ExecutionContext;
 import com.risingwave.planner.planner.Planner;
-import com.risingwave.planner.program.ChainedOptimizerProgram;
-import com.risingwave.planner.program.HepOptimizerProgram;
-import com.risingwave.planner.program.JoinReorderProgram;
-import com.risingwave.planner.program.OptimizerProgram;
-import com.risingwave.planner.program.SubQueryRewriteProgram;
-import com.risingwave.planner.program.VolcanoOptimizerProgram;
+import com.risingwave.planner.program.*;
 import com.risingwave.planner.rel.serialization.ExplainWriter;
 import com.risingwave.planner.rel.streaming.*;
 import com.risingwave.planner.rules.physical.BatchRuleSets;
@@ -62,25 +58,31 @@ public class StreamPlanner implements Planner<StreamingPlan> {
   @Override
   public StreamingPlan plan(SqlNode ast, ExecutionContext context) {
     SqlCreateMaterializedView create = (SqlCreateMaterializedView) ast;
-    SqlConverter sqlConverter = SqlConverter.builder(context).build();
+    SqlConverter sqlConverter =
+        SqlConverter.builder(context)
+            .withExpand(
+                !context
+                    .getSessionConfiguration()
+                    .get(StreamPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER))
+            .build();
     RelNode rawPlan = sqlConverter.toRel(create.query).rel;
     // Logical optimization.
-    OptimizerProgram optimizerProgram = buildLogicalOptimizerProgram();
+    OptimizerProgram optimizerProgram = buildLogicalOptimizerProgram(context);
     RelNode logicalPlan = optimizerProgram.optimize(rawPlan, context);
     log.debug("Logical plan: \n" + ExplainWriter.explainPlan(logicalPlan));
     // Generate Streaming plan from logical plan.
-    RwStreamMaterializedView root = generateStreamingPlan(logicalPlan, context, create.name);
+    RwStreamMaterialize root = generateStreamingPlan(logicalPlan, context, create.name);
     return new StreamingPlan(root);
   }
 
-  private RwStreamMaterializedView generateStreamingPlan(
+  private RwStreamMaterialize generateStreamingPlan(
       RelNode logicalPlan, ExecutionContext context, SqlIdentifier name) {
     OptimizerProgram program = buildStreamingOptimizerProgram();
     RisingWaveStreamingRel rawPlan =
         (RisingWaveStreamingRel) program.optimize(logicalPlan, context);
     log.debug("Before adding Materialized View, the plan:\n" + ExplainWriter.explainPlan(rawPlan));
     resolveMaterializedViewOnMaterializedView(rawPlan, null, -1, context);
-    RwStreamMaterializedView materializedViewPlan = addMaterializedViewNode(rawPlan, name);
+    RwStreamMaterialize materializedViewPlan = addMaterializedViewNode(rawPlan, name);
     log.debug("Create streaming plan:\n" + ExplainWriter.explainPlan(materializedViewPlan));
     log.debug(
         "Primary key of Materialized View is:\n" + materializedViewPlan.getPrimaryKeyIndices());
@@ -116,26 +118,24 @@ public class StreamPlanner implements Planner<StreamingPlan> {
       if (source != null && source.isMaterializedView()) {
         // source is a materialized view source
         assert source instanceof MaterializedViewCatalog;
-        if (parent != null) {
-          assert indexInParent >= 0;
-        }
+        assert parent == null || indexInParent >= 0;
 
         var tableSourceNode = (RwStreamTableSource) node;
         var sourceColumnIds = source.getAllColumnIds();
-        var sourcePrimaryKeyColumnIds = source.getPrimaryKeyColumnIds();
+        var sourcePrimaryKeyIndices = source.getPrimaryKeyIndices();
         if (source.isAssociatedMaterializedView()) {
           // since we've ignored row_id column for associated mv, the pk should be empty
-          assert sourcePrimaryKeyColumnIds.isEmpty();
+          assert sourcePrimaryKeyIndices.isEmpty();
           var rowIdColumnId = source.getRowIdColumn().getId();
           // manually put back the row_id column
           sourceColumnIds =
               Stream.concat(sourceColumnIds.stream(), Stream.of(rowIdColumnId))
                   .collect(ImmutableList.toImmutableList());
-          sourcePrimaryKeyColumnIds = ImmutableIntList.of(rowIdColumnId.getValue());
+          sourcePrimaryKeyIndices = ImmutableIntList.of(rowIdColumnId.getValue());
         }
 
         var primaryKeyColumnIdsBuilder = ImmutableList.<ColumnCatalog.ColumnId>builder();
-        for (var idx : sourcePrimaryKeyColumnIds) {
+        for (var idx : sourcePrimaryKeyIndices) {
           primaryKeyColumnIdsBuilder.add(sourceColumnIds.get(idx));
         }
 
@@ -143,35 +143,34 @@ public class StreamPlanner implements Planner<StreamingPlan> {
             new RwStreamBatchPlan(
                 node.getCluster(),
                 node.getTraitSet(),
-                ((RwStreamTableSource) node).getHints(),
+                tableSourceNode.getHints(),
                 node.getTable(),
                 tableSourceNode.getTableId(),
                 primaryKeyColumnIdsBuilder.build(),
                 ImmutableIntList.of(),
                 tableSourceNode.getColumnIds());
 
-        var upstreamFields = ImmutableList.<Field>builder();
-        if (!source.isAssociatedMaterializedView()) {
-          for (int i = 0; i < source.getAllColumns().size(); i++) {
-            var column = source.getAllColumns().get(i);
+        var upstreamFieldsBuilder = ImmutableList.<Field>builder();
+        if (source.isAssociatedMaterializedView()) {
+          for (var column : source.getAllColumnsV2()) {
             var field =
                 Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
-            upstreamFields.add(field);
+            upstreamFieldsBuilder.add(field);
           }
         } else {
-          for (int i = 0; i < source.getAllColumnsV2().size(); i++) {
-            var column = source.getAllColumnsV2().get(i);
+          for (var column : source.getAllColumns()) {
             var field =
                 Field.newBuilder()
                     .setDataType(column.getDesc().getDataType().getProtobufType())
                     .setName(column.getName())
                     .build();
-            upstreamFields.add(field);
+            upstreamFieldsBuilder.add(field);
           }
         }
+        var upstreamFields = upstreamFieldsBuilder.build();
 
         RwStreamChain chain =
             new RwStreamChain(
@@ -180,7 +179,7 @@ public class StreamPlanner implements Planner<StreamingPlan> {
                 tableSourceNode.getTableId(),
                 ImmutableIntList.of(),
                 tableSourceNode.getColumnIds(),
-                upstreamFields.build(),
+                upstreamFields,
                 List.of(batchPlan));
         if (parent != null) {
           parent.replaceInput(indexInParent, chain);
@@ -194,21 +193,21 @@ public class StreamPlanner implements Planner<StreamingPlan> {
     }
   }
 
-  private RwStreamMaterializedView addMaterializedViewNode(
+  private RwStreamMaterialize addMaterializedViewNode(
       RisingWaveStreamingRel root, SqlIdentifier name) {
     var visitor = new PrimaryKeyDerivationVisitor();
     var p = root.accept(visitor);
     if (p.node instanceof RwStreamSort) {
       RwStreamSort sort = (RwStreamSort) p.node;
       // Here RwStreamSort only implements limit/fetch right now, we handle
-      // ordering inside RwStreamMaterializedView. There is one case we could
+      // ordering inside RwStreamMaterialize. There is one case we could
       // do some optimize: when limit and fetch are not provided, we could
-      // merge RwStreamSort into RwStreamMaterializedView.
+      // merge RwStreamSort into RwStreamMaterialize.
       RelNode input = sort;
       if (sort.offset == null && sort.fetch == null) {
         input = sort.getInput();
       }
-      return new RwStreamMaterializedView(
+      return new RwStreamMaterialize(
           sort.getCluster(),
           sort.getTraitSet(),
           input,
@@ -216,15 +215,23 @@ public class StreamPlanner implements Planner<StreamingPlan> {
           p.info.getPrimaryKeyIndices(),
           sort.getCollation());
     } else {
-      return new RwStreamMaterializedView(
+      return new RwStreamMaterialize(
           p.node.getCluster(), p.node.getTraitSet(), p.node, name, p.info.getPrimaryKeyIndices());
     }
   }
 
-  private OptimizerProgram buildLogicalOptimizerProgram() {
+  private OptimizerProgram buildLogicalOptimizerProgram(ExecutionContext context) {
     ChainedOptimizerProgram.Builder builder = ChainedOptimizerProgram.builder(STREAMING);
     // We use partial rules from batch planner until getting a RisingWave logical plan.
-    builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
+    var useNewSubqueryPlanner =
+        context
+            .getSessionConfiguration()
+            .get(StreamPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER);
+    if (useNewSubqueryPlanner) {
+      builder.addLast(SUBQUERY_REWRITE, new SubQueryRewriteProgram2());
+    } else {
+      builder.addLast(SUBQUERY_REWRITE, SubQueryRewriteProgram.INSTANCE);
+    }
 
     builder.addLast(
         LOGICAL_REWRITE, HepOptimizerProgram.builder().addRules(LOGICAL_REWRITE_RULES).build());

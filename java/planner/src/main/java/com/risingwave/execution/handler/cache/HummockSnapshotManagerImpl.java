@@ -37,16 +37,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
     pinWorker.scheduleWithFixedDelay(
         () -> {
           try {
-            // The fetched epoch is guaranteed to be GE than the cached ones.
-            long epoch =
-                this.metaClient
-                    .pinSnapshot(
-                        PinSnapshotRequest.newBuilder().setContextId(this.workerNodeId).build())
-                    .getSnapshot()
-                    .getEpoch();
-            synchronized (referenceCounts) {
-              referenceCounts.putIfAbsent(epoch, 0);
-            }
+            this.forceUpdate();
           } catch (Exception e) {
             LOGGER.warn("Likely meta service is unreachable, retry after a while.");
             try {
@@ -93,6 +84,23 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
             }
             return refCount;
           });
+    }
+  }
+
+  @Override
+  public void forceUpdate() {
+    // The fetched epoch is guaranteed to be GE than the cached ones.
+    long epoch =
+        this.metaClient
+            .pinSnapshot(
+                PinSnapshotRequest.newBuilder()
+                    .setContextId(this.workerNodeId)
+                    .setLastPinned(~0L)
+                    .build())
+            .getSnapshot()
+            .getEpoch();
+    synchronized (referenceCounts) {
+      referenceCounts.putIfAbsent(epoch, 0);
     }
   }
 }

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use risingwave_common::array::RwError;
+use futures::future::try_join_all;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::{ensure, gen_error};
 use tokio::sync::Mutex;
 
@@ -23,12 +24,20 @@ impl ObjectStore for InMemObjectStore {
         Ok(())
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Vec<u8>> {
+    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
-            self.get_object(path, |obj| Ok(obj.to_vec())).await?
+            self.get_object(path, |obj| Ok(obj.clone())).await?
         }
+    }
+
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+        let futures = block_locs
+            .into_iter()
+            .map(|block_loc| self.read(path, Some(block_loc)))
+            .collect_vec();
+        try_join_all(futures).await
     }
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
@@ -62,11 +71,9 @@ impl InMemObjectStore {
     }
 }
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Vec<u8>> {
+fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Bytes> {
     ensure!(block.offset + block.size <= obj.len());
-    Ok(obj
-        .slice(block.offset..(block.offset + block.size))
-        .to_vec())
+    Ok(obj.slice(block.offset..(block.offset + block.size)))
 }
 
 #[cfg(test)]

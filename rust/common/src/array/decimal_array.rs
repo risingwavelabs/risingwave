@@ -6,7 +6,7 @@ use risingwave_pb::data::buffer::CompressionType;
 use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{Array, ArrayBuilder, ArrayIterator, NULL_VAL_FOR_HASH};
-use crate::array::ArrayBuilderImpl;
+use crate::array::{ArrayBuilderImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::error::Result;
 use crate::types::Decimal;
@@ -49,7 +49,7 @@ impl Array for DecimalArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let mut offset_buffer = Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>());
         let mut data_buffer = Vec::<u8>::new();
         let mut offset = 0usize;
@@ -74,12 +74,13 @@ impl Array for DecimalArray {
                 body: data_buffer,
             },
         ];
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Decimal as i32,
-        })
+            struct_array_data: None,
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -111,7 +112,7 @@ pub struct DecimalArrayBuilder {
 impl ArrayBuilder for DecimalArrayBuilder {
     type ArrayType = DecimalArray;
 
-    fn new(capacity: usize) -> Result<Self> {
+    fn new_with_meta(capacity: usize, _meta: ArrayMeta) -> Result<Self> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
@@ -179,7 +180,7 @@ mod tests {
         ];
 
         let array = DecimalArray::from_slice(&input).unwrap();
-        let buffers = array.to_protobuf().unwrap().values;
+        let buffers = array.to_protobuf().values;
 
         assert_eq!(buffers.len(), 2);
 

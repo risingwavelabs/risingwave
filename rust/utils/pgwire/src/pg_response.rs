@@ -25,7 +25,10 @@ pub enum StatementType {
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
+    FLUSH,
     OTHER,
+    // EMPTY is used when query statement is empty (e.g. ";").
+    EMPTY,
 }
 
 impl std::fmt::Display for StatementType {
@@ -85,6 +88,10 @@ impl PgResponse {
             self.stmt_type,
             StatementType::SELECT | StatementType::EXPLAIN
         )
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.stmt_type == StatementType::EMPTY
     }
 
     pub fn get_row_desc(&self) -> Vec<PgFieldDescriptor> {

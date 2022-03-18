@@ -1,127 +1,131 @@
-use std::borrow::Cow;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
-use risingwave_common::array::Row;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::array::column::Column;
+use risingwave_common::array::{DataChunk, Row};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
-use super::TableIterRef;
-use crate::table::{ScannableTable, TableIter};
-use crate::{Keyspace, StateStore, TableColumnDesc};
+use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
+use crate::table::TableIter;
+use crate::{Keyspace, StateStore};
 
 /// `MViewTable` provides a readable cell-based row table interface,
 /// so that data can be queried by AP engine.
+///
+/// Note that `MViewTable` is sort of a view on the original table.
+/// `MViewTable` only return certain columns to its callers instead of all the columns that
+/// associated with the keyspace.
+#[derive(Clone)]
 pub struct MViewTable<S: StateStore> {
+    /// The keyspace that the pk and value of the original table has
     keyspace: Keyspace<S>,
 
+    /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
 
-    column_descs: Vec<TableColumnDesc>,
+    /// ColumnDesc contains strictly more info than `schema`.
+    column_descs: Vec<ColumnDesc>,
 
-    pk_columns: Vec<usize>,
+    /// Mapping from column Id to column index
+    column_id_to_column_index: HashMap<ColumnId, usize>,
 
-    sort_key_serializer: OrderedRowsSerializer,
+    /// This is used for testing only.
+    ordered_row_serializer: Option<OrderedRowSerializer>,
 }
 
 impl<S: StateStore> std::fmt::Debug for MViewTable<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MViewTable")
-            .field("schema", &self.schema)
-            .field("pk_columns", &self.pk_columns)
+            .field("column_descs", &self.column_descs)
             .finish()
     }
 }
 
+fn generate_column_id_to_column_index_mapping(
+    column_descs: &[ColumnDesc],
+) -> HashMap<ColumnId, usize> {
+    let mut mapping = HashMap::with_capacity(column_descs.len());
+    for (index, column_desc) in column_descs.iter().enumerate() {
+        mapping.insert(column_desc.column_id, index);
+    }
+    mapping
+}
+
 impl<S: StateStore> MViewTable<S> {
-    /// Create a [`MViewTable`] for materialized view.
-    pub fn new(
+    fn new(
         keyspace: Keyspace<S>,
-        schema: Schema,
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
+        column_descs: Vec<ColumnDesc>,
+        ordered_row_serializer: Option<OrderedRowSerializer>,
     ) -> Self {
-        let order_pairs = orderings
-            .into_iter()
-            .zip_eq(pk_columns.clone().into_iter())
-            .collect::<Vec<_>>();
-
-        let column_descs = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(column_index, f)| {
-                // For mview, column id is exactly the index, so we perform conversion here.
-                TableColumnDesc::new_without_name(column_index as i32, f.data_type.clone())
-            })
-            .collect_vec();
-
-        Self {
-            keyspace,
-            schema,
-            column_descs,
-            pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
-        }
-    }
-
-    /// Create a [`MViewTable`] for batch table.
-    pub fn new_batch(keyspace: Keyspace<S>, column_descs: Vec<TableColumnDesc>) -> Self {
-        let schema = {
-            let fields = column_descs
+        let schema = Schema::new(
+            column_descs
                 .iter()
-                .map(|c| Field::with_name(c.data_type.clone(), c.name.clone()))
-                .collect();
-            Schema::new(fields)
-        };
+                .map(|cd| Field::with_name(cd.data_type.clone(), cd.name.clone()))
+                .collect_vec(),
+        );
 
-        // row id will be inserted at first column in `InsertExecutor`
-        // FIXME: should we check `is_primary` in pb `ColumnDesc` after we support pk?
-        let pk_columns = vec![0];
-        let order_pairs = vec![(OrderType::Ascending, 0)];
-
+        let column_id_to_column_index = generate_column_id_to_column_index_mapping(&column_descs);
         Self {
             keyspace,
             schema,
             column_descs,
-            pk_columns,
-            sort_key_serializer: OrderedRowsSerializer::new(order_pairs),
+            column_id_to_column_index,
+            ordered_row_serializer,
         }
     }
 
-    // TODO(MrCroxx): remove me after iter is impled.
-    pub fn storage(&self) -> S {
-        self.keyspace.state_store()
+    /// Create a [`MViewTable`] for materialized view.
+    // TODO: refactor into `RowTable`.
+    pub fn new_for_test(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        order_types: Vec<OrderType>,
+    ) -> Self {
+        Self::new(
+            keyspace,
+            column_descs,
+            Some(OrderedRowSerializer::new(order_types)),
+        )
     }
 
-    // TODO(MrCroxx): Refactor this after statestore iter is finished.
+    /// Create an "adhoc" [`MViewTable`] with specified columns.
+    // TODO: refactor into `RowTable`.
+    pub fn new_adhoc(keyspace: Keyspace<S>, column_descs: Vec<ColumnDesc>) -> Self {
+        Self::new(keyspace, column_descs, None)
+    }
+
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
-    async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
-        MViewTableIter::new(
-            self.keyspace.clone(),
-            self.schema.clone(),
-            self.pk_columns.clone(),
-            epoch,
-        )
-        .await
+    pub async fn iter(&self, epoch: u64) -> Result<MViewTableIter<S>> {
+        MViewTableIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
     }
 
     // TODO(MrCroxx): More interfaces are needed besides cell get.
     // The returned Datum is from a snapshot corresponding to the given `epoch`
-    pub async fn get(&self, pk: Row, cell_idx: usize, epoch: u64) -> Result<Option<Datum>> {
-        debug_assert!(cell_idx < self.schema.len());
+    // TODO(eric): remove this...
+    // TODO(bugen): remove this...
+    pub async fn get_for_test(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
+        assert!(
+            self.ordered_row_serializer.is_some(),
+            "this table is adhoc and there's no sort key serializer"
+        );
+
+        let column_id = ColumnId::new(column_id);
+
+        let column_index = self.column_id_to_column_index.get(&column_id).unwrap();
         // TODO(MrCroxx): More efficient encoding is needed.
 
         let buf = self
             .keyspace
             .get(
                 &[
-                    &serialize_pk(&pk, &self.sort_key_serializer)?[..],
-                    &serialize_cell_idx(cell_idx as u32)?[..],
+                    &serialize_pk(&pk, self.ordered_row_serializer.as_ref().unwrap())?[..],
+                    &serialize_column_id(&column_id)?,
                 ]
                 .concat(),
                 epoch,
@@ -132,20 +136,21 @@ impl<S: StateStore> MViewTable<S> {
         if let Some(buf) = buf {
             Ok(Some(deserialize_cell(
                 &buf[..],
-                &self.schema.fields[cell_idx].data_type,
+                &self.schema.fields[*column_index].data_type,
             )?))
         } else {
             Ok(None)
         }
     }
+
+    pub fn schema(&self) -> &Schema {
+        &self.schema
+    }
 }
 
 pub struct MViewTableIter<S: StateStore> {
     keyspace: Keyspace<S>,
-    schema: Schema,
-    // TODO: why pk_columns is not used??
-    #[allow(dead_code)]
-    pk_columns: Vec<usize>,
+
     /// A buffer to store prefetched kv pairs from state store
     buf: Vec<(Bytes, Bytes)>,
     /// The idx into `buf` for the next item
@@ -156,32 +161,27 @@ pub struct MViewTableIter<S: StateStore> {
     err_msg: Option<String>,
     /// A epoch representing the read snapshot
     epoch: u64,
+    /// Cell-based row deserializer
+    cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
-impl<'a, S: StateStore> MViewTableIter<S> {
+impl<S: StateStore> MViewTableIter<S> {
     // TODO: adjustable limit
     const SCAN_LIMIT: usize = 1024;
 
-    async fn new(
-        keyspace: Keyspace<S>,
-        schema: Schema,
-        pk_columns: Vec<usize>,
-        epoch: u64,
-    ) -> Result<Self> {
-        // The table might be updated from other compute nodes, and we are not aware of the latest
-        // version in Hummock's local version manager.
-        // TODO: remove this after we implement periodical version updating.
-        keyspace.state_store().update_local_version().await?;
+    async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
+        keyspace.state_store().wait_epoch(epoch).await?;
+
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         let iter = Self {
             keyspace,
-            schema,
-            pk_columns,
             buf: vec![],
             next_idx: 0,
             done: false,
             err_msg: None,
             epoch,
+            cell_based_row_deserializer,
         };
         Ok(iter)
     }
@@ -210,6 +210,46 @@ impl<'a, S: StateStore> MViewTableIter<S> {
 
         Ok(())
     }
+
+    pub async fn collect_data_chunk(
+        &mut self,
+        mview_table: &MViewTable<S>,
+        chunk_size: Option<usize>,
+    ) -> Result<Option<DataChunk>> {
+        let schema = &mview_table.schema;
+        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0))?;
+
+        let mut row_count = 0;
+        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(row) => {
+                    for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
+                        builder.append_datum(&datum)?;
+                    }
+                    row_count += 1;
+                }
+                None => break,
+            }
+        }
+
+        let chunk = if schema.is_empty() {
+            // Generate some dummy data to ensure a correct cardinality, which might be used by
+            // count(*).
+            DataChunk::new_dummy(row_count)
+        } else {
+            let columns: Vec<Column> = builders
+                .into_iter()
+                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
+                .try_collect()?;
+            DataChunk::builder().columns(columns).build()
+        };
+
+        if chunk.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(chunk))
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -222,9 +262,6 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
             }
         }
 
-        let mut pk_buf = vec![];
-        let mut restored = 0;
-        let mut row = vec![];
         loop {
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
@@ -233,24 +270,13 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                     self.consume_more().await?;
                     if let Some(item) = self.buf.first() {
                         item
-                    } else if restored == 0 {
-                        // No more items
-                        self.done = true;
-                        return Ok(None);
                     } else {
-                        // current item is incomplete
+                        let pk_and_row = self.cell_based_row_deserializer.take();
                         self.done = true;
-                        self.err_msg = Some(String::from("incomplete item"));
-                        return Err(ErrorCode::InternalError(
-                            self.err_msg.as_ref().unwrap().clone(),
-                        )
-                        .into());
+                        return Ok(pk_and_row.map(|(_pk, row)| row));
                     }
                 }
             };
-
-            self.next_idx += 1;
-
             tracing::trace!(
                 target: "events::stream::mview::scan",
                 "mview scanned key = {:?}, value = {:?}",
@@ -263,47 +289,12 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let cur_pk_buf = &key[self.keyspace.key().len()..key.len() - 4];
-            if restored == 0 {
-                pk_buf = cur_pk_buf.to_owned();
-            } else if pk_buf != cur_pk_buf {
-                return Err(ErrorCode::InternalError("primary key incorrect".to_owned()).into());
-            }
-
-            let datum = deserialize_cell(&value[..], &self.schema.data_types()[restored])?;
-            row.push(datum);
-
-            restored += 1;
-            if restored == self.schema.len() {
-                break;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
+            self.next_idx += 1;
+            match pk_and_row {
+                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                None => {}
             }
         }
-        Ok(Some(Row::new(row)))
-    }
-}
-
-#[async_trait::async_trait]
-impl<S> ScannableTable for MViewTable<S>
-where
-    S: StateStore,
-{
-    async fn iter(&self, epoch: u64) -> Result<TableIterRef> {
-        Ok(Box::new(self.iter(epoch).await?))
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn std::any::Any + Sync + Send> {
-        self
-    }
-
-    fn schema(&self) -> Cow<Schema> {
-        Cow::Borrowed(&self.schema)
-    }
-
-    fn column_descs(&self) -> Cow<[TableColumnDesc]> {
-        Cow::Borrowed(&self.column_descs)
-    }
-
-    fn is_shared_storage(&self) -> bool {
-        true
     }
 }

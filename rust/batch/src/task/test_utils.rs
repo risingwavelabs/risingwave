@@ -1,9 +1,7 @@
 use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::util::downcast_arc;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{Column, DataType};
 use risingwave_pb::expr::expr_node::RexNode;
@@ -13,18 +11,16 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::{
     exchange_info, ColumnDesc, CreateTableNode, ExchangeInfo, Field as NodeField, InsertNode,
-    PlanFragment, PlanNode, QueryId, RowSeqScanNode, StageId, TaskId as ProstTaskId,
-    TaskSinkId as ProstSinkId, ValuesNode,
+    PlanFragment, PlanNode, TaskId as ProstTaskId, TaskOutputId as ProstOutputId, ValuesNode,
 };
 use risingwave_pb::task_service::GetDataResponse;
-use risingwave_storage::table::test::TestTable;
 
 use super::*;
 use crate::rpc::service::exchange::ExchangeWriter;
 
 // TODO: rewrite these tests without relying on `PlanFragment`.
 
-fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
+fn get_num_outputs(plan: &PlanFragment) -> Result<u32> {
     Ok(match plan.get_exchange_info()?.get_mode()? {
         DistributionMode::Single => 1,
         DistributionMode::Hash => match plan.get_exchange_info()?.distribution {
@@ -39,7 +35,7 @@ fn get_num_sinks(plan: &PlanFragment) -> Result<u32> {
 }
 
 /// Write the execution results into a buffer for testing.
-/// In a real server, the results will be flushed into a grpc sink.
+/// In a real server, the results will be flushed into a grpc output.
 struct FakeExchangeWriter {
     messages: Vec<GetDataResponse>,
 }
@@ -60,13 +56,9 @@ pub struct TestRunner {
 impl TestRunner {
     pub fn new() -> Self {
         let tid = ProstTaskId {
-            stage_id: Some(StageId {
-                query_id: Some(QueryId {
-                    trace_id: "".to_string(),
-                }),
-                stage_id: 0,
-            }),
+            stage_id: 0,
             task_id: 0,
+            query_id: "".to_owned(),
         };
         Self {
             tid,
@@ -89,7 +81,7 @@ impl TestRunner {
 
     pub fn run_task(&mut self, plan: &PlanFragment) -> Result<()> {
         let task_manager = self.env.task_manager();
-        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone())
+        task_manager.fire_task(self.env.clone(), &self.tid, plan.clone(), u64::MAX)
     }
 
     pub async fn collect_task_output(
@@ -98,15 +90,15 @@ impl TestRunner {
     ) -> Result<Vec<Vec<GetDataResponse>>> {
         let task_manager = self.env.task_manager();
         let mut res = Vec::new();
-        let sink_ids = 0..get_num_sinks(plan)?;
-        for sink_id in sink_ids {
-            let proto_sink_id = ProstSinkId {
+        let output_ids = 0..get_num_outputs(plan)?;
+        for output_id in output_ids {
+            let proto_output_id = ProstOutputId {
                 task_id: Some(self.tid.clone()),
-                sink_id,
+                output_id,
             };
-            let mut task_sink = task_manager.take_sink(&proto_sink_id)?;
+            let mut task_output = task_manager.take_output(&proto_output_id)?;
             let mut writer = FakeExchangeWriter { messages: vec![] };
-            task_sink.take_data(&mut writer).await.unwrap();
+            task_output.take_data(&mut writer).await.unwrap();
             res.push(writer.messages);
         }
         // In test, we remove the task manually, while in production,
@@ -209,7 +201,6 @@ impl<'a> TableBuilder<'a> {
                     ..CoreDefault::default()
                 })
                 .collect_vec(),
-            is_materialized_view: false,
             ..Default::default()
         };
 
@@ -229,7 +220,7 @@ impl<'a> TableBuilder<'a> {
 
     fn build_insert_values_plan(&self) -> Result<PlanFragment> {
         let insert = InsertNode {
-            table_ref_id: None,
+            table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
         };
 
@@ -339,40 +330,6 @@ impl<'a> SelectBuilder<'a> {
                     distribution: None,
                 }),
             },
-        }
-    }
-
-    // select * from t;
-    pub async fn scan_all(mut self) -> SelectBuilder<'a> {
-        let table_ref = self
-            .runner
-            .get_global_env()
-            .table_manager_ref()
-            .get_table(&TableId::default())
-            .unwrap();
-
-        if let Ok(column_table_ref) = downcast_arc::<TestTable>(table_ref.into_any()) {
-            let column_ids = column_table_ref.column_ids();
-            let scan = RowSeqScanNode {
-                table_ref_id: None,
-                column_ids,
-                fields: vec![],
-            };
-
-            self.plan = PlanFragment {
-                root: Some(PlanNode {
-                    children: vec![],
-                    node_body: Some(NodeBody::RowSeqScan(scan)),
-                    identity: "SeqScanExecutor".to_string(),
-                }),
-                exchange_info: Some(ExchangeInfo {
-                    mode: 0,
-                    distribution: None,
-                }),
-            };
-            self
-        } else {
-            unreachable!()
         }
     }
 

@@ -3,12 +3,13 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::session::QueryContext;
 
-pub(super) async fn handle_drop_table(
-    session: &RwSession,
+pub async fn handle_drop_table(
+    context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
+    let session = context.session_ctx;
     let str_table_name = table_name.to_string();
 
     let catalog_mgr = session.env().catalog_mgr();
@@ -26,15 +27,12 @@ pub(super) async fn handle_drop_table(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_meta::test_utils::LocalMeta;
 
     use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    #[serial_test::serial]
     async fn test_drop_table_handler() {
-        let meta = LocalMeta::start().await;
         let sql_create_table = "create table t (v1 smallint);";
         let sql_drop_table = "drop table t;";
         let frontend = LocalFrontend::new().await;
@@ -46,7 +44,5 @@ mod tests {
         assert!(catalog_manager
             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
             .is_none());
-
-        meta.stop().await;
     }
 }

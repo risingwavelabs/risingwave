@@ -21,13 +21,6 @@ public class StageId {
     return id;
   }
 
-  public com.risingwave.proto.plan.StageId toStageIdProto() {
-    return com.risingwave.proto.plan.StageId.newBuilder()
-        .setQueryId(queryId.toQueryIdProto())
-        .setStageId(id)
-        .build();
-  }
-
   @Override
   public boolean equals(Object o) {
     if (this == o) {

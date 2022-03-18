@@ -4,8 +4,9 @@ use risingwave_common::error::tonic_err;
 use risingwave_common::try_match_expand;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
-    AddWorkerNodeRequest, AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
-    ListAllNodesRequest, ListAllNodesResponse,
+    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
+    ListAllNodesResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -53,21 +54,28 @@ where
         }))
     }
 
+    async fn activate_worker_node(
+        &self,
+        request: Request<ActivateWorkerNodeRequest>,
+    ) -> Result<Response<ActivateWorkerNodeResponse>, Status> {
+        let req = request.into_inner();
+        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
+            .map_err(|e| e.to_grpc_status())?;
+        self.scm
+            .activate_worker_node(host)
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
+    }
+
     async fn delete_worker_node(
         &self,
         request: Request<DeleteWorkerNodeRequest>,
     ) -> Result<Response<DeleteWorkerNodeResponse>, Status> {
         let req = request.into_inner();
-        let node = try_match_expand!(req.node, Some, "DeleteWorkerNodeRequest::node is empty")
+        let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
-        let host = try_match_expand!(
-            node.host,
-            Some,
-            "DeleteWorkerNodeRequest::node::host is empty"
-        )
-        .map_err(|e| e.to_grpc_status())?;
-        let _ = self
-            .scm
+        self.scm
             .delete_worker_node(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
@@ -80,7 +88,12 @@ where
     ) -> Result<Response<ListAllNodesResponse>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let node_list = self.scm.list_worker_node(worker_type);
+        let worker_state = if req.include_starting_nodes {
+            None
+        } else {
+            Some(risingwave_pb::common::worker_node::State::Running)
+        };
+        let node_list = self.scm.list_worker_node(worker_type, worker_state).await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,

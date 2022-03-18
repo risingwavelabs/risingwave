@@ -56,7 +56,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
 
     // Send create MV tasks to all compute nodes.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context, false);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context, null);
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
     CreateTaskBroadcaster.broadCastTaskFromPlanFragment(planFragment, context);
@@ -74,20 +74,23 @@ public class CreateMaterializedViewHandler implements SqlHandler {
 
   @VisibleForTesting
   public static MaterializedViewCatalog convertPlanToCatalog(
-      String tableName, StreamingPlan plan, ExecutionContext context, boolean hasAssociated) {
+      String tableName,
+      StreamingPlan plan,
+      ExecutionContext context,
+      TableCatalog.TableId associated) {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     CreateMaterializedViewInfo.Builder builder = CreateMaterializedViewInfo.builder(tableName);
-    RwStreamMaterializedView rootNode = plan.getStreamingPlan();
+    RwStreamMaterialize rootNode = plan.getStreamingPlan();
     var columns = rootNode.getColumns();
     for (var column : columns) {
       builder.addColumn(column.getKey(), column.getValue());
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
-    builder.setAssociated(hasAssociated);
+    builder.setAssociated(associated);
     builder.setDependentTables(rootNode.getDependentTables());
-    if (!hasAssociated) {
+    if (associated == null) {
       rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     }
     CreateMaterializedViewInfo mvInfo = builder.build();
@@ -98,7 +101,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
   }
 
   @VisibleForTesting
-  public static boolean isAllAliased(RwStreamMaterializedView root) {
+  public static boolean isAllAliased(RwStreamMaterialize root) {
     // Trick for checking whether is there any un-aliased aggregations: check the name pattern of
     // columns. Un-aliased column is named as EXPR$1 etc.
     var columns = root.getColumns();
