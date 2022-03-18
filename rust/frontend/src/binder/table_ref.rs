@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 
+use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
@@ -9,8 +10,6 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
-use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
@@ -32,7 +31,8 @@ pub struct BoundJoin {
 pub struct BaseTableRef {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub columns: Vec<ColumnCatalog>,
+    pub cell_based_desc: CellBasedTableDesc,
+    pub columns: Vec<ColumnDesc>,
 }
 
 #[derive(Debug)]
@@ -128,35 +128,49 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+    /// return the (schema_name, table_name)
+    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError("empty table name".into()))?
             .value;
+
         let schema_name = identifiers
             .pop()
             .map(|ident| ident.value)
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
-        let table_catalog = self
-            .catalog
-            .get_schema(&schema_name)
-            .and_then(|c| c.get_table(&table_name))
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
-        let columns = table_catalog.columns().to_vec();
-        let table_id = table_catalog.id();
+        Ok((schema_name, table_name))
+    }
+    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+        let (schema_name, table_name) = Self::resolve_table_name(name)?;
+        let table_catalog = {
+            let schema_catalog = self
+                .get_schema_by_name(&schema_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
+            schema_catalog
+                .get_table_by_name(&table_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
+                .clone()
+        };
 
+        let table_id = table_catalog.id();
+        let cell_based_desc = table_catalog.cell_based_table();
+        let columns = table_catalog.columns().to_vec();
+
+        let columns = columns
+            .into_iter()
+            .map(|c| c.column_desc)
+            .collect::<Vec<ColumnDesc>>();
         self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type())),
+            columns.iter().cloned().map(|c| (c.name, c.data_type)),
             table_name.clone(),
         )?;
 
         Ok(BaseTableRef {
             name: table_name,
+            cell_based_desc,
             table_id,
             columns,
         })

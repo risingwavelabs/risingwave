@@ -82,12 +82,11 @@ do
 done
 '''
 
-[tasks.post-build-risingwave]
+[tasks.link-standalone-binaries]
 category = "RisingWave"
-description = "Copy RisingWave binaries to bin"
-condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+description = "Link standalone cmds to RiseDev bin"
 script = '''
-#!/bin/bash
+#!@shell
 set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
@@ -95,6 +94,15 @@ rm -f "${PREFIX_BIN}/frontend-v2"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+'''
+
+[tasks.link-all-in-one-binaries]
+category = "RisingWave"
+description = "Link all-in-one cmds to RiseDev bin"
+condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
+script = '''
+#!@shell
+set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
 mkdir -p "${PREFIX_BIN}/risingwave"
@@ -103,6 +111,15 @@ ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwav
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+'''
+
+[tasks.link-user-bin]
+category = "RisingWave"
+description = "Link all binaries to .bin"
+condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
+script = '''
+#!@shell
+set -e
 
 rm -rf "${PREFIX_USR_BIN}"
 mkdir -p "${PREFIX_USR_BIN}"
@@ -112,6 +129,12 @@ ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/front
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
 ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
 '''
+
+[tasks.post-build-risingwave]
+category = "RisingWave"
+description = "Copy RisingWave binaries to bin"
+condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
 
 [tasks.build-risingwave]
 category = "RisingWave"
@@ -298,3 +321,7 @@ cd rust
 CARGO_TARGET_DIR=target/coverage
 cargo llvm-cov nextest
 """
+
+[tasks.apply-ci-template]
+description = "Apply CI template"
+command = ".github/workflow-template/generate.sh"

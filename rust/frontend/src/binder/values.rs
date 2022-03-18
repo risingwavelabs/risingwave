@@ -47,7 +47,7 @@ impl Binder {
     }
 
     /// Find compatible type for `left` and `right`.
-    fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
+    pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
         if (left == right || left.is_numeric() && right.is_numeric())
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
@@ -67,7 +67,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
+    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
         } else {
@@ -82,18 +82,16 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
-    use crate::catalog::database_catalog::DatabaseCatalog;
+    use crate::binder::test_utils::mock_binder;
 
     #[test]
     fn test_bind_values() {
-        let catalog = DatabaseCatalog::new(0);
-        let mut binder = Binder::new(Arc::new(catalog));
+        let mut binder = mock_binder();
 
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));

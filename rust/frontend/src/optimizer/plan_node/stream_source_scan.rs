@@ -36,7 +36,12 @@ impl_plan_tree_node_for_leaf! { StreamSourceScan }
 
 impl fmt::Display for StreamSourceScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamSourceScan {{ logical: {} }}", self.logical)
+        write!(
+            f,
+            "StreamSourceScan {{ table: {}, columns: [{}] }}",
+            self.logical.table_name(),
+            self.logical.column_names().join(", ")
+        )
     }
 }
 

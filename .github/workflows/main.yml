@@ -79,20 +79,10 @@ jobs:
           java-version: "11"
           distribution: "adopt"
       - uses: actions/download-artifact@v2
-        name: Download compute-node binary
+        name: Download risingwave binary
         with:
-          name: compute-node
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
-        name: Download meta-node binary
-        with:
-          name: meta-node
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
-        name: Download rust frontend binary
-        with:
-          name: frontend-v2
-          path: ./.risingwave/bin
+          name: risingwave
+          path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
@@ -105,14 +95,12 @@ jobs:
           path: ./rust/target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./.risingwave/bin/meta-node
-          chmod +x ./.risingwave/bin/compute-node
-          chmod +x ./.risingwave/bin/frontend-v2
+          chmod +x ./rust/target/debug/risingwave
           chmod +x ./rust/target/debug/risedev-playground
       - name: Install required components
         run: |
           apt-get update -yy -o Acquire::Retries=3
-          apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux -o Acquire::Retries=3
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
@@ -130,7 +118,9 @@ jobs:
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - name: Prepare RiseDev playground
-        run: ~/cargo-make/makers pre-start-playground
+        run: |
+          ~/cargo-make/makers link-all-in-one-binaries
+          ~/cargo-make/makers pre-start-playground
       - name: e2e test streaming 3-node
         timeout-minutes: 2
         run: |
@@ -234,15 +224,10 @@ jobs:
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - uses: actions/download-artifact@v2
-        name: Download compute-node binary
+        name: Download risingwave binary
         with:
-          name: compute-node
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
-        name: Download meta-node binary
-        with:
-          name: meta-node
-          path: ./.risingwave/bin
+          name: risingwave
+          path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
@@ -260,8 +245,7 @@ jobs:
           path: ./rust/target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./.risingwave/bin/meta-node
-          chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./rust/target/debug/risingwave
           chmod +x ./rust/target/debug/risedev-playground
           chmod +x ./rust/target/debug/risingwave_regress_test
       - name: Run batch tests on Postgresql
@@ -271,7 +255,9 @@ jobs:
         run: |
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
-        run: ~/cargo-make/makers pre-start-playground
+        run: |
+          ~/cargo-make/makers link-all-in-one-binaries
+          ~/cargo-make/makers pre-start-playground
       - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
@@ -359,7 +345,7 @@ jobs:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
           ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
+          ec2-instance-type: c5.2xlarge
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
   compute-node-build:
@@ -395,34 +381,23 @@ jobs:
           cargo install cargo-sort
       - name: Run rust cargo-sort check
         run: |
-          make rust_cargo_sort_check
+          cd rust && cargo sort -c -w
       - name: Run rust format check
         run: |
-          make rust_fmt_check
+          cd rust && cargo fmt --all -- --check
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          make rust_clippy_check_locked
-      - name: Build compute-node and meta-node
-        run: make rust_build
+          cd rust && cargo clippy --all-targets --locked -- -D warnings
+      - name: Build Rust components
+        run: |
+          cd rust && cargo build --features=all-in-one
       - uses: actions/upload-artifact@v2
         with:
-          name: compute-node
+          name: risingwave
           if-no-files-found: error
           path: |
-            rust/target/debug/compute-node
-      - uses: actions/upload-artifact@v2
-        with:
-          name: meta-node
-          if-no-files-found: error
-          path: |
-            rust/target/debug/meta-node
-      - uses: actions/upload-artifact@v2
-        with:
-          name: frontend-v2
-          if-no-files-found: error
-          path: |
-            rust/target/debug/frontend-v2
+            rust/target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test

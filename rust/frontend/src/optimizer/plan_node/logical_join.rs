@@ -32,10 +32,11 @@ pub struct LogicalJoin {
 
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalJoin")
-            .field("type", &self.join_type())
-            .field("on", &self.on)
-            .finish()
+        write!(
+            f,
+            "LogicalJoin {{ type: {:?}, on: {} }}",
+            &self.join_type, &self.on
+        )
     }
 }
 
