@@ -102,7 +102,7 @@ where
                         if let Some(downstream_actors) =
                             extra_downstream_actors.get(&actor.actor_id)
                         {
-                            actor
+                            actor.dispatcher[0]
                                 .downstream_actor_id
                                 .extend(downstream_actors.iter().cloned());
                         }
