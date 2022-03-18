@@ -4,8 +4,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, OrderedColumnDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan::{ColumnCatalog, OrderType as ProstOrderType};
+use risingwave_pb::plan::OrderType as ProstOrderType;
 
+use super::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 
 #[derive(Clone, Debug)]
@@ -77,11 +78,12 @@ impl From<ProstTable> for TableCatalog {
             })
             .collect();
 
+        let columns = columns.into_iter().map(ColumnCatalog::from).collect();
         Self {
             id: id.into(),
             name,
-            columns,
             pk_desc,
+            columns,
         }
     }
 }

@@ -161,7 +161,7 @@ impl Binder {
 
         let columns = columns
             .into_iter()
-            .map(|c| c.column_desc.unwrap().into())
+            .map(|c| c.column_desc)
             .collect::<Vec<ColumnDesc>>();
         self.bind_context(
             columns.iter().cloned().map(|c| (c.name, c.data_type)),
