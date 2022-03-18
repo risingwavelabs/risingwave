@@ -431,18 +431,15 @@ where
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
-        // 4.1. Mark current mview as "creating" and add reference count to dependent tables
         self.catalog_manager
             .start_create_table_process(&mview)
             .await?;
 
-        // 4.2. Create mview in stream manager
         match self
             .create_materialized_view_inner(&stream_node, mview_id)
             .await
         {
             Ok(_) => {
-                // Insert mview into the catalog only if step 2 succeeded.
                 mview.id = mview_id;
                 let version = self
                     .catalog_manager
