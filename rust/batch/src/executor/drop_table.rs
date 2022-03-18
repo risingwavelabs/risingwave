@@ -6,6 +6,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
+// TODO: All DDLs should be RPC requests from the meta service. Remove this.
 pub(super) struct DropTableExecutor {
     table_id: TableId,
     schema: Schema,
