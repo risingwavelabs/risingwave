@@ -1,9 +1,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
+use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
 use crate::optimizer::property::order::WithOrder;
@@ -64,7 +63,7 @@ impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
             fields: self.schema.to_prost(),
-            dispatcher: Some(Dispatcher {
+            strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
                     Distribution::Single => DispatcherType::Simple,
@@ -75,8 +74,6 @@ impl ToStreamProst for StreamExchange {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
-                // Frontend does not have the info of hash mapping, which is set by meta.
-                hash_mapping: None,
             }),
         })
     }
