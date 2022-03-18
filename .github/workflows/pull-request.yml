@@ -225,15 +225,10 @@ jobs:
           unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
           mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
       - uses: actions/download-artifact@v2
-        name: Download compute-node binary
+        name: Download risingwave binary
         with:
-          name: compute-node
-          path: ./.risingwave/bin
-      - uses: actions/download-artifact@v2
-        name: Download meta-node binary
-        with:
-          name: meta-node
-          path: ./.risingwave/bin
+          name: risingwave
+          path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
