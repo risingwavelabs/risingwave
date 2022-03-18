@@ -6,11 +6,11 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.streamnode";
 option optimize_for = SPEED;
 
+import "catalog.proto";
 import "common.proto";
 import "data.proto";
 import "plan.proto";
 import "stream_plan.proto";
-import "catalog.proto";
 
 message HangingChannel {
   common.ActorInfo upstream = 1;
