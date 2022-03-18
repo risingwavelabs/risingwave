@@ -250,8 +250,7 @@ jobs:
           path: ./rust/target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./.risingwave/bin/meta-node
-          chmod +x ./.risingwave/bin/compute-node
+          chmod +x ./rust/target/debug/risingwave
           chmod +x ./rust/target/debug/risedev-playground
           chmod +x ./rust/target/debug/risingwave_regress_test
       - name: Run batch tests on Postgresql
@@ -261,7 +260,9 @@ jobs:
         run: |
           cp risedev-components.ci.env risedev-components.user.env
       - name: Prepare RiseDev playground
-        run: ~/cargo-make/makers pre-start-playground
+        run: |
+          ~/cargo-make/makers link-all-in-one-binaries
+          ~/cargo-make/makers pre-start-playground
       - name: regress test batch 3-node
         run: |
           ~/cargo-make/makers clean-data
@@ -385,10 +386,10 @@ jobs:
           cargo install cargo-sort
       - name: Run rust cargo-sort check
         run: |
-          cargo sort -c -w
+          cd rust && cargo sort -c -w
       - name: Run rust format check
         run: |
-          cargo fmt --all -- --check
+          cd rust && cargo fmt --all -- --check
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
