@@ -410,7 +410,7 @@ impl Dispatcher for HashDataDispatcher {
                     .zip_eq(ops)
                     .for_each(|((hash, visible), op)| {
                         for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(visible && *hash == output_idx);
+                            vis_map.push(visible && self.hash_mapping[*hash] == self.outputs[output_idx].actor_id());
                         }
                         if !visible {
                             new_ops.push(op);
@@ -607,7 +607,6 @@ pub use sender_consumer::SenderConsumer;
 
 #[cfg(test)]
 mod tests {
-    use core::num;
     use std::collections::HashMap;
     use std::hash::{BuildHasher, Hasher};
     use std::sync::{Arc, Mutex};
