@@ -194,8 +194,7 @@ mod test {
                         actor_id,
                         fragment_id: id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     }],
                 };
@@ -211,8 +210,7 @@ mod test {
                         actor_id: id,
                         fragment_id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     })
                     .collect_vec();
