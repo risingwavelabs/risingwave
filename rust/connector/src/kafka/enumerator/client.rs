@@ -25,7 +25,6 @@ use rdkafka::{Offset, TopicPartitionList};
 use crate::base::SplitEnumerator;
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
 use crate::kafka::{KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT};
-use crate::SourceSplit;
 
 pub struct KafkaSplitEnumerator {
     broker_address: String,
@@ -58,6 +57,8 @@ impl KafkaSplitEnumerator {
 
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
+    type Split = KafkaSplit;
+    
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition()?;
 

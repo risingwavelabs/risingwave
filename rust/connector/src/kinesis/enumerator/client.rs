@@ -19,7 +19,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 
 use crate::base::SplitEnumerator;
 use crate::kinesis::split::{KinesisOffset, KinesisSplit};
-use crate::SourceSplit;
+
 
 pub struct KinesisSplitEnumerator {
     stream_name: String,
@@ -28,6 +28,8 @@ pub struct KinesisSplitEnumerator {
 
 #[async_trait]
 impl SplitEnumerator for KinesisSplitEnumerator {
+    type Split = KinesisSplit;
+
     async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;
         let mut shard_collect: Vec<Shard> = Vec::new();

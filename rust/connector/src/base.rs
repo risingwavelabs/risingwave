@@ -22,7 +22,9 @@ use anyhow::{anyhow, Error};
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
+use kafka::enumerator::KafkaSplitEnumerator;
 
 pub enum SourceOffset {
     Number(i64),
@@ -64,22 +66,25 @@ pub trait SplitEnumerator {
 }
 
 pub enum SplitEnumeratorImpl {
-    Kafka(kafka::enumerator::KafkaSplitEnumerator),
+    Kafka(KafkaSplitEnumerator),
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
 }
 
+pub enum SplitImpl {
+    Kafka(kafka::KafkaSplit),
+    Pulsar(pulsar::PulsarSplit),
+}
+
 impl SplitEnumeratorImpl {
-    async fn list_splits(&mut self) -> Result<Vec<&[u8]>> {
+    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         match self {
             SplitEnumeratorImpl::Kafka(k) => {
-                k.list_splits().await.map(|x| x.iter().map( |xx| {xx.to_string().unwrap().as_}))
+                k.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::Kafka).collect_vec())
             }
-            SplitEnumeratorImpl::Pulsar(_) => {
-                todo!()
+            SplitEnumeratorImpl::Pulsar(p) => {
+                p.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec())
             }
         }
-
-        todo!()
     }
 }
 
@@ -91,7 +96,7 @@ pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<
 
     match source_type.as_ref() {
         "kafka" => {
-            return kafka::enumerator::KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka);
+            KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka)
         }
         _ => Err(anyhow!("unsupported source type: {}", source_type)),
     }

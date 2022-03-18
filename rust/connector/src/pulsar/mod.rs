@@ -20,3 +20,4 @@ mod topic;
 
 
 pub use enumerator::*;
+pub use split::*;
