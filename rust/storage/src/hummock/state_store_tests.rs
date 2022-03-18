@@ -12,8 +12,6 @@ use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
 
 #[tokio::test]
-/// Fix this when we finished epoch management.
-#[ignore]
 async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());

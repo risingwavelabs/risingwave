@@ -20,6 +20,7 @@ pub type DatabaseId = u32;
 pub type SchemaId = u32;
 pub type TableId = u32;
 pub type SourceId = u32;
+pub type RelationId = u32;
 
 pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
 
@@ -132,8 +133,8 @@ where
             let version = core.new_version_id().await?;
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
-            for &dependent_table_id in &table.dependent_tables {
-                core.increase_ref_count(dependent_table_id);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
             }
 
             self.nm
@@ -166,8 +167,8 @@ where
                     let version = core.new_version_id().await?;
                     Table::delete(&*self.meta_store_ref, &table_id).await?;
                     core.drop_table(&table);
-                    for &dependent_table_id in &table.dependent_tables {
-                        core.decrease_ref_count(dependent_table_id);
+                    for &dependent_relation_id in &table.dependent_relations {
+                        core.decrease_ref_count(dependent_relation_id);
                     }
 
                     self.nm
@@ -207,15 +208,28 @@ where
         let mut core = self.core.lock().await;
         let source = Source::select(&*self.meta_store_ref, &source_id).await?;
         if let Some(source) = source {
-            let version = core.new_version_id().await?;
-            Source::delete(&*self.meta_store_ref, &source_id).await?;
-            core.drop_source(&source);
+            match core.get_ref_count(source_id) {
+                Some(ref_count) => Err(CatalogError(
+                    anyhow!(
+                        "Fail to delete source {} because {} other table(s) depends on it.",
+                        source_id,
+                        ref_count
+                    )
+                    .into(),
+                )
+                .into()),
+                None => {
+                    let version = core.new_version_id().await?;
+                    Source::delete(&*self.meta_store_ref, &source_id).await?;
+                    core.drop_source(&source);
 
-            self.nm
-                .notify_fe(Operation::Delete, &Info::Source(source))
-                .await;
+                    self.nm
+                        .notify_fe(Operation::Delete, &Info::Source(source))
+                        .await;
 
-            Ok(version)
+                    Ok(version)
+                }
+            }
         } else {
             Err(RwError::from(InternalError(
                 "source doesn't exist".to_string(),
@@ -241,8 +255,8 @@ struct CatalogManagerCore<S> {
     sources: HashSet<SourceKey>,
     /// Cached table key information.
     tables: HashSet<TableKey>,
-    /// Table refer count mapping.
-    table_ref_count: HashMap<TableId, usize>,
+    /// Relation refer count mapping.
+    relation_ref_count: HashMap<RelationId, usize>,
 
     /// Catalog version generator.
     version_generator: CatalogVersionGenerator,
@@ -258,7 +272,7 @@ where
         let sources = Source::list(&*meta_store_ref).await?;
         let tables = Table::list(&*meta_store_ref).await?;
 
-        let mut table_ref_count = HashMap::new();
+        let mut relation_ref_count = HashMap::new();
 
         let databases = HashSet::from_iter(databases.into_iter().map(|database| (database.id)));
         let schemas = HashSet::from_iter(
@@ -272,8 +286,8 @@ where
                 .map(|source| (source.database_id, source.schema_id, source.name)),
         );
         let tables = HashSet::from_iter(tables.into_iter().map(|table| {
-            for depend_table_id in &table.dependent_tables {
-                table_ref_count.entry(*depend_table_id).or_insert(0);
+            for depend_relation_id in &table.dependent_relations {
+                relation_ref_count.entry(*depend_relation_id).or_insert(0);
             }
             (table.database_id, table.schema_id, table.name)
         }));
@@ -286,7 +300,7 @@ where
             schemas,
             sources,
             tables,
-            table_ref_count,
+            relation_ref_count,
             version_generator,
         })
     }
@@ -363,16 +377,16 @@ where
             .remove(&(source.database_id, source.schema_id, source.name.clone()))
     }
 
-    fn get_ref_count(&self, table_id: TableId) -> Option<usize> {
-        self.table_ref_count.get(&table_id).cloned()
+    fn get_ref_count(&self, relation_id: RelationId) -> Option<usize> {
+        self.relation_ref_count.get(&relation_id).cloned()
     }
 
-    fn increase_ref_count(&mut self, table_id: TableId) {
-        *self.table_ref_count.entry(table_id).or_insert(0) += 1;
+    fn increase_ref_count(&mut self, relation_id: RelationId) {
+        *self.relation_ref_count.entry(relation_id).or_insert(0) += 1;
     }
 
-    fn decrease_ref_count(&mut self, table_id: TableId) {
-        match self.table_ref_count.entry(table_id) {
+    fn decrease_ref_count(&mut self, relation_id: RelationId) {
+        match self.relation_ref_count.entry(relation_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() -= 1;
                 if *o.get() == 0 {

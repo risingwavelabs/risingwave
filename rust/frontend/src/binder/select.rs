@@ -1,10 +1,12 @@
 use std::fmt::Debug;
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
+use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, TableRef};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
@@ -14,13 +16,35 @@ pub struct BoundSelect {
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
     pub from: Option<TableRef>,
-    pub selection: Option<ExprImpl>,
+    pub where_clause: Option<ExprImpl>,
+    pub group_by: Vec<ExprImpl>,
+}
+
+impl BoundSelect {
+    /// The names returned by this [`BoundSelect`].
+    pub fn names(&self) -> Vec<String> {
+        self.aliases
+            .iter()
+            .cloned()
+            .map(|alias| alias.unwrap_or_else(|| UNNAMED_COLUMN.to_string()))
+            .collect()
+    }
+
+    /// The types returned by this [`BoundSelect`].
+    pub fn data_types(&self) -> Vec<DataType> {
+        self.select_items
+            .iter()
+            .map(|item| item.return_type())
+            .collect()
+    }
 }
 
 impl Binder {
     pub(super) fn bind_select(&mut self, select: Select) -> Result<BoundSelect> {
+        // Bind FROM clause.
         let from = self.bind_vec_table_with_joins(select.from)?;
 
+        // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
         let selection = select
             .selection
@@ -38,13 +62,24 @@ impl Binder {
                 .into());
             }
         }
+
+        // Bind GROUP BY clause.
+        let group_by = select
+            .group_by
+            .into_iter()
+            .map(|expr| self.bind_expr(expr))
+            .try_collect()?;
+
+        // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
+
         Ok(BoundSelect {
             distinct: select.distinct,
             select_items,
             aliases,
             from,
-            selection,
+            where_clause: selection,
+            group_by,
         })
     }
 

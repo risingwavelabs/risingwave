@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::data::data_type::TypeName;
@@ -120,6 +121,7 @@ fn make_stream_node() -> StreamNode {
             dispatcher: Some(Dispatcher {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
+                hash_mapping: None,
             }),
             fields: vec![
                 make_field(TypeName::Int32),
@@ -236,7 +238,9 @@ async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
     let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-    let mut fragmenter = StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, 4);
+    let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
+    let mut fragmenter =
+        StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, hash_mapping);
 
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;

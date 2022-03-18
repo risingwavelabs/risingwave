@@ -72,9 +72,9 @@ where
         .await
     }
 
-    pub async fn get_worker_mapping(&self) -> Result<Vec<ParallelUnitId>> {
+    pub async fn get_worker_mapping(&self) -> Vec<ParallelUnitId> {
         let core = self.core.lock().await;
-        Ok(core.key_mapping.get_mapping())
+        core.key_mapping.get_mapping()
     }
 }
 

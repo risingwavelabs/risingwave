@@ -137,10 +137,7 @@ impl ScheduledBarriers {
 /// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactionally using [`Command`].
-pub struct BarrierManager<S>
-where
-    S: MetaStore,
-{
+pub struct BarrierManager<S> {
     cluster_manager: StoredClusterManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,

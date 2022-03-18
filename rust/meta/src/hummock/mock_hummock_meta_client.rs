@@ -33,9 +33,9 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
         self.hummock_manager
-            .pin_version(self.context_id)
+            .pin_version(self.context_id, last_pinned)
             .await
             .map_err(HummockError::meta_error)
     }
@@ -47,9 +47,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch> {
         self.hummock_manager
-            .pin_snapshot(self.context_id)
+            .pin_snapshot(self.context_id, last_pinned)
             .await
             .map(|e| e.epoch)
             .map_err(HummockError::meta_error)

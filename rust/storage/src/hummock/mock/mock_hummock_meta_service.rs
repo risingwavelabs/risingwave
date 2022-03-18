@@ -45,6 +45,7 @@ impl MockHummockMetaServiceInner {
                 }],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
+                safe_epoch: INVALID_EPOCH,
             },
         );
         MockHummockMetaServiceInner {

@@ -3,7 +3,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::{debug, info};
+use log::info;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -31,13 +32,12 @@ pub struct CreateMaterializedViewContext {
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by table id.
+    pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
 /// Stream Manager
-pub struct StreamManager<S>
-where
-    S: MetaStore,
-{
+pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 
@@ -191,7 +191,7 @@ where
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]update actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -227,7 +227,7 @@ where
 
             let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]build actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
                 .to_owned()
                 .build_actors(BuildActorsRequest {
@@ -245,6 +245,7 @@ where
         self.barrier_manager_ref
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
+                table_sink_map: ctx.table_sink_map,
                 dispatches,
             })
             .await?;
@@ -287,16 +288,13 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
-    use risingwave_pb::stream_service::{
-        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
-    };
+    use risingwave_pb::stream_service::*;
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
@@ -385,6 +383,20 @@ mod tests {
                 request_id: "".to_string(),
                 status: None,
             }))
+        }
+
+        async fn create_source(
+            &self,
+            _request: Request<CreateSourceRequest>,
+        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn drop_source(
+            &self,
+            _request: Request<DropSourceRequest>,
+        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
+            unimplemented!()
         }
     }
 
@@ -516,6 +528,7 @@ mod tests {
             Fragment {
                 fragment_id: 0,
                 fragment_type: FragmentType::Sink as i32,
+                distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
             },
         );

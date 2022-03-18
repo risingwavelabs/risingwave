@@ -43,7 +43,7 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::task::{ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
+use crate::task::{ActorId, ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 mod aggregation;
@@ -82,9 +82,9 @@ pub type BoxedExecutorStream = Pin<Box<dyn Stream<Item = Result<Message>> + Send
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
-    Stop(HashSet<u32>),
-    UpdateOutputs(HashMap<u32, Vec<ActorInfo>>),
-    AddOutput(HashMap<u32, Vec<ActorInfo>>),
+    Stop(HashSet<ActorId>),
+    UpdateOutputs(HashMap<ActorId, Vec<ActorInfo>>),
+    AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -240,7 +240,7 @@ impl Barrier {
                         .actors
                         .iter()
                         .map(|(&f, actors)| (f, actors.get_info().clone()))
-                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),
@@ -249,7 +249,7 @@ impl Barrier {
                     adds.actors
                         .iter()
                         .map(|(&id, actors)| (id, actors.get_info().clone()))
-                        .collect::<HashMap<u32, Vec<ActorInfo>>>(),
+                        .collect::<HashMap<ActorId, Vec<ActorInfo>>>(),
                 )
                 .into(),
             ),

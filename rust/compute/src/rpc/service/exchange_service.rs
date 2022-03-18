@@ -16,6 +16,7 @@ use risingwave_stream::task::StreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
+/// Buffer size of the receiver of the remote channel.
 const EXCHANGE_BUFFER_SIZE: usize = 1024;
 
 #[derive(Clone)]
@@ -31,7 +32,7 @@ impl ExchangeService for ExchangeServiceImpl {
     type GetDataStream = ExchangeDataStream;
     type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data(
         &self,
         request: Request<GetDataRequest>,
@@ -91,7 +92,7 @@ impl ExchangeServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_data_impl(
         &self,
         peer_addr: SocketAddr,

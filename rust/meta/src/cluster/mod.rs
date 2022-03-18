@@ -350,6 +350,10 @@ where
         core.get_parallel_unit_count(parallel_unit_type)
     }
 
+    pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
+        self.dispatch_manager_ref.get_worker_mapping().await
+    }
+
     async fn generate_cn_parallel_units(
         &self,
         parallel_degree: usize,
@@ -595,8 +599,7 @@ mod tests {
         let mapping = cluster_manager
             .dispatch_manager_ref
             .get_worker_mapping()
-            .await
-            .unwrap();
+            .await;
         let unique_parallel_units = HashSet::<u32>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),

@@ -6,6 +6,7 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.streamnode";
 option optimize_for = SPEED;
 
+import "catalog.proto";
 import "common.proto";
 import "data.proto";
 import "plan.proto";
@@ -70,12 +71,30 @@ message BroadcastActorInfoTableResponse {
   common.Status status = 1;
 }
 
+message CreateSourceRequest {
+  catalog.Source source = 1;
+}
+
+message CreateSourceResponse {
+  common.Status status = 1;
+}
+
+message DropSourceRequest {
+  uint32 source_id = 1;
+}
+
+message DropSourceResponse {
+  common.Status status = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
+  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
+  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
 }
 
 // TODO: Lifecycle management for actors.
