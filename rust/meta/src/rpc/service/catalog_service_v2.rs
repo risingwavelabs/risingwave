@@ -7,6 +7,7 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::plan::TableRefId;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
@@ -211,9 +212,24 @@ where
 
     async fn create_materialized_source(
         &self,
-        _request: Request<CreateMaterializedSourceRequest>,
+        request: Request<CreateMaterializedSourceRequest>,
     ) -> Result<Response<CreateMaterializedSourceResponse>, Status> {
-        todo!()
+        let request = request.into_inner();
+        let source = request.source.unwrap();
+        let mview = request.materialized_view.unwrap();
+        let stream_node = request.stream_node.unwrap();
+
+        let (source_id, table_id, version) = self
+            .create_materialized_source_inner(source, mview, stream_node)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(CreateMaterializedSourceResponse {
+            status: None,
+            source_id,
+            table_id,
+            version,
+        }))
     }
 
     async fn drop_materialized_source(
@@ -346,5 +362,42 @@ where
             .await?;
 
         Ok(version)
+    }
+
+    // TODO: transactional creation of source and mview
+    async fn create_materialized_source_inner(
+        &self,
+        source: Source,
+        mview: Table,
+        mut stream_node: StreamNode,
+    ) -> RwResult<(SourceId, u32, CatalogVersion)> {
+        // 1. Create source.
+        let (source_id, _version_1) = self.create_source_inner(source).await?;
+
+        // 2. Fill in the correct source id.
+        fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
+            let mut source_count = 0;
+            if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
+                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into(); // TODO: refactor using source id.
+                source_count += 1;
+            }
+            for input in &mut stream_node.input {
+                source_count += fill_source_id(input, source_id);
+            }
+            source_count
+        }
+
+        let source_count = fill_source_id(&mut stream_node, source_id);
+        assert_eq!(
+            source_count, 1,
+            "require exactly 1 source node when creating materialized source"
+        );
+
+        // 3. Create materialized view.
+        let (table_id, version_2) = self
+            .create_materialized_view_inner(mview, stream_node)
+            .await?;
+
+        Ok((source_id, table_id, version_2))
     }
 }
