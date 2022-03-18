@@ -133,6 +133,7 @@ impl ObserverManager {
                         catalog_guard.version()
                     );
                     catalog_guard.set_version(resp.version);
+                    self.catalog_updated_tx.send(resp.version).unwrap();
                 }
             }
         });
