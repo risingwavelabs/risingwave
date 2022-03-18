@@ -3,6 +3,7 @@ use futures::future::try_join_all;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -234,9 +235,21 @@ where
 
     async fn drop_materialized_source(
         &self,
-        _request: Request<DropMaterializedSourceRequest>,
+        request: Request<DropMaterializedSourceRequest>,
     ) -> Result<Response<DropMaterializedSourceResponse>, Status> {
-        todo!()
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let table_id = request.table_id;
+
+        let version = self
+            .drop_materialized_source_inner(source_id, table_id)
+            .await
+            .map_err(tonic_err)?;
+
+        Ok(Response::new(DropMaterializedSourceResponse {
+            status: None,
+            version,
+        }))
     }
 }
 
@@ -368,13 +381,13 @@ where
     async fn create_materialized_source_inner(
         &self,
         source: Source,
-        mview: Table,
+        mut mview: Table,
         mut stream_node: StreamNode,
     ) -> RwResult<(SourceId, u32, CatalogVersion)> {
         // 1. Create source.
         let (source_id, _version_1) = self.create_source_inner(source).await?;
 
-        // 2. Fill in the correct source id.
+        // 2. Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
             let mut source_count = 0;
             if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
@@ -393,11 +406,30 @@ where
             "require exactly 1 source node when creating materialized source"
         );
 
-        // 3. Create materialized view.
+        // 3. Fill in the correct source id for mview.
+        mview.optional_associated_source_id =
+            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+
+        // 4. Create materialized view.
         let (table_id, version_2) = self
             .create_materialized_view_inner(mview, stream_node)
             .await?;
 
         Ok((source_id, table_id, version_2))
+    }
+
+    async fn drop_materialized_source_inner(
+        &self,
+        source_id: SourceId,
+        table_id: u32,
+    ) -> RwResult<CatalogVersion> {
+        // 1. Drop mview.
+        let _version_1 = self.drop_materialized_view_inner(table_id).await?;
+
+        // 2. Drop source.
+        // TODO: should we extract the source id from the dropped mview and validate it?
+        let version_2 = self.drop_source_inner(source_id).await?;
+
+        Ok(version_2)
     }
 }
