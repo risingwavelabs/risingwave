@@ -135,7 +135,7 @@ impl Catalog {
             .get_schema_by_name(schema_name)
             .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()))?;
         if let Some(source) = schema.get_source_by_name(relation_name) {
-            // TODO: check if it is a materivalized source and improve the err msg
+            // TODO: check if it is a materialized source and improve the err msg
             return match source.info {
                 Some(source::Info::TableSource(_)) => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
@@ -149,7 +149,7 @@ impl Catalog {
 
         if let Some(_table) = schema.get_table_by_name(relation_name) {
             return Err(
-                CatalogError::Duplicated("materivalized view", schema_name.to_string()).into(),
+                CatalogError::Duplicated("materialized view", schema_name.to_string()).into(),
             );
         }
         Ok((db.id(), schema.id()))
