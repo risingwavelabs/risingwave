@@ -16,6 +16,7 @@ extern crate log;
 pub mod test_utils;
 
 use std::ffi::OsString;
+use std::iter;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -37,8 +38,7 @@ pub struct FrontendOpts {
 
 impl Default for FrontendOpts {
     fn default() -> Self {
-        let args: [OsString; 0] = []; // No argument.
-        FrontendOpts::parse_from(args)
+        FrontendOpts::parse_from(iter::empty::<OsString>())
     }
 }
 
