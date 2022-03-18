@@ -29,6 +29,7 @@ pub struct Catalog {
     db_name_by_id: HashMap<DatabaseId, String>,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for Catalog {
     fn default() -> Self {
         Self {

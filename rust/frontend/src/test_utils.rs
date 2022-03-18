@@ -1,45 +1,32 @@
-
 use std::cell::RefCell;
-
+use std::mem;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
-use std::{mem};
-
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{Result};
-
-
-
-
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
     Database as ProstDatabase, Schema as ProstSchema,
 };
-
 use risingwave_pb::common::WorkerNode;
-
-use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse,
-    AddWorkerNodeRequest, AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
-    ListAllNodesRequest, ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
+    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
+    ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
 };
 use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::mpsc::{
-    self, Receiver, Sender, UnboundedSender,
-};
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
-
 
 use crate::binder::Binder;
 use crate::optimizer::PlanRef;
@@ -367,18 +354,18 @@ impl SingleFrontendMockNotifyService {
 
     // return the version id
     pub async fn notify(&mut self, operation: Operation, info: &Info) -> u64 {
-        self.cur_version += 1;
+        let version = self.gen_version();
         self.notify_tx
             .send(Ok(SubscribeResponse {
                 status: None,
                 operation: operation as i32,
                 info: Some(info.clone()),
                 // TODO: pass the version when call notify
-                version: self.cur_version,
+                version,
             }))
             .await
             .unwrap();
-        self.cur_version
+        version
     }
 
     fn gen_version(&mut self) -> u64 {

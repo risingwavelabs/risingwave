@@ -53,7 +53,7 @@ impl Binder {
         self.bind_statement(stmt)
     }
 
-    fn get_schema_by_name(&self, schema_name: &String) -> Option<&SchemaCatalog> {
+    fn get_schema_by_name(&self, schema_name: &str) -> Option<&SchemaCatalog> {
         self.catalog.get_schema_by_name(&self.db_name, schema_name)
     }
     fn push_context(&mut self) {
