@@ -16,6 +16,7 @@ macro_rules! array {
 }
 
 /// `empty_array` builds an empty `Array`.
+#[macro_export]
 macro_rules! empty_array {
     ($array:tt) => {
         {
