@@ -109,10 +109,6 @@ jobs:
           chmod +x ./.risingwave/bin/compute-node
           chmod +x ./.risingwave/bin/frontend-v2
           chmod +x ./rust/target/debug/risedev-playground
-      - name: Install required components
-        run: |
-          apt-get update -yy -o Acquire::Retries=3
-          apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
@@ -359,7 +355,7 @@ jobs:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
           ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
+          ec2-instance-type: c5.2xlarge
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
   compute-node-build:
