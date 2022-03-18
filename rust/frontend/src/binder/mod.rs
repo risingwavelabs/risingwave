@@ -80,7 +80,7 @@ pub mod test_utils {
     #[cfg(test)]
     pub fn mock_binder_with_catalog(catalog: Catalog, db_name: String) -> Binder {
         let catalog = Arc::new(RwLock::new(catalog));
-        let catalog_reader = CatalogReader(catalog);
+        let catalog_reader = CatalogReader::new(catalog);
         Binder::new(catalog_reader.read_guard(), db_name)
     }
     #[cfg(test)]

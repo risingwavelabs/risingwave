@@ -20,8 +20,11 @@ pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
 /// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
-pub struct CatalogReader(pub Arc<RwLock<Catalog>>);
+pub struct CatalogReader(Arc<RwLock<Catalog>>);
 impl CatalogReader {
+    pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
+        CatalogReader(inner)
+    }
     pub fn read_guard(&self) -> CatalogReadGuard {
         self.0.read_arc()
     }

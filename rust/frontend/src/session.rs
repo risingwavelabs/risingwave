@@ -96,7 +96,7 @@ impl FrontendEnv {
         let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = CatalogWriter::new(meta_client.clone(), catalog_updated_rx);
-        let catalog_reader = CatalogReader(catalog);
+        let catalog_reader = CatalogReader::new(catalog);
         Self {
             meta_client,
             catalog_writer,
@@ -124,7 +124,7 @@ impl FrontendEnv {
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
         let catalog_writer = CatalogWriter::new(meta_client.clone(), catalog_updated_rx);
-        let catalog_reader = CatalogReader(catalog.clone());
+        let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
 
