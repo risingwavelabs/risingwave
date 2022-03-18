@@ -103,7 +103,9 @@ impl CatalogWriter {
             database_id: table_clone.database_id,
             name: table_clone.name,
             info: Some(risingwave_pb::catalog::source::Info::TableSource(
-                TableSourceInfo {},
+                TableSourceInfo {
+                    columns: table_clone.columns,
+                },
             )),
         };
         let (_, _, version) = self

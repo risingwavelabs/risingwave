@@ -38,7 +38,7 @@ use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::mpsc::{
-    self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender, UnboundedSender,
+    self, unbounded_channel, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;

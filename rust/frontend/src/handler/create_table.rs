@@ -63,10 +63,10 @@ pub async fn handle_create_table(
         schema_id,
         database_id,
         name: table_name,
-        column_catalog: column_catalogs,
+        columns: column_catalogs,
         pk_column_ids: vec![0],
         pk_orders: vec![OrderType::Ascending.to_prost() as i32],
-        dependent_tables: vec![],
+        dependent_relations: vec![],
     };
 
     let catalog_writer = session.env().catalog_writer();

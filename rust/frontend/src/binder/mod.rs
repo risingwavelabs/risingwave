@@ -56,6 +56,15 @@ impl Binder {
     fn get_schema_by_name(&self, schema_name: &String) -> Option<&SchemaCatalog> {
         self.catalog.get_schema_by_name(&self.db_name, schema_name)
     }
+    fn push_context(&mut self) {
+        let new_context = std::mem::take(&mut self.context);
+        self.upper_contexts.push(new_context);
+    }
+
+    fn pop_context(&mut self) {
+        let old_context = self.upper_contexts.pop();
+        self.context = old_context.unwrap();
+    }
 }
 
 #[cfg(test)]
@@ -77,16 +86,6 @@ pub mod test_utils {
     #[cfg(test)]
     pub fn mock_binder() -> Binder {
         mock_binder_with_catalog(Catalog::default(), "".to_string())
-    }
-
-    fn push_context(&mut self) {
-        let new_context = std::mem::take(&mut self.context);
-        self.upper_contexts.push(new_context);
-    }
-
-    fn pop_context(&mut self) {
-        let old_context = self.upper_contexts.pop();
-        self.context = old_context.unwrap();
     }
 }
 

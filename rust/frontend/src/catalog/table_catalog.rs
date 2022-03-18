@@ -52,7 +52,7 @@ impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
         let name = tb.name.clone();
-        let columns = tb.column_catalog.clone();
+        let columns = tb.columns.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         for col in &columns {
@@ -70,7 +70,6 @@ impl From<ProstTable> for TableCatalog {
             .into_iter()
             .zip_eq(
                 tb.pk_orders
-                    
                     .into_iter()
                     .map(|x| OrderType::from_prost(&ProstOrderType::from_i32(x).unwrap())),
             )
