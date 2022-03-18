@@ -52,19 +52,24 @@ impl LogicalScan {
         Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
     }
 
-    pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
-        let columns = self
-            .schema()
+    pub(super) fn column_names(&self) -> Vec<String> {
+        self.schema()
             .fields()
             .iter()
             .map(|f| f.name.clone())
-            .collect::<Vec<_>>();
-        f.field("table", &self.table_name)
-            .field("columns", &columns);
+            .collect()
     }
 
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn columns(&self) -> &[ColumnId] {
+        &self.columns
     }
 }
 
@@ -72,9 +77,12 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = f.debug_struct("LogicalScan");
-        self.fmt_fields(&mut s);
-        s.finish()
+        write!(
+            f,
+            "LogicalScan {{ table: {}, columns: {:?} }}",
+            self.table_name,
+            &self.column_names()
+        )
     }
 }
 

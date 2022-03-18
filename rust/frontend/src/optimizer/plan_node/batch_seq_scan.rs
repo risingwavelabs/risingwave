@@ -5,6 +5,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
 
 use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
@@ -39,9 +40,12 @@ impl BatchSeqScan {
 impl_plan_tree_node_for_leaf! {BatchSeqScan}
 impl fmt::Display for BatchSeqScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = f.debug_struct("BatchScan");
-        self.logical.fmt_fields(&mut s);
-        s.finish()
+        write!(
+            f,
+            "LogicalScan {{ table: {}, columns: {:?} }}",
+            self.logical.table_name(),
+            &self.logical.column_names()
+        )
     }
 }
 
