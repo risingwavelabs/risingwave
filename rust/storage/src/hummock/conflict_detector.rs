@@ -42,7 +42,7 @@ impl ConflictDetector {
     }
 
     pub fn set_watermark(&self, epoch: HummockEpoch) {
-        // set the new watermark with CAS to enable detection in concurrent update
+        // Set the new watermark with CAS to enable detection in concurrent update
         loop {
             let current_watermark = self.get_epoch_watermark();
             assert!(
@@ -61,7 +61,7 @@ impl ConflictDetector {
         }
     }
 
-    /// Check whether there is key conflict for the given `kv_pairs` and add the key in `kv_pairs`
+    /// Checks whether there is key conflict for the given `kv_pairs` and adds the key in `kv_pairs`
     /// to the tracking history. Besides, whether the `epoch` has been archived will also be checked
     /// to avoid writing to a stale epoch
     pub fn check_conflict_and_track_write_batch(
@@ -87,7 +87,7 @@ impl ConflictDetector {
         }
     }
 
-    /// Archive an epoch. An archived epoch cannot be written anymore.
+    /// Archives an epoch. An archived epoch cannot be written anymore.
     pub fn archive_epoch(&self, epoch: HummockEpoch) {
         self.epoch_history.remove(&epoch);
         self.set_watermark(epoch);

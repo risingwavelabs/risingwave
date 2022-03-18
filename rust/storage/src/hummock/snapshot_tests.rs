@@ -40,7 +40,7 @@ async fn gen_and_upload_table(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    // get remote table
+    // Get remote table
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         remote_dir.to_string(),

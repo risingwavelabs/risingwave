@@ -75,11 +75,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send,
         B: 'static + Send;
 
-    /// Point get a value from the state store.
+    /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_>;
 
-    /// Scan `limit` number of keys from a key range. If `limit` is `None`, scan all elements.
+    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
@@ -104,12 +104,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Ingest a batch of data into the state store. One write batch should never contain operation
+    /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
-    /// A epoch should be provided to ingest a write batch. It is served as:
+    /// An epoch should be provided to ingest a write batch. It is served as:
     /// - A handle to represent an atomic write session. All ingested write batches associated with
     ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
-    ///   queryable and will be rollbacked if instructed.
+    ///   queryable and will be rolled back if instructed.
     /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
     ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
     ///   per-key modification history (e.g. in compaction), not across different keys.
@@ -126,7 +126,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_>;
 
-    /// Open and return an iterator for given `key_range`.
+    /// Opens and returns an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
     fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
@@ -134,7 +134,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Open and return a reversed iterator for given `key_range`.
+    /// Opens and returns a reversed iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
     fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
@@ -142,20 +142,20 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    /// Create a `WriteBatch` associated with this state store.
+    /// Creates a `WriteBatch` associated with this state store.
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
     }
 
-    /// Wait until the epoch is committed and its data is ready to read.
+    /// Waits until the epoch is committed and its data is ready to read.
     fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
 
-    /// Sync buffered data to S3.
-    /// If epoch is None, all buffered data will be synced.
+    /// Syncs buffered data to S3.
+    /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
 
-    /// Create a [`MonitoredStateStore`] from this state store, with given `stats`.
+    /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
     }

@@ -76,12 +76,12 @@ impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
         }
     }
 
-    /// Move all iterators from the `heap` to the linked list.
+    /// Moves all iterators from the `heap` to the linked list.
     fn reset_heap(&mut self) {
         self.unused_iters.extend(self.heap.drain().map(|n| n.0));
     }
 
-    /// After some of the iterators in `unused_iterators` are seeked or rewound, call this function
+    /// After some iterators in `unused_iterators` are sought or rewound, calls this function
     /// to construct a new heap using the valid ones.
     fn build_heap(&mut self) {
         assert!(self.heap.is_empty());
@@ -117,11 +117,11 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
         }
 
         if !node.0.is_valid() {
-            // put back to `unused_iters`
+            // Put back to `unused_iters`
             let node = PeekMut::pop(node);
             self.unused_iters.push_back(node.0);
         } else {
-            // this will update the heap top
+            // This will update the heap top
             drop(node);
         }
 
