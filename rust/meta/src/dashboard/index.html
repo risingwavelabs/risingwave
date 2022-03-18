@@ -521,9 +521,19 @@
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
+  const eraseDownstreamIfBroadcast = (dispatcher) => {
+    // legacy dashboard doesn't support broadcast downstream, so we'd rather let the internal logic
+    // think there's no downstream.
+    if (dispatcher.type == "BROADCAST") {
+      return []
+    } else {
+      return dispatcher.downstreamActorId || []
+    }
+  }
+
   const toV1Actor = (actor) => ({
     dispatcher: actor.dispatcher[0],
-    downstreamActorId: actor.dispatcher[0].downstreamActorId || [],
+    downstreamActorId: eraseDownstreamIfBroadcast(actor.dispatcher[0]),
     ...actor
   })
 
@@ -575,7 +585,6 @@
         (data) => {
           if ((currentMv === "" && currentMvs.has(data[0])) || data[0].toString() === currentMv) {
             let mvActorData = { actors: data[1].map(toV1Actor) };
-            console.log(mvActorData)
             $("#mvFragments").append(mvActors(mvActorData, data[0]))
             layoutStreamGraphs(mvActorData, data[0])
           }
