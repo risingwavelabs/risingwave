@@ -329,7 +329,7 @@ jobs:
           mode: start
           github-token: ${{ secrets.WUTAO_PAT }}
           ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.2xlarge
+          ec2-instance-type: c5.4xlarge
           subnet-id: subnet-59743123
           security-group-id: sg-9ec32bfe
   compute-node-build:
