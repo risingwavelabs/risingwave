@@ -10,6 +10,7 @@ PREFIX_CONFIG = "${PREFIX}/config"
 PREFIX_DATA = "${PREFIX}/data"
 PREFIX_LOG = "${PREFIX}/log"
 PREFIX_TMP = "${PREFIX}/tmp"
+PREFIX_UI = "${PREFIX}/ui"
 
 HUMMOCK_PATH = "${PREFIX_DATA}/hummock"
 META_STORE_PATH = "${PREFIX_DATA}/meta"

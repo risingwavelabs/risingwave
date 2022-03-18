@@ -6,12 +6,13 @@ use anyhow::{anyhow, Result};
 use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{get, get_service};
 use axum::Router;
 use risingwave_common::error::ErrorCode;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
+use tower_http::services::ServeDir;
 
 use crate::cluster::StoredClusterManager;
 use crate::storage::MetaStore;
@@ -137,18 +138,15 @@ impl<S> DashboardService<S>
 where
     S: MetaStore,
 {
-    pub async fn serve(self) -> Result<()> {
+    pub async fn serve(self, ui_path: Option<String>) -> Result<()> {
         use handlers::*;
         let srv = Arc::new(self);
-        let app = Router::new()
-            .route("/api/clusters/:ty", get(list_clusters::<S>))
-            .route("/api/actors", get(list_actors::<S>))
-            .route("/api/fragments", get(list_table_fragments::<S>))
-            .route("/api/materialized_views", get(list_materialized_views::<S>))
-            .route(
-                "/",
-                get(|| async { Html::from(include_str!("index.html")) }),
-            )
+
+        let api_router = Router::new()
+            .route("/clusters/:ty", get(list_clusters::<S>))
+            .route("/actors", get(list_actors::<S>))
+            .route("/fragments", get(list_table_fragments::<S>))
+            .route("/materialized_views", get(list_materialized_views::<S>))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))
@@ -163,6 +161,30 @@ where
                     Method::DELETE,
                 ]),
             );
+
+        let app = if let Some(ui_path) = ui_path {
+            let static_file_router = Router::new().nest(
+                "/",
+                get_service(ServeDir::new(ui_path)).handle_error(
+                    |error: std::io::Error| async move {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Unhandled internal error: {}", error),
+                        )
+                    },
+                ),
+            );
+            Router::new()
+                .fallback(static_file_router)
+                .nest("/api", api_router)
+        } else {
+            Router::new()
+                .route(
+                    "/",
+                    get(|| async { Html::from(include_str!("index.html")) }),
+                )
+                .nest("/api", api_router)
+        };
 
         axum::Server::bind(&srv.dashboard_addr)
             .serve(app.into_make_service())

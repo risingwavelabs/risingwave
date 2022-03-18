@@ -136,11 +136,28 @@ description = "Copy RisingWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
 
+[tasks.extract-dashboard-artifact]
+category = "RisingWave"
+description = "Extract dashboard artifact"
+script = '''
+#!@shell
+#!/bin/bash
+
+# we allow this script to fail
+
+echo "Extracting dashboard artifacts to ${PREFIX_UI}"
+
+rm -rf "${PREFIX_UI}"
+git worktree prune
+git worktree add "${PREFIX_UI}" origin/dashboard-artifact
+'''
+
 [tasks.build-risingwave]
 category = "RisingWave"
 description = "Build RisingWave compute-node and meta-node"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
+#!@shell
 #!/bin/bash
 set -e
 echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
@@ -199,6 +216,7 @@ dependencies = [
   "post-build-risingwave",
   "build-frontend",
   "post-build-frontend",
+  "extract-dashboard-artifact",
   "prepare-config"
 ]
 

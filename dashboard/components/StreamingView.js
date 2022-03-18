@@ -1,25 +1,27 @@
-import * as d3 from "d3";
 import createView, { computeNodeAddrToSideColor } from "../lib/streamPlan/streamChartHelper";
 import { useEffect, useRef, useState } from 'react';
 import styled from '@emotion/styled';
 import LocationSearchingIcon from '@mui/icons-material/LocationSearching';
-import FmdGoodIcon from '@mui/icons-material/FmdGood';
+import CircularProgress from '@mui/material/CircularProgress';
 import SearchIcon from '@mui/icons-material/Search';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import { Stack, Tabs, Tab, Button } from "@mui/material";
 import { Tooltip, FormControl, Select, MenuItem, InputLabel, FormHelperText, Input, InputAdornment, IconButton, Autocomplete, TextField, FormControlLabel, Switch, Divider } from '@mui/material';
+import { CanvasEngine } from "../lib/graaphEngine/canvasEngine";
+import useWindowSize from "../hook/useWindowSize";
+import { Close } from "@mui/icons-material";
+import SyntaxHighlighter from "react-syntax-highlighter";
+import { stackoverflowDark } from 'react-syntax-highlighter/dist/cjs/styles/hljs';
 
-const width = 1000;
-const height = 1000;
-const orginalZoom = new d3.ZoomTransform(0.5, 0, 0);
-let zoom;
-let svg;
-let view;
 
 const SvgBox = styled('div')(() => ({
   padding: "10px",
   borderRadius: "20px",
   boxShadow: "5px 5px 10px #ebebeb, -5px -5px 10px #ffffff",
   position: "relative",
-  marginBottom: "100px"
+  marginBottom: "100px",
+  height: "100%",
+  width: "100%"
 }));
 
 const SvgBoxCover = styled('div')(() => ({
@@ -32,6 +34,35 @@ const ToolBoxTitle = styled('div')(() => ({
   fontWeight: 700
 }));
 
+const PopupBox = styled("div")({
+  width: "100%",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  backgroundColor: "white",
+  borderRadius: "20px",
+  boxShadow: "14px 14px 28px #e6e6e6, -14px -14px 28px #ffffff"
+});
+
+const PopupBoxHeader = styled("div")({
+  padding: "10px",
+  display: "flex",
+  flexDirection: "row",
+  justifyContent: "end",
+  alignItems: "center",
+  backgroundColor: "#1976D2",
+  borderTopRightRadius: "20px",
+  borderTopLeftRadius: "20px",
+  height: "50px"
+});
+
+const generateMessageTraceLink = (actorId) => {
+  return `http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22msg%22%3A%22chunk%22%7D`;
+}
+
+const generateEpochTraceLink = (actorId) => {
+  return `http://localhost:16680/search?service=compute&tags=%7B%22actor_id%22%3A%22${actorId}%22%2C%22epoch%22%3A%22-1%22%7D`;
+}
 
 export default function StreamingView(props) {
   const data = props.data || [];
@@ -48,23 +79,40 @@ export default function StreamingView(props) {
   const [filterMode, setFilterMode] = useState("Chain View");
   const [selectedMvTableId, setSelectedMvTableId] = useState(null);
   const [showFullGraph, setShowFullGraph] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [tabValue, setTabValue] = useState(0);
+  const [actor, setActor] = useState(null);
 
-  const d3Container = useRef(null);
 
-  // let tmp = [];
-  // for(let mv of mvList){
-  //   tmp.push({
-  //     label: mv[1].tableName, tableId: mv[0]
-  //   })
-  // }
+  const canvasRef = useRef(null);
+  const canvasOutterBox = useRef(null);
+  const engineRef = useRef(null);
+  const viewRef = useRef(null);
+
+  const setEngine = (e) => {
+    engineRef.current = e;
+  }
+
+  const getEngine = () => {
+    return engineRef.current;
+  }
+
+  const setView = (v) => {
+    viewRef.current = v;
+  }
+
+  const getView = () => {
+    return viewRef.current;
+  }
 
   const exprNode = (actorNode) => (({ input, ...o }) => o)(actorNode)
 
   const locateTo = (selector) => {
-    let selection = d3.select(selector);
-    if (!selection.empty()) {
-      svg.call(zoom).call(zoom.transform, new d3.ZoomTransform(0.7, - 0.7 * selection.attr("x"), 0.7 *(-selection.attr("y") + height / 2) ));
-    }
+    getEngine() && getEngine().locateTo(selector);
+  }
+
+  const onTabChange = (_, v) => {
+    setTabValue(v);
   }
 
   const locateSearchPosition = () => {
@@ -72,20 +120,28 @@ export default function StreamingView(props) {
     type = type.toLocaleLowerCase();
 
     if (type === "actor") {
-      locateTo(`rect.${type}-${searchContent}`);
+      locateTo(`${type}-${searchContent}`);
     }
 
-    if (type === "fragment"){
-      locateTo(`rect.${type}-${searchContent}`);
+    if (type === "fragment") {
+      locateTo(`${type}-${searchContent}`);
     }
   }
 
-  const onNodeClick = (e, node) => {
+  const onNodeClick = (e, node, actor) => {
+    setActor(actor);
     setShowInfoPane(true);
     setNodeJson(node.dispatcherType
       ? JSON.stringify({ dispatcher: { type: node.dispatcherType }, downstreamActorId: node.downstreamActorId }, null, 2)
       : JSON.stringify(exprNode(node.nodeProto), null, 2));
   };
+
+  const onActorClick = (e, actor) => {
+    setActor(actor);
+    setShowInfoPane(true);
+    setNodeJson("Click a node to show its raw json");
+  }
+
 
   const onWorkerNodeSelect = (e) => {
     setSelectedWorkerNode(e.target.value);
@@ -115,105 +171,124 @@ export default function StreamingView(props) {
     setShowFullGraph(v);
   }
 
-  const locateToCurrentMviewActor = () => {
-    let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
-      .get(selectedMvTableId) || [];
-    if (shownActorIdList.length !== 0) {
-      locateTo(locateTo(`rect.actor-${shownActorIdList[0]}`));
+  const locateToCurrentMviewActor = (actorIdList) => {
+    if (actorIdList.length !== 0) {
+      locateTo(`actor-${actorIdList[0]}`)
     }
   }
 
   const onReset = () => {
-    svg.call(zoom.transform, orginalZoom);
-    view.highlightByActorIds([]);
+    getEngine().resetCamera();
   }
 
-  const createSvg = (callback) => {
-    d3.select(d3Container.current).selectAll("*").remove();
-
-    svg = d3
-      .select(d3Container.current)
-      .attr("viewBox", [0, 0, width, height]);
-
-    const g = svg.append("g").attr("class", "top");
-    callback && callback(g);
-
-    let transform;
-    // Deal with zooming event
-    zoom = d3.zoom().on("zoom", e => {
-      transform = e.transform;
-      g.attr("transform", e.transform);
-    });
-
-    svg.call(zoom)
-      .call(zoom.transform, orginalZoom)
-      .on("pointermove", event => {
-        transform.invert(d3.pointer(event));
-      });
+  const onRefresh = async () => {
+    window.location.reload(true);
   }
+
+  const resizeCanvas = () => {
+    if (canvasOutterBox.current) {
+      getEngine() && getEngine().resize(canvasOutterBox.current.clientWidth, canvasOutterBox.current.clientHeight);
+    }
+  }
+
+  const initGraph = (shownActorIdList) => {
+    let newEngine = new CanvasEngine("c", canvasRef.current.clientHeight, canvasRef.current.clientWidth);
+    setEngine(newEngine);
+    resizeCanvas();
+    let newView = createView(newEngine, data, onNodeClick, onActorClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
+    setView(newView);
+  };
+
+  const windowSize = useWindowSize();
+
+  useEffect(() => {
+    resizeCanvas();
+  }, [windowSize])
 
   useEffect(() => {
     locateSearchPosition();
   }, [searchType, searchContent]);
 
-  // useEffect(() => {
-  //   if (mvTableIdToSingleViewActorList !== null) {
-  //     let tmp = [];
-  //     for (let [tableId, _] of mvTableIdToSingleViewActorList.entries()) {
-  //       tmp.push({ label: "mvtable " + tableId, tableId: tableId });
-  //     }
-  //     tmp.sort(x => x.label);
-  //     setMviewTableList(tmp);
-  //   }
-  // }, [mvTableIdToSingleViewActorList])
-
   // render the full graph
   useEffect(() => {
-    if (d3Container.current && showFullGraph) {
-      createSvg((g) => {
-        view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, null);
-      })
-      // assign once.
-      mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(view.getMvTableIdToSingleViewActorList());
-      mvTableIdToChainViewActorList || setMvTableIdToChainViewActorList(view.getMvTableIdToChainViewActorList());
+    if (canvasRef.current && showFullGraph) {
+      initGraph(null);
 
-      return () => d3.select(d3Container.current).selectAll("*").remove();
+      mvTableIdToSingleViewActorList || setMvTableIdToSingleViewActorList(getView().getMvTableIdToSingleViewActorList());
+      mvTableIdToChainViewActorList || setMvTableIdToChainViewActorList(getView().getMvTableIdToChainViewActorList());
+      return () => {
+        getEngine().cleanGraph();
+      };
     }
   }, [selectedWorkerNode, showFullGraph]);
 
   // locate and render partial graph on mview query
   useEffect(() => {
     if (selectedMvTableId === null) {
-      view.highlightByActorIds([]);
       return;
     }
     let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
       .get(selectedMvTableId) || [];
-    if (showFullGraph) { // locate to the selected part
-      let shownActorIdList = (filterMode === "Chain View" ? mvTableIdToChainViewActorList : mvTableIdToSingleViewActorList)
-        .get(selectedMvTableId);
-      view.highlightByActorIds(shownActorIdList);
-    } else {
-      if (d3Container.current) {
-        createSvg((g) => {
-          view = createView(g, data, onNodeClick, selectedWorkerNode === "Show All" ? null : selectedWorkerNode, shownActorIdList);
-        });
+    if (!showFullGraph) { // rerender graph if it is a partial graph
+      if (canvasRef.current) {
+        initGraph(shownActorIdList);
+        return () => {
+          getEngine().cleanGraph();
+        };
       }
     }
-    locateToCurrentMviewActor();
+    locateToCurrentMviewActor(shownActorIdList);
   }, [selectedWorkerNode, filterMode, selectedMvTableId, showFullGraph])
 
   return (
     <SvgBox>
-      <SvgBoxCover style={{ right: "10px", top: "10px", width: "300px" }}>
-        <div style={{
-          height: "560px",
-          display: showInfoPane ? "block" : "none", padding: "20px",
-          backgroundColor: "snow", whiteSpace: "pre", lineHeight: "100%",
-          fontSize: "13px", overflow: "scroll"
+      <SvgBoxCover style={{ right: "10px", top: "10px", width: "500px" }}>
+        <PopupBox style={{
+          display: showInfoPane ? "block" : "none",
+          height: canvasOutterBox && canvasOutterBox.current ? canvasOutterBox.current.clientHeight - 100 : 500
         }}>
-          {nodeJson}
-        </div>
+          <PopupBoxHeader>
+            <IconButton onClick={() => setShowInfoPane(false)}>
+              <Close sx={{ color: "white" }} />
+            </IconButton>
+          </PopupBoxHeader>
+          <Tabs value={tabValue} onChange={onTabChange} aria-label="basic tabs example">
+            <Tab label="Info" id={0} />
+            <Tab label="Raw JSON" id={1} />
+          </Tabs>
+          <div style={{
+            display: tabValue === 0 ? "flex" : "none",
+            flexDirection: "column",
+            padding: "10px",
+            width: "100%",
+            height: "calc(100% - 160px)",
+            overflow: "auto"
+          }}>
+            {actor && actor.representedActorList.map((a, i) =>
+              <Stack key={i} direction="column" justifyContent="center" spacing={1} style={{ width: "100%", marginBottom: "30px" }}>
+                <div style={{ fontSize: "15px", color: "#1976D2" }}>
+                  Actor {a.actorId}
+                </div>
+                <a target="_blank" rel="noopener noreferrer" href={generateMessageTraceLink(a.actorId)}>
+                  <Button variant="outlined">
+                    Trace Message of Actor #{a.actorId}
+                  </Button>
+                </a>
+                <a target="_blank" rel="noopener noreferrer" href={generateEpochTraceLink(a.actorId)}>
+                  <Button variant="outlined">
+                    Trace Epoch "-1" of Actor #{a.actorId}
+                  </Button>
+                </a>
+              </Stack>
+            )}
+          </div>
+          <div style={{ display: tabValue === 1 ? "block" : "none", height: "calc(100% - 160px)", overflow: "auto" }}>
+            <SyntaxHighlighter language="json" style={stackoverflowDark} wrapLines={true} showLineNumbers={true}>
+              {nodeJson}
+            </SyntaxHighlighter>
+          </div>
+
+        </PopupBox>
       </SvgBoxCover>
       <SvgBoxCover className="noselect" style={{ display: "flex", flexDirection: "column" }}>
         {/* Select actor */}
@@ -232,12 +307,13 @@ export default function StreamingView(props) {
             </MenuItem>
             {actorList.map((x, index) => {
               return (
-                <MenuItem value={x} key={index} sx={{display: "flex", flexDirection: "row", alignItems: "center"}}>
+                <MenuItem value={x} key={index} sx={{ display: "flex", flexDirection: "row", alignItems: "center" }}>
                   {x.type}&nbsp; <span style={{ fontWeight: 700 }}>{x.host.host + ":" + x.host.port}</span>
                   <div style={{
                     margin: 5,
                     height: 10, width: 10, borderRadius: 5,
-                    backgroundColor: computeNodeAddrToSideColor(x.host.host + ":" + x.host.port)}} 
+                    backgroundColor: computeNodeAddrToSideColor(x.host.host + ":" + x.host.port)
+                  }}
                   />
                 </MenuItem>
               )
@@ -306,9 +382,9 @@ export default function StreamingView(props) {
               />
             </div>
             <Autocomplete
-              isOptionEqualToValue={(option, value) => {return option.tableId === value.tableId}}
+              isOptionEqualToValue={(option, value) => { return option.tableId === value.tableId }}
               disablePortal
-              options={mvList.map(mv => {return {label: mv[1].tableName, tableId: mv[0]}}) || []}
+              options={mvList.map(mv => { return { label: mv[1].tableName, tableId: mv[0] } }) || []}
               onChange={onSelectMvChange}
               renderInput={(param) => <TextField {...param} label="Materialized View" />}
             />
@@ -317,19 +393,26 @@ export default function StreamingView(props) {
       </SvgBoxCover>
 
       <SvgBoxCover style={{ right: "10px", bottom: "10px", cursor: "pointer" }}>
+        <Stack direction="row" spacing={2}>
+          <Tooltip title="Reset">
+            <div onClick={() => onReset()}>
+              <LocationSearchingIcon color="action" />
+            </div>
+          </Tooltip>
 
-        <Tooltip title="Reset">
-          <div onClick={() => onReset()}>
-            <LocationSearchingIcon color="action" />
-          </div>
-        </Tooltip>
+          <Tooltip title="refresh">
+            {!refreshing
+              ? <div onClick={() => onRefresh()}>
+                <RefreshIcon color="action" />
+              </div>
+              : <CircularProgress />}
+          </Tooltip>
+        </Stack>
+
 
       </SvgBoxCover>
-      <div style={{ zIndex: 5 }} className="noselect">
-        <svg ref={d3Container}
-          width="100%"
-          height={600}
-        />
+      <div ref={canvasOutterBox} style={{ zIndex: 5, width: "100%", height: "100%", overflow: "auto" }} className="noselect">
+        <canvas ref={canvasRef} id="c" width={1000} height={1000} style={{ cursor: "pointer" }} />
       </div>
     </SvgBox >
   )
