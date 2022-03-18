@@ -114,7 +114,7 @@ impl Binder {
                 },
                 None => condition,
             };
-            inputs.push(self.bind_expr(_condition)?);
+            inputs.push(self.bind_expr(condition)?);
             inputs.push(Binder::ensure_type(result, return_type.clone()));
         }
         if let Some(expr) = else_result_expr {
