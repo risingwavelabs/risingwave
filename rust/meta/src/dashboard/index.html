@@ -71,11 +71,11 @@
       </div>
       <div class="flex mt-5 mb-2 text-sm">
         <h1 class="flex-auto leading-6 font-semibold text-sky-500 dark:text-sky-400">
-        Materialized Views
+          Materialized Views
         </h1>
         <div class="form-check">
           <input class="form-check-input" type="checkbox" value="" id="showAssociateMvCheckbox"
-                 onchange="handleShowAssociateMvClick(this);">
+            onchange="handleShowAssociateMvClick(this);">
           <label class="form-check-label text-gray-500" for="showAssociateMvCheckbox">
             Show Associated MV
           </label>
@@ -130,7 +130,7 @@
   <div id="message-${nodeId}" class="w-full flex flex-row"></div>
 </div>`
 
-const mvActors = (actors, mvId) => `
+  const mvActors = (actors, mvId) => `
 <div class="p-6 max-w bg-white rounded-xl shadow-md flex flex-col space-y-1">
   <div class="flex flex-row items-center">
     <div class="w-3 h-3 flex-none bg-green-600 rounded-full mr-2"></div>
@@ -521,6 +521,22 @@ const mvActors = (actors, mvId) => `
       data => $("#clusters").append(cluster("Compute Node", data))))
   $("#clusters").append(cluster("Meta Node", { host: { host: "127.0.0.1", port: "2333" } }))
 
+  const eraseDownstreamIfBroadcast = (dispatcher) => {
+    // legacy dashboard doesn't support broadcast downstream, so we'd rather let the internal logic
+    // think there's no downstream.
+    if (dispatcher.type == "BROADCAST") {
+      return []
+    } else {
+      return dispatcher.downstreamActorId || []
+    }
+  }
+
+  const toV1Actor = (actor) => ({
+    ...actor,
+    dispatcher: actor.dispatcher[0],
+    downstreamActorId: eraseDownstreamIfBroadcast(actor.dispatcher[0])
+  })
+
   const loadActors = () => {
     fetch('/api/actors')
       .then(response => response.json())
@@ -528,7 +544,7 @@ const mvActors = (actors, mvId) => `
         const allActors = []
         data.forEach(data => {
           // bind node info with actor
-          const nodeActors = data.actors.map(actor => ({ node: data.node, ...actor }))
+          const nodeActors = data.actors.map(actor => ({ node: data.node, ...toV1Actor(actor) }))
           allActors.push(...nodeActors)
         })
         const processedData = { actors: allActors }
@@ -568,7 +584,7 @@ const mvActors = (actors, mvId) => `
       .then(data => data.forEach(
         (data) => {
           if ((currentMv === "" && currentMvs.has(data[0])) || data[0].toString() === currentMv) {
-            let mvActorData = {actors: data[1]};
+            let mvActorData = { actors: data[1].map(toV1Actor) };
             $("#mvFragments").append(mvActors(mvActorData, data[0]))
             layoutStreamGraphs(mvActorData, data[0])
           }
