@@ -13,7 +13,7 @@ use risingwave_pb::stream_plan::StreamNode;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
-use super::catalog::Catalog;
+use super::root_catalog::Catalog;
 use super::{DatabaseId, SchemaId};
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;

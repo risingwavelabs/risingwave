@@ -10,7 +10,7 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 use tokio::time;
 
-use crate::catalog::catalog::Catalog;
+use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.

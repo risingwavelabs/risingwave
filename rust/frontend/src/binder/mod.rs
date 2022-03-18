@@ -74,8 +74,8 @@ pub mod test_utils {
     use parking_lot::RwLock;
 
     use super::Binder;
-    use crate::catalog::catalog::Catalog;
     use crate::catalog::catalog_service::CatalogReader;
+    use crate::catalog::root_catalog::Catalog;
 
     #[cfg(test)]
     pub fn mock_binder_with_catalog(catalog: Catalog, db_name: String) -> Binder {

@@ -17,8 +17,8 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::catalog::catalog::Catalog;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter};
+use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
