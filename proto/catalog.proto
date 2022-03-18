@@ -54,7 +54,7 @@ message Table {
   repeated plan.ColumnCatalog columns = 5;
   repeated int32 pk_column_ids = 6;
   repeated plan.OrderType pk_orders = 7;
-  repeated uint32 dependent_tables = 8;
+  repeated uint32 dependent_relations = 8;
 }
 
 message Schema {
