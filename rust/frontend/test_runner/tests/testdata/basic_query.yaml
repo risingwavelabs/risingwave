@@ -56,11 +56,14 @@
     create table t ();
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;
   batch_plan: |
-    BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
-      BatchScan { table: "t", columns: [] }
+    BatchExchange { order: Order { field_order: [] }, dist: Single }
+      BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
+        BatchScan { table: "t", columns: [] }
   stream_plan: |
-    StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
-      StreamTableSource { logical: LogicalScan { table: "t", columns: [] } }
+    StreamMaterialize { table_id: 0 }
+      StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [None] }
+        StreamExchange { order: Order { field_order: [] }, dist: Single }
+          StreamTableScan { logical: LogicalScan { table: "t", columns: [] } }
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
