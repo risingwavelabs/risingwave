@@ -106,7 +106,7 @@ impl Binder {
             return_type = Binder::find_compat(return_type, expr.return_type())?;
         }
         for (condition, result) in zip_eq(conditions, results_expr) {
-            let _condition = match operand {
+            let condition = match operand {
                 Some(ref t) => Expr::BinaryOp {
                     left: t.clone(),
                     op: BinaryOperator::Eq,
