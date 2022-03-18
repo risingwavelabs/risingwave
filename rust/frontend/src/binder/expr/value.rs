@@ -39,10 +39,8 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    
 
     use crate::binder::test_utils::mock_binder;
-    
 
     #[test]
     fn test_bind_value() {

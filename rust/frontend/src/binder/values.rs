@@ -82,14 +82,12 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    
 
     use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
     use crate::binder::test_utils::mock_binder;
-    
 
     #[test]
     fn test_bind_values() {

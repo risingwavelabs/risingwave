@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;

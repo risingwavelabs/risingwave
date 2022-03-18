@@ -1,12 +1,9 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
-use risingwave_common::error::{Result};
-
-
+use risingwave_common::error::Result;
 use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
-
 
 use crate::session::QueryContext;
 
