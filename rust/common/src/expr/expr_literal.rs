@@ -229,7 +229,8 @@ mod tests {
 
     use super::*;
     use crate::array::column::Column;
-    use crate::array::PrimitiveArray;
+    use crate::array::{I32Array, PrimitiveArray};
+    use crate::array_nonnull;
     use crate::types::IntoOrdered;
 
     #[test]
@@ -336,5 +337,12 @@ mod tests {
     fn create_column(vec: &[Option<i32>]) -> Result<Column> {
         let array = PrimitiveArray::from_slice(vec).map(|x| Arc::new(x.into()))?;
         Ok(Column::new(array))
+    }
+
+    #[test]
+    fn test_literal_eval_dummy_chunk() {
+        let mut literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
+        let result = literal.eval(&DataChunk::new_dummy(1)).unwrap();
+        assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
     }
 }
