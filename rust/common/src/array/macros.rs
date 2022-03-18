@@ -15,6 +15,18 @@ macro_rules! array {
     };
 }
 
+/// `empty_array` builds an empty `Array`.
+macro_rules! empty_array {
+    ($array:tt) => {
+        {
+            use $crate::array::Array;
+            use $crate::array::ArrayBuilder;
+            let mut builder = <$array as Array>::Builder::new(0).unwrap();
+            builder.finish().unwrap()
+        }
+    };
+}
+
 /// `array_nonnull` builds an `Array` with concrete values.
 #[macro_export]
 macro_rules! array_nonnull {
