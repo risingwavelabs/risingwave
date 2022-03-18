@@ -7,6 +7,7 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    TableSourceInfo,
 };
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_rpc_client::MetaClient;
@@ -94,12 +95,21 @@ impl CatalogWriter {
     pub async fn create_materialized_table_source_workaround(
         &self,
         table: ProstTable,
-        source: ProstSource,
     ) -> Result<()> {
+        let table_clone = table.clone();
+        let table_source = ProstSource {
+            id: 0,
+            schema_id: table_clone.schema_id,
+            database_id: table_clone.database_id,
+            name: table_clone.name,
+            info: Some(risingwave_pb::catalog::source::Info::TableSource(
+                TableSourceInfo {},
+            )),
+        };
         let (_, _, version) = self
             .meta_client
             .create_materialized_source(
-                source,
+                table_source,
                 table,
                 StreamNode {
                     ..Default::default()

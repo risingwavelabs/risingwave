@@ -1,8 +1,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
-use risingwave_pb::meta::table::Info;
-use risingwave_pb::meta::Table;
-use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
+use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable};
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, TableSourceInfo};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
@@ -26,21 +25,41 @@ fn columns_to_prost(columns: &[ColumnDef]) -> Result<Vec<ColumnDesc>> {
 pub async fn handle_create_table(
     context: QueryContext,
     table_name: ObjectName,
-    _columns: Vec<ColumnDef>,
+    columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
-    let (_db_id, _schema_id) = session
+    let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), &schema_name, &table_name)?;
 
-    let _table_source = Table {
-        info: Info::TableSource(TableSourceInfo::default()).into(),
-        ..Default::default()
+    let columns = columns_to_prost(&columns)?;
+    let columns = columns
+        .into_iter()
+        .map(|c| ColumnCatalog {
+            column_desc: Some(c),
+            is_hidden: false,
+        })
+        .collect();
+
+    let table = ProstTable {
+        id: 0,
+        schema_id,
+        database_id,
+        name: table_name,
+        column_catalog: columns,
+        pk_column_ids: vec![],
+        pk_orders: vec![],
+        dependent_tables: vec![],
     };
-    // TODO: construct a stream plan to materialize table source here
+
+    let catalog_writer = session.env().catalog_writer();
+    // FIX ME
+    catalog_writer
+        .create_materialized_table_source_workaround(table)
+        .await?;
 
     Ok(PgResponse::new(
         StatementType::CREATE_TABLE,
