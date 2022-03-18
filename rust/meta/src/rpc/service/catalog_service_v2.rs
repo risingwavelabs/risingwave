@@ -7,17 +7,16 @@ use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
     CreateSourceRequest as ComputeNodeCreateSourceRequest,
     DropSourceRequest as ComputeNodeDropSourceRequest,
 };
-use tonic::transport::Channel;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{
-    CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SourceId, StreamClientsRef,
+    CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SourceId, StreamClient,
+    StreamClientsRef,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
@@ -263,9 +262,7 @@ impl<S> CatalogServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn all_stream_clients(
-        &self,
-    ) -> RwResult<impl Iterator<Item = StreamServiceClient<Channel>>> {
+    async fn all_stream_clients(&self) -> RwResult<impl Iterator<Item = StreamClient>> {
         let all_compute_nodes = self
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
