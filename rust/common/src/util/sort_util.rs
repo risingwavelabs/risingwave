@@ -25,6 +25,13 @@ impl OrderType {
             ProstOrderType::Invalid => panic!("invalid order type"),
         }
     }
+
+    pub fn to_prost(&self) -> ProstOrderType {
+        match self {
+            OrderType::Ascending => ProstOrderType::Ascending,
+            OrderType::Descending => ProstOrderType::Descending,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

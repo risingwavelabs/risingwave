@@ -6,7 +6,6 @@ use risingwave_common::catalog::CatalogVersion;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
-use tokio::runtime::{Handle, Runtime};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 use tokio::time;
