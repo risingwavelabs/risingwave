@@ -1,6 +1,5 @@
 use prost::Message;
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
-use risingwave_pb::hummock::HummockStaleSstables;
+use risingwave_pb::hummock::{HummockStaleSstables, HummockVersionRefId};
 
 use crate::model::{MetadataModel, Transactional};
 

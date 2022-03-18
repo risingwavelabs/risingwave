@@ -5,7 +5,7 @@ use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
 use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ParallelUnitType, WorkerType};
+use risingwave_pb::common::WorkerType;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use risingwave_pb::stream_service::{
@@ -146,15 +146,12 @@ where
             .map_err(tonic_err)? as u32;
 
         // 1. create mv in stream manager
-        let hash_parallel_count = self
-            .cluster_manager
-            .get_parallel_unit_count(Some(ParallelUnitType::Hash))
-            .await;
+        let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
         let mut fragmenter = StreamFragmenter::new(
             self.id_gen_manager.clone(),
             self.fragment_manager.clone(),
-            hash_parallel_count as u32,
+            hash_mapping,
         );
         let graph = fragmenter
             .generate_graph(req.get_stream_node().map_err(tonic_err)?, &mut ctx)

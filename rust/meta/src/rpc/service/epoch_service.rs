@@ -17,7 +17,7 @@ impl EpochServiceImpl {
 
 #[async_trait::async_trait]
 impl EpochService for EpochServiceImpl {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn get_epoch(
         &self,
         request: Request<GetEpochRequest>,

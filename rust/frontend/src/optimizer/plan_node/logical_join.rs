@@ -149,11 +149,11 @@ impl ColPrunable for LogicalJoin {
         if required_cols == &visitor.input_bits {
             join.into()
         } else {
+            let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
+            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
             LogicalProject::with_mapping(
                 join.into(),
-                ColIndexMapping::with_remaining_columns(
-                    &required_cols.ones().map(|i| mapping.map(i)).collect(),
-                ),
+                ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
             .into()
         }

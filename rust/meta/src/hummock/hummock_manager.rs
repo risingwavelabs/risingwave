@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -5,11 +6,10 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, HummockContextRefId, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
-    SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionRefId, Level, LevelType,
+    SstableIdInfo, SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -86,7 +86,7 @@ where
         Ok(instance)
     }
 
-    /// load state from meta store.
+    /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
         compaction_guard.compact_status = CompactStatus::get(self.meta_store_ref.as_ref())
@@ -121,6 +121,7 @@ where
                 ],
                 uncommitted_epochs: vec![],
                 max_committed_epoch: INVALID_EPOCH,
+                safe_epoch: INVALID_EPOCH,
             };
             init_version.insert(self.meta_store_ref.as_ref()).await?;
             versioning_guard
@@ -182,10 +183,18 @@ where
         meta_store_ref.txn(trx).await.map_err(Into::into)
     }
 
-    pub async fn pin_version(&self, context_id: HummockContextId) -> Result<HummockVersion> {
+    /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` helps to make `pin_version` retryable:
+    /// 1 Return the smallest already pinned version of `context_id` that is greater than
+    /// `last_pinned`, if any.
+    /// 2 Otherwise pin and return the current greatest version.
+    pub async fn pin_version(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: HummockVersionId,
+    ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
-        let version_id = versioning_guard.current_version_id.id();
-        // pin the version
         let mut context_pinned_version_copy = versioning_guard
             .pinned_versions
             .get(&context_id)
@@ -194,17 +203,37 @@ where
                 context_id,
                 version_id: vec![],
             });
-        context_pinned_version_copy.pin_version(version_id);
-        let mut transaction = Transaction::default();
-        context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
-            .await?;
 
-        // Update in-mem state after transaction succeeds.
-        versioning_guard.pinned_versions.insert(
-            context_pinned_version_copy.context_id,
-            context_pinned_version_copy,
-        );
+        let mut already_pinned = false;
+        let version_id = {
+            let partition_point = context_pinned_version_copy
+                .version_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_version_copy.version_id.len() {
+                already_pinned = true;
+                context_pinned_version_copy.version_id[partition_point]
+            } else {
+                versioning_guard.current_version_id.id()
+            }
+        };
+
+        if !already_pinned {
+            context_pinned_version_copy.pin_version(version_id);
+            let mut transaction = Transaction::default();
+            context_pinned_version_copy.upsert_in_transaction(&mut transaction)?;
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+                .await?;
+
+            // Update in-mem state after transaction succeeds.
+            versioning_guard.pinned_versions.insert(
+                context_pinned_version_copy.context_id,
+                context_pinned_version_copy,
+            );
+        }
 
         let ret = Ok(versioning_guard
             .hummock_versions
@@ -252,6 +281,19 @@ where
         }
 
         Ok(())
+    }
+
+    fn trigger_commit_stat(&self, current_version: &HummockVersion) {
+        self.metrics
+            .max_committed_epoch
+            .set(current_version.max_committed_epoch as i64);
+        let uncommitted_sst_num = current_version
+            .uncommitted_epochs
+            .iter()
+            .fold(0, |accum, elem| accum + elem.tables.len());
+        self.metrics
+            .uncommitted_sst_num
+            .set(uncommitted_sst_num as i64);
     }
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
@@ -375,29 +417,8 @@ where
         sstables: Vec<SstableInfo>,
         epoch: HummockEpoch,
     ) -> Result<HummockVersion> {
-        let stats = sstables.iter().map(SSTableStat::from).collect_vec();
-
         let mut sst_id_infos_update_vec = vec![];
-        let mut compaction_guard = self.compaction.lock().await;
-        let mut compact_status_copy = compaction_guard.compact_status.clone();
-        match compact_status_copy.level_handlers.first_mut().unwrap() {
-            LevelHandler::Overlapping(vec_tier, _) => {
-                for stat in stats {
-                    let insert_point = vec_tier.partition_point(
-                        |SSTableStat {
-                             key_range: other_key_range,
-                             ..
-                         }| { other_key_range <= &stat.key_range },
-                    );
-                    vec_tier.insert(insert_point, stat);
-                }
-            }
-            LevelHandler::Nonoverlapping(_, _) => {
-                panic!("L0 must be Tiering.");
-            }
-        }
         let mut transaction = Transaction::default();
-        compact_status_copy.update_in_transaction(&mut transaction);
 
         let mut versioning_guard = self.versioning.write().await;
         let mut current_version_id_copy = versioning_guard.current_version_id.clone();
@@ -430,7 +451,7 @@ where
             }
         }
 
-        // check whether the epoch is valid
+        // Check whether the epoch is valid
         // TODO: return error instead of panic
         if epoch <= hummock_version_copy.max_committed_epoch {
             panic!(
@@ -439,22 +460,20 @@ where
             );
         }
 
-        // create new_version by adding tables in UncommittedEpoch
+        // Create new_version by adding tables in UncommittedEpoch
         match hummock_version_copy
             .uncommitted_epochs
             .iter_mut()
             .find(|e| e.epoch == epoch)
         {
             Some(uncommitted_epoch) => {
-                sstables
-                    .iter()
-                    .for_each(|t| uncommitted_epoch.table_ids.push(t.id));
+                uncommitted_epoch.tables.extend(sstables);
             }
             None => hummock_version_copy
                 .uncommitted_epochs
                 .push(UncommittedEpoch {
                     epoch,
-                    table_ids: sstables.iter().map(|t| t.id).collect(),
+                    tables: sstables,
                 }),
         };
         current_version_id_copy.increase();
@@ -462,14 +481,14 @@ where
         hummock_version_copy.id = current_version_id_copy.id();
         hummock_version_copy.upsert_in_transaction(&mut transaction)?;
 
-        // the trx contain update for both tables and compact_status
+        // trx contains update for both tables and compact_status
         self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
             .await?;
 
-        self.trigger_sst_stat(&compact_status_copy);
+        // Update metrics
+        self.trigger_commit_stat(&hummock_version_copy);
 
         // Update in-mem state after transaction succeeds.
-        compaction_guard.compact_status = compact_status_copy;
         versioning_guard.current_version_id = current_version_id_copy;
         versioning_guard
             .hummock_versions
@@ -483,14 +502,20 @@ where
         #[cfg(test)]
         {
             drop(versioning_guard);
-            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
         Ok(hummock_version_copy)
     }
 
-    pub async fn pin_snapshot(&self, context_id: HummockContextId) -> Result<HummockSnapshot> {
+    /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
+    /// and will be unpinned when `context_id` is invalidated.
+    /// `last_pinned` helps to `pin_snapshot` retryable, see `pin_version` for detail.
+    pub async fn pin_snapshot(
+        &self,
+        context_id: HummockContextId,
+        last_pinned: HummockEpoch,
+    ) -> Result<HummockSnapshot> {
         let mut versioning_guard = self.versioning.write().await;
 
         // Use the max_committed_epoch in storage as the snapshot ts so only committed changes are
@@ -501,6 +526,7 @@ where
             .get(&version_id)
             .unwrap()
             .max_committed_epoch;
+
         let mut context_pinned_snapshot_copy = versioning_guard
             .pinned_snapshots
             .get(&context_id)
@@ -509,17 +535,37 @@ where
                 context_id,
                 snapshot_id: vec![],
             });
-        context_pinned_snapshot_copy.pin_snapshot(max_committed_epoch);
-        let mut transaction = Transaction::default();
-        context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
-        self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
-            .await?;
 
-        // Update in-mem state after transaction succeeds.
-        versioning_guard.pinned_snapshots.insert(
-            context_pinned_snapshot_copy.context_id,
-            context_pinned_snapshot_copy,
-        );
+        let mut already_pinned = false;
+        let epoch = {
+            let partition_point = context_pinned_snapshot_copy
+                .snapshot_id
+                .iter()
+                .sorted()
+                .cloned()
+                .collect_vec()
+                .partition_point(|p| *p <= last_pinned);
+            if partition_point < context_pinned_snapshot_copy.snapshot_id.len() {
+                already_pinned = true;
+                context_pinned_snapshot_copy.snapshot_id[partition_point]
+            } else {
+                max_committed_epoch
+            }
+        };
+
+        if !already_pinned {
+            context_pinned_snapshot_copy.pin_snapshot(epoch);
+            let mut transaction = Transaction::default();
+            context_pinned_snapshot_copy.upsert_in_transaction(&mut transaction)?;
+            self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+                .await?;
+
+            // Update in-mem state after transaction succeeds.
+            versioning_guard.pinned_snapshots.insert(
+                context_pinned_snapshot_copy.context_id,
+                context_pinned_snapshot_copy,
+            );
+        }
 
         #[cfg(test)]
         {
@@ -527,9 +573,7 @@ where
             self.check_state_consistency().await;
         }
 
-        Ok(HummockSnapshot {
-            epoch: max_committed_epoch,
-        })
+        Ok(HummockSnapshot { epoch })
     }
 
     pub async fn unpin_snapshot(
@@ -575,6 +619,7 @@ where
             None => Ok(None),
             Some(mut compact_task) => {
                 let mut transaction = Transaction::default();
+                // Q: why update?
                 compact_status_copy.update_in_transaction(&mut transaction);
                 self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                     .await?;
@@ -636,6 +681,7 @@ where
             .collect_vec();
 
         let compact_task_metrics = compact_task.metrics.take();
+        let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
         let mut transaction = Transaction::default();
         let mut compact_status_copy = compaction_guard.compact_status.clone();
@@ -685,6 +731,8 @@ where
                     .collect(),
                 uncommitted_epochs: old_version.uncommitted_epochs.clone(),
                 max_committed_epoch: old_version.max_committed_epoch,
+                // update safe epoch of hummock version
+                safe_epoch: max(old_version.safe_epoch, compacted_watermark),
             };
 
             new_version.upsert_in_transaction(&mut transaction)?;
@@ -766,6 +814,8 @@ where
     }
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        let mut compaction_guard = self.compaction.lock().await;
+        let mut compact_status_copy = compaction_guard.compact_status.clone();
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         let mut current_version_id_copy = versioning_guard.current_version_id.clone();
@@ -794,21 +844,45 @@ where
         {
             let uncommitted_epoch = &hummock_version_copy.uncommitted_epochs[idx];
 
-            // commit tables by moving them into level0
+            // Commit tables by moving them into level0
             let version_first_level = hummock_version_copy.levels.first_mut().unwrap();
             match version_first_level.get_level_type()? {
                 LevelType::Overlapping => {
                     uncommitted_epoch
-                        .table_ids
+                        .tables
                         .iter()
-                        .for_each(|id| version_first_level.table_ids.push(*id));
+                        .for_each(|t| version_first_level.table_ids.push(t.id));
                 }
                 LevelType::Nonoverlapping => {
                     unimplemented!()
                 }
             };
 
-            // remove the epoch from uncommitted_epochs and update max_committed_epoch
+            // Update compact status so SSTs are eligible for compaction
+            let stats = uncommitted_epoch
+                .tables
+                .iter()
+                .map(SSTableStat::from)
+                .collect_vec();
+            match compact_status_copy.level_handlers.first_mut().unwrap() {
+                LevelHandler::Overlapping(vec_tier, _) => {
+                    for stat in stats {
+                        let insert_point = vec_tier.partition_point(
+                            |SSTableStat {
+                                 key_range: other_key_range,
+                                 ..
+                             }| { other_key_range <= &stat.key_range },
+                        );
+                        vec_tier.insert(insert_point, stat);
+                    }
+                }
+                LevelHandler::Nonoverlapping(_, _) => {
+                    panic!("L0 must be Tiering.");
+                }
+            }
+            compact_status_copy.update_in_transaction(&mut transaction);
+
+            // Remove the epoch from uncommitted_epochs
             hummock_version_copy.uncommitted_epochs.swap_remove(idx);
         }
         // Create a new_version, possibly merely to bump up the version id and max_committed_epoch.
@@ -817,7 +891,13 @@ where
         hummock_version_copy.upsert_in_transaction(&mut transaction)?;
         self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
             .await?;
+
+        // Update metrics
+        self.trigger_sst_stat(&compact_status_copy);
+        self.trigger_commit_stat(&hummock_version_copy);
+
         // Update in-mem state after transaction succeeds.
+        compaction_guard.compact_status = compact_status_copy;
         versioning_guard.current_version_id = current_version_id_copy;
         versioning_guard
             .hummock_versions
@@ -827,6 +907,7 @@ where
         #[cfg(test)]
         {
             drop(versioning_guard);
+            drop(compaction_guard);
             self.check_state_consistency().await;
         }
 
@@ -847,7 +928,7 @@ where
             .unwrap()
             .clone();
 
-        // get tables in the committing epoch
+        // Get tables in the committing epoch
         let ret = match hummock_version_copy
             .uncommitted_epochs
             .iter()
@@ -856,10 +937,10 @@ where
             Some(idx) => {
                 let uncommitted_epoch = &hummock_version_copy.uncommitted_epochs[idx];
 
-                // remove tables of the aborting epoch
-                for sst_id in &uncommitted_epoch.table_ids {
+                // Remove tables of the aborting epoch
+                for sst in &uncommitted_epoch.tables {
                     if let Some(mut sst_id_info) =
-                        versioning_guard.sstable_id_infos.get(sst_id).cloned()
+                        versioning_guard.sstable_id_infos.get(&sst.id).cloned()
                     {
                         sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
                         sst_id_info.upsert_in_transaction(&mut transaction)?;
@@ -868,7 +949,7 @@ where
                 }
                 hummock_version_copy.uncommitted_epochs.swap_remove(idx);
 
-                // create new_version
+                // Create new_version
                 hummock_version_copy.id = new_version_id;
                 hummock_version_copy.upsert_in_transaction(&mut transaction)?;
 
@@ -930,6 +1011,7 @@ where
     }
 
     pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
+        tracing::debug!("context_id {} is released", context_id);
         let mut versioning_guard = self.versioning.write().await;
         let mut transaction = Transaction::default();
         let pinned_version = versioning_guard.pinned_versions.get(&context_id);

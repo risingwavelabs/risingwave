@@ -28,11 +28,10 @@ impl Vacuum {
         // TODO: report progress instead of in one go.
         hummock_meta_client
             .report_vacuum_task(VacuumTask {
-                sstable_ids: sst_ids.clone(),
+                sstable_ids: sst_ids,
             })
             .await?;
 
-        tracing::debug!("vacuum {} tracked SSTs, {:?}", sst_ids.len(), sst_ids);
         Ok(())
     }
 }

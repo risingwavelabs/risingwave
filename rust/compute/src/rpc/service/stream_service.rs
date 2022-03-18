@@ -23,7 +23,7 @@ impl StreamServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamService for StreamServiceImpl {
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn update_actors(
         &self,
         request: Request<UpdateActorsRequest>,
@@ -39,7 +39,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn build_actors(
         &self,
         request: Request<BuildActorsRequest>,
@@ -60,7 +60,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn broadcast_actor_info_table(
         &self,
         request: Request<BroadcastActorInfoTableRequest>,
@@ -79,7 +79,7 @@ impl StreamService for StreamServiceImpl {
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_actors(
         &self,
         request: Request<DropActorsRequest>,

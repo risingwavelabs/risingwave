@@ -44,7 +44,10 @@ where
         request: Request<PinVersionRequest>,
     ) -> Result<Response<PinVersionResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_version(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_version(req.context_id, req.last_pinned)
+            .await;
         match result {
             Ok(pinned_version) => Ok(Response::new(PinVersionResponse {
                 status: None,
@@ -116,7 +119,10 @@ where
         request: Request<PinSnapshotRequest>,
     ) -> Result<Response<PinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self.hummock_manager.pin_snapshot(req.context_id).await;
+        let result = self
+            .hummock_manager
+            .pin_snapshot(req.context_id, req.last_pinned)
+            .await;
         match result {
             Ok(hummock_snapshot) => Ok(Response::new(PinSnapshotResponse {
                 status: None,
@@ -131,14 +137,16 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        let result = self
-            .hummock_manager
-            .unpin_snapshot(req.context_id, req.snapshot.unwrap())
-            .await;
-        match result {
-            Ok(_) => Ok(Response::new(UnpinSnapshotResponse { status: None })),
-            Err(e) => Err(e.to_grpc_status()),
+        if let Some(snapshot) = req.snapshot {
+            if let Err(e) = self
+                .hummock_manager
+                .unpin_snapshot(req.context_id, snapshot)
+                .await
+            {
+                return Err(e.to_grpc_status());
+            }
         }
+        Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }
 
     async fn commit_epoch(

@@ -1,4 +1,4 @@
-use risingwave_common::types::{DataType, Scalar};
+use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 mod input_ref;
 pub use input_ref::*;
 mod literal;
@@ -18,18 +18,16 @@ mod expr_visitor;
 pub use expr_visitor::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::{ConstantValue, InputRefExpr};
+
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
+    /// Get the return type of the expr
     fn return_type(&self) -> DataType;
 
-    // TODO: replace this with real serialization cc @neverchanje
-    fn to_prost(&self) -> ExprNode {
-        ExprNode {
-            expr_type: 0,
-            rex_node: None,
-            return_type: None,
-        }
-    }
+    /// Serialize the expression
+    fn to_protobuf(&self) -> ExprNode;
 }
 
 #[derive(Clone, PartialEq)]
@@ -60,6 +58,64 @@ impl ExprImpl {
             DataType::Boolean,
         )))
     }
+
+    /// Serialize to protobuf.
+    pub fn to_protobuf(&self) -> ExprNode {
+        use risingwave_pb::expr::FunctionCall as ProstFunctionCall;
+
+        match self {
+            ExprImpl::InputRef(e) => ExprNode {
+                expr_type: e.get_expr_type() as i32,
+                return_type: Some(e.return_type().to_protobuf()),
+                rex_node: Some(RexNode::InputRef(InputRefExpr {
+                    column_idx: e.index() as i32,
+                })),
+            },
+            ExprImpl::Literal(e) => ExprNode {
+                expr_type: e.get_expr_type() as i32,
+                return_type: Some(e.return_type().to_protobuf()),
+                rex_node: literal_to_protobuf(e.get_data()),
+            },
+            ExprImpl::FunctionCall(e) => ExprNode {
+                expr_type: e.get_expr_type() as i32,
+                return_type: Some(e.return_type().to_protobuf()),
+                rex_node: Some(RexNode::FuncCall(ProstFunctionCall {
+                    children: e.inputs().iter().map(|arg| arg.to_protobuf()).collect(),
+                })),
+            },
+            // This function is always called on the physical planning step, where
+            // `ExprImpl::AggCall` must have been rewritten to aggregate operators.
+            ExprImpl::AggCall(e) => {
+                panic!(
+                    "AggCall {:?} has not been rewritten to physical aggregate operators",
+                    e
+                )
+            }
+        }
+    }
+}
+
+/// Convert a literal value (datum) into protobuf.
+fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
+    if d.is_none() {
+        return None;
+    }
+    let body = match d.as_ref().unwrap() {
+        ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
+        ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
+        ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
+        ScalarImpl::Float32(v) => v.to_be_bytes().to_vec(),
+        ScalarImpl::Float64(v) => v.to_be_bytes().to_vec(),
+        ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
+        ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
+        ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
+        ScalarImpl::Interval(_) => todo!(),
+        ScalarImpl::NaiveDate(_) => todo!(),
+        ScalarImpl::NaiveDateTime(_) => todo!(),
+        ScalarImpl::NaiveTime(_) => todo!(),
+        ScalarImpl::Struct(_) => todo!(),
+    };
+    Some(RexNode::Constant(ConstantValue { body }))
 }
 
 impl Expr for ExprImpl {
@@ -69,6 +125,15 @@ impl Expr for ExprImpl {
             ExprImpl::Literal(expr) => expr.return_type(),
             ExprImpl::FunctionCall(expr) => expr.return_type(),
             ExprImpl::AggCall(expr) => expr.return_type(),
+        }
+    }
+
+    fn to_protobuf(&self) -> ExprNode {
+        match self {
+            ExprImpl::InputRef(e) => e.to_protobuf(),
+            ExprImpl::Literal(e) => e.to_protobuf(),
+            ExprImpl::FunctionCall(e) => e.to_protobuf(),
+            ExprImpl::AggCall(e) => e.to_protobuf(),
         }
     }
 }

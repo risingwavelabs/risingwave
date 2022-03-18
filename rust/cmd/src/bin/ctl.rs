@@ -1,9 +1,11 @@
+#![cfg_attr(coverage, feature(no_coverage))]
+
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
 static GLOBAL: Jemalloc = Jemalloc;
 
-#[cfg(not(tarpaulin_include))]
+#[cfg_attr(coverage, no_coverage)]
 #[tokio::main]
 async fn main() {
     risingwave_logging::oneshot_common();
