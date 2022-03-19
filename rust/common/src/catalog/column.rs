@@ -35,7 +35,7 @@ impl std::fmt::Display for ColumnId {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,

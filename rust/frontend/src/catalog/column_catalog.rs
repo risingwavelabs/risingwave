@@ -3,7 +3,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
@@ -72,5 +72,139 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
                 type_name: prost.type_name,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+    use crate::catalog::column_catalog::ColumnCatalog;
+
+    #[test]
+    fn test_into_column_catalog() {
+        use risingwave_common::types::*;
+
+        let city = vec![
+            ProstColumnCatalog {
+                column_desc: Some(ProstColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.city.address".to_string(),
+                    column_id: 2,
+                }),
+                is_hidden: false,
+                catalogs: vec![],
+                ..Default::default()
+            },
+            ProstColumnCatalog {
+                column_desc: Some(ProstColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.city.zipcode".to_string(),
+                    column_id: 3,
+                }),
+                is_hidden: false,
+                catalogs: vec![],
+                ..Default::default()
+            },
+        ];
+        let country = vec![
+            ProstColumnCatalog {
+                column_desc: Some(ProstColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.address".to_string(),
+                    column_id: 1,
+                }),
+                is_hidden: false,
+                catalogs: vec![],
+                ..Default::default()
+            },
+            ProstColumnCatalog {
+                column_desc: Some(ProstColumnDesc {
+                    column_type: Some(
+                        DataType::Struct {
+                            fields: vec![].into(),
+                        }
+                        .to_protobuf(),
+                    ),
+                    name: "country.city".to_string(),
+                    column_id: 4,
+                }),
+                is_hidden: false,
+                catalogs: city,
+                type_name: ".test.City".to_string(),
+            },
+        ];
+        let catalog:ColumnCatalog = ProstColumnCatalog {
+            column_desc: Some(ProstColumnDesc {
+                column_type: Some(
+                    DataType::Struct {
+                        fields: vec![].into(),
+                    }
+                    .to_protobuf(),
+                ),
+                name: "country".to_string(),
+                column_id: 5,
+            }),
+            is_hidden: false,
+            catalogs: country,
+            type_name: ".test.Country".to_string(),
+        }.into();
+
+        let city = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: DataType::Varchar,
+                    name: "country.city.address".to_string(),
+                    column_id: ColumnId::new(2),
+                },
+                is_hidden: false,
+                catalogs: vec![],
+                type_name: String::new(),
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: DataType::Varchar,
+                    name: "country.city.zipcode".to_string(),
+                    column_id: ColumnId::new(3),
+                },
+                is_hidden: false,
+                catalogs: vec![],
+                type_name: String::new(),
+            },
+        ];
+        let data_type = vec![DataType::Varchar,DataType::Varchar];
+        let country = vec![
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: DataType::Varchar,
+                    name: "country.address".to_string(),
+                    column_id: ColumnId::new(1),
+                },
+                is_hidden: false,
+                catalogs: vec![],
+                type_name: String::new(),
+            },
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: DataType::Struct {fields:data_type.clone().into()},
+                    name: "country.city".to_string(),
+                    column_id: ColumnId::new(4),
+                },
+                is_hidden: false,
+                catalogs: city,
+                type_name: ".test.City".to_string(),
+            },
+        ];
+
+        assert_eq!(catalog,ColumnCatalog{
+            column_desc: ColumnDesc {
+                data_type: DataType::Struct {fields:vec![DataType::Varchar,DataType::Struct {fields:data_type.into()}].into()},
+                column_id: ColumnId::new(5),
+                name: "country".to_string()
+            },
+            is_hidden: false,
+            catalogs: country,
+            type_name: ".test.Country".to_string(),
+        });
     }
 }
