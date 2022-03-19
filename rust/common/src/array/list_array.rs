@@ -462,26 +462,87 @@ mod tests {
     }
 
     #[test]
-    fn test_struct_value_cmp() {
-        // (1, 2.0) > (1, 1.0)
-        assert_gt!(
-            ListValue::new(vec![Some(1.0.into()), Some(2.0.into())]),
-            ListValue::new(vec![Some(1.0.into()), Some(1.0.into())]),
+    fn test_list_nested_layout() {
+        use crate::array::*;
+        
+        let listarray1 = ListArray::from_slices(
+            &[true, true],
+            vec![
+                Some(array! { I32Array, [Some(1), Some(2)] }.into()),
+                Some(array! { I32Array, [Some(3), Some(4)] }.into()),
+            ],
+            DataType::Int32
+        )
+        .unwrap();
+        
+        let listarray2 = ListArray::from_slices(
+            &[true, false, true],
+            vec![
+                Some(array! { I32Array, [Some(5), Some(6), Some(7)] }.into()),
+                None,
+                Some(array! { I32Array, [Some(8)] }.into()),
+            ],
+            DataType::Int32
+        )
+        .unwrap();
+
+        let listarray3 = ListArray::from_slices(
+            &[true],
+            vec![
+                Some(array! { I32Array, [Some(9), Some(10)] }.into()),
+            ],
+            DataType::Int32
+        )
+        .unwrap();
+
+        let nestarray = ListArray::from_slices(
+            &[true, true, true],
+            vec![
+                Some(listarray1.into()),
+                Some(listarray2.into()),
+                Some(listarray3.into()),
+            ],
+            DataType::List { }
+        )
+        .unwrap();
+        // let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        // assert_eq!(ArrayImpl::Struct(arr), actual);
+
+        // let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
+        let nested_list_values = nestarray.values_vec();
+        assert_eq!(
+            nested_list_values,
+            vec![
+                Some(ListValue::new(vec![
+                    Some(ScalarImpl::List(ListValue::new(vec![
+                            Some(ScalarImpl::Int32(1)),
+                            Some(ScalarImpl::Int32(2)),
+                        ]))),
+                    Some(ScalarImpl::List(ListValue::new(vec![
+                            Some(ScalarImpl::Int32(3)),
+                            Some(ScalarImpl::Int32(4)),
+                        ]))),
+                        
+                ])),
+                Some(ListValue::new(vec![
+                    Some(ScalarImpl::List(ListValue::new(vec![
+                            Some(ScalarImpl::Int32(5)),
+                            Some(ScalarImpl::Int32(6)),
+                            Some(ScalarImpl::Int32(7)),
+                        ]))),
+                    None,
+                    Some(ScalarImpl::List(ListValue::new(vec![
+                            Some(ScalarImpl::Int32(8)),
+                        ]))),  
+                ])), 
+                Some(ListValue::new(vec![
+                    Some(ScalarImpl::List(ListValue::new(vec![
+                            Some(ScalarImpl::Int32(9)),
+                            Some(ScalarImpl::Int32(10)),
+                        ]))),
+                ])), 
+            ]
         );
-        // // null > 1
-        // assert_eq!(
-        //     cmp_struct_field(&None, &Some(ScalarRefImpl::Int32(1))),
-        //     Ordering::Greater
-        // );
-        // // (1, null, 3) > (1, 1.0, 2)
-        // assert_gt!(
-        //     ListValue::new(vec![Some(1.into()), None, Some(3.into())]),
-        //     ListValue::new(vec![Some(1.into()), Some(1.0.into()), Some(2.into())]),
-        // );
-        // // (1, null) == (1, null)
-        // assert_eq!(
-        //     ListValue::new(vec![Some(1.into()), None]),
-        //     ListValue::new(vec![Some(1.into()), None]),
-        // );
+
     }
 }
