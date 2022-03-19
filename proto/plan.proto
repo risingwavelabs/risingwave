@@ -35,6 +35,10 @@ message ColumnDesc {
   int32 column_id = 2;
   // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
   string name = 3;
+  // The user-defined type's name. Empty if the column type is a builtin type.
+  // For example, when the type is created from a protobuf schema file,
+  // this field will store the message name.
+  string type_name = 4;
 }
 
 message OrderedColumnDesc {
@@ -45,6 +49,8 @@ message OrderedColumnDesc {
 message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
+  // For STRUCT type.
+  repeated ColumnCatalog catalogs = 3;
 }
 
 message CellBasedTableDesc {
