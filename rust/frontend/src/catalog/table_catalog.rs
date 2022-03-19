@@ -51,17 +51,23 @@ impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
         let name = tb.name.clone();
-        let columns = tb.columns.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
-        for col in &columns {
-            let col_desc = col.column_desc.clone().unwrap();
-            let col_name = col_desc.name.clone();
-            if !col_names.insert(col_name.clone()) {
-                panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+        let columns: Vec<ColumnCatalog> = tb
+            .columns
+            .clone()
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .collect();
+        for col in columns.clone() {
+            for col_desc in col.get_column_descs() {
+                let col_name = col_desc.name.clone();
+                if !col_names.insert(col_name.clone()) {
+                    panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+                }
+                let col_id = col_desc.column_id;
+                col_descs.insert(col_id.get_id(), col_desc);
             }
-            let col_id = col_desc.column_id;
-            col_descs.insert(col_id, col_desc.into());
         }
         let pk_desc = tb
             .pk_column_ids
@@ -78,7 +84,6 @@ impl From<ProstTable> for TableCatalog {
             })
             .collect();
 
-        let columns = columns.into_iter().map(ColumnCatalog::from).collect();
         Self {
             id: id.into(),
             name,

@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
@@ -6,6 +7,7 @@ use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
+    pub catalogs: Vec<ColumnCatalog>,
 }
 
 impl ColumnCatalog {
@@ -28,13 +30,44 @@ impl ColumnCatalog {
     pub fn name(&self) -> &str {
         self.column_desc.name.as_ref()
     }
+
+    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+        let mut descs = vec![self.column_desc.clone()];
+        for catalog in &self.catalogs {
+            descs.append(&mut catalog.get_column_descs());
+        }
+        descs
+    }
 }
 
 impl From<ProstColumnCatalog> for ColumnCatalog {
     fn from(prost: ProstColumnCatalog) -> Self {
-        Self {
-            column_desc: prost.column_desc.unwrap().into(),
-            is_hidden: prost.is_hidden,
+        let mut column_desc: ColumnDesc = prost.column_desc.unwrap().into();
+        if let DataType::Struct { .. } = column_desc.data_type {
+            let catalogs: Vec<ColumnCatalog> = prost
+                .catalogs
+                .into_iter()
+                .map(ColumnCatalog::from)
+                .collect();
+            column_desc.data_type = DataType::Struct {
+                fields: catalogs
+                    .clone()
+                    .into_iter()
+                    .map(|c| c.data_type().clone())
+                    .collect_vec()
+                    .into(),
+            };
+            Self {
+                column_desc,
+                is_hidden: prost.is_hidden,
+                catalogs,
+            }
+        } else {
+            Self {
+                column_desc,
+                is_hidden: prost.is_hidden,
+                catalogs: vec![],
+            }
         }
     }
 }

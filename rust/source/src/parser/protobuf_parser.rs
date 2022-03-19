@@ -346,7 +346,7 @@ mod tests {
       string zipcode = 2;
     }"#;
 
-    fn create_nested_parser() -> Result<ProtobufParser>{
+    fn create_nested_parser() -> Result<ProtobufParser> {
         let temp_file = Builder::new()
             .prefix("temp")
             .suffix(".proto")
@@ -497,7 +497,7 @@ mod tests {
                     ..Default::default()
                 }),
                 is_hidden: false,
-                catalogs: vec![]
+                catalogs: vec![],
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
@@ -507,7 +507,7 @@ mod tests {
                     ..Default::default()
                 }),
                 is_hidden: false,
-                catalogs: vec![]
+                catalogs: vec![],
             },
         ];
         let country = vec![
@@ -519,17 +519,22 @@ mod tests {
                     ..Default::default()
                 }),
                 is_hidden: false,
-                catalogs: vec![]
+                catalogs: vec![],
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
-                    column_type: Some(DataType::Struct { fields: vec![].into()}.to_protobuf()),
+                    column_type: Some(
+                        DataType::Struct {
+                            fields: vec![].into(),
+                        }
+                        .to_protobuf(),
+                    ),
                     name: "country.city".to_string(),
                     column_id: 5,
                     type_name: ".test.City".to_string(),
                 }),
                 is_hidden: false,
-                catalogs: city
+                catalogs: city,
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
@@ -539,7 +544,7 @@ mod tests {
                     ..Default::default()
                 }),
                 is_hidden: false,
-                catalogs: vec![]
+                catalogs: vec![],
             },
         ];
         assert_eq!(
@@ -557,7 +562,12 @@ mod tests {
                 },
                 ColumnCatalog {
                     column_desc: Some(ColumnDesc {
-                        column_type: Some(DataType::Struct { fields: vec![].into()}.to_protobuf()),
+                        column_type: Some(
+                            DataType::Struct {
+                                fields: vec![].into()
+                            }
+                            .to_protobuf()
+                        ),
                         name: "country".to_string(),
                         column_id: 7,
                         type_name: ".test.Country".to_string(),
