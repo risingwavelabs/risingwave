@@ -40,7 +40,6 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String, // for debugging
-    pub type_name: String,
 }
 #[derive(Clone, Debug)]
 pub struct OrderedColumnDesc {
@@ -53,7 +52,6 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
-            type_name: String::new(),
         }
     }
 }
@@ -64,14 +62,12 @@ impl From<ProstColumnDesc> for ColumnDesc {
             column_type,
             column_id,
             name,
-            type_name,
         } = prost;
 
         Self {
             data_type: DataType::from(&column_type.unwrap()),
             column_id: ColumnId::new(column_id),
             name,
-            type_name,
         }
     }
 }

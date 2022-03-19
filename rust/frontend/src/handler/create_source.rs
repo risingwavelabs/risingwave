@@ -50,10 +50,9 @@ pub(super) async fn handle_create_source(
             column_id: 0,
             name: ROWID_NAME.to_string(),
             column_type: Some(DataType::Int32.to_protobuf()),
-            ..Default::default()
         }),
         is_hidden: true,
-        catalogs: vec![],
+        ..Default::default()
     }))
     .chain(columns.into_iter().map(Ok))
     .collect::<Result<_>>()?;

@@ -148,11 +148,11 @@ impl ProtobufParser {
                 column_desc: Some(ColumnDesc {
                     column_id: *index, // need increment
                     name: lastname + field_descriptor.name(),
-                    type_name: m.name().to_string(),
                     column_type: Some(data_type.to_protobuf()),
                 }),
                 is_hidden: false,
                 catalogs: column_vec,
+                type_name: m.name().to_string(),
             })
         } else {
             *index += 1;
@@ -161,7 +161,6 @@ impl ProtobufParser {
                     column_id: *index, // need increment
                     name: lastname + field_descriptor.name(),
                     column_type: Some(data_type.to_protobuf()),
-                    ..Default::default()
                 }),
                 is_hidden: false,
                 ..Default::default()
@@ -494,20 +493,20 @@ mod tests {
                     column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "country.city.address".to_string(),
                     column_id: 3,
-                    ..Default::default()
                 }),
                 is_hidden: false,
                 catalogs: vec![],
+                ..Default::default()
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
                     column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "country.city.zipcode".to_string(),
                     column_id: 4,
-                    ..Default::default()
                 }),
                 is_hidden: false,
                 catalogs: vec![],
+                ..Default::default()
             },
         ];
         let country = vec![
@@ -516,10 +515,10 @@ mod tests {
                     column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "country.address".to_string(),
                     column_id: 2,
-                    ..Default::default()
                 }),
                 is_hidden: false,
                 catalogs: vec![],
+                ..Default::default()
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
@@ -531,20 +530,20 @@ mod tests {
                     ),
                     name: "country.city".to_string(),
                     column_id: 5,
-                    type_name: ".test.City".to_string(),
                 }),
                 is_hidden: false,
                 catalogs: city,
+                type_name: ".test.City".to_string(),
             },
             ColumnCatalog {
                 column_desc: Some(ColumnDesc {
                     column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "country.zipcode".to_string(),
                     column_id: 6,
-                    ..Default::default()
                 }),
                 is_hidden: false,
                 catalogs: vec![],
+                ..Default::default()
             },
         ];
         assert_eq!(
@@ -558,7 +557,8 @@ mod tests {
                         ..Default::default()
                     }),
                     is_hidden: false,
-                    catalogs: vec![]
+                    catalogs: vec![],
+                    ..Default::default()
                 },
                 ColumnCatalog {
                     column_desc: Some(ColumnDesc {
@@ -570,20 +570,20 @@ mod tests {
                         ),
                         name: "country".to_string(),
                         column_id: 7,
-                        type_name: ".test.Country".to_string(),
                     }),
                     is_hidden: false,
-                    catalogs: country
+                    catalogs: country,
+                    type_name: ".test.Country".to_string(),
                 },
                 ColumnCatalog {
                     column_desc: Some(ColumnDesc {
                         column_type: Some(DataType::Int64.to_protobuf()),
                         name: "zipcode".to_string(),
                         column_id: 8,
-                        ..Default::default()
                     }),
                     is_hidden: false,
-                    catalogs: vec![]
+                    catalogs: vec![],
+                    ..Default::default()
                 },
                 ColumnCatalog {
                     column_desc: Some(ColumnDesc {
@@ -593,7 +593,8 @@ mod tests {
                         ..Default::default()
                     }),
                     is_hidden: false,
-                    catalogs: vec![]
+                    catalogs: vec![],
+                    ..Default::default()
                 },
             ]
         );

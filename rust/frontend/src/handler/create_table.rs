@@ -30,10 +30,9 @@ pub async fn handle_create_table(
             column_id: 0,
             name: ROWID_NAME.to_string(),
             column_type: Some(DataType::Int32.to_protobuf()),
-            ..Default::default()
         }),
         is_hidden: true,
-        catalogs: vec![],
+        ..Default::default()
     }))
     .chain(columns.into_iter().enumerate().map(|(idx, col)| {
         Ok(ColumnCatalog {
@@ -41,10 +40,9 @@ pub async fn handle_create_table(
                 column_id: (idx + 1) as i32,
                 name: col.name.to_string(),
                 column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
-                ..Default::default()
             }),
             is_hidden: false,
-            catalogs: vec![],
+            ..Default::default()
         })
     }))
     .collect::<Result<_>>()?;

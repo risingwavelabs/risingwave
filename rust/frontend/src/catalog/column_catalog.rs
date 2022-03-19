@@ -8,6 +8,7 @@ pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
     pub catalogs: Vec<ColumnCatalog>,
+    pub type_name: String,
 }
 
 impl ColumnCatalog {
@@ -61,12 +62,14 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
                 column_desc,
                 is_hidden: prost.is_hidden,
                 catalogs,
+                type_name: prost.type_name,
             }
         } else {
             Self {
                 column_desc,
                 is_hidden: prost.is_hidden,
                 catalogs: vec![],
+                type_name: prost.type_name,
             }
         }
     }
