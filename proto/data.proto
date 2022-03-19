@@ -71,8 +71,13 @@ message StructArrayData {
 }
 
 message ListArrayData {
-  repeated Array children_array = 1;
+  Array value = 1;
+  DataType value_type = 2;
 }
+
+// message ListArrayData {
+//   DataType datatype = 1;
+// }
 
 enum ArrayType {
   INT16 = 0;
