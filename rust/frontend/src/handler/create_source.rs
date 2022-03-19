@@ -1,17 +1,23 @@
+use std::iter;
+
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType, StreamSourceInfo};
+use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, RowFormatType, StreamSourceInfo};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
+use crate::handler::create_table::ROWID_NAME;
 use crate::session::QueryContext;
 
 fn create_protobuf_table_schema(
     schema: &ProtobufSchema,
-) -> Result<(StreamSourceInfo, Vec<ProstColumnDesc>)> {
+) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>)> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
-    let column_descs = parser.map_to_columns()?;
+    let column_catalogs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
         append_only: true,
         row_format: RowFormatType::Protobuf as i32,
@@ -19,7 +25,7 @@ fn create_protobuf_table_schema(
         ..Default::default()
     };
 
-    Ok((info, column_descs))
+    Ok((info, column_catalogs))
 }
 
 pub(super) async fn handle_create_source(
@@ -30,17 +36,44 @@ pub(super) async fn handle_create_source(
     // fix: there is no schema name?
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
-    let (_db_id, _schema_id) = session
+    let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), schema_name, &source_name)?;
-    let (_source, _columns) = match &stmt.source_schema {
+    let (_source, columns) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
         SourceSchema::Json => todo!(),
     };
-    let _catalog_writer = session.env().catalog_writer();
-    // TODO catalog writer to create source
+    let column_catalogs = iter::once(Ok(ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_id: 0,
+            name: ROWID_NAME.to_string(),
+            column_type: Some(DataType::Int32.to_protobuf()),
+            ..Default::default()
+        }),
+        is_hidden: true,
+        catalogs: vec![],
+    }))
+    .chain(columns.into_iter().map(Ok))
+    .collect::<Result<_>>()?;
+
+    let table = ProstTable {
+        id: 0,
+        schema_id,
+        database_id,
+        name: source_name,
+        columns: column_catalogs,
+        pk_column_ids: vec![0],
+        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+        dependent_relations: vec![],
+        optional_associated_source_id: None,
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .create_materialized_table_source_workaround(table)
+        .await?;
 
     Ok(PgResponse::new(
         StatementType::CREATE_SOURCE,

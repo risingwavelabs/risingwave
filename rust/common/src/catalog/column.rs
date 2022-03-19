@@ -62,6 +62,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
             column_type,
             column_id,
             name,
+            type_name: _,
         } = prost;
 
         Self {

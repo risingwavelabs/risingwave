@@ -9,10 +9,10 @@ use risingwave_common::error::ErrorCode::{
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_common::vector_op::cast::str_to_date;
-use risingwave_pb::plan::ColumnDesc;
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
-use serde_protobuf::descriptor::{Descriptors, FieldType};
+use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
@@ -104,7 +104,7 @@ impl ProtobufParser {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnCatalog>> {
         let msg = match self.descriptors.message_by_name(self.message_name.as_str()) {
             Some(msg) => msg,
             None => {
@@ -115,17 +115,51 @@ impl ProtobufParser {
         };
         msg.fields()
             .iter()
-            .map(|f| {
-                let field_type = f.field_type(&self.descriptors);
-                let column_type =
-                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf();
-                Ok(ColumnDesc {
-                    column_type: Some(column_type),
-                    name: f.name().to_string(),
-                    ..Default::default()
+            .map(|f| Self::pb_field_to_col_catalogs(f, &self.descriptors, "".to_string()))
+            .collect::<Result<Vec<ColumnCatalog>>>()
+    }
+
+    pub fn pb_field_to_col_catalogs(
+        field_descriptor: &FieldDescriptor,
+        descriptors: &Descriptors,
+        lastname: String,
+    ) -> Result<ColumnCatalog> {
+        let field_type = field_descriptor.field_type(descriptors);
+        let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
+        if let FieldType::Message(m) = field_type {
+            let column_vec = m
+                .fields()
+                .iter()
+                .map(|f| {
+                    Self::pb_field_to_col_catalogs(
+                        f,
+                        descriptors,
+                        lastname.clone() + field_descriptor.name() + ".",
+                    )
                 })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_id: 0, // need increment
+                    name: lastname + field_descriptor.name(),
+                    type_name: m.name().to_string(),
+                    column_type: Some(data_type.to_protobuf()),
+                }),
+                is_hidden: false,
+                catalogs: column_vec,
             })
-            .collect::<Result<Vec<ColumnDesc>>>()
+        } else {
+            Ok(ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_id: 0, // need increment
+                    name: lastname + field_descriptor.name(),
+                    column_type: Some(data_type.to_protobuf()),
+                    ..Default::default()
+                }),
+                is_hidden: false,
+                ..Default::default()
+            })
+        }
     }
 }
 
@@ -143,7 +177,9 @@ macro_rules! protobuf_match_type {
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataType> {
+fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Result<DataType> {
+    let is_repeated = f.is_repeated();
+    let field_type = &f.field_type(descriptors);
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
@@ -154,6 +190,14 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
+        FieldType::Message(m) => {
+            let vec = m
+                .fields()
+                .iter()
+                .map(|f| protobuf_type_mapping(f, descriptors))
+                .collect::<Result<Vec<_>>>()?;
+            DataType::Struct { fields: vec.into() }
+        }
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
