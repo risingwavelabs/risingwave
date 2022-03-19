@@ -35,7 +35,6 @@ const KINESIS_ASSUMEROLE_ARN: &str = "kinesis.assumerole.arn";
 const KINESIS_ASSUMEROLE_EXTERNAL_ID: &str = "kinesis.assumerole.external_id";
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-
 pub struct AwsAssumeRole {
     pub(crate) arn: String,
     pub(crate) external_id: Option<String>,

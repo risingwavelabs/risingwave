@@ -142,7 +142,6 @@ impl ExchangeServiceImpl {
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
         tracing::debug!(peer_addr = %peer_addr, "serve stream exchange RPC");
-        debug!("Serve stream exchange RPC from {}", peer_addr);
         tokio::spawn(async move {
             loop {
                 let msg = receiver.next().await;
