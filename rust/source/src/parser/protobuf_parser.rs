@@ -113,9 +113,12 @@ impl ProtobufParser {
                 )
             }
         };
+        let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| Self::pb_field_to_col_catalogs(f, &self.descriptors, "".to_string()))
+            .map(|f| {
+                Self::pb_field_to_col_catalogs(f, &self.descriptors, "".to_string(), &mut index)
+            })
             .collect::<Result<Vec<ColumnCatalog>>>()
     }
 
@@ -123,6 +126,7 @@ impl ProtobufParser {
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
         lastname: String,
+        index: &mut i32,
     ) -> Result<ColumnCatalog> {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
@@ -135,12 +139,14 @@ impl ProtobufParser {
                         f,
                         descriptors,
                         lastname.clone() + field_descriptor.name() + ".",
+                        index,
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
+            *index += 1;
             Ok(ColumnCatalog {
                 column_desc: Some(ColumnDesc {
-                    column_id: 0, // need increment
+                    column_id: *index, // need increment
                     name: lastname + field_descriptor.name(),
                     type_name: m.name().to_string(),
                     column_type: Some(data_type.to_protobuf()),
@@ -149,9 +155,10 @@ impl ProtobufParser {
                 catalogs: column_vec,
             })
         } else {
+            *index += 1;
             Ok(ColumnCatalog {
                 column_desc: Some(ColumnDesc {
-                    column_id: 0, // need increment
+                    column_id: *index, // need increment
                     name: lastname + field_descriptor.name(),
                     column_type: Some(data_type.to_protobuf()),
                     ..Default::default()
@@ -278,7 +285,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -315,6 +322,41 @@ mod tests {
         let path = temp_file.path().to_str().unwrap();
         let mut file = temp_file.as_file();
         file.write_all(PROTO_FILE_DATA.as_ref())
+            .expect("writing binary to test file");
+
+        ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
+    }
+
+    static PROTO_NESTED_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
+
+    fn create_nested_parser() -> Result<ProtobufParser>{
+        let temp_file = Builder::new()
+            .prefix("temp")
+            .suffix(".proto")
+            .rand_bytes(5)
+            .tempfile()
+            .unwrap();
+
+        let path = temp_file.path().to_str().unwrap();
+        let mut file = temp_file.as_file();
+        file.write_all(PROTO_NESTED_FILE_DATA.as_ref())
             .expect("writing binary to test file");
 
         ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
@@ -444,40 +486,104 @@ mod tests {
     fn test_map_to_columns() {
         use risingwave_common::types::*;
 
-        let parser = create_parser().unwrap();
+        let parser = create_nested_parser().unwrap();
         let columns = parser.map_to_columns().unwrap();
+        let city = vec![
+            ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.city.address".to_string(),
+                    column_id: 3,
+                    ..Default::default()
+                }),
+                is_hidden: false,
+                catalogs: vec![]
+            },
+            ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.city.zipcode".to_string(),
+                    column_id: 4,
+                    ..Default::default()
+                }),
+                is_hidden: false,
+                catalogs: vec![]
+            },
+        ];
+        let country = vec![
+            ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.address".to_string(),
+                    column_id: 2,
+                    ..Default::default()
+                }),
+                is_hidden: false,
+                catalogs: vec![]
+            },
+            ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_type: Some(DataType::Struct { fields: vec![].into()}.to_protobuf()),
+                    name: "country.city".to_string(),
+                    column_id: 5,
+                    type_name: ".test.City".to_string(),
+                }),
+                is_hidden: false,
+                catalogs: city
+            },
+            ColumnCatalog {
+                column_desc: Some(ColumnDesc {
+                    column_type: Some(DataType::Varchar.to_protobuf()),
+                    name: "country.zipcode".to_string(),
+                    column_id: 6,
+                    ..Default::default()
+                }),
+                is_hidden: false,
+                catalogs: vec![]
+            },
+        ];
         assert_eq!(
             columns,
             vec![
-                ColumnDesc {
-                    column_type: Some(DataType::Int32.to_protobuf()),
-                    name: "id".to_string(),
-                    ..Default::default()
+                ColumnCatalog {
+                    column_desc: Some(ColumnDesc {
+                        column_type: Some(DataType::Int32.to_protobuf()),
+                        name: "id".to_string(),
+                        column_id: 1,
+                        ..Default::default()
+                    }),
+                    is_hidden: false,
+                    catalogs: vec![]
                 },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "address".to_string(),
-                    ..Default::default()
+                ColumnCatalog {
+                    column_desc: Some(ColumnDesc {
+                        column_type: Some(DataType::Struct { fields: vec![].into()}.to_protobuf()),
+                        name: "country".to_string(),
+                        column_id: 7,
+                        type_name: ".test.Country".to_string(),
+                    }),
+                    is_hidden: false,
+                    catalogs: country
                 },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "city".to_string(),
-                    ..Default::default()
+                ColumnCatalog {
+                    column_desc: Some(ColumnDesc {
+                        column_type: Some(DataType::Int64.to_protobuf()),
+                        name: "zipcode".to_string(),
+                        column_id: 8,
+                        ..Default::default()
+                    }),
+                    is_hidden: false,
+                    catalogs: vec![]
                 },
-                ColumnDesc {
-                    column_type: Some(DataType::Int64.to_protobuf()),
-                    name: "zipcode".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Float32.to_protobuf()),
-                    name: "rate".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "date".to_string(),
-                    ..Default::default()
+                ColumnCatalog {
+                    column_desc: Some(ColumnDesc {
+                        column_type: Some(DataType::Float32.to_protobuf()),
+                        name: "rate".to_string(),
+                        column_id: 9,
+                        ..Default::default()
+                    }),
+                    is_hidden: false,
+                    catalogs: vec![]
                 },
             ]
         );
