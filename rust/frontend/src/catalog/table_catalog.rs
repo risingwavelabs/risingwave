@@ -9,7 +9,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use super::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     id: TableId,
     name: String,
@@ -95,5 +95,75 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::types::*;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+
+    use crate::catalog::column_catalog::tests::{build_catalog, build_prost_catalog};
+    use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::table_catalog::TableCatalog;
+    use crate::handler::create_table::ROWID_NAME;
+
+    #[test]
+    fn test_into_table_catalog() {
+        let table: TableCatalog = ProstTable {
+            id: 0,
+            schema_id: 0,
+            database_id: 0,
+            name: "test".to_string(),
+            columns: vec![
+                ProstColumnCatalog {
+                    column_desc: Some(ProstColumnDesc {
+                        column_id: 0,
+                        name: ROWID_NAME.to_string(),
+                        column_type: Some(DataType::Int32.to_protobuf()),
+                    }),
+                    is_hidden: true,
+                    ..Default::default()
+                },
+                build_prost_catalog(),
+            ],
+            pk_column_ids: vec![0],
+            pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+            dependent_relations: vec![],
+            optional_associated_source_id: None,
+        }
+        .into();
+
+        assert_eq!(
+            table,
+            TableCatalog {
+                id: TableId::new(0),
+                name: "test".to_string(),
+                columns: vec![
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: DataType::Int32,
+                            column_id: ColumnId::new(0),
+                            name: ROWID_NAME.to_string(),
+                        },
+                        is_hidden: true,
+                        catalogs: vec![],
+                        type_name: String::new()
+                    },
+                    build_catalog()
+                ],
+                pk_desc: vec![OrderedColumnDesc {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Int32,
+                        column_id: ColumnId::new(0),
+                        name: ROWID_NAME.to_string(),
+                    },
+                    order: OrderType::Ascending
+                }]
+            }
+        );
     }
 }

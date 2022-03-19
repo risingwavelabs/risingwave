@@ -554,7 +554,6 @@ mod tests {
                         column_type: Some(DataType::Int32.to_protobuf()),
                         name: "id".to_string(),
                         column_id: 1,
-                        ..Default::default()
                     }),
                     is_hidden: false,
                     catalogs: vec![],
@@ -590,7 +589,6 @@ mod tests {
                         column_type: Some(DataType::Float32.to_protobuf()),
                         name: "rate".to_string(),
                         column_id: 9,
-                        ..Default::default()
                     }),
                     is_hidden: false,
                     catalogs: vec![],

@@ -76,15 +76,13 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::*;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+
     use crate::catalog::column_catalog::ColumnCatalog;
-
-    #[test]
-    fn test_into_column_catalog() {
-        use risingwave_common::types::*;
-
+    pub fn build_prost_catalog() -> ProstColumnCatalog {
         let city = vec![
             ProstColumnCatalog {
                 column_desc: Some(ProstColumnDesc {
@@ -134,7 +132,7 @@ mod tests {
                 type_name: ".test.City".to_string(),
             },
         ];
-        let catalog:ColumnCatalog = ProstColumnCatalog {
+        ProstColumnCatalog {
             column_desc: Some(ProstColumnDesc {
                 column_type: Some(
                     DataType::Struct {
@@ -148,8 +146,10 @@ mod tests {
             is_hidden: false,
             catalogs: country,
             type_name: ".test.Country".to_string(),
-        }.into();
+        }
+    }
 
+    pub fn build_catalog() -> ColumnCatalog {
         let city = vec![
             ColumnCatalog {
                 column_desc: ColumnDesc {
@@ -172,7 +172,7 @@ mod tests {
                 type_name: String::new(),
             },
         ];
-        let data_type = vec![DataType::Varchar,DataType::Varchar];
+        let data_type = vec![DataType::Varchar, DataType::Varchar];
         let country = vec![
             ColumnCatalog {
                 column_desc: ColumnDesc {
@@ -186,7 +186,9 @@ mod tests {
             },
             ColumnCatalog {
                 column_desc: ColumnDesc {
-                    data_type: DataType::Struct {fields:data_type.clone().into()},
+                    data_type: DataType::Struct {
+                        fields: data_type.clone().into(),
+                    },
                     name: "country.city".to_string(),
                     column_id: ColumnId::new(4),
                 },
@@ -196,15 +198,28 @@ mod tests {
             },
         ];
 
-        assert_eq!(catalog,ColumnCatalog{
+        ColumnCatalog {
             column_desc: ColumnDesc {
-                data_type: DataType::Struct {fields:vec![DataType::Varchar,DataType::Struct {fields:data_type.into()}].into()},
+                data_type: DataType::Struct {
+                    fields: vec![
+                        DataType::Varchar,
+                        DataType::Struct {
+                            fields: data_type.into(),
+                        },
+                    ]
+                    .into(),
+                },
                 column_id: ColumnId::new(5),
-                name: "country".to_string()
+                name: "country".to_string(),
             },
             is_hidden: false,
             catalogs: country,
             type_name: ".test.Country".to_string(),
-        });
+        }
+    }
+    #[test]
+    fn test_into_column_catalog() {
+        let catalog: ColumnCatalog = build_prost_catalog().into();
+        assert_eq!(catalog, build_catalog());
     }
 }

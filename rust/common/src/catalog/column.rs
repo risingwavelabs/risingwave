@@ -41,7 +41,7 @@ pub struct ColumnDesc {
     pub column_id: ColumnId,
     pub name: String, // for debugging
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
     pub order: OrderType,
