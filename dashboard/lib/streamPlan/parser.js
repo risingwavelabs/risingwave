@@ -314,8 +314,8 @@ export default class StreamPlanParser {
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
     }
-    // console.log(newNode.typeInfo)
-    if (newNode.type === "mviewNode") {
+    
+    if (newNode.type === "materializeNode") {
       this.actorIdTomviewNodes.set(actorId, newNode);
     }
 
