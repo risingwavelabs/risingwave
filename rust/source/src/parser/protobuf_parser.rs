@@ -122,6 +122,7 @@ impl ProtobufParser {
             .collect::<Result<Vec<ColumnCatalog>>>()
     }
 
+    // Use pb field to create column_catalog, use index to create increment column_id
     pub fn pb_field_to_col_catalogs(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
@@ -310,7 +311,7 @@ mod tests {
     //    Date:    "2021-01-01"
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
-    fn create_parser() -> Result<ProtobufParser> {
+    fn create_parser(proto_data: &str) -> Result<ProtobufParser> {
         let temp_file = Builder::new()
             .prefix("temp")
             .suffix(".proto")
@@ -320,7 +321,7 @@ mod tests {
 
         let path = temp_file.path().to_str().unwrap();
         let mut file = temp_file.as_file();
-        file.write_all(PROTO_FILE_DATA.as_ref())
+        file.write_all(proto_data.as_ref())
             .expect("writing binary to test file");
 
         ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
@@ -345,22 +346,6 @@ mod tests {
       string zipcode = 2;
     }"#;
 
-    fn create_nested_parser() -> Result<ProtobufParser> {
-        let temp_file = Builder::new()
-            .prefix("temp")
-            .suffix(".proto")
-            .rand_bytes(5)
-            .tempfile()
-            .unwrap();
-
-        let path = temp_file.path().to_str().unwrap();
-        let mut file = temp_file.as_file();
-        file.write_all(PROTO_NESTED_FILE_DATA.as_ref())
-            .expect("writing binary to test file");
-
-        ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
-    }
-
     #[test]
     fn test_proto_message_name() {
         assert_eq!(ProtobufParser::normalize_message_name(""), "".to_string());
@@ -380,12 +365,12 @@ mod tests {
 
     #[test]
     fn test_create_parser() {
-        create_parser().unwrap();
+        create_parser(PROTO_FILE_DATA).unwrap();
     }
 
     #[test]
     fn test_parser_decode() {
-        let parser = create_parser().unwrap();
+        let parser = create_parser(PROTO_FILE_DATA).unwrap();
 
         let value = parser.decode(PRE_GEN_PROTO_DATA).unwrap();
 
@@ -426,7 +411,7 @@ mod tests {
 
     #[test]
     fn test_parser_parse() {
-        let parser = create_parser().unwrap();
+        let parser = create_parser(PROTO_FILE_DATA).unwrap();
         let descs = vec![
             SourceColumnDesc {
                 name: "id".to_string(),
@@ -485,7 +470,7 @@ mod tests {
     fn test_map_to_columns() {
         use risingwave_common::types::*;
 
-        let parser = create_nested_parser().unwrap();
+        let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
             ColumnCatalog {

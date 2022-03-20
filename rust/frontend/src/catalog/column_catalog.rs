@@ -32,6 +32,7 @@ impl ColumnCatalog {
         self.column_desc.name.as_ref()
     }
 
+    // Get all column descs by recursion
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.column_desc.clone()];
         for catalog in &self.catalogs {
@@ -42,6 +43,7 @@ impl ColumnCatalog {
 }
 
 impl From<ProstColumnCatalog> for ColumnCatalog {
+    // If the DataType is struct, the column_catalog need to rebuild DataType Struct fields according to its catalogs
     fn from(prost: ProstColumnCatalog) -> Self {
         let mut column_desc: ColumnDesc = prost.column_desc.unwrap().into();
         if let DataType::Struct { .. } = column_desc.data_type {
