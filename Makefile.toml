@@ -233,7 +233,7 @@ set -e
 
 cd rust
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
-RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
+RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
 [tasks.d]
