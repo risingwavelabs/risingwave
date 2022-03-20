@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 #[allow(unused_imports)]
 use itertools::Itertools;
 use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
+    Array as ProstArray, ArrayType as ProstArrayType, ListArrayData,
 };
 
 use super::{
@@ -71,7 +71,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 self.bitmap.append(true);
                 let last = *self.offsets.last().unwrap();
                 self.offsets.push(last + value.unwrap().fields_ref().len());
-                for f in v.fields_ref().into_iter() {
+                for f in v.fields_ref() {
                     self.value.append_datum_ref(f)?;
                 }
             }
