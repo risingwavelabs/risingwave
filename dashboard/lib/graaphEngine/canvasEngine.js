@@ -53,7 +53,7 @@ export class DrawElement {
     return this;
   }
 
-  getEventHandler(event){
+  getEventHandler(event) {
     return this.eventHandler.get(event);
   }
 
@@ -201,10 +201,10 @@ export class Text extends DrawElement {
    */
   constructor(props) {
     super(props)
-    this.props = props; 
+    this.props = props;
   }
 
-  position(x, y){
+  position(x, y) {
     let e = this.props.canvasElement;
     e.set("top", y);
     e.set("left", x);
@@ -349,20 +349,15 @@ export class CanvasEngine {
         zoom *= 0.999 ** delta;
         if (zoom > 10) zoom = 10;
         if (zoom < 0.03) zoom = 0.03;
-        canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom)
+        canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+        that.refreshView();
         evt.preventDefault();
         evt.stopPropagation();
 
       } else {
-        canvas.setZoom(canvas.getZoom()); // essential for rendering (seems like a bug)
-        let vpt = this.viewportTransform;
-        vpt[4] -= evt.deltaX;
-        vpt[5] -= evt.deltaY;
-        this.requestRenderAll();
+        that.moveCamera(-evt.deltaX, -evt.deltaY);
         evt.preventDefault();
         evt.stopPropagation();
-
-        that.refreshView();
       }
     });
 
@@ -379,10 +374,7 @@ export class CanvasEngine {
     canvas.on('mouse:move', function (opt) {
       if (this.isDragging) {
         var e = opt.e;
-        var vpt = this.viewportTransform;
-        vpt[4] += e.clientX - this.lastPosX;
-        vpt[5] += e.clientY - this.lastPosY;
-        this.requestRenderAll()
+        that.moveCamera(e.clientX - this.lastPosX, e.clientY - this.lastPosY);
         this.lastPosX = e.clientX;
         this.lastPosY = e.clientY;
       }
@@ -394,14 +386,22 @@ export class CanvasEngine {
     });
   }
 
+  async moveCamera(deltaX, deltaY) {
+    this.canvas.setZoom(this.canvas.getZoom()); // essential for rendering (seems like a bug)
+    let vpt = this.canvas.viewportTransform;
+    vpt[4] += deltaX;
+    vpt[5] += deltaY;
+    this.refreshView();
+  }
+
   async handleClickEvent(target) {
-    if(target === null){
+    if (target === null) {
       return;
     }
 
     let ele = this.canvasElementToDrawElement.get(target);
     let func = ele.getEventHandler("click");
-    if(func){
+    if (func) {
       func();
     }
   }
@@ -479,7 +479,7 @@ export class CanvasEngine {
 
   resetCamera() {
     let zoom = this.canvas.getZoom();
-    zoom *= 0.999;ƒ
+    zoom *= 0.999; ƒ
     this.canvas.setZoom(zoom);
     let vpt = this.canvas.viewportTransform;
     vpt[4] = 0;
