@@ -17,23 +17,23 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamSimpleAgg {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalAgg,
 }
 
 impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(
+            ctx.clone(),
+            logical.schema().clone(),
+            Distribution::any().clone(),
+        );
         StreamSimpleAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {

@@ -56,7 +56,7 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
+        let base = PlanBase::new_logical(ctx.clone(), schema);
         LogicalProject {
             input,
             base,

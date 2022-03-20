@@ -42,7 +42,7 @@ impl LogicalScan {
         schema: Schema,
         ctx: QueryContextRef,
     ) -> Self {
-        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
+        let base = PlanBase::new_logical(ctx.clone(), schema);
         Self {
             table_name,
             table_id,

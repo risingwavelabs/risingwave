@@ -19,7 +19,8 @@ pub struct PlanBase {
     pub dist: Distribution,
 }
 impl PlanBase {
-    pub fn new_logical(id: PlanNodeId, ctx: QueryContextRef, schema: Schema) -> Self {
+    pub fn new_logical(ctx: QueryContextRef, schema: Schema) -> Self {
+        let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,
@@ -28,12 +29,8 @@ impl PlanBase {
             order: Order::any().clone(),
         }
     }
-    pub fn new_stream(
-        id: PlanNodeId,
-        ctx: QueryContextRef,
-        schema: Schema,
-        dist: Distribution,
-    ) -> Self {
+    pub fn new_stream(ctx: QueryContextRef, schema: Schema, dist: Distribution) -> Self {
+        let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,
@@ -43,12 +40,12 @@ impl PlanBase {
         }
     }
     pub fn new_batch(
-        id: PlanNodeId,
         ctx: QueryContextRef,
         schema: Schema,
         dist: Distribution,
         order: Order,
     ) -> Self {
+        let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,

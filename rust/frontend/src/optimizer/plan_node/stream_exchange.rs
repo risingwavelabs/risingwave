@@ -18,32 +18,22 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
-    pub base: StreamBase,
+    pub base: PlanBase,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let schema = input.schema().clone();
-        let base = StreamBase {
-            dist,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
-        StreamExchange {
-            input,
-            schema,
-            base,
-        }
+        let base = PlanBase::new_stream(ctx.clone(), input.schema().clone(), dist);
+        StreamExchange { input, base }
     }
 }
 
@@ -65,14 +55,14 @@ impl_plan_tree_node_for_unary! {StreamExchange}
 
 impl WithSchema for StreamExchange {
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.base.schema
     }
 }
 
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
-            fields: self.schema.to_prost(),
+            fields: self.schema().to_prost(),
             strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,

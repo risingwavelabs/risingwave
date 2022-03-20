@@ -19,13 +19,13 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::InsertNode;
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::BatchBase;
+use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchInsert` implements [`LogicalInsert`]
 #[derive(Debug, Clone)]
 pub struct BatchInsert {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalInsert,
 }
 
@@ -33,12 +33,12 @@ impl BatchInsert {
     pub fn new(logical: LogicalInsert) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
         BatchInsert { logical, base }
     }
 }

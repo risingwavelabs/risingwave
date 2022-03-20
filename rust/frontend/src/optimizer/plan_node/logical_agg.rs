@@ -186,7 +186,7 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
-        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
+        let base = PlanBase::new_logical(ctx.clone(), schema);
         Self {
             agg_calls,
             group_keys,

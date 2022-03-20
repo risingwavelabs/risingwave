@@ -17,24 +17,24 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
-use super::{BatchBase, LogicalAgg, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashAgg {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalAgg,
 }
 
 impl BatchHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::HashShard(logical.group_keys().to_vec()),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
         BatchHashAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {

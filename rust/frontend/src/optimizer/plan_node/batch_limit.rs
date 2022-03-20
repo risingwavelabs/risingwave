@@ -18,27 +18,25 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::LimitNode;
 
-use super::{
-    BatchBase, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
 pub struct BatchLimit {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalLimit,
 }
 
 impl BatchLimit {
     pub fn new(logical: LogicalLimit) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = BatchBase {
-            order: logical.input().order().clone(),
-            dist: logical.input().distribution().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            logical.input().distribution().clone(),
+            logical.input().order().clone(),
+        );
         BatchLimit { logical, base }
     }
 }
