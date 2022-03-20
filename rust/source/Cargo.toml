@@ -43,6 +43,7 @@ tokio-stream = "0.1"
 tonic = "0.6"
 twox-hash = "1"
 url = "2"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

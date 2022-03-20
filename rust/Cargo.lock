@@ -2462,6 +2462,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "thiserror",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -2991,6 +2992,7 @@ dependencies = [
  "log",
  "tokio",
  "tokio-postgres",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3321,6 +3323,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3698,6 +3701,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "workspace-hack",
  "yaml-rust",
 ]
 
@@ -3745,6 +3749,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3768,6 +3773,7 @@ dependencies = [
  "serde",
  "tokio",
  "toml",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3783,6 +3789,7 @@ dependencies = [
  "tikv-jemallocator",
  "tokio",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3817,6 +3824,7 @@ dependencies = [
  "toml",
  "tonic",
  "twox-hash",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3868,6 +3876,7 @@ dependencies = [
  "tracing",
  "twox-hash",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3923,6 +3932,7 @@ dependencies = [
  "twox-hash",
  "url",
  "urlencoding 2.1.0",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3937,6 +3947,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_storage",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3971,6 +3982,7 @@ dependencies = [
  "tonic",
  "tracing",
  "uuid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -3986,6 +3998,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "walkdir",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4003,6 +4016,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4055,6 +4069,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4071,6 +4086,7 @@ dependencies = [
  "serde",
  "tonic",
  "tonic-build",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4084,6 +4100,7 @@ dependencies = [
  "path-absolutize",
  "similar",
  "tokio",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4098,6 +4115,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tracing",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4144,6 +4162,7 @@ dependencies = [
  "tonic",
  "twox-hash",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4158,6 +4177,7 @@ dependencies = [
  "serde",
  "serde_json",
  "walkdir",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4210,6 +4230,7 @@ dependencies = [
  "tracing",
  "twox-hash",
  "uuid",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -4261,6 +4282,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "workspace-hack",
 ]
 
 [[package]]
@@ -5710,6 +5732,56 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0120db82e8a1e0b9fb3345a539c478767c0048d842860994d96113d5b667bd69"
 dependencies = [
  "winapi",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bit-vec",
+ "bytes",
+ "cc",
+ "either",
+ "fixedbitset 0.4.1",
+ "futures 0.3.21",
+ "futures-channel",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+ "hashbrown",
+ "indexmap",
+ "lalrpop-util",
+ "libc",
+ "libz-sys",
+ "lock_api",
+ "log",
+ "memchr",
+ "num-integer",
+ "num-traits",
+ "parking_lot 0.12.0",
+ "phf_shared",
+ "prost 0.7.0",
+ "rand 0.8.5",
+ "regex",
+ "regex-syntax",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "socket2",
+ "syn",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.6.9",
+ "tokio-util 0.7.0",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-core",
+ "tracing-futures",
+ "zstd-sys",
 ]
 
 [[package]]

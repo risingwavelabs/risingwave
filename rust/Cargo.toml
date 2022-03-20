@@ -22,4 +22,5 @@ members = [
   "utils/logging",
   "utils/memcomparable",
   "utils/pgwire",
+  "workspace-hack",
 ]

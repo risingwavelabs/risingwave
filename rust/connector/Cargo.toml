@@ -51,6 +51,7 @@ tonic = "0.6"
 twox-hash = "1"
 url = "2"
 urlencoding = "2"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 httpmock = "0.6"

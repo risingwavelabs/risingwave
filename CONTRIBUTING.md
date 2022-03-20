@@ -8,12 +8,18 @@ There are some tips for you.
 
 We support both unit tests and end-to-end tests.
 
-### Unit Testing
-
-To run unit tests for Rust, run the following commands under the `rust` directory:
+We recommend to install required tools prior to running steps in the following sections:
 
 ```shell
-cargo test --workspace
+./risedev install-tools
+```
+
+### Unit Testing
+
+To run unit tests for Rust, run:
+
+```shell
+./risedev test
 ```
 
 To run unit tests for Java, run the following commands under the root directory:
@@ -95,9 +101,7 @@ cd java
 For Rust code, please run:
 
 ```shell
-cd rust
-cargo fmt
-cargo clippy --all-targets
+./risedev check
 ```
 
 If a new dependency is added to `Cargo.toml`, you may also run:
@@ -165,8 +169,29 @@ Then, you may edit the files in `workflow-template`.
 * `template.yml` + `main-override.yml` = `main.yml`
 * `template.yml` + `pr-override.yml` = `pull-request.yml`
 
-After that, run `generate.sh` to update the final workflow config.
+After that, run `apply-ci-template` to update the final workflow config.
 
 ```shell
-./.github/workflow-template/generate.sh
+./risedev apply-ci-template
 ```
+
+## When adding new files...
+
+We use [skywalking-eyes](https://github.com/apache/skywalking-eyes) to manage license headers.
+If you added new files, please follow the installation guide and run:
+
+```
+license-eye -c .licenserc.yaml header fix
+```
+
+## When adding new dependencies...
+
+To avoid rebuild some common dependencies across different crates in workspace, we use
+[cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
+are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
+after deps get updated.
+
+Also, we use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
+workspace.
+
+We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
