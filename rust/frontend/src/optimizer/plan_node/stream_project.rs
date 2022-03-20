@@ -40,11 +40,7 @@ impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         StreamProject { logical, base }
     }
 }

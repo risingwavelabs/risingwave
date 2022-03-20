@@ -35,11 +35,7 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     pub fn new(ctx: QueryContextRef, input: PlanRef, table_id: TableId) -> Self {
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            input.schema().clone(),
-            Distribution::any().clone(),
-        );
+        let base = PlanBase::new_stream(ctx, input.schema().clone(), Distribution::any().clone());
         Self {
             base,
             schema: input.schema().clone(),

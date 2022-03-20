@@ -35,11 +35,7 @@ impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         Self { logical, base }
     }
 
