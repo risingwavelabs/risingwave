@@ -69,7 +69,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
 pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
 
-    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
     stats: Arc<HummockMetrics>,
 }
 

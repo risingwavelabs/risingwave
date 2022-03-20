@@ -57,11 +57,7 @@ macro_rules! for_all_hummock_metrics {
 
 macro_rules! define_hummock_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
-        /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
-        /// `RocksDBStateStore` and `TikvStateStore`.
-        /// In practice, keep in mind that this represents the whole Hummock utilizations of
-        /// a `RisingWave` instance. More granular utilizations of per `materialization view`
-        /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+        /// [`HummockMetrics`] stores the performance and IO metrics of hummock storage.
         #[derive(Debug)]
         pub struct HummockMetrics {
             $( pub $name: $type, )*
