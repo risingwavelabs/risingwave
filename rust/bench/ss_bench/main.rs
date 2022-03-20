@@ -22,7 +22,7 @@ use operations::*;
 use risingwave_common::config::{parse_checksum_algo, StorageConfig};
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 use crate::utils::display_stats::print_statistics;
@@ -116,7 +116,8 @@ fn preprocess_options(opts: &mut Opts) {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let mut opts = Opts::parse();
-    let stats = Arc::new(StateStoreMetrics::unused());
+    let state_store_stats = Arc::new(StateStoreMetrics::unused());
+    let hummock_stats = Arc::new(HummockMetrics::unused());
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);
@@ -140,13 +141,19 @@ async fn main() {
         .await
         .unwrap();
 
-    let state_store = StateStoreImpl::new(&opts.store, config, hummock_meta_client, stats.clone())
-        .await
-        .expect("Failed to get state_store");
+    let state_store = StateStoreImpl::new(
+        &opts.store,
+        config,
+        hummock_meta_client,
+        state_store_stats.clone(),
+        hummock_stats.clone(),
+    )
+    .await
+    .expect("Failed to get state_store");
 
     dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
 
     if opts.statistics {
-        print_statistics(&stats);
+        print_statistics(&state_store_stats);
     }
 }
