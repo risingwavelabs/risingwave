@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 #[allow(unused_imports)]
 use itertools::Itertools;
 use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, ListArrayData,
+    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
 };
 
 use super::{
@@ -34,14 +34,14 @@ impl ArrayBuilder for ListArrayBuilder {
     fn new(_capacity: usize) -> Result<Self> {
         panic!("Must use new_with_meta.")
     }
-    
+
     #[cfg(test)]
     fn new(capacity: usize) -> Result<Self> {
         Self::new_with_meta(
             capacity,
             ArrayMeta::List {
                 // Default datatype
-                datatype: DataType::Int32
+                datatype: DataType::Int32,
             },
         )
     }
@@ -83,7 +83,8 @@ impl ArrayBuilder for ListArrayBuilder {
     fn append_array(&mut self, other: &ListArray) -> Result<()> {
         self.bitmap.append_bitmap(&other.bitmap);
         let last = *self.offsets.last().unwrap();
-        self.offsets.append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
+        self.offsets
+            .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
         self.value.append_array(&other.value)?;
         self.len += other.len();
         Ok(())
@@ -144,7 +145,7 @@ impl Array for ListArray {
             list_array_data: Some(Box::new(ListArrayData {
                 offsets: self.offsets.iter().map(|u| *u as u32).collect(),
                 value: Some(Box::new(value)),
-                value_type: self.value_type.to_protobuf().ok()
+                value_type: self.value_type.to_protobuf().ok(),
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()?),
             values: vec![],
@@ -182,37 +183,37 @@ impl ListArray {
         );
         let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
         let cardinality = bitmap.len();
-        let array_data = array.get_list_array_data()?;
+        let array_data = array.get_list_array_data()?.to_owned();
         let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
         let arr = ListArray {
             bitmap,
             offsets: array_data.offsets.iter().map(|u| *u as usize).collect(),
             value: Box::new(value),
-            value_type: DataType::Int32, //array_data.value_type.unwrap(),
+            value_type: DataType::from(&array_data.value_type.unwrap()),
             len: cardinality,
         };
         Ok(arr.into())
     }
 
     #[cfg(test)]
-    pub fn from_slices(null_bitmap: &[bool], values: Vec<Option<ArrayImpl>>, value_type: DataType) -> Result<ListArray> {
+    pub fn from_slices(
+        null_bitmap: &[bool],
+        values: Vec<Option<ArrayImpl>>,
+        value_type: DataType,
+    ) -> Result<ListArray> {
         let cardinality = null_bitmap.len();
         let bitmap = Bitmap::try_from(null_bitmap.to_vec())?;
         let mut offsets = vec![0];
-        let mut values = values
-            .into_iter()
-            .peekable();
+        let mut values = values.into_iter().peekable();
         let mut builderimpl = values.peek().unwrap().as_ref().unwrap().create_builder(0)?;
-        values.try_for_each(|i| {
-            match i {
-                Some(a) => {
-                    offsets.push(a.len());
-                    builderimpl.append_array(&a)
-                }
-                None => {
-                    offsets.push(0);
-                    Ok(())
-                }
+        values.try_for_each(|i| match i {
+            Some(a) => {
+                offsets.push(a.len());
+                builderimpl.append_array(&a)
+            }
+            None => {
+                offsets.push(0);
+                Ok(())
             }
         })?;
         offsets.iter_mut().fold(0, |acc, x| {
@@ -276,11 +277,9 @@ pub enum ListRef<'a> {
 impl<'a> ListRef<'a> {
     pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
-            ListRef::Indexed { arr, idx } => {
-                (arr.offsets[*idx]..arr.offsets[*idx + 1])
-                    .map(|o| arr.value.value_at(o))
-                    .collect()
-            }
+            ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                .map(|o| arr.value.value_at(o))
+                .collect(),
             ListRef::ValueRef { val } => val
                 .fields
                 .iter()
@@ -340,10 +339,8 @@ fn cmp_list_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Order
 impl Debug for ListRef<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ListRef::Indexed { arr, idx } =>
-                (arr.offsets[*idx]..arr.offsets[*idx + 1])
-                    .try_for_each(|idx| arr
-                        .value.value_at(idx).fmt(f)),
+            ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
+                .try_for_each(|idx| arr.value.value_at(idx).fmt(f)),
             ListRef::ValueRef { val } => write!(f, "{:?}", val),
         }
     }
@@ -380,9 +377,9 @@ mod tests {
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into())
+                Some(empty_array! { I32Array }.into()),
             ],
-            DataType::Int32
+            DataType::Int32,
         )
         .unwrap();
         let actual = ListArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
@@ -406,10 +403,10 @@ mod tests {
                     Some(ScalarImpl::Int32(127)),
                     Some(ScalarImpl::Int32(50)),
                 ])),
-                Some(ListValue::new(vec![])), 
+                Some(ListValue::new(vec![])),
             ]
         );
-        
+
         let mut builder = ListArrayBuilder::new_with_meta(
             4,
             ArrayMeta::List {
@@ -419,29 +416,29 @@ mod tests {
         .unwrap();
         list_values.iter().for_each(|v| {
             builder
-                .append(v.as_ref().map(|s|s.as_scalar_ref()))
+                .append(v.as_ref().map(|s| s.as_scalar_ref()))
                 .unwrap()
         });
         let arr = builder.finish().unwrap();
         assert_eq!(arr.values_vec(), list_values);
-        
+
         let part1 = ListArray::from_slices(
             &[true, false],
             vec![
                 Some(array! { I32Array, [Some(12), Some(-7), Some(25)] }.into()),
                 None,
             ],
-            DataType::Int32
+            DataType::Int32,
         )
         .unwrap();
-        
+
         let part2 = ListArray::from_slices(
             &[true, true],
             vec![
                 Some(array! { I32Array, [Some(0), Some(-127), Some(127), Some(50)] }.into()),
-                Some(empty_array! { I32Array }.into())
+                Some(empty_array! { I32Array }.into()),
             ],
-            DataType::Int32
+            DataType::Int32,
         )
         .unwrap();
 
@@ -464,8 +461,10 @@ mod tests {
         use crate::array::*;
         let arr = ListArray::from_slices(
             &[true],
-            vec![Some(array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into())],
-            DataType::Float32
+            vec![Some(
+                array! { F32Array, [Some(2.0), Some(42.0), Some(1.0)] }.into(),
+            )],
+            DataType::Float32,
         )
         .unwrap();
         let builder = arr.create_builder(0).unwrap();
@@ -476,17 +475,17 @@ mod tests {
     #[test]
     fn test_list_nested_layout() {
         use crate::array::*;
-        
+
         let listarray1 = ListArray::from_slices(
             &[true, true],
             vec![
                 Some(array! { I32Array, [Some(1), Some(2)] }.into()),
                 Some(array! { I32Array, [Some(3), Some(4)] }.into()),
             ],
-            DataType::Int32
+            DataType::Int32,
         )
         .unwrap();
-        
+
         let listarray2 = ListArray::from_slices(
             &[true, false, true],
             vec![
@@ -494,16 +493,14 @@ mod tests {
                 None,
                 Some(array! { I32Array, [Some(8)] }.into()),
             ],
-            DataType::Int32
+            DataType::Int32,
         )
         .unwrap();
 
         let listarray3 = ListArray::from_slices(
             &[true],
-            vec![
-                Some(array! { I32Array, [Some(9), Some(10)] }.into()),
-            ],
-            DataType::Int32
+            vec![Some(array! { I32Array, [Some(9), Some(10)] }.into())],
+            DataType::Int32,
         )
         .unwrap();
 
@@ -514,7 +511,7 @@ mod tests {
                 Some(listarray2.into()),
                 Some(listarray3.into()),
             ],
-            DataType::List { }
+            DataType::List {},
         )
         .unwrap();
         let actual = ListArray::from_protobuf(&nestarray.to_protobuf().unwrap()).unwrap();
@@ -527,34 +524,32 @@ mod tests {
             vec![
                 Some(ListValue::new(vec![
                     Some(ScalarImpl::List(ListValue::new(vec![
-                            Some(ScalarImpl::Int32(1)),
-                            Some(ScalarImpl::Int32(2)),
-                        ]))),
+                        Some(ScalarImpl::Int32(1)),
+                        Some(ScalarImpl::Int32(2)),
+                    ]))),
                     Some(ScalarImpl::List(ListValue::new(vec![
-                            Some(ScalarImpl::Int32(3)),
-                            Some(ScalarImpl::Int32(4)),
-                        ]))),
-                        
+                        Some(ScalarImpl::Int32(3)),
+                        Some(ScalarImpl::Int32(4)),
+                    ]))),
                 ])),
                 Some(ListValue::new(vec![
                     Some(ScalarImpl::List(ListValue::new(vec![
-                            Some(ScalarImpl::Int32(5)),
-                            Some(ScalarImpl::Int32(6)),
-                            Some(ScalarImpl::Int32(7)),
-                        ]))),
+                        Some(ScalarImpl::Int32(5)),
+                        Some(ScalarImpl::Int32(6)),
+                        Some(ScalarImpl::Int32(7)),
+                    ]))),
                     None,
-                    Some(ScalarImpl::List(ListValue::new(vec![
-                            Some(ScalarImpl::Int32(8)),
-                        ]))),  
-                ])), 
-                Some(ListValue::new(vec![
-                    Some(ScalarImpl::List(ListValue::new(vec![
-                            Some(ScalarImpl::Int32(9)),
-                            Some(ScalarImpl::Int32(10)),
-                        ]))),
-                ])), 
+                    Some(ScalarImpl::List(ListValue::new(vec![Some(
+                        ScalarImpl::Int32(8)
+                    ),]))),
+                ])),
+                Some(ListValue::new(vec![Some(ScalarImpl::List(
+                    ListValue::new(vec![
+                        Some(ScalarImpl::Int32(9)),
+                        Some(ScalarImpl::Int32(10)),
+                    ])
+                )),])),
             ]
         );
-
     }
 }
