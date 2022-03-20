@@ -88,6 +88,10 @@ To preview the web page, install Node.js, and
 cd rust/meta/src/dashboard && npx reload -b
 ```
 
+### Dashboard v2
+
+The developement instructions for dashboard v2 is in [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+
 ## Contributing
 
 Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
