@@ -6,8 +6,7 @@ use std::hash::{Hash, Hasher};
 #[allow(unused_imports)]
 use itertools::Itertools;
 use risingwave_pb::data::{
-    Array as ProstArray, 
-    // ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
+    Array as ProstArray, ArrayType as ProstArrayType, ListArrayData,
 };
 
 use super::{
@@ -138,18 +137,18 @@ impl Array for ListArray {
     }
 
     fn to_protobuf(&self) -> Result<ProstArray> {
-        todo!()
-        // let value = self.value.to_protobuf()?;
-        // Ok(ProstArray {
-        //     array_type: ProstArrayType::List as i32,
-        //     struct_array_data: None,
-        //     list_array_data: Some(Box::new(ListArrayData {
-        //         value: Some(Box::new(value)),
-        //         value_type: None
-        //     })), // fix
-        //     null_bitmap: Some(self.bitmap.to_protobuf()?),
-        //     values: vec![],
-        // })
+        let value = self.value.to_protobuf()?;
+        Ok(ProstArray {
+            array_type: ProstArrayType::List as i32,
+            struct_array_data: None,
+            list_array_data: Some(Box::new(ListArrayData {
+                offsets: self.offsets.iter().map(|u| *u as u32).collect(),
+                value: Some(Box::new(value)),
+                value_type: self.value_type.to_protobuf().ok()
+            })),
+            null_bitmap: Some(self.bitmap.to_protobuf()?),
+            values: vec![],
+        })
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -176,24 +175,23 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    pub fn from_protobuf(_array: &ProstArray) -> Result<ArrayImpl> {
-        todo!()
-        // ensure!(
-        //     array.values.is_empty(),
-        //     "Must have no buffer in a list array"
-        // );
-        // let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-        // let cardinality = bitmap.len();
-        // let array_data = array.get_list_array_data()?;
-        // let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
-        // let arr = ListArray {
-        //     bitmap,
-        //     offsets: vec![],
-        //     value: Box::new(value),
-        //     value_type: array_data.value_type.unwrap(),
-        //     len: cardinality,
-        // };
-        // Ok(arr.into())
+    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
+        ensure!(
+            array.values.is_empty(),
+            "Must have no buffer in a list array"
+        );
+        let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+        let cardinality = bitmap.len();
+        let array_data = array.get_list_array_data()?;
+        let value = ArrayImpl::from_protobuf(array_data.value.as_ref().unwrap(), cardinality)?;
+        let arr = ListArray {
+            bitmap,
+            offsets: array_data.offsets.iter().map(|u| *u as usize).collect(),
+            value: Box::new(value),
+            value_type: DataType::Int32, //array_data.value_type.unwrap(),
+            len: cardinality,
+        };
+        Ok(arr.into())
     }
 
     #[cfg(test)]
@@ -387,10 +385,11 @@ mod tests {
             DataType::Int32
         )
         .unwrap();
-        // let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
-        // assert_eq!(ArrayImpl::Struct(arr), actual);
+        let actual = ListArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let tmp = ArrayImpl::List(arr);
+        assert_eq!(tmp, actual);
 
-        // let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
+        let arr = try_match_expand!(actual, ArrayImpl::List).unwrap();
         let list_values = arr.values_vec();
         assert_eq!(
             list_values,
@@ -518,10 +517,10 @@ mod tests {
             DataType::List { }
         )
         .unwrap();
-        // let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
-        // assert_eq!(ArrayImpl::Struct(arr), actual);
+        let actual = ListArray::from_protobuf(&nestarray.to_protobuf().unwrap()).unwrap();
+        assert_eq!(ArrayImpl::List(nestarray), actual);
 
-        // let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();
+        let nestarray = try_match_expand!(actual, ArrayImpl::List).unwrap();
         let nested_list_values = nestarray.values_vec();
         assert_eq!(
             nested_list_values,

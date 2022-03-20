@@ -71,8 +71,9 @@ message StructArrayData {
 }
 
 message ListArrayData {
-  Array value = 1;
-  DataType value_type = 2;
+  repeated uint32 offsets = 1;
+  Array value = 2;
+  DataType value_type = 3;
 }
 
 // message ListArrayData {
