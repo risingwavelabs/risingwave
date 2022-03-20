@@ -58,6 +58,8 @@ public class SqlConverter {
     private VolcanoPlanner planner = null;
     private RelOptCluster cluster = null;
 
+    private boolean withExpand = true;
+
     private Builder(ExecutionContext context) {
       this.context = context;
       this.rootSchema = context.getCalciteRootSchema();
@@ -68,8 +70,8 @@ public class SqlConverter {
       return this;
     }
 
-    public Builder withSql2RelConverterConfig(SqlToRelConverter.Config config) {
-      this.config = requireNonNull(config, "config can't be null!");
+    public Builder withExpand(boolean doExpand) {
+      withExpand = doExpand;
       return this;
     }
 
@@ -86,7 +88,11 @@ public class SqlConverter {
       RisingWaveConvertletTable sqlRexConvertletTable = new RisingWaveConvertletTable();
 
       initAll();
-      this.config = this.config.addRelBuilderConfigTransform(c -> c.withSimplify(false));
+      this.config =
+          this.config
+              .addRelBuilderConfigTransform(c -> c.withSimplify(false))
+              .withExpand(this.withExpand);
+
       SqlToRelConverter sql2RelConverter =
           new RisingWaveSqlToRelConverter(
               catalogReader, validator, catalogReader, cluster, sqlRexConvertletTable, config);

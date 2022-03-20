@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
@@ -50,12 +64,12 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
 
     match prost.get_expr_type()? {
         Cast | Upper | Lower | Not | PgSleep | IsTrue | IsNotTrue | IsFalse | IsNotFalse
-        | IsNull | IsNotNull | Neg => build_unary_expr_prost(prost),
+        | IsNull | IsNotNull | Neg | Ascii => build_unary_expr_prost(prost),
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
             build_binary_expr_prost(prost)
         }
         Add | Subtract | Multiply | Divide | Modulus => build_binary_expr_prost(prost),
-        Extract | RoundDigit | TumbleStart => build_binary_expr_prost(prost),
+        Extract | RoundDigit | TumbleStart | Position => build_binary_expr_prost(prost),
         StreamNullByRowCount | And | Or => build_nullable_binary_expr_prost(prost),
         Substr => build_substr_expr(prost),
         Length => build_length_expr(prost),
@@ -64,8 +78,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Trim => build_trim_expr(prost),
         Ltrim => build_ltrim_expr(prost),
         Rtrim => build_rtrim_expr(prost),
-        Position => build_position_expr(prost),
-        Ascii => build_ascii_expr(prost),
         ConstantValue => LiteralExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         InputRef => InputRefExpression::try_from(prost).map(|d| Box::new(d) as BoxedExpression),
         Case => build_case_expr(prost),

@@ -1,13 +1,27 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::{Op, RwError, StreamChunk};
-use risingwave_common::catalog::{Schema, TableId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::table::{ScannableTableRef, TableIterRef};
-use risingwave_storage::StateStore;
+use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
+use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
@@ -16,15 +30,15 @@ const DEFAULT_BATCH_SIZE: usize = 100;
 
 /// [`BatchQueryExecutor`] pushes m-view data batch to the downstream executor. Currently, this
 /// executor is used as input of the [`ChainExecutor`] to support MV-on-MV.
-pub struct BatchQueryExecutor {
+pub struct BatchQueryExecutor<S: StateStore> {
     /// The primary key indices of the schema
     pk_indices: PkIndices,
     /// The [`MViewTable`] that needs to be queried
-    table: ScannableTableRef,
+    table: MViewTable<S>,
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
     /// Inner iterator that reads [`MViewTable`]
-    iter: Option<TableIterRef>,
+    iter: Option<MViewTableIter<S>>,
 
     schema: Schema,
 
@@ -33,7 +47,7 @@ pub struct BatchQueryExecutor {
     op_info: String,
 }
 
-impl std::fmt::Debug for BatchQueryExecutor {
+impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BatchQueryExecutor")
             .field("table", &self.table)
@@ -49,34 +63,38 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
-        _store: impl StateStore,
+        state_store: impl StateStore,
         _stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);
-        let table_manager = params.env.table_manager();
-        let table = table_manager.get_table(&table_id)?;
-
+        let column_descs = node
+            .column_descs
+            .iter()
+            .map(|column_desc| ColumnDesc::from(column_desc.clone()))
+            .collect_vec();
+        let keyspace = Keyspace::table_root(state_store, &table_id);
+        let table = MViewTable::new_adhoc(keyspace, column_descs);
         Ok(Box::new(BatchQueryExecutor::new(
-            table.clone(),
+            table,
             params.pk_indices,
             params.op_info,
         )))
     }
 }
 
-impl BatchQueryExecutor {
-    pub fn new(table: ScannableTableRef, pk_indices: PkIndices, op_info: String) -> Self {
+impl<S: StateStore> BatchQueryExecutor<S> {
+    pub fn new(table: MViewTable<S>, pk_indices: PkIndices, op_info: String) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }
 
     pub fn new_with_batch_size(
-        table: ScannableTableRef,
+        table: MViewTable<S>,
         pk_indices: PkIndices,
         batch_size: usize,
         op_info: String,
     ) -> Self {
-        let schema = table.schema().into_owned();
+        let schema = table.schema().clone();
         Self {
             pk_indices,
             table,
@@ -90,7 +108,7 @@ impl BatchQueryExecutor {
 }
 
 #[async_trait]
-impl Executor for BatchQueryExecutor {
+impl<S: StateStore> Executor for BatchQueryExecutor<S> {
     async fn next(&mut self) -> Result<Message> {
         if self.iter.is_none() {
             self.iter = Some(
@@ -102,11 +120,8 @@ impl Executor for BatchQueryExecutor {
         }
 
         let iter = self.iter.as_mut().unwrap();
-        let column_indices = (0..self.table.schema().len()).collect_vec();
-
-        let data_chunk = self
-            .table
-            .collect_from_iter(iter, &column_indices, Some(self.batch_size))
+        let data_chunk = iter
+            .collect_data_chunk(&self.table, Some(self.batch_size))
             .await?
             .ok_or_else(|| RwError::from(ErrorCode::Eof))?;
 
@@ -137,16 +152,11 @@ impl Executor for BatchQueryExecutor {
         }
         Ok(())
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
 mod test {
 
-    use std::sync::Arc;
     use std::vec;
 
     use super::*;
@@ -156,8 +166,7 @@ mod test {
     async fn test_basic() {
         let test_batch_size = 50;
         let test_batch_count = 5;
-        let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
-            as ScannableTableRef;
+        let table = gen_basic_table(test_batch_count * test_batch_size).await;
         let mut node = BatchQueryExecutor::new_with_batch_size(
             table,
             vec![0, 1],
@@ -179,8 +188,7 @@ mod test {
     async fn test_init_epoch_twice() {
         let test_batch_size = 50;
         let test_batch_count = 5;
-        let table = Arc::new(gen_basic_table(test_batch_count * test_batch_size).await)
-            as ScannableTableRef;
+        let table = gen_basic_table(test_batch_count * test_batch_size).await;
         let mut node = BatchQueryExecutor::new_with_batch_size(
             table,
             vec![0, 1],

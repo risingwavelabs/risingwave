@@ -1,22 +1,40 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 mod catalog;
+mod catalog_v2;
 mod cluster;
+mod hash_mapping;
 mod stream;
 
 use async_trait::async_trait;
 pub use catalog::*;
+pub use catalog_v2::*;
 pub use cluster::*;
+pub use hash_mapping::*;
 use prost::Message;
 use risingwave_common::error::Result;
 pub use stream::*;
 
-use crate::storage::{self, MetaStore, Operation, Transaction};
+use crate::storage::{self, MetaStore, Transaction};
 
 pub type ActorId = u32;
 pub type FragmentId = u32;
 
 /// `MetadataModel` defines basic model operations in CRUD.
 #[async_trait]
-pub trait MetadataModel: Sized {
+pub trait MetadataModel: std::fmt::Debug + Sized {
     /// Serialized prost message type.
     type ProstType: Message + Default;
     /// Serialized key type.
@@ -100,18 +118,18 @@ pub trait MetadataModel: Sized {
 /// Read operations can be supported if necessary.
 pub trait Transactional: MetadataModel {
     fn upsert_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Put {
-            cf: Self::cf_name(),
-            key: self.key()?.encode_to_vec(),
-            value: self.to_protobuf_encoded_vec(),
-        }]);
+        trx.put(
+            Self::cf_name(),
+            self.key()?.encode_to_vec(),
+            self.to_protobuf_encoded_vec(),
+        );
         Ok(())
     }
-    fn delete_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        trx.add_operations(vec![Operation::Delete {
-            cf: Self::cf_name(),
-            key: self.key()?.encode_to_vec(),
-        }]);
+    fn delete_in_transaction(
+        key: Self::KeyType,
+        trx: &mut Transaction,
+    ) -> risingwave_common::error::Result<()> {
+        trx.delete(Self::cf_name(), key.encode_to_vec());
         Ok(())
     }
 }

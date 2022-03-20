@@ -1,12 +1,25 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::cmp;
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
 
 use super::version_cmp::VersionedComparator;
 
 /// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,
     pub right: Bytes,
@@ -83,6 +96,15 @@ impl From<KeyRange> for risingwave_pb::hummock::KeyRange {
             right: kr.right.to_vec(),
             inf: kr.inf,
         }
+    }
+}
+
+impl From<&risingwave_pb::hummock::KeyRange> for KeyRange {
+    fn from(kr: &risingwave_pb::hummock::KeyRange) -> Self {
+        KeyRange::new(
+            Bytes::copy_from_slice(&kr.left),
+            Bytes::copy_from_slice(&kr.right),
+        )
     }
 }
 

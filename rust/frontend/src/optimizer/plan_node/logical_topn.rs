@@ -1,36 +1,60 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use fixedbitset::FixedBitSet;
 
-use super::{ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::{Order, WithDistribution, WithOrder, WithSchema};
+use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::optimizer::plan_node::LogicalProject;
+use crate::optimizer::property::{FieldOrder, Order, WithSchema};
+use crate::utils::ColIndexMapping;
 
+/// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
+    pub base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
     order: Order,
 }
 
 impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalTopN {
             input,
             limit,
             offset,
-            schema,
+            base,
             order,
         }
     }
 
     /// the function will check if the cond is bool expression
     pub fn create(input: PlanRef, limit: usize, offset: usize, order: Order) -> PlanRef {
-        Self::new(input, limit, offset, order).into_plan_ref()
+        Self::new(input, limit, offset, order).into()
     }
 }
+
 impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -45,19 +69,52 @@ impl fmt::Display for LogicalTopN {
         todo!()
     }
 }
-impl WithOrder for LogicalTopN {}
-impl WithDistribution for LogicalTopN {}
-impl WithSchema for LogicalTopN {
-    fn schema(&self) -> &Schema {
-        &self.schema
+
+impl ColPrunable for LogicalTopN {
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
+        let mut input_required_cols = required_cols.clone();
+        self.order
+            .field_order
+            .iter()
+            .for_each(|fo| input_required_cols.insert(fo.index));
+
+        let mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
+        let new_order = Order {
+            field_order: self
+                .order
+                .field_order
+                .iter()
+                .map(|fo| FieldOrder {
+                    index: mapping.map(fo.index),
+                    direct: fo.direct.clone(),
+                })
+                .collect(),
+        };
+        let new_input = self.input.prune_col(required_cols);
+        let top_n = Self::new(new_input, self.limit, self.offset, new_order).into();
+
+        if *required_cols == input_required_cols {
+            top_n
+        } else {
+            let mut remaining_columns = FixedBitSet::with_capacity(top_n.schema().fields().len());
+            remaining_columns.extend(required_cols.ones().map(|i| mapping.map(i)));
+            LogicalProject::with_mapping(
+                top_n,
+                ColIndexMapping::with_remaining_columns(&remaining_columns),
+            )
+            .into()
+        }
     }
 }
-impl ColPrunable for LogicalTopN {}
+
 impl ToBatch for LogicalTopN {
     fn to_batch(&self) -> PlanRef {
         todo!()
     }
 }
+
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
         todo!()

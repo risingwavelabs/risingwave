@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::{mem, vec};
@@ -6,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::Result;
 use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
@@ -98,11 +112,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
-        let proto_child = source
-            .plan_node()
-            .get_children()
-            .get(0)
-            .ok_or_else(|| ErrorCode::InternalError(String::from("")))?;
+        let proto_child = &source.plan_node().get_children()[0];
         let child = source.clone_for_plan(proto_child).build()?;
 
         let hash_agg_node = try_match_expand!(
@@ -155,20 +165,18 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         while let Some(chunk) = self.child.next().await? {
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
-                let mut err_flag = None;
+                let mut err_flag = Ok(());
                 let states: &mut Vec<BoxedAggState> = self.groups.entry(key).or_insert_with(|| {
                     self.agg_factories
                         .iter()
-                        .map(|state_factory| state_factory.create_agg_state())
+                        .map(AggStateFactory::create_agg_state)
                         .collect::<Result<Vec<_>>>()
                         .unwrap_or_else(|x| {
-                            err_flag = Some(x);
+                            err_flag = Err(x);
                             vec![]
                         })
                 });
-                if let Some(err) = err_flag {
-                    return Err(err);
-                }
+                err_flag?;
                 // TODO: currently not a vectorized implementation
                 states
                     .iter_mut()

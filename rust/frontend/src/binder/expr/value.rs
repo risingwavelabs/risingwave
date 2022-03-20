@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use risingwave_sqlparser::ast::Value;
@@ -12,8 +26,13 @@ impl Binder {
             Value::SingleQuotedString(s) => {
                 Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
             }
+            Value::Boolean(b) => self.bind_bool(b),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
+    }
+
+    fn bind_bool(&mut self, b: bool) -> Result<Literal> {
+        Ok(Literal::new(Some(ScalarImpl::Bool(b)), DataType::Boolean))
     }
 
     fn bind_number(&mut self, s: String, _b: bool) -> Result<Literal> {
@@ -34,9 +53,8 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
-    use crate::catalog::database_catalog::DatabaseCatalog;
+    use crate::binder::test_utils::mock_binder;
 
     #[test]
     fn test_bind_value() {
@@ -44,8 +62,7 @@ mod tests {
 
         use super::*;
 
-        let catalog = DatabaseCatalog::new(0);
-        let mut binder = Binder::new(Arc::new(catalog));
+        let mut binder = mock_binder();
         let values = vec![
             "1",
             "111111111111111",

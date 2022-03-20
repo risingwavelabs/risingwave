@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::backtrace::Backtrace;
 
 use risingwave_common::error::{ErrorCode, RwError};
@@ -19,6 +33,14 @@ pub enum HummockError {
     MetaError(String),
     #[error("Invalid WriteBatch.")]
     InvalidWriteBatch,
+    #[error("SharedBuffer error {0}.")]
+    SharedBufferError(String),
+    #[error("Wait epoch error {0}.")]
+    WaitEpoch(String),
+    #[error("Expired Epoch: watermark {safe_epoch}, epoch {epoch}.")]
+    ExpiredEpoch { safe_epoch: u64, epoch: u64 },
+    #[error("Other error {0}.")]
+    Other(String),
 }
 
 impl HummockError {
@@ -44,6 +66,18 @@ impl HummockError {
 
     pub fn invalid_write_batch() -> TracedHummockError {
         Self::InvalidWriteBatch.into()
+    }
+
+    pub fn shared_buffer_error(error: impl ToString) -> TracedHummockError {
+        Self::SharedBufferError(error.to_string()).into()
+    }
+
+    pub fn wait_epoch(error: impl ToString) -> TracedHummockError {
+        Self::WaitEpoch(error.to_string()).into()
+    }
+
+    pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> TracedHummockError {
+        Self::ExpiredEpoch { safe_epoch, epoch }.into()
     }
 }
 

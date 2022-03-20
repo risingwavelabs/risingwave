@@ -1,8 +1,21 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
-use std::fs::{read, File};
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::str::from_utf8;
 use std::sync::Arc;
 
 use anyhow::{bail, Context};
@@ -121,13 +134,13 @@ impl Schedule {
 
         if !different_tests.is_empty() {
             info!(
-        "Risingwave regress tests failed, these tests are different from expected output: {:?}",
-        different_tests
-      );
+                "Risingwave regress tests failed, these tests are different from expected output: {:?}",
+                different_tests
+            );
             bail!(
-        "Risingwave regress tests failed, these tests are different from expected output: {:?}",
-        different_tests
-      )
+                "Risingwave regress tests failed, these tests are different from expected output: {:?}",
+                different_tests
+            )
         } else {
             info!("Risingwave regress tests passed.");
             Ok(())
@@ -240,22 +253,42 @@ impl TestCase {
             );
         }
 
-        let expected_output = read(&expected_output_file).with_context(|| {
-            format!(
-                "Failed to read expected output file: {:?}",
-                expected_output_file
-            )
-        })?;
+        let expected_output =
+            std::fs::read_to_string(&expected_output_file).with_context(|| {
+                format!(
+                    "Failed to read expected output file: {:?}",
+                    expected_output_file
+                )
+            })?;
 
-        let actual_output = read(&output_path)
+        let actual_output = std::fs::read_to_string(&output_path)
             .with_context(|| format!("Failed to read actual output file: {:?}", output_path))?;
 
         if expected_output == actual_output {
             Ok(Same)
         } else {
-            error!("Expected output of [{:?}] is different from actual output.\nExpected is:\n{:?}\nActual is:\n{:?}", 
-        self.test_name, from_utf8(&expected_output).unwrap(), from_utf8(&actual_output).unwrap());
+            error!(
+                "Expected output of [{}] is different from actual output.\n{}",
+                self.test_name,
+                format_diff(&expected_output, &actual_output)
+            );
             Ok(Different)
         }
     }
+}
+
+fn format_diff(expected_output: &String, actual_output: &String) -> String {
+    use similar::{ChangeTag, TextDiff};
+    let diff = TextDiff::from_lines(expected_output, actual_output);
+
+    let mut diff_str = "".to_string();
+    for change in diff.iter_all_changes() {
+        let sign = match change.tag() {
+            ChangeTag::Delete => "-",
+            ChangeTag::Insert => "+",
+            ChangeTag::Equal => " ",
+        };
+        diff_str.push_str(&format!("{}{}", sign, change));
+    }
+    diff_str
 }

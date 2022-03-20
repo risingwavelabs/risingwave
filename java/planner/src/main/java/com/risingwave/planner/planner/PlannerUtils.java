@@ -333,33 +333,32 @@ public class PlannerUtils {
       var newConjunctions =
           RelOptUtil.conjunctions(newExpr1).stream()
               .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(true)))
-              .collect(Collectors.toList());
+              .toArray(RexNode[]::new);
 
       RexNode newExpr2;
-      if (newConjunctions.size() == 0) {
+      if (newConjunctions.length == 0) {
         newExpr2 = newExpr1;
-      } else if (newConjunctions.size() == 1) {
-        newExpr2 = newConjunctions.get(0);
+      } else if (newConjunctions.length == 1) {
+        newExpr2 = newConjunctions[0];
       } else {
-        newExpr2 = rexBuilder.makeCall(AND, newConjunctions.toArray(new RexNode[0]));
+        newExpr2 = rexBuilder.makeCall(AND, newConjunctions);
       }
 
       // merges same expressions in disjunctions
       // e.g. (a > b OR c < 10) OR a > b -> a > b OR c < 10 OR false
       sameExprMap.clear();
+      var newDisjunctions =
+          RelOptUtil.disjunctions(newExpr2).stream()
+              .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(false)))
+              .toArray(RexNode[]::new);
 
       RexNode newExpr3;
-      if (newConjunctions.size() == 0) {
+      if (newDisjunctions.length == 0) {
         newExpr3 = newExpr2;
-      } else if (newConjunctions.size() == 1) {
-        newExpr3 = newConjunctions.get(0);
+      } else if (newDisjunctions.length == 1) {
+        newExpr3 = newDisjunctions[0];
       } else {
-        newExpr3 =
-            rexBuilder.makeCall(
-                OR,
-                RelOptUtil.disjunctions(newExpr2).stream()
-                    .map(ex -> mergeSameExpr(ex, rexBuilder.makeLiteral(false)))
-                    .toArray(RexNode[]::new));
+        newExpr3 = rexBuilder.makeCall(OR, newDisjunctions);
       }
 
       return newExpr3;

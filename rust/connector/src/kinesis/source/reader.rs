@@ -1,3 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use std::str::from_utf8;
 use std::{thread, time};
 
 use anyhow::{anyhow, Result};
@@ -10,7 +25,7 @@ use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
 use http::uri::Uri;
 
-use crate::base::SourceReader;
+use crate::base::{InnerMessage, SourceReader};
 use crate::kinesis::config::AwsConfigInfo;
 use crate::kinesis::source::message::KinesisMessage;
 use crate::kinesis::source::state::KinesisSplitReaderState;
@@ -27,10 +42,7 @@ pub struct KinesisSplitReader {
 
 #[async_trait]
 impl SourceReader for KinesisSplitReader {
-    type Message = KinesisMessage;
-    type Split = KinesisSplit;
-
-    async fn next(&mut self) -> Result<Option<Vec<Self::Message>>> {
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         if self.assigned_split.is_none() {
             return Err(anyhow::Error::msg(
                 "you should call `assign_split` before calling `next`".to_string(),
@@ -80,7 +92,7 @@ impl SourceReader for KinesisSplitReader {
                 continue;
             }
 
-            let mut record_collection: Vec<Self::Message> = Vec::new();
+            let mut record_collection: Vec<InnerMessage> = Vec::new();
             for record in records {
                 if !is_stopping(
                     record.sequence_number.as_ref().unwrap(),
@@ -89,13 +101,17 @@ impl SourceReader for KinesisSplitReader {
                     return Ok(Some(record_collection));
                 }
                 self.latest_sequence_num = record.sequence_number().unwrap().to_string();
-                record_collection.push(Self::Message::new(self.shard_id.clone(), record));
+                record_collection.push(InnerMessage::from(KinesisMessage::new(
+                    self.shard_id.clone(),
+                    record,
+                )));
             }
             return Ok(Some(record_collection));
         }
     }
 
-    async fn assign_split(&mut self, split: Self::Split) -> Result<()> {
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
+        let split: KinesisSplit = serde_json::from_str(from_utf8(split)?)?;
         self.shard_id = split.shard_id.clone();
         match &split.start_position.clone() {
             KinesisOffset::Earliest | KinesisOffset::None => {

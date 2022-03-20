@@ -1,16 +1,33 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 #![allow(dead_code)]
 
+// TODO: Cleanup this file, see issue #547 .
+
+use std::iter::Iterator;
 use std::sync::Arc;
 
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
-use crate::hummock::{
-    cloud, HummockResult, HummockValue, SSTable, SSTableBuilder, SSTableBuilderOptions,
-};
-use crate::object::{InMemObjectStore, ObjectStore};
+use crate::hummock::{sstable_store, HummockResult, HummockValue, SSTableBuilderOptions, Sstable};
+use crate::object::{InMemObjectStore, ObjectStoreRef};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+
 impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
+
 type BoxedIndexMapper = Box<dyn IndexMapper>;
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
@@ -65,6 +82,7 @@ impl Default for TestIteratorConfig {
         }
     }
 }
+
 /// Test iterator stores a buffer of key-value pairs `Vec<(Bytes, Bytes)>` and yields the data
 /// stored in the buffer.
 pub struct TestIteratorInner<const DIRECTION: usize> {
@@ -72,11 +90,13 @@ pub struct TestIteratorInner<const DIRECTION: usize> {
     data: Vec<(Bytes, Bytes)>,
     cur_idx: usize,
 }
+
 pub struct TestValidator {
     cfg: Arc<TestIteratorConfig>,
     key: Vec<u8>,
     value: Vec<u8>,
 }
+
 #[derive(Default)]
 pub struct TestIteratorBuilder<const DIRECTION: usize> {
     cfg: TestIteratorConfig,
@@ -160,7 +180,7 @@ macro_rules! test_key {
     };
 }
 
-use risingwave_pb::hummock::SstableMeta;
+use sstable_store::{SstableStore, SstableStoreRef};
 pub(crate) use test_key;
 
 pub type TestIterator = TestIteratorInner<FORWARD>;
@@ -207,6 +227,18 @@ impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
         Ok(())
     }
 
+    fn key(&self) -> &[u8] {
+        self.key()
+    }
+
+    fn value(&self) -> HummockValue<&[u8]> {
+        self.value()
+    }
+
+    fn is_valid(&self) -> bool {
+        self.cur_idx < self.data.len()
+    }
+
     async fn rewind(&mut self) -> HummockResult<()> {
         self.cur_idx = 0;
         Ok(())
@@ -215,35 +247,17 @@ impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         self.seek_inner(key)
     }
-
-    fn is_valid(&self) -> bool {
-        self.cur_idx < self.data.len()
-    }
-
-    fn key(&self) -> &[u8] {
-        self.key()
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        self.value()
-    }
 }
 
 pub const TEST_KEYS_COUNT: usize = 10;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 
 use super::HummockIterator;
-
-pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
-    SSTableBuilderOptions {
-        bloom_false_positive: 0.1,
-        block_size: 4096,                // 4KB
-        table_capacity: 256 * (1 << 20), // 256MB
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-    }
-}
+pub use crate::hummock::test_utils::default_builder_opt_for_test;
+use crate::hummock::test_utils::gen_test_sstable;
 
 /// Generate keys like `001_key_test_00002` with epoch 233.
 pub fn iterator_test_key_of(table: u64, idx: usize) -> Vec<u8> {
@@ -268,62 +282,74 @@ pub fn iterator_test_key_of_epoch(table: u64, idx: usize, epoch: Epoch) -> Vec<u
 }
 
 /// The value of an index in the test table
-pub fn test_value_of(table: u64, idx: usize) -> Vec<u8> {
+pub fn iterator_test_value_of(table: u64, idx: usize) -> Vec<u8> {
     format!("{:03}_value_test_{:05}", table, idx)
         .as_bytes()
         .to_vec()
 }
 
-pub async fn gen_test_sstable(table_idx: u64, opts: SSTableBuilderOptions) -> SSTable {
-    gen_test_sstable_base(table_idx, opts, |x| x).await
+pub async fn gen_iterator_test_sstable(
+    table_idx: u64,
+    opts: SSTableBuilderOptions,
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    gen_iterator_test_sstable_base(table_idx, opts, |x| x, sstable_store).await
+}
+
+// key=[table, idx, epoch], value
+pub async fn gen_iterator_test_sstable_from_kv_pair(
+    sst_id: u64,
+    kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    gen_test_sstable(
+        default_builder_opt_for_test(),
+        sst_id,
+        kv_pairs
+            .into_iter()
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1, kv.2), kv.3)),
+        sstable_store,
+    )
+    .await
 }
 
 /// Generate a test table used in almost all table-related tests. Developers may verify the
 /// correctness of their implementations by comparing the got value and the expected value
 /// generated by `test_key_of` and `test_value_of`.
-pub async fn gen_test_sstable_base(
+pub async fn gen_iterator_test_sstable_base(
     table_idx: u64,
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
-) -> SSTable {
-    const REMOTE_DIR: &str = "test";
-    let mut b = SSTableBuilder::new(opts);
-
-    for i in 0..TEST_KEYS_COUNT {
-        b.add(
-            &iterator_test_key_of(table_idx, idx_mapping(i)),
-            HummockValue::Put(&test_value_of(table_idx, idx_mapping(i))),
-        );
-    }
-
-    // get remote table
-    let (data, meta) = b.finish();
-    let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-    upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
-        .await
-        .unwrap()
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    gen_test_sstable(
+        opts,
+        table_idx,
+        (0..TEST_KEYS_COUNT).map(|i| {
+            (
+                iterator_test_key_of(table_idx, idx_mapping(i)),
+                HummockValue::Put(iterator_test_value_of(table_idx, idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+    )
+    .await
 }
 
-pub async fn upload_and_load_sst(
-    obj_client: Arc<dyn ObjectStore>,
-    sst_id: u64,
-    meta: SstableMeta,
-    data: Bytes,
-    path: &str,
-) -> HummockResult<SSTable> {
-    cloud::upload(&obj_client, sst_id, &meta, data, path).await?;
-    Ok(SSTable {
-        id: sst_id,
-        meta,
-        obj_client,
-        data_path: cloud::get_sst_data_path(path, sst_id),
-        block_cache: Arc::new(moka::future::Cache::new(65536)),
-    })
+pub fn mock_sstable_store() -> SstableStoreRef {
+    let object_store = Arc::new(InMemObjectStore::new());
+    mock_sstable_store_with_object_store(object_store)
+}
+
+pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
+    let path = "test".to_string();
+    Arc::new(SstableStore::new(object_store, path))
 }
 
 #[cfg(test)]
 mod metatest {
     use super::*;
+
     #[tokio::test]
     async fn test_basic() {
         let (_, val) = TestIteratorBuilder::<FORWARD>::default()
@@ -332,6 +358,6 @@ mod metatest {
             .finish();
 
         let expected = iterator_test_key_of(0, 9);
-        assert!(expected.as_slice() == test_key!(val, 3));
+        assert_eq!(expected.as_slice(), test_key!(val, 3));
     }
 }

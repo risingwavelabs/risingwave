@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
@@ -35,38 +49,38 @@ where
 }
 
 macro_rules! impl_primitive_array_item_type {
-  ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
-    $(
-      impl PrimitiveArrayItemType for $scalar_type {
-        fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
-          ArrayImpl::$variant_type(arr)
-        }
+    ([], $({ $scalar_type:ty, $variant_type:ident } ),*) => {
+        $(
+        impl PrimitiveArrayItemType for $scalar_type {
+            fn erase_array_type(arr: PrimitiveArray<Self>) -> ArrayImpl {
+                ArrayImpl::$variant_type(arr)
+            }
 
-        fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
-          match arr {
-            ArrayImpl::$variant_type(inner) => Some(inner),
-            _ => None,
-          }
-        }
+            fn try_into_array(arr: ArrayImpl) -> Option<PrimitiveArray<Self>> {
+                match arr {
+                    ArrayImpl::$variant_type(inner) => Some(inner),
+                    _ => None,
+                }
+            }
 
-        fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
-          match arr {
-            ArrayImpl::$variant_type(inner) => Some(inner),
-            _ => None,
-          }
-        }
+            fn try_into_array_ref(arr: &ArrayImpl) -> Option<&PrimitiveArray<Self>> {
+                match arr {
+                    ArrayImpl::$variant_type(inner) => Some(inner),
+                    _ => None,
+                }
+            }
 
-        fn array_type() -> ArrayType {
-          ArrayType::$variant_type
-        }
+            fn array_type() -> ArrayType {
+                ArrayType::$variant_type
+            }
 
-        fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
-          let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
-          Ok(ArrayBuilderImpl::$variant_type(array_builder))
+            fn create_array_builder(capacity: usize) -> Result<ArrayBuilderImpl> {
+                let array_builder = PrimitiveArrayBuilder::<$scalar_type>::new(capacity)?;
+                Ok(ArrayBuilderImpl::$variant_type(array_builder))
+            }
         }
-      }
-    )*
-  };
+        )*
+    };
 }
 
 for_all_native_types! { impl_primitive_array_item_type }
@@ -110,7 +124,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -121,14 +135,14 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             compression: CompressionType::None as i32,
             body: output_buffer,
         };
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,
             struct_array_data: None,
             list_array_data: None,
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {

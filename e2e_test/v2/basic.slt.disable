@@ -1,0 +1,28 @@
+statement ok
+create table t (v1 int not null);
+
+statement ok
+drop table t;
+
+query I
+values(1);
+----
+1
+
+query I
+values(1+2*3)
+----
+7
+
+statement error
+values(CAST('abc' AS BOOLEAN))
+
+query I
+select 1;
+----
+1
+
+query I
+select 1+2*3, 4*5;
+----
+7 20

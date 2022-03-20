@@ -1,3 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use std::str::from_utf8;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -9,13 +24,10 @@ use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 
-use crate::base::SourceReader;
-use crate::kafka::source::message::KafkaMessage;
+use crate::base::{InnerMessage, SourceReader};
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
-pub struct KafkaSourceReader {}
 
 pub struct KafkaSplitReader {
     consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
@@ -26,10 +38,7 @@ pub struct KafkaSplitReader {
 
 #[async_trait]
 impl SourceReader for KafkaSplitReader {
-    type Message = KafkaMessage;
-    type Split = KafkaSplit;
-
-    async fn next(&mut self) -> Result<Option<Vec<Self::Message>>> {
+    async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>> {
         let mut stream = self
             .partition_queue
             .stream()
@@ -59,34 +68,35 @@ impl SourceReader for KafkaSplitReader {
                 }
             }
 
-            ret.push(KafkaMessage::from(msg));
+            ret.push(InnerMessage::from(msg));
         }
 
         Ok(Some(ret))
     }
 
-    async fn assign_split(&mut self, split: KafkaSplit) -> Result<()> {
+    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
+        let kafka_split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
         let mut tpl = TopicPartitionList::new();
 
-        let offset = match split.start_offset {
+        let offset = match kafka_split.start_offset {
             KafkaOffset::None | KafkaOffset::Earliest => Offset::Beginning,
             KafkaOffset::Latest => Offset::End,
             KafkaOffset::Offset(offset) => Offset::Offset(offset),
             KafkaOffset::Timestamp(_) => unimplemented!(),
         };
 
-        tpl.add_partition_offset(self.topic.as_str(), split.partition, offset)
+        tpl.add_partition_offset(self.topic.as_str(), kafka_split.partition, offset)
             .map_err(|e| anyhow!(e))?;
 
         self.consumer.assign(&tpl).map_err(|e| anyhow!(e))?;
 
         let partition_queue = self
             .consumer
-            .split_partition_queue(self.topic.as_str(), split.partition)
-            .ok_or(anyhow!("Failed to split partition queue"))?;
+            .split_partition_queue(self.topic.as_str(), kafka_split.partition)
+            .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
 
         self.partition_queue = partition_queue;
-        self.assigned_split = split;
+        self.assigned_split = kafka_split;
 
         Ok(())
     }
@@ -99,10 +109,6 @@ impl KafkaSplitReader {
         config.set("topic.metadata.refresh.interval.ms", "30000");
         config.set("fetch.message.max.bytes", "134217728");
         config.set("auto.offset.reset", "earliest");
-
-        // for (k, v) in &self.properties {
-        //   config.set(k, v);
-        // }
 
         if config.get("group.id").is_none() {
             config.set(

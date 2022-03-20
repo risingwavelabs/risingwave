@@ -1,28 +1,39 @@
-use std::cmp::max;
-use std::collections::BTreeMap;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
 
 use async_recursion::async_recursion;
 use itertools::Itertools;
-use risingwave_common::array::RwError;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
+use risingwave_pb::common::HashMapping;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode};
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
+use crate::cluster::ParallelUnitId;
 use crate::manager::{IdCategory, IdGeneratorManagerRef};
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::stream::graph::{
     StreamActorBuilder, StreamFragment, StreamFragmentGraph, StreamGraphBuilder,
 };
-
-const PARALLEL_DEGREE_LOW_BOUND: u32 = 4;
 
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
@@ -33,8 +44,8 @@ pub struct StreamFragmenter<S> {
 
     /// id generator, used to generate actor id.
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    /// worker count, used to init actor parallelization.
-    worker_count: u32,
+    /// hash mapping, used for hash dispatcher
+    hash_mapping: Vec<ParallelUnitId>,
 }
 
 impl<S> StreamFragmenter<S>
@@ -44,13 +55,13 @@ where
     pub fn new(
         id_gen_manager_ref: IdGeneratorManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
-        worker_count: u32,
+        hash_mapping: Vec<ParallelUnitId>,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
             stream_graph: StreamGraphBuilder::new(fragment_manager_ref),
             id_gen_manager_ref,
-            worker_count,
+            hash_mapping,
         }
     }
 
@@ -79,6 +90,10 @@ where
                     Fragment {
                         fragment_id,
                         fragment_type: self.fragment_graph.get_fragment_type_by_id(fragment_id)?
+                            as i32,
+                        distribution_type: self
+                            .fragment_graph
+                            .get_distribution_type_by_id(fragment_id)?
                             as i32,
                         actors: actors.clone(),
                     },
@@ -140,7 +155,7 @@ where
                     );
 
                     let is_simple_dispatcher =
-                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple;
+                        exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                     if is_simple_dispatcher {
                         current_fragment.set_singleton(true);
                     }
@@ -189,22 +204,28 @@ where
         let parallel_degree = if current_fragment.is_singleton() {
             1
         } else {
-            // Currently, we assume the parallel degree is at least 4, and grows linearly with
-            // more worker nodes added.
-            max(self.worker_count * 2, PARALLEL_DEGREE_LOW_BOUND)
+            self.hash_mapping.iter().unique().count() as u32
         };
         let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 
         let node = current_fragment.get_node();
-        let blackhole_dispatcher = Dispatcher {
-            r#type: DispatcherType::Broadcast as i32,
-            ..Default::default()
-        };
+
         let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
-            &blackhole_dispatcher
+            Dispatcher {
+                r#type: DispatcherType::Broadcast as i32,
+                ..Default::default()
+            }
         } else {
             match node.get_node()? {
-                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
+                Node::ExchangeNode(exchange_node) => {
+                    // TODO: support multiple dispatchers
+                    let strategy = exchange_node.get_strategy()?;
+                    Dispatcher {
+                        r#type: strategy.r#type,
+                        column_indices: strategy.column_indices.clone(),
+                        ..Default::default()
+                    }
+                }
                 _ => {
                     return Err(RwError::from(InternalError(format!(
                         "{:?} should not found.",
@@ -216,7 +237,39 @@ where
 
         for id in actor_ids.clone() {
             let mut actor_builder = StreamActorBuilder::new(id, current_fragment_id, node.clone());
-            actor_builder.set_dispatcher(dispatcher.clone());
+
+            // Construct a consistent hash mapping of actors based on that of parallel units. Set
+            // the new mapping into hash dispatchers.
+            if dispatcher.r#type == DispatcherType::Hash as i32 {
+                // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as the
+                // number of its downstream actors. However, since the frontend optimizer is still
+                // WIP, there exists some unoptimized situation where a hash dispatcher has ONLY
+                // ONE downstream actor, which makes it behave like a simple dispatcher. As an
+                // expedient, we specially compute the consistent hash mapping here. The `if`
+                // branch could be removed after the optimizer has been fully implemented.
+                let streaming_hash_mapping = if last_fragment_actors.len() == 1 {
+                    vec![last_fragment_actors[0]; self.hash_mapping.len()]
+                } else {
+                    let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
+                    assert_eq!(last_fragment_actors.len(), hash_parallel_units.len());
+                    let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
+                        .into_iter()
+                        .zip_eq(last_fragment_actors.clone().into_iter())
+                        .collect();
+                    self.hash_mapping
+                        .iter()
+                        .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
+                        .collect_vec()
+                };
+                actor_builder.set_hash_dispatcher(
+                    dispatcher.column_indices.clone(),
+                    HashMapping {
+                        hash_mapping: streaming_hash_mapping,
+                    },
+                )
+            } else {
+                actor_builder.set_dispatcher(dispatcher.clone());
+            }
             self.stream_graph.add_actor(actor_builder);
         }
 

@@ -1,5 +1,7 @@
 package com.risingwave.common.config;
 
+import static com.risingwave.common.config.Parsers.BOOLEAN_PARSER;
+
 /** Manage all config entry that can be set up in batch planner. */
 public class BatchPlannerConfigurations {
   private BatchPlannerConfigurations() {}
@@ -43,5 +45,14 @@ public class BatchPlannerConfigurations {
           .withConverter(Parsers.BOOLEAN_PARSER)
           .withDefaultValue(true)
           .withDoc("Enable sort agg for batch execution.")
+          .build();
+
+  @Config
+  public static final ConfigEntry<Boolean> ENABLE_NEW_SUBQUERY_PLANNER =
+      ConfigEntry.<Boolean>builder("enable_new_subquery_batch_planner")
+          .setOptional(true)
+          .withDefaultValue(false)
+          .withConverter(BOOLEAN_PARSER)
+          .withDoc("Optimizer config to enable new subquery expand")
           .build();
 }

@@ -20,6 +20,9 @@ rust: rust_check_all rust_test
 
 rust_check_all: rust_fmt_check rust_clippy_check rust_cargo_sort_check
 
+rust_fmt:
+	cd rust && cargo fmt --all
+
 rust_fmt_check:
 	cd rust && cargo fmt --all -- --check
 
@@ -42,7 +45,7 @@ rust_test_no_run:
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
 	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target/tarpaulin cargo tarpaulin --workspace \
-	  --exclude risingwave-pb --exclude-files tests/* --out Xml --force-clean --run-types Doctests Tests \
+	  --exclude risingwave_pb --exclude-files tests/* --out Xml --force-clean --run-types Doctests Tests \
 	  -- --report-time -Z unstable-options
 
 rust_build:
@@ -62,7 +65,7 @@ ss_bench_build:
 	cd rust && cargo build --workspace --bin ss-bench
 
 sqllogictest:
-	cargo install sqllogictest --version 0.2.0 --features bin
+	cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
 
 export DOCKER_GROUP_NAME ?= risingwave
 export DOCKER_IMAGE_TAG ?= latest

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
@@ -8,7 +22,8 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
-    BlockIterator, HummockResult, SSTable, SSTableIteratorBase, SSTableIteratorType, SeekPos,
+    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, SeekPos, Sstable,
+    SstableStoreRef,
 };
 
 /// Reversely iterates on a table.
@@ -20,24 +35,31 @@ pub struct ReverseSSTableIterator {
     cur_idx: usize,
 
     /// Reference to the table
-    pub table: Arc<SSTable>,
+    pub sst: Arc<Sstable>,
+
+    sstable_store: SstableStoreRef,
 }
 
 impl ReverseSSTableIterator {
-    pub fn new(table: Arc<SSTable>) -> Self {
+    pub fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self {
         Self {
             block_iter: None,
             cur_idx: table.meta.block_metas.len() - 1,
-            table,
+            sst: table,
+            sstable_store,
         }
     }
 
     /// Seek to a block, and then seek to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
-        if idx >= self.table.block_count() as isize || idx < 0 {
+        if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
-            let mut block_iter = BlockIterator::new(self.table.block(idx as usize).await?);
+            let block = self
+                .sstable_store
+                .get(&self.sst, idx as u64, crate::hummock::CachePolicy::Fill)
+                .await?;
+            let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
                 block_iter.seek_le(key, SeekPos::Origin);
             } else {
@@ -92,13 +114,13 @@ impl HummockIterator for ReverseSSTableIterator {
     /// Instead of setting idx to 0th block, a `ReverseSSTableIterator` rewinds to the last block in
     /// the table.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.table.block_count() as isize - 1, None)
+        self.seek_idx(self.sst.block_count() as isize - 1, None)
             .await
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let block_idx = self
-            .table
+            .sst
             .meta
             .block_metas
             .partition_point(|block_meta| {
@@ -127,8 +149,8 @@ impl SSTableIteratorType for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
     const DIRECTION: usize = BACKWARD;
 
-    fn new(table: Arc<SSTable>) -> Self::SSTableIterator {
-        ReverseSSTableIterator::new(table)
+    fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
+        ReverseSSTableIterator::new(table, sstable_store)
     }
 }
 
@@ -138,21 +160,27 @@ mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
 
-    use super::super::builder::tests::*;
     use super::*;
     use crate::assert_bytes_eq;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::key::key_with_epoch;
-    use crate::hummock::sstable::builder::tests::gen_test_sstable;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
 
     #[tokio::test]
     async fn test_reverse_sstable_iterator() {
         // build remote table
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
 
-        let mut sstable_iter = ReverseSSTableIterator::new(Arc::new(table));
+        let mut sstable_iter = ReverseSSTableIterator::new(Arc::new(table), sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
 
@@ -160,7 +188,7 @@ mod tests {
             cnt -= 1;
             let key = sstable_iter.key();
             let value = sstable_iter.value();
-            assert_bytes_eq!(key, builder_test_key_of(cnt));
+            assert_bytes_eq!(key, test_key_of(cnt));
             assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
             sstable_iter.next().await.unwrap();
         }
@@ -170,32 +198,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_reverse_sstable_seek() {
-        let table = gen_test_sstable(default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
         // We should have at least 10 blocks, so that table iterator test could cover more code
         // path.
         assert!(table.meta.block_metas.len() > 10);
         let table = Arc::new(table);
-        let mut sstable_iter = ReverseSSTableIterator::new(table.clone());
+        let mut sstable_iter = ReverseSSTableIterator::new(table.clone(), sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();
         all_key_to_test.shuffle(&mut rng);
 
         // We seek and access all the keys in random order
         for i in all_key_to_test {
-            sstable_iter.seek(&builder_test_key_of(i)).await.unwrap();
+            sstable_iter.seek(&test_key_of(i)).await.unwrap();
             // sstable_iter.next().await.unwrap();
             let key = sstable_iter.key();
-            assert_bytes_eq!(key, builder_test_key_of(i));
+            assert_bytes_eq!(key, test_key_of(i));
         }
 
         // Seek to key #TEST_KEYS_COUNT-500 and start iterating
         sstable_iter
-            .seek(&builder_test_key_of(TEST_KEYS_COUNT - 500))
+            .seek(&test_key_of(TEST_KEYS_COUNT - 500))
             .await
             .unwrap();
         for i in (0..TEST_KEYS_COUNT - 500 + 1).rev() {
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(i), "key index:{}", i);
+            assert_eq!(key, test_key_of(i), "key index:{}", i);
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());
@@ -203,7 +234,7 @@ mod tests {
         let largest_key = key_with_epoch(format!("key_zzzz_{:05}", 0).as_bytes().to_vec(), 233);
         sstable_iter.seek(largest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();
-        assert_eq!(key, builder_test_key_of(TEST_KEYS_COUNT - 1));
+        assert_eq!(key, test_key_of(TEST_KEYS_COUNT - 1));
 
         // Seek to > last key
         let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
@@ -228,7 +259,7 @@ mod tests {
                 .unwrap();
 
             let key = sstable_iter.key();
-            assert_eq!(key, builder_test_key_of(idx - 1));
+            assert_eq!(key, test_key_of(idx - 1));
             sstable_iter.next().await.unwrap();
         }
         assert!(!sstable_iter.is_valid());

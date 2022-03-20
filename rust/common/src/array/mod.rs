@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
@@ -42,9 +56,8 @@ pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -149,7 +162,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> Result<ProstArray>;
+    fn to_protobuf(&self) -> ProstArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -457,7 +470,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> Result<ProstArray> {
+            pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }

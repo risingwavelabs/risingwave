@@ -1,5 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
@@ -47,16 +60,14 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let snapshot = params.input.remove(1);
         let mview = params.input.remove(0);
 
-        let upstream_schema = snapshot.schema();
         // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
         // column_ids. Now simply treat column_id as column_idx.
+        // TODO(bugen): how can we know the way of mapping?
         let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
-        let schema = Schema::new(
-            column_idxs
-                .iter()
-                .map(|i| upstream_schema.fields()[*i].clone())
-                .collect_vec(),
-        );
+
+        // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
+        // its schema.
+        let schema = snapshot.schema().clone();
         Ok(Box::new(ChainExecutor::new(
             snapshot,
             mview,
@@ -121,7 +132,7 @@ impl ChainExecutor {
                 }
                 Err(e)
             }
-            Ok(msg) => self.mapping(msg),
+            Ok(msg) => Ok(msg),
         }
     }
 
@@ -171,23 +182,17 @@ impl Executor for ChainExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
 mod test {
 
     use async_trait::async_trait;
-    use risingwave_common::array::{Array, I32Array, Op, RwError, StreamChunk};
-    use risingwave_common::catalog::Schema;
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::error::{ErrorCode, Result};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_common::error::{ErrorCode, Result, RwError};
+    use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -246,23 +251,11 @@ mod test {
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
-
-        fn reset(&mut self, _epoch: u64) {
-            // nothing to do
-        }
     }
 
     #[tokio::test]
     async fn test_basic() {
-        let columns = vec![ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            name: "v1".to_string(),
-            ..Default::default()
-        }];
-        let schema = Schema::try_from(&columns).unwrap();
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
         let first = Box::new(MockSnapshot::with_chunks(
             schema.clone(),
             PkIndices::new(),

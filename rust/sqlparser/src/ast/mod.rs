@@ -173,6 +173,14 @@ pub enum Expr {
     IsNull(Box<Expr>),
     /// `IS NOT NULL` operator
     IsNotNull(Box<Expr>),
+    /// `IS TRUE` operator
+    IsTrue(Box<Expr>),
+    /// `IS NOT TRUE` operator
+    IsNotTrue(Box<Expr>),
+    /// `IS FALSE` operator
+    IsFalse(Box<Expr>),
+    /// `IS NOT FALSE` operator
+    IsNotFalse(Box<Expr>),
     /// `IS DISTINCT FROM` operator
     IsDistinctFrom(Box<Expr>, Box<Expr>),
     /// `IS NOT DISTINCT FROM` operator
@@ -284,6 +292,9 @@ pub enum Expr {
     Rollup(Vec<Vec<Expr>>),
     /// The `ROW` expr. The `ROW` keyword can be omitted,
     Row(Vec<Expr>),
+    /// The `ARRAY` expr. Alternative syntax for `ARRAY` is by utilizing curly braces, e.g. {1, 2,
+    /// 3},
+    Array(Vec<Expr>),
 }
 
 impl fmt::Display for Expr {
@@ -304,6 +315,10 @@ impl fmt::Display for Expr {
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
+            Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
+            Expr::IsNotTrue(ast) => write!(f, "{} IS NOT TRUE", ast),
+            Expr::IsFalse(ast) => write!(f, "{} IS FALSE", ast),
+            Expr::IsNotFalse(ast) => write!(f, "{} IS NOT FALSE", ast),
             Expr::InList {
                 expr,
                 list,
@@ -447,6 +462,16 @@ impl fmt::Display for Expr {
             Expr::Row(exprs) => write!(
                 f,
                 "ROW({})",
+                exprs
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<String>>()
+                    .as_slice()
+                    .join(", ")
+            ),
+            Expr::Array(exprs) => write!(
+                f,
+                "ARRAY[{}]",
                 exprs
                     .iter()
                     .map(|v| v.to_string())
@@ -804,6 +829,10 @@ pub enum Statement {
         /// A SQL query that specifies what to explain
         statement: Box<Statement>,
     },
+    /// FLUSH the current barrier.
+    ///
+    /// Note: RisingWave specific statement.
+    Flush,
 }
 
 impl fmt::Display for Statement {
@@ -1146,6 +1175,9 @@ impl fmt::Display for Statement {
                 } else {
                     write!(f, "NULL")
                 }
+            }
+            Statement::Flush => {
+                write!(f, "FLUSH")
             }
         }
     }

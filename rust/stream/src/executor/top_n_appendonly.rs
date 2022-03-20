@@ -1,10 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use itertools::*;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Op, Row};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::ToOwnedDatum;
@@ -14,6 +28,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -170,6 +185,14 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
+        let table_column_descs = row_data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| {
+                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+            })
+            .collect::<Vec<_>>();
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
         Self {
             input,
             pk_order_types,
@@ -181,6 +204,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 lower_sub_keyspace,
                 row_data_types.clone(),
                 ordered_row_deserializer.clone(),
+                cell_based_row_deserializer.clone(),
             ),
             managed_higher_state: ManagedTopNState::<S, TOP_N_MAX>::new(
                 cache_size,
@@ -188,6 +212,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
                 higher_sub_keyspace,
                 row_data_types,
                 ordered_row_deserializer,
+                cell_based_row_deserializer,
             ),
             pk_indices,
             first_execution: true,
@@ -227,18 +252,11 @@ impl<S: StateStore> Executor for AppendOnlyTopNExecutor<S> {
     }
 
     fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache(false);
-        self.managed_higher_state.clear_cache(false);
+        self.managed_lower_state.clear_cache();
+        self.managed_higher_state.clear_cache();
         self.first_execution = true;
 
         Ok(())
-    }
-
-    fn reset(&mut self, epoch: u64) {
-        self.managed_lower_state.clear_cache(true);
-        self.managed_higher_state.clear_cache(true);
-        self.first_execution = true;
-        self.update_executor_state(ExecutorState::Active(epoch));
     }
 }
 

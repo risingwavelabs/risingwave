@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
@@ -42,7 +56,7 @@ impl Array for Utf8Array {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
+    fn to_protobuf(&self) -> ProstArray {
         let offset_buffer = self
             .offset
             .iter()
@@ -76,14 +90,14 @@ impl Array for Utf8Array {
                 body: data_buffer,
             },
         ];
-        let null_bitmap = self.null_bitmap().to_protobuf()?;
-        Ok(ProstArray {
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Utf8 as i32,
             struct_array_data: None,
             list_array_data: None,
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -344,9 +358,7 @@ mod tests {
 
         assert!(result_array.is_ok());
         let array = result_array.unwrap();
-        let result_buffers = array.to_protobuf();
-        assert!(result_buffers.is_ok());
-        let buffers = result_buffers.unwrap().values;
+        let buffers = array.to_protobuf().values;
         assert!(buffers.len() >= 2);
     }
 

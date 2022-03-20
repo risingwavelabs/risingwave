@@ -5,9 +5,7 @@ use std::hash::{Hash, Hasher};
 
 #[allow(unused_imports)]
 use itertools::Itertools;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, ListArrayData,
-};
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
@@ -137,19 +135,19 @@ impl Array for ListArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
-        let value = self.value.to_protobuf()?;
-        Ok(ProstArray {
+    fn to_protobuf(&self) -> ProstArray {
+        let value = self.value.to_protobuf();
+        ProstArray {
             array_type: ProstArrayType::List as i32,
             struct_array_data: None,
             list_array_data: Some(Box::new(ListArrayData {
                 offsets: self.offsets.iter().map(|u| *u as u32).collect(),
                 value: Some(Box::new(value)),
-                value_type: self.value_type.to_protobuf().ok(),
+                value_type: Some(self.value_type.to_protobuf()),
             })),
-            null_bitmap: Some(self.bitmap.to_protobuf()?),
+            null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -382,7 +380,7 @@ mod tests {
             DataType::Int32,
         )
         .unwrap();
-        let actual = ListArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let actual = ListArray::from_protobuf(&arr.to_protobuf()).unwrap();
         let tmp = ArrayImpl::List(arr);
         assert_eq!(tmp, actual);
 
@@ -514,7 +512,7 @@ mod tests {
             DataType::List {},
         )
         .unwrap();
-        let actual = ListArray::from_protobuf(&nestarray.to_protobuf().unwrap()).unwrap();
+        let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::List(nestarray), actual);
 
         let nestarray = try_match_expand!(actual, ArrayImpl::List).unwrap();

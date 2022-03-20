@@ -1,10 +1,23 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::option::Option;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
-use risingwave_pb::plan::exchange_info::hash_info::HashMethod;
 use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
 use tokio::sync::mpsc;
@@ -23,9 +36,7 @@ pub struct HashShuffleReceiver {
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> Result<Vec<usize>> {
     let output_count = hash_info.output_count as usize;
 
-    let hasher_builder = match hash_info.get_hash_method()? {
-        HashMethod::Crc32 => CRC32FastBuilder {},
-    };
+    let hasher_builder = CRC32FastBuilder {};
 
     let hash_values = chunk
         .get_hash_values(

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::VecDeque;
 
 use risingwave_storage::memory::MemoryStateStore;
@@ -105,10 +119,6 @@ impl Executor for MockSource {
     fn logical_operator_info(&self) -> &str {
         self.identity()
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 /// This source takes message from users asynchronously
@@ -198,44 +208,8 @@ impl Executor for MockAsyncSource {
     fn logical_operator_info(&self) -> &str {
         self.identity()
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 pub fn create_in_memory_keyspace() -> Keyspace<MemoryStateStore> {
     Keyspace::executor_root(MemoryStateStore::new(), 0x2333)
-}
-
-pub mod schemas {
-    use risingwave_common::catalog::*;
-    use risingwave_common::types::DataType;
-
-    fn field_n<const N: usize>(data_type: DataType) -> Schema {
-        Schema::new(vec![Field::unnamed(data_type); N])
-    }
-
-    fn int32_n<const N: usize>() -> Schema {
-        field_n::<N>(DataType::Int32)
-    }
-
-    /// Create a util schema **for test only** with two int32 fields.
-    pub fn ii() -> Schema {
-        int32_n::<2>()
-    }
-
-    /// Create a util schema **for test only** with three int32 fields.
-    pub fn iii() -> Schema {
-        int32_n::<3>()
-    }
-
-    fn varchar_n<const N: usize>() -> Schema {
-        field_n::<N>(DataType::Varchar)
-    }
-
-    /// Create a util schema **for test only** with three varchar fields.
-    pub fn sss() -> Schema {
-        varchar_n::<3>()
-    }
 }

@@ -1,16 +1,32 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::{Debug, Formatter};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use opentelemetry::metrics::{Counter, MeterProvider};
-use opentelemetry::KeyValue;
+use either::Either;
+use futures::stream::{select_with_strategy, PollNext};
+use futures::{Stream, StreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    ArrayBuilder, ArrayImpl, I64ArrayBuilder, InternalError, RwError, StreamChunk,
-};
+use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -18,9 +34,20 @@ use risingwave_source::*;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-use crate::executor::monitor::DEFAULT_COMPUTE_STATS;
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
 use crate::task::{ExecutorParams, StreamManagerCore};
+
+struct SourceReader {
+    /// The reader for stream source
+    pub stream_reader: Box<dyn StreamSourceReader>,
+    /// The reader for barrier
+    pub barrier_receiver: UnboundedReceiver<Message>,
+}
+
+/// `SourceReader` will be turned into this stream type.
+type ReaderStream =
+    Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<StreamChunk>>> + Send>>;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -30,11 +57,9 @@ pub struct SourceExecutor {
     column_ids: Vec<ColumnId>,
     schema: Schema,
     pk_indices: PkIndices,
-    reader: Box<dyn StreamSourceReader>,
-    barrier_receiver: UnboundedReceiver<Message>,
+
     /// current allocated row id
     next_row_id: AtomicU64,
-    first_execution: bool,
 
     /// Identity string
     identity: String,
@@ -42,10 +67,17 @@ pub struct SourceExecutor {
     /// Logical Operator Info
     op_info: String,
 
+    /// The reader object. When `next` is called for the first time on `SourceExecutor`, the
+    /// `reader` will be turned into `reader_stream`, and this field will become `None`.
+    reader: Option<SourceReader>,
+
+    /// Stream object for reader. When `next` is called for the first time on `SourceExecutor`, the
+    /// `reader` will be turned into a `futures::Stream`.
+    reader_stream: Option<ReaderStream>,
+
     // monitor
-    /// attributes of the OpenTelemetry monitor
-    attributes: Vec<KeyValue>,
-    source_output_row_count: Counter<u64>,
+    metrics: Arc<StreamingMetrics>,
+    source_identify: String,
 }
 
 pub struct SourceExecutorBuilder {}
@@ -96,6 +128,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.executor_id,
             params.operator_id,
             params.op_info,
+            params.executor_stats,
         )?))
     }
 }
@@ -112,9 +145,10 @@ impl SourceExecutor {
         executor_id: u64,
         operator_id: u64,
         op_info: String,
+        streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
-        let reader: Box<dyn StreamSourceReader> = match source.as_ref() {
+        let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
             SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
                 HighLevelKafkaSourceReaderContext {
                     query_id: Some(format!("source-operator-{}", operator_id)),
@@ -126,30 +160,23 @@ impl SourceExecutor {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
         };
-        let source_identify = "Table_".to_string() + &source_id.table_id().to_string();
-        let meter = DEFAULT_COMPUTE_STATS
-            .clone()
-            .prometheus_exporter
-            .provider()
-            .unwrap()
-            .meter("stream_source_monitor", None);
+
         Ok(Self {
             source_id,
             source_desc,
             column_ids,
             schema,
             pk_indices,
-            reader,
-            barrier_receiver,
+            reader: Some(SourceReader {
+                stream_reader,
+                barrier_receiver,
+            }),
             next_row_id: AtomicU64::from(0u64),
-            first_execution: true,
             identity: format!("SourceExecutor {:X}", executor_id),
-            attributes: vec![KeyValue::new("source_id", source_identify)],
-            source_output_row_count: meter
-                .u64_counter("stream_source_output_rows_counts")
-                .with_description("")
-                .init(),
             op_info,
+            reader_stream: None,
+            metrics: streaming_metrics,
+            source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
         })
     }
 
@@ -183,34 +210,85 @@ impl SourceExecutor {
     }
 }
 
+impl SourceReader {
+    #[try_stream(ok = StreamChunk, error = RwError)]
+    async fn stream_reader(mut stream_reader: Box<dyn StreamSourceReader>) {
+        loop {
+            match stream_reader.next().await {
+                Err(e) => {
+                    // TODO: report this error to meta service to mark the actors failed.
+                    error!("hang up stream reader due to polling error: {}", e);
+
+                    // Drop the reader, then the error might be caught by the writer side.
+                    drop(stream_reader);
+                    // Then hang up this stream by breaking the loop.
+                    break;
+                }
+                Ok(chunk) => yield chunk,
+            }
+        }
+
+        futures::future::pending().await
+    }
+
+    #[try_stream(ok = Message, error = RwError)]
+    async fn barrier_receiver(mut barrier_receiver: UnboundedReceiver<Message>) {
+        while let Some(msg) = barrier_receiver.recv().await {
+            yield msg;
+        }
+        return Err(RwError::from(InternalError(
+            "barrier reader closed unexpectedly".to_string(),
+        )));
+    }
+
+    fn prio_left(_: &mut ()) -> PollNext {
+        PollNext::Left
+    }
+
+    pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunk>>> {
+        let stream_reader = Self::stream_reader(self.stream_reader);
+        let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
+        select_with_strategy(
+            barrier_receiver.map(Either::Left),
+            stream_reader.map(Either::Right),
+            Self::prio_left,
+        )
+    }
+}
+
 #[async_trait]
 impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
-        if self.first_execution {
-            self.reader.open().await?;
-            self.first_execution = false;
+        if let Some(mut reader) = self.reader.take() {
+            reader.stream_reader.open().await?;
+            self.reader_stream.replace(reader.into_stream().boxed());
         }
-        // FIXME: may lose message
-        tokio::select! {
-          biased; // to ensure `FLUSH` run after any `INSERT`.
 
-          chunk = self.reader.next() => {
-            let mut chunk = chunk?;
+        match self.reader_stream.as_mut().unwrap().next().await {
+            // This branch will be preferred.
+            Some(Either::Left(message)) => message,
 
-            // Refill row id only if not a table source.
-            // Note(eric): Currently, rows from external sources are filled with row_ids here,
-            // but rows from tables (by insert statements) are filled in InsertExecutor.
-            //
-            // TODO: in the future, we may add row_id column here for TableV2 as well
-            if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
-              chunk = self.refill_row_id_column(chunk);
+            // If there's barrier, this branch will be deferred.
+            Some(Either::Right(chunk)) => {
+                let mut chunk = chunk?;
+
+                // Refill row id only if not a table source.
+                // Note(eric): Currently, rows from external sources are filled with row_ids here,
+                // but rows from tables (by insert statements) are filled in InsertExecutor.
+                //
+                // TODO: in the future, we may add row_id column here for TableV2 as well
+                if !matches!(self.source_desc.source.as_ref(), SourceImpl::TableV2(_)) {
+                    chunk = self.refill_row_id_column(chunk);
+                }
+
+                self.metrics
+                    .source_output_row_count
+                    .with_label_values(&[self.source_identify.as_str()])
+                    .inc_by(chunk.cardinality() as u64);
+                Ok(Message::Chunk(chunk))
             }
-            self.source_output_row_count.add(chunk.cardinality() as u64, &self.attributes);
-            Ok(Message::Chunk(chunk))
-          }
-          message = self.barrier_receiver.recv() => {
-            message.ok_or_else(|| RwError::from(InternalError("stream closed unexpectedly".to_string())))
-          }
+
+            None => unreachable!(),
         }
     }
 
@@ -228,11 +306,6 @@ impl Executor for SourceExecutor {
 
     fn logical_operator_info(&self) -> &str {
         &self.op_info
-    }
-
-    // TODO: implement reset after introduce connector here.
-    fn reset(&mut self, _epoch: u64) {
-        todo!()
     }
 }
 
@@ -255,11 +328,9 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{ArrayImpl, I32Array, I64Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::array_nonnull;
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
-    use risingwave_storage::table::test::TestTable;
-    use risingwave_storage::TableColumnDesc;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -274,29 +345,26 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];
-        let table = Arc::new(TestTable::new(&table_id, table_columns));
-
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -337,7 +405,7 @@ mod tests {
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
 
-        let mut source = SourceExecutor::new(
+        let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -347,8 +415,17 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
+            Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
         )
         .unwrap();
+
+        let write_chunk = |chunk: StreamChunk| {
+            let source = source.clone();
+            tokio::spawn(async move {
+                let table_source = source.as_table_v2();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
+            });
+        };
 
         barrier_sender
             .send(Message::Barrier(Barrier {
@@ -358,10 +435,10 @@ mod tests {
             .unwrap();
 
         // Write 1st chunk
-        table_source.write_chunk(chunk1).await?;
+        write_chunk(chunk1);
 
         for _ in 0..2 {
-            match source.next().await.unwrap() {
+            match source_executor.next().await.unwrap() {
                 Message::Chunk(chunk) => {
                     assert_eq!(3, chunk.columns().len());
                     assert_eq!(
@@ -381,9 +458,9 @@ mod tests {
         }
 
         // Write 2nd chunk
-        table_source.write_chunk(chunk2).await?;
+        write_chunk(chunk2);
 
-        if let Message::Chunk(chunk) = source.next().await.unwrap() {
+        if let Message::Chunk(chunk) = source_executor.next().await.unwrap() {
             assert_eq!(3, chunk.columns().len());
             assert_eq!(
                 col1_arr2.iter().collect_vec(),
@@ -410,29 +487,26 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
             },
-            TableColumnDesc {
+            ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
             },
         ];
-        let table = Arc::new(TestTable::new(&table_id, table_columns));
-
         let source_manager = MemSourceManager::new();
-        source_manager.create_table_source_v2(&table_id, table.clone())?;
+        source_manager.create_table_source_v2(&table_id, table_columns)?;
         let source_desc = source_manager.get_source(&table_id)?;
         let source = source_desc.clone().source;
-        let table_source = source.as_table_v2();
 
         // Prepare test data chunks
         let rowid_arr1: Arc<ArrayImpl> = Arc::new(array_nonnull! { I64Array, [0, 0, 0] }.into());
@@ -460,7 +534,7 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
-        let mut source = SourceExecutor::new(
+        let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
             column_ids,
@@ -470,10 +544,19 @@ mod tests {
             1,
             1,
             "SourceExecutor".to_string(),
+            Arc::new(StreamingMetrics::unused()),
         )
         .unwrap();
 
-        table_source.write_chunk(chunk.clone()).await?;
+        let write_chunk = |chunk: StreamChunk| {
+            let source = source.clone();
+            tokio::spawn(async move {
+                let table_source = source.as_table_v2();
+                table_source.blocking_write_chunk(chunk).await.unwrap();
+            });
+        };
+
+        write_chunk(chunk.clone());
 
         barrier_sender
             .send(Message::Barrier(
@@ -481,9 +564,9 @@ mod tests {
             ))
             .unwrap();
 
-        source.next().await.unwrap();
-        source.next().await.unwrap();
-        table_source.write_chunk(chunk).await?;
+        source_executor.next().await.unwrap();
+        source_executor.next().await.unwrap();
+        write_chunk(chunk);
 
         Ok(())
     }

@@ -1,9 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
 
 use bytes::Bytes;
-use risingwave_common::array::RwError;
+use futures::future::try_join_all;
+use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::{ensure, gen_error};
 use tokio::sync::Mutex;
 
@@ -29,6 +44,14 @@ impl ObjectStore for InMemObjectStore {
         } else {
             self.get_object(path, |obj| Ok(obj.clone())).await?
         }
+    }
+
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+        let futures = block_locs
+            .into_iter()
+            .map(|block_loc| self.read(path, Some(block_loc)))
+            .collect_vec();
+        try_join_all(futures).await
     }
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {

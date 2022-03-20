@@ -1,17 +1,30 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{expr_node, ExprNode};
 
-use crate::array::{DataChunk, RwError};
-use crate::error::{ErrorCode, Result};
+use crate::array::DataChunk;
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::expr_binary_bytes::new_substr_start;
-use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default, new_position_expr};
+use crate::expr::expr_binary_nonnull::{new_binary_expr, new_like_default};
 use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
 use crate::expr::expr_case::{CaseExpression, WhenClause};
 use crate::expr::expr_in::InExpression;
 use crate::expr::expr_ternary_bytes::{new_replace_expr, new_substr_start_end, new_translate_expr};
 use crate::expr::expr_unary::{
-    new_ascii_expr, new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr,
-    new_unary_expr,
+    new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use crate::types::{DataType, ToOwnedDatum};
@@ -76,14 +89,6 @@ pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_position_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
-    ensure!(children.len() == 2);
-    let str = expr_build_from_prost(&children[0])?;
-    let sub_str = expr_build_from_prost(&children[1])?;
-    Ok(new_position_expr(str, sub_str, ret_type))
-}
-
 pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     // TODO: add expr with the delimiter parameter
@@ -131,13 +136,6 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let expr_ia1 = expr_build_from_prost(&children[0])?;
     let expr_ia2 = expr_build_from_prost(&children[1])?;
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
-}
-
-pub fn build_ascii_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_return_type_and_children(prost)?;
-    ensure!(children.len() == 1);
-    let child = expr_build_from_prost(&children[0])?;
-    Ok(new_ascii_expr(child, ret_type))
 }
 
 pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {

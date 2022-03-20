@@ -1,7 +1,21 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 /// `array` builds an `Array` with `Option`.
 #[macro_export]
 macro_rules! array {
-    ($array:tt, [$( $value:expr ),*]) => {
+    ($array:ident, [$( $value:expr ),*]) => {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;
@@ -38,7 +52,7 @@ macro_rules! array_nonnull {
                 builder.append(Some(value)).unwrap();
             }
             builder.finish().unwrap()
-          }
+        }
     };
 }
 
@@ -47,7 +61,7 @@ macro_rules! array_nonnull {
 macro_rules! column {
     ($array:tt, [$( $value:expr ),*]) => {
         {
-            use crate::array::column::Column;
+            use $crate::array::column::Column;
             let arr = $crate::array! { $array, [ $( $value ),* ] };
             Column::new(std::sync::Arc::new(arr.into()))
         }

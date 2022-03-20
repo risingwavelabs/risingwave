@@ -1,9 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use assert_matches::assert_matches;
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{Key, Result as MetaResult, Value};
-use crate::storage::{Error, MemStore, MetaStore, Operation, Precondition, Snapshot};
+use crate::storage::{Error, MemStore, MetaStore, Operation, Snapshot, Transaction};
 
 const TEST_DEFAULT_CF: &str = "TEST_DEFAULT";
 
@@ -119,7 +134,7 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
             value: value.to_owned(),
         })
         .collect_vec();
-    let mut trx = meta_store.get_transaction();
+    let mut trx = Transaction::default();
     trx.add_operations(ops);
     meta_store.txn(trx).await.unwrap();
     let result = meta_store.list_cf(cf).await.unwrap();
@@ -133,20 +148,13 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
     assert_eq!(result, expected);
 
     // preconditions evaluated to true
-    let mut trx = meta_store.get_transaction();
-    trx.add_preconditions(vec![Precondition::KeyExists {
-        cf: cf.to_owned(),
-        key: kvs[0].0.to_owned(),
-    }]);
-    trx.add_operations(vec![Operation::Put {
-        cf: cf.to_owned(),
-        key: kvs[2].0.to_owned(),
-        value: kvs[2].1.to_owned(),
-    }]);
+    let mut trx = Transaction::default();
+    trx.check_exists(cf.to_owned(), kvs[0].0.to_owned());
+    trx.put(cf.to_owned(), kvs[2].0.to_owned(), kvs[2].1.to_owned());
     meta_store.txn(trx).await.unwrap();
     assert_eq!(3, meta_store.list_cf(cf).await.unwrap().len());
 
-    let mut trx = meta_store.get_transaction();
+    let mut trx = Transaction::default();
     let ops = kvs
         .iter()
         .map(|(key, _)| Operation::Delete {
@@ -159,18 +167,13 @@ async fn test_meta_store_transaction<S: MetaStore>(meta_store: &S) -> Result<()>
     assert_eq!(0, meta_store.list_cf(cf).await.unwrap().len());
 
     // preconditions evaluated to false
-    let mut trx = meta_store.get_transaction();
-    trx.add_preconditions(vec![Precondition::KeyExists {
-        cf: cf.to_owned(),
-        key: kvs[4].0.to_owned(),
-    }]);
-    trx.add_operations(vec![Operation::Put {
-        cf: cf.to_owned(),
-        key: kvs[3].0.to_owned(),
-        value: kvs[3].1.to_owned(),
-    }]);
-    let expected = Error::TransactionAbort();
-    assert_eq!(meta_store.txn(trx).await.unwrap_err(), expected);
+    let mut trx = Transaction::default();
+    trx.check_exists(cf.to_owned(), kvs[4].0.to_owned());
+    trx.put(cf.to_owned(), kvs[3].0.to_owned(), kvs[3].1.to_owned());
+    assert_matches!(
+        meta_store.txn(trx).await.unwrap_err(),
+        Error::TransactionAbort()
+    );
     assert_eq!(0, meta_store.list_cf(cf).await.unwrap().len());
 
     Ok(())

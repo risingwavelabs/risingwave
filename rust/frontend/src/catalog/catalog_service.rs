@@ -1,486 +1,154 @@
-use std::collections::HashMap;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::sync::Arc;
 
-use parking_lot::Mutex;
-use risingwave_common::array::RwError;
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_pb::meta::{Database, Schema, Table};
-use risingwave_pb::plan::{ColumnDesc, DatabaseRefId, SchemaRefId, TableRefId};
+use parking_lot::lock_api::ArcRwLockReadGuard;
+use parking_lot::{RawRwLock, RwLock};
+use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::{
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+    TableSourceInfo,
+};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_rpc_client::MetaClient;
+use tokio::sync::watch::Receiver;
 
-use crate::catalog::database_catalog::DatabaseCatalog;
-use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::table_catalog::{TableCatalog, ROWID_NAME};
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
+use super::root_catalog::Catalog;
+use super::{DatabaseId, SchemaId};
 
-pub const DEFAULT_DATABASE_NAME: &str = "dev";
-pub const DEFAULT_SCHEMA_NAME: &str = "dev";
+pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
-struct CatalogCache {
-    database_by_name: HashMap<String, Arc<DatabaseCatalog>>,
-}
-
-/// Root catalog of database catalog. Manage all database/schema/table in memory.
-/// It can not be used outside from [`CatalogConnector`].
-///
-/// - catalog cache (root catalog)
-///   - database catalog
-///     - schema catalog
-///       - table catalog
-///        - column catalog
-impl CatalogCache {
-    fn new() -> Self {
-        Self {
-            database_by_name: HashMap::new(),
-        }
-    }
-
-    fn create_database(&mut self, db_name: &str, db_id: DatabaseId) -> Result<()> {
-        self.database_by_name
-            .try_insert(db_name.to_string(), Arc::new(DatabaseCatalog::new(db_id)))
-            .map(|_| ())
-            .map_err(|_| CatalogError::Duplicated("database", db_name.to_string()).into())
-    }
-
-    fn get_database(&self, db_name: &str) -> Option<&DatabaseCatalog> {
-        Some(self.database_by_name.get(db_name)?.as_ref())
-    }
-
-    fn get_database_mut(&mut self, db_name: &str) -> Option<&mut DatabaseCatalog> {
-        Some(Arc::make_mut(self.database_by_name.get_mut(db_name)?))
-    }
-
-    fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        Some(self.database_by_name.get(db_name)?.clone())
-    }
-
-    fn create_schema(
-        &mut self,
-        db_name: &str,
-        schema_name: &str,
-        schema_id: SchemaId,
-    ) -> Result<()> {
-        self.get_database_mut(db_name).map_or(
-            Err(CatalogError::NotFound("schema", db_name.to_string()).into()),
-            |db| db.create_schema_with_id(schema_name, schema_id),
-        )
-    }
-
-    fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.get_database(db_name)
-            .and_then(|db| db.get_schema(schema_name))
-    }
-
-    fn get_schema_mut(&mut self, db_name: &str, schema_name: &str) -> Option<&mut SchemaCatalog> {
-        self.get_database_mut(db_name)
-            .and_then(|db| db.get_schema_mut(schema_name))
-    }
-
-    fn create_table(&mut self, db_name: &str, schema_name: &str, table: &Table) -> Result<()> {
-        self.get_schema_mut(db_name, schema_name).map_or(
-            Err(CatalogError::NotFound("table", table.table_name.to_string()).into()),
-            |schema| schema.create_table(table),
-        )
-    }
-
-    fn get_table(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Option<&TableCatalog> {
-        self.get_schema(db_name, schema_name)
-            .and_then(|schema| schema.get_table(table_name))
-    }
-
-    fn drop_table(&mut self, db_name: &str, schema_name: &str, table_name: &str) -> Result<()> {
-        self.get_schema_mut(db_name, schema_name).map_or(
-            Err(CatalogError::NotFound("schema", schema_name.to_string()).into()),
-            |schema| schema.drop_table(table_name),
-        )
-    }
-
-    fn drop_schema(&mut self, db_name: &str, schema_name: &str) -> Result<()> {
-        self.get_database_mut(db_name).map_or(
-            Err(CatalogError::NotFound("database", db_name.to_string()).into()),
-            |db| db.drop_schema(schema_name),
-        )
-    }
-
-    fn drop_database(&mut self, db_name: &str) -> Result<()> {
-        self.database_by_name.remove(db_name).ok_or_else(|| {
-            RwError::from(CatalogError::NotFound("database", db_name.to_string()))
-        })?;
-        Ok(())
-    }
-}
-
-/// For DDL (create table/schema/database), go through meta rpc first then update local catalog
-/// cache. For get catalog request (get table/schema/database), check the root catalog cache only.
-/// Should be used by DDL handler.
-///
-/// Some changes need to be done in future:
-/// 1. Support more fields for ddl in future (#2473)
-/// 2. MVCC of schema (`version` flag in message) (#2474).
+/// [`CatalogReader`] can read catalog from local catalog and force the holder can not modify it.
 #[derive(Clone)]
-pub struct CatalogConnector {
-    meta_client: MetaClient,
-    catalog_cache: Arc<Mutex<CatalogCache>>,
+pub struct CatalogReader(Arc<RwLock<Catalog>>);
+impl CatalogReader {
+    pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
+        CatalogReader(inner)
+    }
+    pub fn read_guard(&self) -> CatalogReadGuard {
+        self.0.read_arc()
+    }
 }
 
-impl CatalogConnector {
-    pub fn new(meta_client: MetaClient) -> Self {
+///  [`CatalogWriter`] is for DDL (create table/schema/database), it will only send rpc to meta and
+/// get the catalog version as response. then it will wait the local catalog to update to sync with
+/// the version.
+#[derive(Clone)]
+pub struct CatalogWriter {
+    meta_client: MetaClient,
+    catalog_updated_rx: Receiver<CatalogVersion>,
+}
+
+impl CatalogWriter {
+    pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
         Self {
             meta_client,
-            catalog_cache: Arc::new(Mutex::new(CatalogCache::new())),
+            catalog_updated_rx,
         }
+    }
+
+    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+        let mut rx = self.catalog_updated_rx.clone();
+        while *rx.borrow_and_update() < version {
+            rx.changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
+        Ok(())
     }
 
     pub async fn create_database(&self, db_name: &str) -> Result<()> {
-        let id = self
+        let (_, version) = self
             .meta_client
-            .create_database(Database {
-                database_name: db_name.to_string(),
-                // Do not support MVCC DDL now.
-                ..Default::default()
+            .create_database(ProstDatabase {
+                name: db_name.to_string(),
+                id: 0,
             })
             .await?;
-        self.catalog_cache
-            .lock()
-            .create_database(db_name, id as DatabaseId)?;
-        Ok(())
+        self.wait_version(version).await
     }
 
-    pub async fn create_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .lock()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id();
-        let schema_id = self
+    pub async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+        let (_, version) = self
             .meta_client
-            .create_schema(Schema {
-                schema_name: schema_name.to_string(),
-                version: 0,
-                schema_ref_id: Some(SchemaRefId {
-                    database_ref_id: Some(DatabaseRefId {
-                        database_id: database_id as i32,
-                    }),
-                    schema_id: 0,
-                }),
+            .create_schema(ProstSchema {
+                id: 0,
+                name: schema_name.to_string(),
+                database_id: db_id,
             })
             .await?;
-        self.catalog_cache
-            .lock()
-            .create_schema(db_name, schema_name, schema_id as SchemaId)?;
-        Ok(())
+        self.wait_version(version).await
     }
 
-    pub async fn create_table(
+    // TODO: it just change the catalog, just to unit test,will be deprecated soon
+    pub async fn create_materialized_view_workaround(&self, table: ProstTable) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_materialized_view(
+                table,
+                StreamNode {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.wait_version(version).await
+    }
+
+    // TODO: it just change the catalog, just to unit test,will be deprecated soon
+    pub async fn create_materialized_table_source_workaround(
         &self,
-        db_name: &str,
-        schema_name: &str,
-        mut table: Table,
+        table: ProstTable,
     ) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .lock()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let schema_id = self
-            .catalog_cache
-            .lock()
-            .get_schema(db_name, schema_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-            })?
-            .id() as i32;
-        let schema_ref_id = Some(SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id }),
-            schema_id,
-        });
-        table.table_ref_id = Some(TableRefId {
-            schema_ref_id: schema_ref_id.clone(),
-            table_id: 0,
-        });
-        // Append hidden column ROWID.
-        table.column_descs.insert(
-            0,
-            ColumnDesc {
-                name: ROWID_NAME.to_string(),
-                column_type: Some(DataType::Int64.to_protobuf()?),
-                ..Default::default()
-            },
-        );
-        let table_id = self.meta_client.create_table(table.clone()).await?;
-        // Create table locally.
-        table.table_ref_id = Some(TableRefId::from(&table_id));
-        self.catalog_cache
-            .lock()
-            .create_table(db_name, schema_name, &table)
-    }
-
-    pub async fn drop_table(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<()> {
-        let table_id = self
-            .catalog_cache
-            .lock()
-            .get_table(db_name, schema_name, table_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("table", table_name.to_string())))?
-            .id();
-
-        let table_ref_id = TableRefId::from(&table_id);
-        self.meta_client.drop_table(table_ref_id).await?;
-        // Drop table locally.
-        self.catalog_cache
-            .lock()
-            .drop_table(db_name, schema_name, table_name)
-            .unwrap();
-        Ok(())
-    }
-
-    pub async fn drop_schema(&self, db_name: &str, schema_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .lock()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let schema_id = self
-            .catalog_cache
-            .lock()
-            .get_schema(db_name, schema_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound("schema", schema_name.to_string()))
-            })?
-            .id() as i32;
-
-        let schema_ref_id = SchemaRefId {
-            database_ref_id: Some(DatabaseRefId { database_id }),
-            schema_id,
+        let table_clone = table.clone();
+        let table_source = ProstSource {
+            id: 0,
+            schema_id: table_clone.schema_id,
+            database_id: table_clone.database_id,
+            name: table_clone.name,
+            info: Some(risingwave_pb::catalog::source::Info::TableSource(
+                TableSourceInfo {
+                    columns: table_clone.columns,
+                },
+            )),
         };
-        self.meta_client.drop_schema(schema_ref_id).await?;
-        // Drop schema locally.
-        self.catalog_cache
-            .lock()
-            .drop_schema(db_name, schema_name)
-            .unwrap();
-        Ok(())
+        let (_, _, version) = self
+            .meta_client
+            .create_materialized_source(
+                table_source,
+                table,
+                StreamNode {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.wait_version(version).await
     }
 
-    pub async fn drop_database(&self, db_name: &str) -> Result<()> {
-        let database_id = self
-            .catalog_cache
-            .lock()
-            .get_database(db_name)
-            .ok_or_else(|| RwError::from(CatalogError::NotFound("database", db_name.to_string())))?
-            .id() as i32;
-        let database_ref_id = DatabaseRefId { database_id };
-        self.meta_client.drop_database(database_ref_id).await?;
-        // Drop database locally.
-        self.catalog_cache.lock().drop_database(db_name).unwrap();
-        Ok(())
+    /// for the `CREATE TABLE statement`
+    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
+        todo!()
     }
 
-    pub fn get_database_snapshot(&self, db_name: &str) -> Option<Arc<DatabaseCatalog>> {
-        self.catalog_cache.lock().get_database_snapshot(db_name)
-    }
-
-    /// Get catalog will not query meta service. The sync of schema is done by periodically push of
-    /// meta. Frontend should not pull and update the catalog voluntarily.
-    #[cfg(test)]
-    pub fn get_table(
+    // TODO: maybe here to pass a materialize plan node
+    pub async fn create_materialized_view(
         &self,
-        db_name: &str,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Option<TableCatalog> {
-        self.catalog_cache
-            .lock()
-            .get_table(db_name, schema_name, table_name)
-            .cloned()
-    }
-
-    #[cfg(test)]
-    pub fn get_database(&self, db_name: &str) -> Option<DatabaseCatalog> {
-        self.catalog_cache.lock().get_database(db_name).cloned()
-    }
-
-    #[cfg(test)]
-    pub fn get_schema(&self, db_name: &str, schema_name: &str) -> Option<SchemaCatalog> {
-        self.catalog_cache
-            .lock()
-            .get_schema(db_name, schema_name)
-            .cloned()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use risingwave_common::types::DataType;
-    use risingwave_meta::test_utils::LocalMeta;
-    use risingwave_pb::meta::table::Info;
-    use risingwave_pb::plan::{ColumnDesc, TableSourceInfo};
-
-    use crate::catalog::catalog_service::{
-        CatalogConnector, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
-    };
-
-    fn create_test_table(test_table_name: &str, columns: Vec<(String, DataType)>) -> Table {
-        let column_descs = columns
-            .iter()
-            .map(|c| ColumnDesc {
-                name: c.0.clone(),
-                column_type: Some(c.1.to_protobuf().unwrap()),
-                ..Default::default()
-            })
-            .collect();
-        Table {
-            table_name: test_table_name.to_string(),
-            column_descs,
-            info: Info::TableSource(TableSourceInfo::default()).into(),
-            ..Default::default()
-        }
-    }
-
-    use risingwave_pb::meta::{GetCatalogRequest, Table};
-
-    use crate::catalog::table_catalog::ROWID_NAME;
-
-    #[tokio::test]
-    async fn test_create_and_drop_table() {
-        // Init meta and catalog.
-        let meta = LocalMeta::start(12000).await;
-        let mut meta_client = meta.create_client().await;
-        let catalog_mgr = CatalogConnector::new(meta_client.clone());
-
-        // Create db and schema.
-        catalog_mgr
-            .create_database(DEFAULT_DATABASE_NAME)
-            .await
-            .unwrap();
-        assert!(catalog_mgr.get_database(DEFAULT_DATABASE_NAME).is_some());
-        catalog_mgr
-            .create_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await
-            .unwrap();
-        assert!(catalog_mgr
-            .get_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .is_some());
-
-        // Create table.
-        let test_table_name = "t";
-        let table = create_test_table(
-            test_table_name,
-            vec![
-                ("v1".to_string(), DataType::Int32),
-                ("v2".to_string(), DataType::Int32),
-            ],
-        );
-        catalog_mgr
-            .create_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, table)
-            .await
-            .unwrap();
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_some());
-
-        // Get catalog from meta and check the table info.
-        let req = GetCatalogRequest { node_id: 0 };
-        let response = meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap();
-        let catalog = response.get_ref().catalog.as_ref().unwrap();
-        assert_eq!(catalog.tables.len(), 1);
-        assert_eq!(catalog.tables[0].table_name, test_table_name);
-        let expected_table = create_test_table(
-            test_table_name,
-            vec![
-                (ROWID_NAME.to_string(), DataType::Int64),
-                ("v1".to_string(), DataType::Int32),
-                ("v2".to_string(), DataType::Int32),
-            ],
-        );
-        assert_eq!(catalog.tables[0].column_descs, expected_table.column_descs);
-
-        // -----  test drop table, schema and database  -----
-
-        catalog_mgr
-            .drop_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .await
-            .unwrap();
-        // Ensure the table has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the table has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.tables.len(), 0);
-            })
-            .unwrap();
-
-        catalog_mgr
-            .drop_schema(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .await
-            .unwrap();
-        // Ensure the schema has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the schema has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.schemas.len(), 0);
-            })
-            .unwrap();
-
-        catalog_mgr
-            .drop_database(DEFAULT_DATABASE_NAME)
-            .await
-            .unwrap();
-        // Ensure the db has been dropped from cache.
-        assert!(catalog_mgr
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, test_table_name)
-            .is_none());
-        // Ensure the db has been dropped from meta.
-        meta_client
-            .catalog_client
-            .get_catalog(req.clone())
-            .await
-            .unwrap()
-            .get_ref()
-            .catalog
-            .as_ref()
-            .map(|catalog| {
-                assert_eq!(catalog.databases.len(), 0);
-            })
-            .unwrap();
-
-        meta.stop().await;
+        _db_id: DatabaseId,
+        _schema_id: SchemaId,
+    ) -> Result<()> {
+        todo!()
     }
 }

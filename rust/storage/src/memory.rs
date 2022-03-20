@@ -1,4 +1,19 @@
-use std::collections::{btree_map, BTreeMap};
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -9,15 +24,20 @@ use lazy_static::lazy_static;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{StateStore, StateStoreIter};
 
+type KeyWithEpoch = (Bytes, Reverse<u64>);
+
 /// An in-memory state store
+///
+/// The in-memory state store is a [`BTreeMap`], which maps (key, epoch) to value. It never does GC,
+/// so the memory usage will be high. At the same time, everytime we create a new iterator on
+/// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
+/// store should never be used in production.
 #[derive(Clone)]
 pub struct MemoryStateStore {
-    inner: Arc<Mutex<BTreeMap<Bytes, Bytes>>>,
-
-    stats: Arc<StateStoreStats>,
+    /// store (key, epoch) -> value
+    inner: Arc<Mutex<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
 }
 
 impl Default for MemoryStateStore {
@@ -26,19 +46,19 @@ impl Default for MemoryStateStore {
     }
 }
 
-fn to_bytes_range<R, B>(range: R) -> (Bound<Bytes>, Bound<Bytes>)
+fn to_bytes_range<R, B>(range: R) -> (Bound<KeyWithEpoch>, Bound<KeyWithEpoch>)
 where
     R: RangeBounds<B> + Send,
     B: AsRef<[u8]>,
 {
     let start = match range.start_bound() {
-        Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
-        Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+        Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
+        Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
         Unbounded => Unbounded,
     };
     let end = match range.end_bound() {
-        Included(k) => Included(Bytes::copy_from_slice(k.as_ref())),
-        Excluded(k) => Excluded(Bytes::copy_from_slice(k.as_ref())),
+        Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
+        Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
         Unbounded => Unbounded,
     };
     (start, end)
@@ -48,7 +68,6 @@ impl MemoryStateStore {
     pub fn new() -> Self {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
         }
     }
 
@@ -59,14 +78,14 @@ impl MemoryStateStore {
         STORE.clone()
     }
 
-    async fn ingest_batch_inner(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn ingest_batch_inner(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
         let mut inner = self.inner.lock().await;
         for (key, value) in kv_pairs {
-            if let Some(value) = value {
-                inner.insert(key, value);
-            } else {
-                inner.remove(&key);
-            }
+            inner.insert((key, Reverse(epoch)), value);
         }
         Ok(())
     }
@@ -75,6 +94,7 @@ impl MemoryStateStore {
         &self,
         key_range: R,
         limit: Option<usize>,
+        epoch: u64,
     ) -> Result<Vec<(Bytes, Bytes)>>
     where
         R: RangeBounds<B> + Send,
@@ -85,11 +105,18 @@ impl MemoryStateStore {
             return Ok(vec![]);
         }
         let inner = self.inner.lock().await;
-        for (key, value) in inner.range(to_bytes_range(key_range)) {
-            self.stats
-                .iter_next_size
-                .observe((key.len() + value.len()) as f64);
-            data.push((key.clone(), value.clone()));
+
+        let mut last_key = None;
+        for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
+            if *key_epoch > epoch {
+                continue;
+            }
+            if Some(key) != last_key.as_ref() {
+                if let Some(value) = value {
+                    data.push((key.clone(), value.clone()));
+                }
+                last_key = Some(key.clone());
+            }
             if let Some(limit) = limit && data.len() >= limit {
                 break;
             }
@@ -99,25 +126,14 @@ impl MemoryStateStore {
 
     async fn reverse_scan_inner<R, B>(
         &self,
-        key_range: R,
-        limit: Option<usize>,
+        _key_range: R,
+        _limit: Option<usize>,
     ) -> Result<Vec<(Bytes, Bytes)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        let mut data = vec![];
-        if limit == Some(0) {
-            return Ok(vec![]);
-        }
-        let inner = self.inner.lock().await;
-        for (key, value) in inner.range(to_bytes_range(key_range)).rev() {
-            data.push((key.clone(), value.clone()));
-            if let Some(limit) = limit && data.len() >= limit {
-                break;
-            }
-        }
-        Ok(data)
+        todo!()
     }
 }
 
@@ -125,33 +141,26 @@ impl MemoryStateStore {
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
 
-    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.stats.get_counts.inc();
-        let timer = self.stats.get_latency.start_timer();
-        let inner = self.inner.lock().await;
-        let res = inner.get(key).cloned();
-        timer.observe_duration();
-
-        self.stats.get_key_size.observe(key.len() as f64);
-        self.stats
-            .get_value_size
-            .observe(res.as_ref().map(|x| x.len()).unwrap_or(0) as f64);
-
-        Ok(res)
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
+        let res = self.scan_inner(key..=key, Some(1), epoch).await?;
+        Ok(match res.as_slice() {
+            [] => None,
+            [(_, value)] => Some(value.clone()),
+            _ => unreachable!(),
+        })
     }
 
     async fn scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
-        _epoch: u64,
+        epoch: u64,
     ) -> Result<Vec<(Bytes, Bytes)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.range_scan_counts.inc();
-        self.scan_inner(key_range, limit).await
+        self.scan_inner(key_range, limit, epoch).await
     }
 
     async fn reverse_scan<R, B>(
@@ -164,44 +173,60 @@ impl StateStore for MemoryStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.reverse_range_scan_counts.inc();
         self.reverse_scan_inner(key_range, limit).await
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
-        // TODO: actually use epoch and support rollback
-        self.ingest_batch_inner(kv_pairs).await
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+        self.ingest_batch_inner(kv_pairs, epoch).await
     }
 
-    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        #[allow(clippy::mutable_key_type)]
-        let snapshot: BTreeMap<_, _> = self
-            .inner
-            .lock()
-            .await
-            .range(to_bytes_range(key_range))
-            .map(|(k, v)| (k.to_owned(), v.to_owned()))
-            .collect();
+        Ok(MemoryStateStoreIter::new(
+            self.scan_inner(key_range, None, epoch)
+                .await
+                .unwrap()
+                .into_iter(),
+        ))
+    }
 
-        Ok(MemoryStateStoreIter::new(snapshot.into_iter()))
+    async fn replicate_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Result<()> {
+        unimplemented!()
+    }
+
+    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]>,
+    {
+        unimplemented!()
+    }
+
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
+        // memory backend doesn't support wait for epoch, so this is a no-op.
+        Ok(())
+    }
+
+    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
+        // memory backend doesn't support push to S3, so this is a no-op
+        Ok(())
     }
 }
 
 pub struct MemoryStateStoreIter {
-    inner: btree_map::IntoIter<Bytes, Bytes>,
-    stats: Arc<StateStoreStats>,
+    inner: std::vec::IntoIter<(Bytes, Bytes)>,
 }
 
 impl MemoryStateStoreIter {
-    fn new(iter: btree_map::IntoIter<Bytes, Bytes>) -> Self {
-        Self {
-            inner: iter,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
-        }
+    fn new(iter: std::vec::IntoIter<(Bytes, Bytes)>) -> Self {
+        Self { inner: iter }
     }
 }
 
@@ -210,14 +235,66 @@ impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let timer = self.stats.iter_next_latency.start_timer();
-        let res = self.inner.next();
-        timer.observe_duration();
-        if res.is_some() {
-            self.stats
-                .iter_next_size
-                .observe((res.as_ref().unwrap().0.len() + res.as_ref().unwrap().1.len()) as f64)
-        }
-        Ok(res)
+        Ok(self.inner.next())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_snapshot_isolation() {
+        let state_store = MemoryStateStore::new();
+        state_store
+            .ingest_batch(
+                vec![
+                    (b"a".to_vec().into(), Some(b"v1".to_vec().into())),
+                    (b"b".to_vec().into(), Some(b"v1".to_vec().into())),
+                ],
+                0,
+            )
+            .await
+            .unwrap();
+        state_store
+            .ingest_batch(
+                vec![
+                    (b"a".to_vec().into(), Some(b"v2".to_vec().into())),
+                    (b"b".to_vec().into(), None),
+                ],
+                1,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            state_store.scan("a"..="b", None, 0).await.unwrap(),
+            vec![
+                (b"a".to_vec().into(), b"v1".to_vec().into()),
+                (b"b".to_vec().into(), b"v1".to_vec().into())
+            ]
+        );
+        assert_eq!(
+            state_store.scan("a"..="b", Some(1), 0).await.unwrap(),
+            vec![(b"a".to_vec().into(), b"v1".to_vec().into())]
+        );
+        assert_eq!(
+            state_store.scan("a"..="b", None, 1).await.unwrap(),
+            vec![(b"a".to_vec().into(), b"v2".to_vec().into())]
+        );
+        assert_eq!(
+            state_store.get(b"a", 0).await.unwrap(),
+            Some(b"v1".to_vec().into())
+        );
+        assert_eq!(
+            state_store.get(b"b", 0).await.unwrap(),
+            Some(b"v1".to_vec().into())
+        );
+        assert_eq!(state_store.get(b"c", 0).await.unwrap(), None);
+        assert_eq!(
+            state_store.get(b"a", 1).await.unwrap(),
+            Some(b"v2".to_vec().into())
+        );
+        assert_eq!(state_store.get(b"b", 1).await.unwrap(), None);
+        assert_eq!(state_store.get(b"c", 1).await.unwrap(), None);
     }
 }

@@ -1,11 +1,26 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use risingwave_pb::hummock::{
     AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
-    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo, UnpinSnapshotRequest,
-    UnpinVersionRequest,
+    HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinVersionRequest, VacuumTask,
 };
+use tonic::Streaming;
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::mock::MockHummockMetaService;
@@ -25,10 +40,13 @@ impl MockHummockMetaClient {
 
 #[async_trait]
 impl HummockMetaClient for MockHummockMetaClient {
-    async fn pin_version(&self) -> HummockResult<HummockVersion> {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
         let response = self
             .mock_hummock_meta_service
-            .pin_version(PinVersionRequest { context_id: 0 });
+            .pin_version(PinVersionRequest {
+                context_id: 0,
+                last_pinned,
+            });
         Ok(response.pinned_version.unwrap())
     }
 
@@ -41,10 +59,13 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(())
     }
 
-    async fn pin_snapshot(&self) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch> {
         let epoch = self
             .mock_hummock_meta_service
-            .pin_snapshot(PinSnapshotRequest { context_id: 0 })
+            .pin_snapshot(PinSnapshotRequest {
+                context_id: 0,
+                last_pinned,
+            })
             .snapshot
             .unwrap()
             .epoch;
@@ -83,10 +104,6 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn get_compaction_task(&self) -> HummockResult<Option<CompactTask>> {
-        unimplemented!()
-    }
-
     async fn report_compaction_task(
         &self,
         _compact_task: CompactTask,
@@ -103,5 +120,15 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
         unimplemented!()
+    }
+
+    async fn subscribe_compact_tasks(
+        &self,
+    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
+        unimplemented!()
+    }
+
+    async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> HummockResult<()> {
+        Ok(())
     }
 }

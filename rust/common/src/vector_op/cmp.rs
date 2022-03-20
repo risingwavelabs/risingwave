@@ -1,10 +1,23 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use core::convert::From;
 use std::any::type_name;
 use std::fmt::Debug;
 
-use crate::array::RwError;
 use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
+use crate::error::{Result, RwError};
 
 fn general_cmp<T1, T2, T3, F>(l: T1, r: T2, cmp: F) -> Result<bool>
 where

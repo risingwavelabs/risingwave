@@ -1,11 +1,28 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use hyper::{Body, Request, Response};
 use itertools::Itertools;
 use prometheus::{
-    histogram_opts, register_histogram_vec_with_registry, register_histogram_with_registry,
-    Encoder, Histogram, HistogramVec, Registry, TextEncoder, DEFAULT_BUCKETS,
+    histogram_opts, register_counter_vec_with_registry, register_histogram_vec_with_registry,
+    register_histogram_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, CounterVec, Encoder,
+    Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry, TextEncoder,
+    DEFAULT_BUCKETS,
 };
 use tower::make::Shared;
 use tower::ServiceBuilder;
@@ -23,6 +40,28 @@ pub struct MetaMetrics {
     pub grpc_latency: HistogramVec,
     /// latency of each barrier
     pub barrier_latency: Histogram,
+    /// max committed epoch
+    pub max_committed_epoch: IntGauge,
+    /// num of uncommitted SSTs,
+    pub uncommitted_sst_num: IntGauge,
+    /// num of SSTs in each level
+    pub level_sst_num: IntGaugeVec,
+    /// num of SSTs to be merged to next level in each level
+    pub level_compact_cnt: IntGaugeVec,
+    /// GBs read from current level during history compactions to next level
+    pub level_compact_read_curr: CounterVec,
+    /// GBs read from next level during history compactions to next level
+    pub level_compact_read_next: CounterVec,
+    /// GBs written into next level during history compactions to next level
+    pub level_compact_write: CounterVec,
+    /// num of SSTs read from current level during history compactions to next level
+    pub level_compact_read_sstn_curr: IntCounterVec,
+    /// num of SSTs read from next level during history compactions to next level
+    pub level_compact_read_sstn_next: IntCounterVec,
+    /// num of SSTs written into next level during history compactions to next level
+    pub level_compact_write_sstn: IntCounterVec,
+    /// num of compactions from each level to next level
+    pub level_compact_frequence: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -45,10 +84,107 @@ impl MetaMetrics {
         );
         let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let max_committed_epoch = register_int_gauge_with_registry!(
+            "storage_max_committed_epoch",
+            "max committed epoch",
+            registry
+        )
+        .unwrap();
+
+        let uncommitted_sst_num = register_int_gauge_with_registry!(
+            "storage_uncommitted_sst_num",
+            "num of uncommitted SSTs",
+            registry
+        )
+        .unwrap();
+
+        let level_sst_num = register_int_gauge_vec_with_registry!(
+            "storage_level_sst_num",
+            "num of SSTs in each level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_cnt = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_cnt",
+            "num of SSTs to be merged to next level in each level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_curr = register_counter_vec_with_registry!(
+            "storage_level_compact_read_curr",
+            "GBs read from current level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_next = register_counter_vec_with_registry!(
+            "storage_level_compact_read_next",
+            "GBs read from next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write = register_counter_vec_with_registry!(
+            "storage_level_compact_write",
+            "GBs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_curr = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_curr",
+            "num of SSTs read from current level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_read_sstn_next = register_int_counter_vec_with_registry!(
+            "storage_level_compact_read_sstn_next",
+            "num of SSTs read from next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_write_sstn = register_int_counter_vec_with_registry!(
+            "storage_level_compact_write_sstn",
+            "num of SSTs written into next level during history compactions to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
+        let level_compact_frequence = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequence",
+            "num of compactions from each level to next level",
+            &["level_index"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
             grpc_latency,
             barrier_latency,
+            max_committed_epoch,
+            uncommitted_sst_num,
+            level_sst_num,
+            level_compact_cnt,
+            level_compact_read_curr,
+            level_compact_read_next,
+            level_compact_write,
+            level_compact_read_sstn_curr,
+            level_compact_read_sstn_next,
+            level_compact_write_sstn,
+            level_compact_frequence,
         }
     }
 

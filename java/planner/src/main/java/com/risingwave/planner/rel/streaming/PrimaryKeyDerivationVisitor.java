@@ -267,12 +267,14 @@ public class PrimaryKeyDerivationVisitor
       case INNER:
       case LEFT:
       case FULL:
-        // We remark that we can process INNER, LEFT and FULL in the same way as in both cases
-        // we put the primary key indices of left child first, and right child second.
+        // We remark that we can process INNER, LEFT and FULL in the same way as in all cases.
+        // We put the primary key indices of left child first before all primary key indices of
+        // right child.
         var rightJoinKeyIndices = new HashSet<Integer>();
         var leftToRightJoinKeyIndices = new HashMap<Integer, Integer>();
         for (var p : joinInfo.pairs()) {
-          // We remark that target is left key index, source is right key index
+          // Source is a left key index.
+          // Target is the corresponding right key index.
           leftToRightJoinKeyIndices.putIfAbsent(p.source, p.target);
         }
         LOGGER.debug("leftToRightJoinKeyIndices:" + leftToRightJoinKeyIndices);
@@ -285,9 +287,9 @@ public class PrimaryKeyDerivationVisitor
             rightJoinKeyIndices.add(leftToRightJoinKeyIndices.get(newLeftPrimaryKeyIndex));
           }
         }
-        // It is possible that the output key of left child may be a join key
+        // It is possible that a primary key of left child is also a join key.
         // We do NOT want to add the same join key twice when we process new right child.
-        // But we DO need to add other non-join-key primary key from the new right child.
+        // But we DO need to add other non-join-key primary key of the new right child.
         for (var newRightPrimaryKeyIndex : rightRes.info.getPrimaryKeyIndices()) {
           if (!rightJoinKeyIndices.contains(newRightPrimaryKeyIndex + originalLeftFieldCount)) {
             primaryKeyIndices.add(newRightPrimaryKeyIndex + newLeftFieldCount);
@@ -298,7 +300,6 @@ public class PrimaryKeyDerivationVisitor
         var leftJoinKeyIndices = new HashSet<Integer>();
         var rightToLeftJoinKeyIndices = new HashMap<Integer, Integer>();
         for (var p : joinInfo.pairs()) {
-          // We remark that target is left key index, source is right key index.
           rightToLeftJoinKeyIndices.putIfAbsent(p.target, p.source);
         }
         LOGGER.debug("rightToLeftJoinKeyIndices:" + rightToLeftJoinKeyIndices);
@@ -307,6 +308,9 @@ public class PrimaryKeyDerivationVisitor
         // We put the primary key of right child first, and left child second.
         for (var newRightPrimaryKeyIndex : rightRes.info.getPrimaryKeyIndices()) {
           primaryKeyIndices.add(newRightPrimaryKeyIndex + newLeftFieldCount);
+          // Since we are using the original `joinInfo` above, we add `originalLeftFieldCount` to
+          // the primary
+          // key index of right child.
           if (rightToLeftJoinKeyIndices.containsKey(
               newRightPrimaryKeyIndex + originalLeftFieldCount)) {
             leftJoinKeyIndices.add(
@@ -320,8 +324,15 @@ public class PrimaryKeyDerivationVisitor
           }
         }
         break;
+      case ANTI:
+      case SEMI:
+        // Since both ANTI and SEMI join output only records from their left child, we just reuse
+        // the info returned
+        // from the left child.
+        primaryKeyIndices = leftRes.info.getPrimaryKeyIndices();
+        break;
       default:
-        throw new IllegalArgumentException("Only support inner hash join now");
+        throw new UnsupportedOperationException(joinType + " is not supported yet");
     }
     LOGGER.debug("primary key indices:" + primaryKeyIndices);
     var info =

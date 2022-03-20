@@ -1,24 +1,58 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatService;
 use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
 use tonic::{Request, Response, Status};
 
-#[derive(Clone)]
-pub struct HeartbeatServiceImpl {}
+use crate::cluster::StoredClusterManagerRef;
+use crate::storage::MetaStore;
 
-impl HeartbeatServiceImpl {
-    pub fn new() -> Self {
-        HeartbeatServiceImpl {}
+#[derive(Clone)]
+pub struct HeartbeatServiceImpl<S>
+where
+    S: MetaStore,
+{
+    cluster_manager_ref: StoredClusterManagerRef<S>,
+}
+
+impl<S> HeartbeatServiceImpl<S>
+where
+    S: MetaStore,
+{
+    pub fn new(cluster_manager_ref: StoredClusterManagerRef<S>) -> Self {
+        HeartbeatServiceImpl {
+            cluster_manager_ref,
+        }
     }
 }
 
 #[async_trait::async_trait]
-impl HeartbeatService for HeartbeatServiceImpl {
-    #[cfg(not(tarpaulin_include))]
+impl<S> HeartbeatService for HeartbeatServiceImpl<S>
+where
+    S: MetaStore,
+{
+    #[cfg_attr(coverage, no_coverage)]
     async fn heartbeat(
         &self,
         request: Request<HeartbeatRequest>,
     ) -> Result<Response<HeartbeatResponse>, Status> {
-        let _req = request.into_inner();
-        Ok(Response::new(HeartbeatResponse { status: None }))
+        let req = request.into_inner();
+        let result = self.cluster_manager_ref.heartbeat(req.node_id).await;
+        match result {
+            Ok(_) => Ok(Response::new(HeartbeatResponse { status: None })),
+            Err(e) => Err(e.to_grpc_status()),
+        }
     }
 }

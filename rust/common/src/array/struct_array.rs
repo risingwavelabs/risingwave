@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
@@ -5,9 +19,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use itertools::Itertools;
-use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, StructArrayData,
-};
+use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
 
 use super::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayIterator, ArrayMeta, NULL_VAL_FOR_HASH,
@@ -140,27 +152,19 @@ impl Array for StructArray {
         ArrayIterator::new(self)
     }
 
-    fn to_protobuf(&self) -> Result<ProstArray> {
-        let children_array = self
-            .children
-            .iter()
-            .map(|a| a.to_protobuf())
-            .collect::<Result<Vec<ProstArray>>>()?;
-        let children_type = self
-            .children_type
-            .iter()
-            .map(|t| t.to_protobuf())
-            .collect::<Result<Vec<ProstDataType>>>()?;
-        Ok(ProstArray {
+    fn to_protobuf(&self) -> ProstArray {
+        let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
+        let children_type = self.children_type.iter().map(|t| t.to_protobuf()).collect();
+        ProstArray {
             array_type: ProstArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
                 children_array,
                 children_type,
             }),
             list_array_data: None,
-            null_bitmap: Some(self.bitmap.to_protobuf()?),
+            null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
-        })
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {
@@ -387,7 +391,7 @@ mod tests {
     #[test]
     fn test_struct_new_empty() {
         let arr = StructArray::from_slices(&[true, false, true, false], vec![], vec![]).unwrap();
-        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
     }
 
@@ -403,7 +407,7 @@ mod tests {
             vec![DataType::Int32, DataType::Float32],
         )
         .unwrap();
-        let actual = StructArray::from_protobuf(&arr.to_protobuf().unwrap()).unwrap();
+        let actual = StructArray::from_protobuf(&arr.to_protobuf()).unwrap();
         assert_eq!(ArrayImpl::Struct(arr), actual);
 
         let arr = try_match_expand!(actual, ArrayImpl::Struct).unwrap();

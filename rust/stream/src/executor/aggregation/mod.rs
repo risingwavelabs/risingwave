@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 mod agg_executor;
 pub use agg_executor::*;
 
@@ -10,6 +24,8 @@ mod foldable;
 pub use foldable::*;
 
 mod row_count;
+mod single_value;
+
 use dyn_clone::{self, DynClone};
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
@@ -22,6 +38,8 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::*;
 pub use row_count::*;
+
+use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
@@ -172,6 +190,60 @@ pub fn create_streaming_agg_state(
                     (Max, decimal, decimal, StreamingMaxAgg::<DecimalArray>),
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
+                    (
+                        SingleValue,
+                        int16,
+                        int16,
+                        StreamingSingleValueAgg::<I16Array>
+                    ),
+                    (
+                        SingleValue,
+                        int32,
+                        int32,
+                        StreamingSingleValueAgg::<I32Array>
+                    ),
+                    (
+                        SingleValue,
+                        int64,
+                        int64,
+                        StreamingSingleValueAgg::<I64Array>
+                    ),
+                    (
+                        SingleValue,
+                        float32,
+                        float32,
+                        StreamingSingleValueAgg::<F32Array>
+                    ),
+                    (
+                        SingleValue,
+                        float64,
+                        float64,
+                        StreamingSingleValueAgg::<F64Array>
+                    ),
+                    (
+                        SingleValue,
+                        boolean,
+                        boolean,
+                        StreamingSingleValueAgg::<BoolArray>
+                    ),
+                    (
+                        SingleValue,
+                        decimal,
+                        decimal,
+                        StreamingSingleValueAgg::<DecimalArray>
+                    ),
+                    (
+                        SingleValue,
+                        char,
+                        char,
+                        StreamingSingleValueAgg::<Utf8Array>
+                    ),
+                    (
+                        SingleValue,
+                        varchar,
+                        varchar,
+                        StreamingSingleValueAgg::<Utf8Array>
+                    )
                 ]
             )
         }

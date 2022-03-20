@@ -1,132 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+pub mod cell_based_table;
 pub mod mview;
-pub mod row_table;
-mod simple_manager;
-pub mod test;
 
-use std::any::Any;
-use std::borrow::Cow;
-use std::sync::Arc;
-
-use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::array::Row;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan::ColumnDesc;
-pub use simple_manager::*;
-
-use crate::TableColumnDesc;
-
-/// `TableManager` is an abstraction of managing a collection of tables.
-/// The interface between executors and storage should be table-oriented.
-/// `Database` is a logical concept and stored as metadata information.
-#[async_trait::async_trait]
-pub trait TableManager: Sync + Send + AsRef<dyn Any> {
-    /// Create a specific table.
-    async fn create_table_v2(
-        &self,
-        table_id: &TableId,
-        table_columns: Vec<TableColumnDesc>,
-    ) -> Result<ScannableTableRef>;
-
-    /// Get a specific table.
-    fn get_table(&self, table_id: &TableId) -> Result<ScannableTableRef>;
-
-    /// Drop a specific table.
-    async fn drop_table(&self, table_id: &TableId) -> Result<()>;
-
-    /// Create materialized view.
-    fn create_materialized_view(
-        &self,
-        table_id: &TableId,
-        columns: &[ColumnDesc],
-        pk_columns: Vec<usize>,
-        orderings: Vec<OrderType>,
-    ) -> Result<()>;
-
-    /// Create materialized view associated to table v2
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<ScannableTableRef>;
-
-    /// Drop materialized view.
-    async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()>;
-}
 
 #[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next(&mut self) -> Result<Option<Row>>;
 }
-
-#[async_trait::async_trait]
-pub trait ScannableTable: Sync + Send + Any + core::fmt::Debug {
-    /// Open and return an iterator.
-    async fn iter(&self, epoch: u64) -> Result<TableIterRef>;
-
-    /// Collect data chunk with the target `chunk_size` from the given `iter`, projected on
-    /// `indices`. If there's no more data, return `None`.
-    async fn collect_from_iter(
-        &self,
-        iter: &mut TableIterRef,
-        indices: &[usize],
-        chunk_size: Option<usize>,
-    ) -> Result<Option<DataChunk>> {
-        let schema = self.schema();
-        let mut builders = indices
-            .iter()
-            .map(|i| {
-                schema.fields()[*i]
-                    .data_type()
-                    .create_array_builder(chunk_size.unwrap_or(0))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        let mut row_count = 0;
-        for _ in 0..chunk_size.unwrap_or(usize::MAX) {
-            match iter.next().await? {
-                Some(row) => {
-                    for (&index, builder) in indices.iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&row.0[index])?;
-                    }
-                    row_count += 1;
-                }
-                None => break,
-            }
-        }
-
-        let chunk = if indices.is_empty() {
-            // Generate some dummy data to ensure a correct cardinality, which might be used by
-            // count(*).
-            DataChunk::new_dummy(row_count)
-        } else {
-            let columns: Vec<Column> = builders
-                .into_iter()
-                .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-                .try_collect()?;
-            DataChunk::builder().columns(columns).build()
-        };
-
-        if chunk.cardinality() == 0 {
-            Ok(None)
-        } else {
-            Ok(Some(chunk))
-        }
-    }
-
-    fn into_any(self: Arc<Self>) -> Arc<dyn Any + Sync + Send>;
-
-    fn schema(&self) -> Cow<Schema>;
-
-    fn column_descs(&self) -> Cow<[TableColumnDesc]>;
-
-    /// Indicates whether this table is backed with a shared storage. The behavior of distributed
-    /// scanning differs according to this property.
-    fn is_shared_storage(&self) -> bool;
-}
-/// Reference of a `TableManager`.
-pub type TableManagerRef = Arc<dyn TableManager>;
-pub type ScannableTableRef = Arc<dyn ScannableTable>;
-pub type TableIterRef = Box<dyn TableIter>;

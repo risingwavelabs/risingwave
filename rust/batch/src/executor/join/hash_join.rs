@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::convert::TryInto;
 use std::mem::take;
 
@@ -551,8 +565,8 @@ mod tests {
                 ));
 
                 let column2 = Column::new(Arc::new(
-          array! {F64Array, [Some(5.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
-        ));
+                array! {F64Array, [Some(5.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -705,9 +719,8 @@ mod tests {
         ));
 
         let column2 = Column::new(Arc::new(
-      array! {F64Array, [None, None, None, Some(5.7f64), None, None, Some(7.5f64), Some(5.7f64),
-      None, None, None, None]}
-      .into(),
+            array! {F64Array, [None, None, None, Some(5.7f64), None, None, Some(7.5f64), Some(5.7f64),
+                None, None, None, None]}.into(),
     ));
 
         let expected_chunk =
@@ -726,10 +739,10 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              None, Some(3.9f32), Some(3.9f32), Some(6.6), None,
-              None, None, None, None, None,
-              None, None, None, None, None,
-              None, None, None, None, None
+                None, Some(3.9f32), Some(3.9f32), Some(6.6), None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None
             ]}
             .into(),
         ));
@@ -758,24 +771,24 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32),
-              None, Some(6.6f32), None, None, Some(0.7f32),
-              None, Some(5.5f32), None, None, None,
-              None, None, None, None, None,
-              None, None, None, None, None,
-              None
+                Some(6.1f32), None, Some(8.4f32), Some(3.9f32), Some(3.9f32),
+                None, Some(6.6f32), None, None, Some(0.7f32),
+                None, Some(5.5f32), None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None,
+                None
             ]}
             .into(),
         ));
 
         let column2 = Column::new(Arc::new(
             array! {F64Array, [
-              None, None, None, Some(5.7f64), None,
-              None, Some(7.5f64), Some(5.7f64), None, None,
-              None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
-              None, None, Some(8.0f64), None, Some(9.1f64),
-              None, None, Some(9.6f64), None, Some(8.18f64),
-              None
+                None, None, None, Some(5.7f64), None,
+                None, Some(7.5f64), Some(5.7f64), None, None,
+                None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
+                None, None, Some(8.0f64), None, Some(9.1f64),
+                None, None, Some(9.6f64), None, Some(8.18f64),
+                None
             ]}
             .into(),
         ));
@@ -792,7 +805,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              Some(6.1f32), Some(8.4f32), None, Some(0.7f32), None, Some(5.5f32)
+                Some(6.1f32), Some(8.4f32), None, Some(0.7f32), None, Some(5.5f32)
             ]}
             .into(),
         ));
@@ -808,7 +821,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [
-              None, Some(3.9f32), Some(6.6f32), None
+                None, Some(3.9f32), Some(6.6f32), None
             ]}
             .into(),
         ));
@@ -824,9 +837,9 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F64Array, [
-              Some(6.1f64), Some(8.9f64), Some(3.5f64), None, None,
-              Some(8.0f64), None, Some(9.1f64), None, None,
-              Some(9.6f64), None, Some(8.18f64), None
+                Some(6.1f64), Some(8.9f64), Some(3.5f64), None, None,
+                Some(8.0f64), None, Some(9.1f64), None, None,
+                Some(9.6f64), None, Some(8.18f64), None
             ]}
             .into(),
         ));
@@ -842,7 +855,7 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F64Array, [
-              None, Some(5.7f64), None, Some(7.5f64)
+                None, Some(5.7f64), None, Some(7.5f64)
             ]}
             .into(),
         ));

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use crate::array::*;
 use crate::error::{ErrorCode, Result};
 use crate::types::*;
@@ -260,15 +274,9 @@ mod tests {
 
     #[test]
     fn vec_agg_group() -> Result<()> {
-        let mut g0 = GeneralSortedGrouper::<I32Array> {
-            ongoing: false,
-            group_value: None,
-        };
+        let mut g0 = GeneralSortedGrouper::<I32Array>::new(false, None);
         let mut g0_builder = I32ArrayBuilder::new(0)?;
-        let mut g1 = GeneralSortedGrouper::<I32Array> {
-            ongoing: false,
-            group_value: None,
-        };
+        let mut g1 = GeneralSortedGrouper::<I32Array>::new(false, None);
         let mut g1_builder = I32ArrayBuilder::new(0)?;
         let mut a = GeneralAgg::<I32Array, _, I64Array>::new(DataType::Int64, 0, sum);
         let mut a_builder = I64ArrayBuilder::new(0)?;
@@ -313,10 +321,7 @@ mod tests {
 
     #[test]
     fn vec_count_star() {
-        let mut g0 = GeneralSortedGrouper::<I32Array> {
-            ongoing: false,
-            group_value: None,
-        };
+        let mut g0 = GeneralSortedGrouper::<I32Array>::new(false, None);
         let mut g0_builder = I32ArrayBuilder::new(0).unwrap();
         let prost = AggCall {
             r#type: Type::Count as i32,

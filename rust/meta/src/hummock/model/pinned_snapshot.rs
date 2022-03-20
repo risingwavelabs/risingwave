@@ -1,20 +1,34 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use prost::Message;
-use risingwave_pb::hummock::{HummockContextPinnedSnapshot, HummockContextRefId};
+use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedSnapshot};
 use risingwave_storage::hummock::HummockEpoch;
 
 use crate::model::{MetadataModel, Transactional};
-use crate::storage::Transaction;
 
-/// Column family name for hummock context pinned snapshot
-/// `cf(hummock_context_pinned_snapshot)`: `HummockContextRefId` -> `HummockContextPinnedSnapshot`
-const HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_context_pinned_snapshot";
+/// Column family name for hummock pinned snapshot
+/// `cf(hummock_pinned_snapshot)`: `HummockContextRefId` -> `HummockPinnedSnapshot`
+const HUMMOCK_PINNED_SNAPSHOT_CF_NAME: &str = "cf/hummock_pinned_snapshot";
 
-impl MetadataModel for HummockContextPinnedSnapshot {
-    type ProstType = HummockContextPinnedSnapshot;
+/// `HummockPinnedSnapshot` tracks pinned snapshots by given context id.
+impl MetadataModel for HummockPinnedSnapshot {
+    type ProstType = HummockPinnedSnapshot;
     type KeyType = HummockContextRefId;
 
     fn cf_name() -> String {
-        String::from(HUMMOCK_CONTEXT_PINNED_SNAPSHOT_CF_NAME)
+        String::from(HUMMOCK_PINNED_SNAPSHOT_CF_NAME)
     }
 
     fn to_protobuf(&self) -> Self::ProstType {
@@ -36,15 +50,13 @@ impl MetadataModel for HummockContextPinnedSnapshot {
     }
 }
 
-pub trait HummockContextPinnedSnapshotExt {
+pub trait HummockPinnedSnapshotExt {
     fn pin_snapshot(&mut self, new_snapshot_id: HummockEpoch);
 
     fn unpin_snapshot(&mut self, pinned_snapshot_id: HummockEpoch);
-
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()>;
 }
 
-impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
+impl HummockPinnedSnapshotExt for HummockPinnedSnapshot {
     fn pin_snapshot(&mut self, epoch: HummockEpoch) {
         let found = self.snapshot_id.iter().position(|&v| v == epoch);
         if found.is_none() {
@@ -58,15 +70,6 @@ impl HummockContextPinnedSnapshotExt for HummockContextPinnedSnapshot {
             self.snapshot_id.remove(pos);
         }
     }
-
-    fn update_in_transaction(&self, trx: &mut Transaction) -> risingwave_common::error::Result<()> {
-        if self.snapshot_id.is_empty() {
-            self.delete_in_transaction(trx)?;
-        } else {
-            self.upsert_in_transaction(trx)?;
-        }
-        Ok(())
-    }
 }
 
-impl Transactional for HummockContextPinnedSnapshot {}
+impl Transactional for HummockPinnedSnapshot {}

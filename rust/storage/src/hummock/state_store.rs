@@ -1,5 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::ops::RangeBounds;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -7,7 +20,6 @@ use risingwave_common::error::Result;
 
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
@@ -24,12 +36,11 @@ impl HummockStateStore {
         Self { storage }
     }
 
-    pub fn storage(&self) -> HummockStorage {
-        self.storage.clone()
+    pub fn storage(&self) -> &HummockStorage {
+        &self.storage
     }
 }
 
-// Note(eric): How about removing HummockStateStore and just impl StateStore for HummockStorage?
 #[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
@@ -42,14 +53,8 @@ impl StateStore for HummockStateStore {
 
     async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
         self.storage
-            .write_batch(
-                kv_pairs
-                    .into_iter()
-                    .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-                epoch,
-            )
+            .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
-
         Ok(())
     }
 
@@ -58,12 +63,9 @@ impl StateStore for HummockStateStore {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        let timer = self.storage.stats.iter_seek_latency.start_timer();
         let inner = self.storage.range_scan(key_range, epoch).await?;
-        self.storage.stats.iter_counts.inc();
         let mut res = DirectedUserIterator::Forward(inner);
         res.rewind().await?;
-        timer.observe_duration();
         Ok(HummockStateStoreIter::new(res))
     }
 
@@ -79,22 +81,34 @@ impl StateStore for HummockStateStore {
         )))
     }
 
-    async fn wait_epoch(&self, epoch: u64) {
-        self.storage.wait_epoch(epoch).await;
+    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
+        self.storage.wait_epoch(epoch).await
+    }
+
+    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
+        self.storage.sync(epoch).await?;
+        Ok(())
+    }
+
+    async fn replicate_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        epoch: u64,
+    ) -> Result<()> {
+        self.storage
+            .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+            .await?;
+        Ok(())
     }
 }
 
 pub struct HummockStateStoreIter<'a> {
     inner: DirectedUserIterator<'a>,
-    stats: Arc<StateStoreStats>,
 }
 
 impl<'a> HummockStateStoreIter<'a> {
     fn new(inner: DirectedUserIterator<'a>) -> Self {
-        Self {
-            inner,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
-        }
+        Self { inner }
     }
 }
 
@@ -104,7 +118,6 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let timer = self.stats.iter_next_latency.start_timer();
         let iter = &mut self.inner;
 
         if iter.is_valid() {
@@ -113,10 +126,6 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
                 Bytes::copy_from_slice(iter.value()),
             );
             iter.next().await?;
-            timer.observe_duration();
-            self.stats
-                .iter_next_size
-                .observe((kv.0.len() + kv.1.len()) as f64);
             Ok(Some(kv))
         } else {
             Ok(None)

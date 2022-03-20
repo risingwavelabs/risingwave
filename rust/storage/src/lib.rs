@@ -1,3 +1,18 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+#![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
 #![warn(clippy::explicit_into_iter_loop)]
@@ -16,17 +31,15 @@
 #![feature(map_first_last)]
 #![feature(let_chains)]
 
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
-
+pub mod cell_based_row_deserializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
-pub mod metrics;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;
-mod store;
+pub mod store;
+pub mod store_impl;
 pub mod table;
 pub mod write_batch;
 
@@ -43,32 +56,8 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::{Keyspace, Segment};
-use risingwave_common::catalog::ColumnId;
-pub use store::{StateStore, StateStoreImpl, StateStoreIter};
-
-#[derive(Clone, Debug)]
-pub struct TableColumnDesc {
-    pub data_type: DataType,
-    pub column_id: ColumnId,
-    pub name: String, // for debugging
-}
-
-#[derive(Clone, Debug)]
-pub struct IndexDesc {
-    pub column_id: ColumnId,
-    pub data_type: DataType,
-    pub order: OrderType,
-}
-
-impl TableColumnDesc {
-    pub fn unnamed(column_id: ColumnId, data_type: DataType) -> TableColumnDesc {
-        TableColumnDesc {
-            data_type,
-            column_id,
-            name: String::new(),
-        }
-    }
-}
+pub use store::{StateStore, StateStoreIter};
+pub use store_impl::StateStoreImpl;
 
 pub enum TableScanOptions {
     SequentialScan,

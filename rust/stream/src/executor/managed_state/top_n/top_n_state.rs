@@ -1,12 +1,29 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::BTreeMap;
 
 use risingwave_common::array::Row;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, Datum};
+use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
+use crate::executor::managed_state::top_n::deserialize_bytes_to_pk_and_row;
 use crate::executor::managed_state::top_n::variants::*;
 
 /// This state is used for several ranges (e.g `[0, offset)`, `[offset+limit, +inf)` of elements in
@@ -36,6 +53,8 @@ pub struct ManagedTopNState<S: StateStore, const TOP_N_TYPE: usize> {
     data_types: Vec<DataType>,
     /// For deserializing `OrderedRow`.
     ordered_row_deserializer: OrderedRowDeserializer,
+    /// For deserializing `Row`.
+    cell_based_row_deserializer: CellBasedRowDeserializer,
 }
 
 impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
@@ -45,6 +64,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         keyspace: Keyspace<S>,
         data_types: Vec<DataType>,
         ordered_row_deserializer: OrderedRowDeserializer,
+        cell_based_row_deserializer: CellBasedRowDeserializer,
     ) -> Self {
         Self {
             top_n: BTreeMap::new(),
@@ -54,6 +74,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             keyspace,
             data_types,
             ordered_row_deserializer,
+            cell_based_row_deserializer,
         }
     }
 
@@ -268,6 +289,10 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         number_rows: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
+        // We remark that since we now encode a null row by only using a special cell encoding
+        // instead of # datum in Row of cell encodings. `top_n_count *
+        // self.data_types.len()` over-calculates the number of kv-pairs that we need to
+        // read from storage. But it is fine.
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
@@ -275,39 +300,11 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
                 epoch,
             )
             .await?;
-        let data_type_num = self.data_types.len();
-        // We must have enough cells to restore a complete row.
-        debug_assert_eq!(pk_row_bytes.len() % data_type_num, 0);
-        // cell-based storage format, so `self.data_types.len()`
-        let mut cell_restored = 0;
-        let mut res = vec![];
-        let mut datum_vec: Vec<Datum> = vec![];
-        for (i, (pk, cell_bytes)) in pk_row_bytes.into_iter().enumerate() {
-            let datum = deserialize_cell(&cell_bytes[..], &self.data_types[i % data_type_num])?;
-            datum_vec.push(datum);
-
-            cell_restored += 1;
-            if cell_restored == data_type_num {
-                cell_restored = 0;
-
-                let row = Row::new(std::mem::take(&mut datum_vec));
-                // format: [pk_buf | cell_idx (4B)]
-                // Take `pk_buf` out.
-                let mut pk_vec = pk.to_vec();
-                let pk_vec_len = pk_vec.len();
-                let pk_without_cell_idx = &mut pk_vec[0..pk_vec_len - 4];
-                if TOP_N_TYPE == TOP_N_MAX {
-                    pk_without_cell_idx
-                        .iter_mut()
-                        .for_each(|byte| *byte = !*byte);
-                };
-                let ordered_row = self
-                    .ordered_row_deserializer
-                    .deserialize(pk_without_cell_idx)?;
-                res.push((ordered_row, row));
-            }
-        }
-        Ok(res)
+        deserialize_bytes_to_pk_and_row::<TOP_N_TYPE>(
+            pk_row_bytes,
+            &mut self.ordered_row_deserializer,
+            &mut self.cell_based_row_deserializer,
+        )
     }
 
     /// We can fill in the cache from storage only when state is not dirty, i.e. right after
@@ -336,30 +333,24 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
     ) -> Result<()> {
         let mut write_batch = self.keyspace.state_store().start_write_batch();
         let mut local = write_batch.prefixify(&self.keyspace);
-
-        for (ordered_row, cells) in iterator {
-            let row_option = cells.into_option();
+        for (pk, cells) in iterator {
+            let row = cells.into_option();
             let pk_buf = match TOP_N_TYPE {
-                TOP_N_MIN => ordered_row.serialize(),
-                TOP_N_MAX => ordered_row.reverse_serialize(),
+                TOP_N_MIN => pk.serialize(),
+                TOP_N_MAX => pk.reverse_serialize(),
                 _ => unreachable!(),
             }?;
-            for cell_idx in 0..self.data_types.len() {
-                // format: [pk_buf | cell_idx (4B)]
-                let key_encoded = [&pk_buf[..], &serialize_cell_idx(cell_idx as i32)?[..]].concat();
-
-                match &row_option {
-                    Some(row) => {
-                        let cell_encoded = serialize_cell(&row[cell_idx])?;
-                        local.put(key_encoded, cell_encoded);
-                    }
-                    None => {
-                        local.delete(key_encoded);
-                    }
-                };
+            let column_ids = (0..self.data_types.len() as i32)
+                .map(ColumnId::from)
+                .collect::<Vec<_>>();
+            let bytes = serialize_pk_and_row(&pk_buf, &row, &column_ids)?;
+            for (key, value) in bytes {
+                match value {
+                    Some(val) => local.put(key, val),
+                    None => local.delete(key),
+                }
             }
         }
-
         write_batch.ingest(epoch).await.unwrap();
         Ok(())
     }
@@ -382,13 +373,11 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         Ok(())
     }
 
-    pub fn clear_cache(&mut self, force: bool) {
-        if !force {
-            assert!(
-                !self.is_dirty(),
-                "cannot clear cache while top n state is dirty"
-            );
-        }
+    pub fn clear_cache(&mut self) {
+        assert!(
+            !self.is_dirty(),
+            "cannot clear cache while top n state is dirty"
+        );
         self.top_n.clear();
     }
 }
@@ -403,6 +392,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -420,6 +410,14 @@ mod tests {
         order_types: Vec<OrderType>,
     ) -> ManagedTopNState<S, TOP_N_TYPE> {
         let ordered_row_deserializer = OrderedRowDeserializer::new(data_types.clone(), order_types);
+        let table_column_descs = data_types
+            .iter()
+            .enumerate()
+            .map(|(id, data_type)| {
+                ColumnDesc::unnamed(ColumnId::from(id as i32), data_type.clone())
+            })
+            .collect::<Vec<_>>();
+        let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
 
         ManagedTopNState::<S, TOP_N_TYPE>::new(
             Some(2),
@@ -427,6 +425,7 @@ mod tests {
             Keyspace::executor_root(store.clone(), 0x2333),
             data_types,
             ordered_row_deserializer,
+            cell_based_row_deserializer,
         )
     }
 

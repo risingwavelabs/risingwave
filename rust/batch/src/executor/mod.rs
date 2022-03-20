@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use drop_stream::*;
 use drop_table::*;
 use filter::*;
@@ -19,6 +33,7 @@ use top_n::*;
 
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
+pub use crate::executor::delete::DeleteExecutor;
 use crate::executor::generate_series::GenerateSeriesI32Executor;
 pub use crate::executor::insert::InsertExecutor;
 use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
@@ -31,6 +46,7 @@ use crate::task::{BatchEnvironment, TaskId};
 
 mod create_source;
 mod create_table;
+mod delete;
 mod drop_stream;
 mod drop_table;
 mod filter;
@@ -133,27 +149,28 @@ impl<'a> ExecutorBuilder<'a> {
 
     fn try_build(&self) -> Result<BoxedExecutor> {
         let real_executor = build_executor! { self,
-          NodeBody::CreateTable => CreateTableExecutor,
-          NodeBody::RowSeqScan => RowSeqScanExecutor,
-          NodeBody::Insert => InsertExecutor,
-          NodeBody::DropTable => DropTableExecutor,
-          NodeBody::Exchange => ExchangeExecutor,
-          NodeBody::Filter => FilterExecutor,
-          NodeBody::Project => ProjectionExecutor,
-          NodeBody::SortAgg => SortAggExecutor,
-          NodeBody::OrderBy => OrderByExecutor,
-          NodeBody::CreateSource => CreateSourceExecutor,
-          NodeBody::SourceScan => StreamScanExecutor,
-          NodeBody::TopN => TopNExecutor,
-          NodeBody::Limit => LimitExecutor,
-          NodeBody::Values => ValuesExecutor,
-          NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
-          NodeBody::HashJoin => HashJoinExecutorBuilder,
-          NodeBody::SortMergeJoin => SortMergeJoinExecutor,
-          NodeBody::DropSource => DropStreamExecutor,
-          NodeBody::HashAgg => HashAggExecutorBuilder,
-          NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
-          NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
+            NodeBody::CreateTable => CreateTableExecutor,
+            NodeBody::RowSeqScan => RowSeqScanExecutorBuilder,
+            NodeBody::Insert => InsertExecutor,
+            NodeBody::Delete => DeleteExecutor,
+            NodeBody::DropTable => DropTableExecutor,
+            NodeBody::Exchange => ExchangeExecutor,
+            NodeBody::Filter => FilterExecutor,
+            NodeBody::Project => ProjectionExecutor,
+            NodeBody::SortAgg => SortAggExecutor,
+            NodeBody::OrderBy => OrderByExecutor,
+            NodeBody::CreateSource => CreateSourceExecutor,
+            NodeBody::SourceScan => StreamScanExecutor,
+            NodeBody::TopN => TopNExecutor,
+            NodeBody::Limit => LimitExecutor,
+            NodeBody::Values => ValuesExecutor,
+            NodeBody::NestedLoopJoin => NestedLoopJoinExecutor,
+            NodeBody::HashJoin => HashJoinExecutorBuilder,
+            NodeBody::SortMergeJoin => SortMergeJoinExecutor,
+            NodeBody::DropSource => DropStreamExecutor,
+            NodeBody::HashAgg => HashAggExecutorBuilder,
+            NodeBody::MergeSortExchange => MergeSortExchangeExecutor,
+            NodeBody::GenerateInt32Series => GenerateSeriesI32Executor
         }?;
         let input_desc = real_executor.identity().to_string();
         Ok(Box::new(TraceExecutor::new(real_executor, input_desc)))

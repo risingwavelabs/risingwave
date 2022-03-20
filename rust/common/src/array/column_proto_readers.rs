@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::io::{Cursor, Read};
 
 use byteorder::{BigEndian, ReadBytesExt};
@@ -88,31 +102,31 @@ fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper
 
 macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
-      paste! {
-        $(
-          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
-            ensure!(
-              array.get_values().len() == 1,
-              "Must have only 1 buffer in a {} array", stringify!($type)
-            );
+        paste! {
+            $(
+            pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+                ensure!(
+                    array.get_values().len() == 1,
+                    "Must have only 1 buffer in a {} array", stringify!($type)
+                );
 
-            let buf = array.get_values()[0].get_body().as_slice();
+                let buf = array.get_values()[0].get_body().as_slice();
 
-            let mut builder = $builder::new(cardinality)?;
-            let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-            let mut cursor = Cursor::new(buf);
-            for not_null in bitmap.iter() {
-              if not_null {
-                builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
-              } else {
-                builder.append(None)?;
-              }
+                let mut builder = $builder::new(cardinality)?;
+                let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+                let mut cursor = Cursor::new(buf);
+                for not_null in bitmap.iter() {
+                    if not_null {
+                        builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
+                    } else {
+                        builder.append(None)?;
+                    }
+                }
+                let arr = builder.finish()?;
+                Ok(arr.into())
             }
-            let arr = builder.finish()?;
-            Ok(arr.into())
-          }
-        )*
-      }
+            )*
+        }
     };
 }
 

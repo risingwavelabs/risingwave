@@ -1,12 +1,26 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
 use super::{HummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
-use crate::monitor::{StateStoreStats, DEFAULT_STATE_STORE_STATS};
 
 pub enum DirectedUserIterator<'a> {
     Forward(UserIterator<'a>),
@@ -78,25 +92,27 @@ pub struct UserIterator<'a> {
     /// Only read values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
-    stats: Arc<StateStoreStats>,
+    /// Ensures the SSTs needed by `iterator` won't be vacuumed.
+    _version: Option<Arc<ScopedLocalVersion>>,
 }
 
-// TODO: decide wheher this should also impl `HummockIterator`
+// TODO: decide whether this should also impl `HummockIterator`
 impl<'a> UserIterator<'a> {
     /// Create [`UserIterator`] with maximum epoch.
     #[cfg(test)]
-    pub(crate) fn new(
+    pub(crate) fn for_test(
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
     ) -> Self {
-        Self::new_with_epoch(iterator, key_range, Epoch::MAX)
+        Self::new(iterator, key_range, Epoch::MAX, None)
     }
 
     /// Create [`UserIterator`] with given `read_epoch`.
-    pub(crate) fn new_with_epoch(
+    pub(crate) fn new(
         iterator: MergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
         read_epoch: u64,
+        version: Option<Arc<ScopedLocalVersion>>,
     ) -> Self {
         Self {
             iterator,
@@ -105,7 +121,7 @@ impl<'a> UserIterator<'a> {
             last_key: Vec::new(),
             last_val: Vec::new(),
             read_epoch,
-            stats: DEFAULT_STATE_STORE_STATS.clone(),
+            _version: version,
         }
     }
 
@@ -114,7 +130,7 @@ impl<'a> UserIterator<'a> {
     /// Returned result:
     /// - if `Ok(())` is returned, it means that the iterator successfully move to the next position
     ///   (may reach to the end and thus not valid)
-    /// - if `Err(_) ` is returned, it means that some error happended.
+    /// - if `Err(_) ` is returned, it means that some error happened.
     pub async fn next(&mut self) -> HummockResult<()> {
         while self.iterator.is_valid() {
             let full_key = self.iterator.key();
@@ -141,7 +157,7 @@ impl<'a> UserIterator<'a> {
                         return Ok(());
                     }
                     // It means that the key is deleted from the storage.
-                    // Deleted kv and the previous verisons (if any) of the key should not be
+                    // Deleted kv and the previous versions (if any) of the key should not be
                     // returned to user.
                     HummockValue::Delete => {}
                 }
@@ -193,7 +209,6 @@ impl<'a> UserIterator<'a> {
 
     /// Reset the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
-        let timer = self.stats.iter_seek_latency.start_timer();
         // handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
@@ -214,7 +229,6 @@ impl<'a> UserIterator<'a> {
         self.last_key.clear();
         // handle range scan when key > end_key
         let res = self.next().await;
-        timer.observe_duration();
         res
     }
 
@@ -235,16 +249,14 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, iterator_test_key_of, iterator_test_key_of_epoch, test_key,
-        test_value_of, upload_and_load_sst, TestIteratorBuilder, TEST_KEYS_COUNT,
+        gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
+        iterator_test_value_of, mock_sstable_store, test_key, TestIteratorBuilder, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
-    use crate::hummock::sstable::{SSTable, SSTableIterator};
+    use crate::hummock::sstable::SSTableIterator;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::SSTableBuilder;
-    use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
     async fn test_basic() {
@@ -253,7 +265,9 @@ mod tests {
                 TestIteratorBuilder::<FORWARD>::default()
                     .id(0)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
-                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
+                    .map_value(move |id, x| {
+                        iterator_test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    })
                     .finish()
             })
             .unzip();
@@ -264,7 +278,7 @@ mod tests {
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
         let mut i = 0;
@@ -292,7 +306,9 @@ mod tests {
                     .id(0)
                     .total(20)
                     .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
-                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
+                    .map_value(move |id, x| {
+                        iterator_test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    })
                     .finish()
             })
             .unzip();
@@ -303,7 +319,7 @@ mod tests {
             .collect_vec();
 
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
         // right edge case
@@ -342,32 +358,42 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete() {
+        let sstable_store = mock_sstable_store();
+
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
-            (0, 1, 100, HummockValue::Put(test_value_of(0, 1))),
+            (0, 1, 100, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 2, 300, HummockValue::Delete),
         ];
-        let table0 = add_kv_pair(kv_pairs).await;
+        let table0 =
+            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
             (0, 1, 200, HummockValue::Delete),
-            (0, 2, 400, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 400, HummockValue::Put(iterator_test_value_of(0, 2))),
         ];
-        let table1 = add_kv_pair(kv_pairs).await;
+        let table1 =
+            gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
 
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(SSTableIterator::new(Arc::new(table0))),
-            Box::new(SSTableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(
+                Arc::new(table0),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(
+                Arc::new(table1),
+                sstable_store.clone(),
+            )),
         ];
         let mi = MergeIterator::new(iters);
-        let mut ui = UserIterator::new(mi, (Unbounded, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
         // verify
         let k = ui.key();
         let v = ui.value();
         assert_eq!(k, user_key(iterator_test_key_of(0, 2).as_slice()));
-        assert_eq!(v, test_value_of(0, 2));
+        assert_eq!(v, iterator_test_value_of(0, 2));
 
         // only one valid kv pair
         ui.next().await.unwrap();
@@ -377,32 +403,36 @@ mod tests {
     // left..=end
     #[tokio::test]
     async fn test_range_inclusive() {
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 300, HummockValue::Put(iterator_test_value_of(0, 2))),
             (0, 2, 200, HummockValue::Delete),
             (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 3, 100, HummockValue::Put(iterator_test_value_of(0, 3))),
             (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 5, 100, HummockValue::Put(iterator_test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(iterator_test_value_of(0, 6))),
             (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 7, 100, HummockValue::Put(iterator_test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(iterator_test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
+        let table =
+            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
+            Arc::new(table),
+            sstable_store,
+        ))];
         let mi = MergeIterator::new(iters);
 
-        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
-        let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+        let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
+        let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, end_key));
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -454,31 +484,35 @@ mod tests {
     // left..end
     #[tokio::test]
     async fn test_range() {
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 300, HummockValue::Put(iterator_test_value_of(0, 2))),
             (0, 2, 200, HummockValue::Delete),
             (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 3, 100, HummockValue::Put(iterator_test_value_of(0, 3))),
             (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 5, 100, HummockValue::Put(iterator_test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(iterator_test_value_of(0, 6))),
+            (0, 7, 100, HummockValue::Put(iterator_test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(iterator_test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
+        let table =
+            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
+            Arc::new(table),
+            sstable_store,
+        ))];
         let mi = MergeIterator::new(iters);
 
-        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
-        let end_key = Excluded(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+        let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
+        let end_key = Excluded(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, end_key));
+        let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -530,30 +564,34 @@ mod tests {
     // ..=right
     #[tokio::test]
     async fn test_range_to_inclusive() {
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 300, HummockValue::Put(iterator_test_value_of(0, 2))),
             (0, 2, 200, HummockValue::Delete),
             (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 3, 100, HummockValue::Put(iterator_test_value_of(0, 3))),
             (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 5, 100, HummockValue::Put(iterator_test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(iterator_test_value_of(0, 6))),
             (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 7, 100, HummockValue::Put(iterator_test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(iterator_test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
+        let table =
+            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
+            Arc::new(table),
+            sstable_store,
+        ))];
         let mi = MergeIterator::new(iters);
-        let end_key = Included(user_key(key_range_test_key(0, 7, 0).as_slice()).to_vec());
+        let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (Unbounded, end_key));
+        let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -609,30 +647,34 @@ mod tests {
     // left..
     #[tokio::test]
     async fn test_range_from() {
+        let sstable_store = mock_sstable_store();
         // key=[table, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
-            (0, 0, 100, HummockValue::Put(test_value_of(0, 0))),
-            (0, 1, 200, HummockValue::Put(test_value_of(0, 1))),
+            (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
+            (0, 1, 200, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 1, 100, HummockValue::Delete),
-            (0, 2, 300, HummockValue::Put(test_value_of(0, 2))),
+            (0, 2, 300, HummockValue::Put(iterator_test_value_of(0, 2))),
             (0, 2, 200, HummockValue::Delete),
             (0, 2, 100, HummockValue::Delete),
-            (0, 3, 100, HummockValue::Put(test_value_of(0, 3))),
+            (0, 3, 100, HummockValue::Put(iterator_test_value_of(0, 3))),
             (0, 5, 200, HummockValue::Delete),
-            (0, 5, 100, HummockValue::Put(test_value_of(0, 5))),
-            (0, 6, 100, HummockValue::Put(test_value_of(0, 6))),
+            (0, 5, 100, HummockValue::Put(iterator_test_value_of(0, 5))),
+            (0, 6, 100, HummockValue::Put(iterator_test_value_of(0, 6))),
             (0, 7, 200, HummockValue::Delete),
-            (0, 7, 100, HummockValue::Put(test_value_of(0, 7))),
-            (0, 8, 100, HummockValue::Put(test_value_of(0, 8))),
+            (0, 7, 100, HummockValue::Put(iterator_test_value_of(0, 7))),
+            (0, 8, 100, HummockValue::Put(iterator_test_value_of(0, 8))),
         ];
-        let table = add_kv_pair(kv_pairs).await;
-        let iters: Vec<BoxedHummockIterator> =
-            vec![Box::new(SSTableIterator::new(Arc::new(table)))];
+        let table =
+            gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(SSTableIterator::new(
+            Arc::new(table),
+            sstable_store,
+        ))];
         let mi = MergeIterator::new(iters);
-        let begin_key = Included(user_key(key_range_test_key(0, 2, 0).as_slice()).to_vec());
+        let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
 
-        let mut ui = UserIterator::new(mi, (begin_key, Unbounded));
+        let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
 
         // ----- basic iterate -----
         ui.rewind().await.unwrap();
@@ -687,27 +729,5 @@ mod tests {
             .await
             .unwrap();
         assert!(!ui.is_valid());
-    }
-
-    // key=[table, idx, epoch], value
-    async fn add_kv_pair(kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>) -> SSTable {
-        const REMOTE_DIR: &str = "test";
-        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
-        for kv in kv_pairs {
-            b.add(
-                key_range_test_key(kv.0, kv.1, kv.2).as_slice(),
-                kv.3.as_slice(),
-            );
-        }
-        let (data, meta) = b.finish();
-        // get remote table
-        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        upload_and_load_sst(obj_client, 0, meta, data, REMOTE_DIR)
-            .await
-            .unwrap()
-    }
-
-    fn key_range_test_key(table: u64, idx: usize, epoch: u64) -> Vec<u8> {
-        iterator_test_key_of_epoch(table, idx, epoch)
     }
 }

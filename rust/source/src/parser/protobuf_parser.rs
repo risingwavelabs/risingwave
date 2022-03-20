@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::path::Path;
 
 use protobuf::descriptor::FileDescriptorSet;
@@ -118,7 +132,7 @@ impl ProtobufParser {
             .map(|f| {
                 let field_type = f.field_type(&self.descriptors);
                 let column_type =
-                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
+                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf();
                 Ok(ColumnDesc {
                     column_type: Some(column_type),
                     name: f.name().to_string(),
@@ -406,32 +420,32 @@ mod tests {
             columns,
             vec![
                 ColumnDesc {
-                    column_type: Some(DataType::Int32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int32.to_protobuf()),
                     name: "id".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "address".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "city".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Int64.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Int64.to_protobuf()),
                     name: "zipcode".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Float32.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Float32.to_protobuf()),
                     name: "rate".to_string(),
                     ..Default::default()
                 },
                 ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
+                    column_type: Some(DataType::Varchar.to_protobuf()),
                     name: "date".to_string(),
                     ..Default::default()
                 },

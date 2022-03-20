@@ -1,14 +1,27 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
 
 use futures::future::try_join_all;
 use log::debug;
-use risingwave_common::array::RwError;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
-use risingwave_pb::meta::table_fragments::State;
+use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
@@ -46,6 +59,7 @@ pub enum Command {
     /// it adds the table fragments info to meta store.
     CreateMaterializedView {
         table_fragments: TableFragments,
+        table_sink_map: HashMap<TableId, Vec<ActorId>>,
         dispatches: HashMap<ActorId, Vec<ActorInfo>>,
     },
 }
@@ -74,7 +88,10 @@ pub struct CommandContext<'a, S> {
 
     /// Resolved info in this barrier loop.
     // TODO: this could be stale when we are calling `post_collect`, check if it matters
-    info: &'a BarrierActorInfo,
+    pub info: &'a BarrierActorInfo,
+
+    pub prev_epoch: u64,
+    pub curr_epoch: u64,
 
     command: Command,
 }
@@ -84,12 +101,16 @@ impl<'a, S> CommandContext<'a, S> {
         fragment_manager: FragmentManagerRef<S>,
         clients: StreamClientsRef,
         info: &'a BarrierActorInfo,
+        prev_epoch: u64,
+        curr_epoch: u64,
         command: Command,
     ) -> Self {
         Self {
             fragment_manager,
             clients,
             info,
+            prev_epoch,
+            curr_epoch,
             command,
         }
     }
@@ -138,7 +159,7 @@ where
             Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
                 let table_id = TableId::from(&Some(table_ref_id.clone()));
-                let node_actors = self.fragment_manager.get_table_node_actors(&table_id)?;
+                let node_actors = self.fragment_manager.table_node_actors(&table_id)?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
@@ -167,13 +188,35 @@ where
             }
 
             Command::CreateMaterializedView {
-                table_fragments, ..
+                table_fragments,
+                dispatches,
+                table_sink_map,
             } => {
+                // TODO: all related updates should be done in one transaction.
                 let mut table_fragments = table_fragments.clone();
-                table_fragments.update_state(State::Created);
+                table_fragments.update_actors_state(ActorState::Running);
                 self.fragment_manager
                     .update_table_fragments(table_fragments)
                     .await?;
+
+                for (table_id, actors) in table_sink_map {
+                    let downstream_actors = dispatches
+                        .iter()
+                        .filter(|(upstream_actor_id, _)| actors.contains(upstream_actor_id))
+                        .map(|(upstream_actor_id, downstream_actor_infos)| {
+                            (
+                                *upstream_actor_id,
+                                downstream_actor_infos
+                                    .iter()
+                                    .map(|info| info.actor_id)
+                                    .collect(),
+                            )
+                        })
+                        .collect::<HashMap<ActorId, Vec<ActorId>>>();
+                    self.fragment_manager
+                        .update_table_fragments_downstream(table_id, &downstream_actors)
+                        .await?;
+                }
             }
         }
 

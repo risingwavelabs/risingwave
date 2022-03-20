@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashSet;
 use std::marker::PhantomData;
 
@@ -17,7 +31,7 @@ use crate::vector_op::agg::general_sorted_grouper::EqGroups;
 pub struct GeneralDistinctAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     return_type: DataType,
@@ -30,7 +44,7 @@ where
 impl<T, F, R> GeneralDistinctAgg<T, F, R>
 where
     T: Array,
-    F: Send + for<'a> RTFn<'a, T, R>,
+    F: for<'a> RTFn<'a, T, R>,
     R: Array,
 {
     pub fn new(return_type: DataType, input_col_idx: usize, f: F) -> Self {
@@ -49,25 +63,28 @@ where
             .value_at(row_id)
             .map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
         if self.exists.insert(value) {
-            self.result = (self.f)(
-                self.result.as_ref().map(|x| x.as_scalar_ref()),
-                input.value_at(row_id),
-            )
-            .map(|x| x.to_owned_scalar());
+            let datum = self
+                .f
+                .eval(
+                    self.result.as_ref().map(|x| x.as_scalar_ref()),
+                    input.value_at(row_id),
+                )?
+                .map(|x| x.to_owned_scalar());
+            self.result = datum;
         }
         Ok(())
     }
 
     fn update_concrete(&mut self, input: &T) -> Result<()> {
-        let r = input
-            .iter()
-            .filter(|scalar_ref| {
-                self.exists.insert(
-                    scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()),
-                )
-            })
-            .fold(self.result.as_ref().map(|x| x.as_scalar_ref()), &mut self.f)
-            .map(|x| x.to_owned_scalar());
+        let input = input.iter().filter(|scalar_ref| {
+            self.exists
+                .insert(scalar_ref.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value()))
+        });
+        let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
+        for datum in input {
+            cur = self.f.eval(cur, datum)?;
+        }
+        let r = cur.map(|x| x.to_owned_scalar());
         self.result = r;
         Ok(())
     }
@@ -90,7 +107,7 @@ where
             }
             let scalar_impl = v.map(|scalar_ref| scalar_ref.to_owned_scalar().to_scalar_value());
             if self.exists.insert(scalar_impl) {
-                cur = (self.f)(cur, v);
+                cur = self.f.eval(cur, v)?;
             }
         }
         self.result = cur.map(|x| x.to_owned_scalar());
@@ -102,7 +119,7 @@ macro_rules! impl_aggregator {
     ($input:ty, $input_variant:ident, $result:ty, $result_variant:ident) => {
         impl<F> Aggregator for GeneralDistinctAgg<$input, F, $result>
         where
-            F: 'static + Send + for<'a> RTFn<'a, $input, $result>,
+            F: for<'a> RTFn<'a, $input, $result>,
         {
             fn return_type(&self) -> DataType {
                 self.return_type.clone()

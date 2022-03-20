@@ -30,12 +30,26 @@ message TableRefId {
   int32 table_id = 2;
 }
 
-// ColumnDesc defines a column in a table
 message ColumnDesc {
   data.DataType column_type = 1;
-  string name = 2;
-  int32 column_id = 3;
-  bool is_hidden = 4;
+  int32 column_id = 2;
+  // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
+  string name = 3;
+}
+
+message OrderedColumnDesc {
+  ColumnDesc column_desc = 1;
+  OrderType order = 2;
+}
+
+message ColumnCatalog {
+  ColumnDesc column_desc = 1;
+  bool is_hidden = 2;
+}
+
+message CellBasedTableDesc {
+  uint32 table_id = 1;
+  repeated OrderedColumnDesc pk = 2;
 }
 
 message StreamSourceInfo {
@@ -56,9 +70,8 @@ message MaterializedViewInfo {
 }
 
 message RowSeqScanNode {
-  TableRefId table_ref_id = 1;
-  repeated int32 column_ids = 2;
-  repeated Field fields = 3;
+  CellBasedTableDesc table_desc = 1;
+  repeated ColumnDesc column_descs = 2;
 }
 
 message SourceScanNode {
@@ -82,8 +95,12 @@ message FilterScanNode {
 }
 
 message InsertNode {
-  TableRefId table_ref_id = 1;
+  TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
+}
+
+message DeleteNode {
+  TableRefId table_source_ref_id = 1;
 }
 
 message ValuesNode {
@@ -204,35 +221,29 @@ message GenerateInt32SeriesNode {
   int32 step = 3;
 }
 
-message QueryId {
-  string trace_id = 1;
-}
-
-message StageId {
-  QueryId query_id = 1;
-  uint32 stage_id = 2;
-}
-
+// Task is a running instance of Stage.
 message TaskId {
-  StageId stage_id = 1;
-  uint32 task_id = 2;
+  string query_id = 1;
+  uint32 stage_id = 2;
+  uint32 task_id = 3;
 }
 
-message TaskSinkId {
+// Every task will create N buffers (channels) for parent operators to fetch results from,
+// where N is the parallelism of parent stage.
+message TaskOutputId {
   TaskId task_id = 1;
-  uint32 sink_id = 2;
+  // The id of output channel to fetch from
+  uint32 output_id = 2;
 }
 
+// ExchangeSource describes where to read results from children operators
 message ExchangeSource {
-  TaskSinkId sink_id = 1;
+  TaskOutputId task_output_id = 1;
   common.HostAddress host = 2;
 }
 
 message ExchangeNode {
   repeated ExchangeSource sources = 1;
-  // An exchange only links to one stage, but a stage could be
-  // linked by multiple exchanges.
-  StageId source_stage_id = 2;
   repeated Field input_schema = 3;
 }
 
@@ -245,6 +256,7 @@ message PlanNode {
   repeated PlanNode children = 1;
   oneof node_body {
     InsertNode insert = 2;
+    DeleteNode delete = 3;
     ProjectNode project = 4;
     CreateTableNode create_table = 5;
     DropTableNode drop_table = 6;
@@ -269,6 +281,10 @@ message PlanNode {
   string identity = 24;
 }
 
+// ExchangeInfo determines how to distribute results to tasks of next stage.
+//
+// Note that the fragment itself does not know the where are the receivers. Instead, it prepares results in
+// N buffers and wait for parent operators (`Exchange` nodes) to pull data from a specified buffer
 message ExchangeInfo {
   enum DistributionMode {
     // No partitioning at all, used for root segment which aggregates query results
@@ -280,11 +296,7 @@ message ExchangeInfo {
     uint32 count = 1;
   }
   message HashInfo {
-    enum HashMethod {
-      CRC32 = 0;
-    }
     uint32 output_count = 1;
-    HashMethod hash_method = 2;
     repeated uint32 keys = 3;
   }
   DistributionMode mode = 1;
@@ -292,8 +304,6 @@ message ExchangeInfo {
     BroadcastInfo broadcast_info = 2;
     HashInfo hash_info = 3;
   }
-  // TODO: Add fields to optimize for local buffer
-
 }
 
 message PlanFragment {

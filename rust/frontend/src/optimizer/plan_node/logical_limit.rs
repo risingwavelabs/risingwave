@@ -1,35 +1,64 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
 
-use super::{BatchLimit, ColPrunable, IntoPlanRef, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::{WithDistribution, WithOrder, WithSchema};
+use super::{BatchLimit, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::optimizer::property::WithSchema;
 
+/// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
+    pub base: LogicalBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
-    schema: Schema,
 }
 
 impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
+        let ctx = input.ctx();
         let schema = input.schema().clone();
+        let base = LogicalBase {
+            schema,
+            id: ctx.borrow_mut().get_id(),
+            ctx: ctx.clone(),
+        };
         LogicalLimit {
             input,
             limit,
             offset,
-            schema,
+            base,
         }
     }
 
     /// the function will check if the cond is bool expression
     pub fn create(input: PlanRef, limit: usize, offset: usize) -> PlanRef {
-        Self::new(input, limit, offset).into_plan_ref()
+        Self::new(input, limit, offset).into()
+    }
+
+    pub fn limit(&self) -> usize {
+        self.limit
+    }
+
+    pub fn offset(&self) -> usize {
+        self.offset
     }
 }
+
 impl PlanTreeNodeUnary for LogicalLimit {
     fn input(&self) -> PlanRef {
         self.input.clone()
@@ -44,26 +73,24 @@ impl fmt::Display for LogicalLimit {
         todo!()
     }
 }
-impl WithOrder for LogicalLimit {}
-impl WithDistribution for LogicalLimit {}
-impl WithSchema for LogicalLimit {
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-}
+
 impl ColPrunable for LogicalLimit {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
         let new_input = self.input.prune_col(required_cols);
-        self.clone_with_input(new_input).into_plan_ref()
+        self.clone_with_input(new_input).into()
     }
 }
+
 impl ToBatch for LogicalLimit {
     fn to_batch(&self) -> PlanRef {
         let new_input = self.input().to_batch();
         let new_logical = self.clone_with_input(new_input);
-        BatchLimit::new(new_logical).into_plan_ref()
+        BatchLimit::new(new_logical).into()
     }
 }
+
 impl ToStream for LogicalLimit {
     fn to_stream(&self) -> PlanRef {
         panic!("there is no limit stream operator");

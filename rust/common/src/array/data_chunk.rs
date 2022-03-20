@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::convert::TryFrom;
 use std::fmt;
 use std::hash::BuildHasher;
@@ -55,7 +69,7 @@ pub struct DataChunk {
 }
 
 impl DataChunk {
-    fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
+    pub fn new(columns: Vec<Column>, visibility: Option<Bitmap>) -> Self {
         let cardinality = if let Some(bitmap) = &visibility {
             // with visibility bitmap
             let card = bitmap.iter().map(|visible| visible as usize).sum();
@@ -181,18 +195,21 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> Result<ProstDataChunk> {
-        ensure!(self.visibility.is_none());
+    pub fn to_protobuf(&self) -> ProstDataChunk {
+        assert!(
+            self.visibility.is_none(),
+            "must be compacted before transfer"
+        );
         let mut proto = ProstDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
         let column_ref = &mut proto.columns;
         for arr in &self.columns {
-            column_ref.push(arr.to_protobuf()?);
+            column_ref.push(arr.to_protobuf());
         }
 
-        Ok(proto)
+        proto
     }
 
     /// `compact` will convert the chunk to compact format.
@@ -324,8 +341,8 @@ impl DataChunk {
         column_idxes: &[usize],
         hasher_builder: H,
     ) -> Result<Vec<u64>> {
-        let mut states = Vec::with_capacity(self.cardinality());
-        states.resize_with(self.cardinality(), || hasher_builder.build_hasher());
+        let mut states = Vec::with_capacity(self.capacity());
+        states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
@@ -528,5 +545,11 @@ mod tests {
 +---+---+
 "
         );
+    }
+
+    #[test]
+    fn test_no_column_chunk() {
+        let chunk = DataChunk::new_dummy(10);
+        assert_eq!(chunk.rows().count(), 10);
     }
 }

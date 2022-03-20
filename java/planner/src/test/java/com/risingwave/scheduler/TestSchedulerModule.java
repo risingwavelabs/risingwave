@@ -29,7 +29,7 @@ public class TestSchedulerModule extends AbstractModule {
   @Provides
   static Configuration getConfiguration() {
     try (InputStream input =
-        TestSchedulerModule.class.getClassLoader().getResourceAsStream("leader.properties")) {
+        TestSchedulerModule.class.getClassLoader().getResourceAsStream("config.properties")) {
       return Configuration.load(input, LeaderServerConfigurations.class);
     } catch (IOException e) {
       throw new RuntimeException("Failed to load leader config.", e);

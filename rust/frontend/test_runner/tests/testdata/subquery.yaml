@@ -1,0 +1,50 @@
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v1 from (select * from t) where v2 > 1;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+      LogicalFilter { predicate: ($2 > 1:Int32) }
+        LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v1 from (select v2, v1 as v3 from t) where v2 > 1;
+  binder_error: |-
+    Item not found: Invalid column: v1
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select v3 from (select v2, v1 as v3 from t) where v2 > 1;
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [Some("v3")] }
+      LogicalFilter { predicate: ($0 > 1:Int32) }
+        LogicalProject { exprs: [$2, $1], expr_alias: [Some("v2"), Some("v3")] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    /* consecutive projects are directly merged */
+    create table t (v1 bigint, v2 double precision);
+    select v1, 2 from (select v1, v2, 1 from t);
+  logical_plan: |
+    LogicalProject { exprs: [$1, 2:Int32], expr_alias: [Some("v1"), None] }
+      LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t);
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+      LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    /* joins */
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t), t;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5], expr_alias: [Some("_row_id"), Some("v1"), Some("v2"), Some("_row_id"), Some("v1"), Some("v2")] }
+      LogicalJoin { type: Inner, on: true:Boolean }
+        LogicalProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
+- sql: |
+    /* table alias not supported yet */
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t) as tt join t on tt.v1=t.v1;
+  binder_error: |-
+    Item not found: missing FROM-clause entry for table "tt"

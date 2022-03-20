@@ -1,20 +1,33 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
-use risingwave_storage::table::ScannableTableRef;
-use risingwave_storage::TableColumnDesc;
 
 use crate::table_v2::TableSourceV2;
 use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-pub trait SourceManager: Sync + Send {
+pub trait SourceManager: Debug + Sync + Send {
     fn create_source(
         &self,
         source_id: &TableId,
@@ -24,12 +37,8 @@ pub trait SourceManager: Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
-    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()>;
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<()>;
+    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
+
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 }
@@ -44,8 +53,8 @@ pub struct SourceColumnDesc {
     pub skip_parse: bool,
 }
 
-impl From<&TableColumnDesc> for SourceColumnDesc {
-    fn from(c: &TableColumnDesc) -> Self {
+impl From<&ColumnDesc> for SourceColumnDesc {
+    fn from(c: &ColumnDesc) -> Self {
         Self {
             name: c.name.clone(),
             data_type: c.data_type.clone(),
@@ -56,7 +65,7 @@ impl From<&TableColumnDesc> for SourceColumnDesc {
 }
 
 /// `SourceDesc` is used to describe a `Source`
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SourceDesc {
     pub source: SourceRef,
     pub format: SourceFormat,
@@ -66,6 +75,7 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
+#[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
@@ -108,7 +118,7 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
-    fn create_table_source_v2(&self, table_id: &TableId, table: ScannableTableRef) -> Result<()> {
+    fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
         ensure!(
@@ -117,18 +127,13 @@ impl SourceManager for MemSourceManager {
             table_id
         );
 
-        let columns = table
-            .column_descs()
-            .iter()
-            .map(SourceColumnDesc::from)
-            .collect();
-
-        let source = SourceImpl::TableV2(TableSourceV2::new(table));
+        let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
+        let source = SourceImpl::TableV2(TableSourceV2::new(columns));
 
         // Table sources do not need columns and format
         let desc = SourceDesc {
             source: Arc::new(source),
-            columns,
+            columns: source_columns,
             format: SourceFormat::Invalid,
             row_id_index: Some(0), // always use the first column as row_id
         };
@@ -142,22 +147,6 @@ impl SourceManager for MemSourceManager {
         sources.get(table_id).cloned().ok_or_else(|| {
             InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
         })
-    }
-
-    fn register_associated_materialized_view(
-        &self,
-        associated_table_id: &TableId,
-        mview_id: &TableId,
-    ) -> Result<()> {
-        let mut sources = self.get_sources()?;
-        let source = sources
-            .get(associated_table_id)
-            .expect("no associated table")
-            .clone();
-
-        // Simply associate the mview id to the table source
-        sources.insert(*mview_id, source);
-        Ok(())
     }
 
     fn drop_source(&self, table_id: &TableId) -> Result<()> {
@@ -199,16 +188,11 @@ impl Default for MemSourceManager {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::*;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
-    use risingwave_common::column_nonnull;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::mview::MViewTable;
-    use risingwave_storage::table::test::TestTable;
-    use risingwave_storage::table::ScannableTable;
-    use risingwave_storage::{Keyspace, TableColumnDesc};
+    use risingwave_storage::Keyspace;
 
     use crate::*;
 
@@ -231,18 +215,8 @@ mod tests {
             properties: Default::default(),
         });
 
-        let table = Arc::new(TestTable::new(
-            &TableId::default(),
-            vec![TableColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)],
-        ));
-
-        let chunk0 = DataChunk::builder()
-            .columns(vec![column_nonnull!(I64Array, [0])])
-            .build();
-        table.append(chunk0).await.unwrap();
-
-        let source_columns = table
-            .column_descs()
+        let columns = vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
+        let source_columns = columns
             .iter()
             .map(|c| SourceColumnDesc {
                 name: "123".to_string(),
@@ -293,18 +267,17 @@ mod tests {
             .fields
             .iter()
             .enumerate()
-            .map(|(i, f)| TableColumnDesc {
+            .map(|(i, f)| ColumnDesc {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
             })
             .collect();
 
-        let keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
+        let _keyspace = Keyspace::table_root(MemoryStateStore::new(), &table_id);
 
-        let table_v2 = Arc::new(MViewTable::new_batch(keyspace, table_columns));
         let mem_source_manager = MemSourceManager::new();
-        let res = mem_source_manager.create_table_source_v2(&table_id, table_v2);
+        let res = mem_source_manager.create_table_source_v2(&table_id, table_columns);
         assert!(res.is_ok());
 
         // get source

@@ -1,88 +1,45 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::sync::Arc;
 
 use bytes::Bytes;
-use hyper::{Body, Request, Response};
-use prometheus::{Encoder, Registry, TextEncoder};
 
 use super::iterator::UserIterator;
-use super::{HummockOptions, HummockStorage};
+use super::HummockStorage;
+use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use crate::hummock::test_utils::default_config_for_test;
+use crate::monitor::StateStoreMetrics;
 use crate::object::InMemObjectStore;
 
-async fn prometheus_service(
-    _req: Request<Body>,
-    registry: &Registry,
-) -> Result<Response<Body>, hyper::Error> {
-    let encoder = TextEncoder::new();
-    let mut buffer = vec![];
-    let mf = registry.gather();
-    encoder.encode(&mf, &mut buffer).unwrap();
-    let response = Response::builder()
-        .header(hyper::header::CONTENT_TYPE, encoder.format_type())
-        .body(Body::from(buffer))
-        .unwrap();
-
-    Ok(response)
-}
-
 #[tokio::test]
-async fn test_prometheus_endpoint_hummock() {
-    // Create a hummock instance so as to fill the registry.
-    let hummock_options = HummockOptions::default_for_test();
-    let object_client = Arc::new(InMemObjectStore::new());
-    let local_version_manager = Arc::new(LocalVersionManager::new(
-        object_client.clone(),
-        &hummock_options.remote_dir,
-        None,
-    ));
-    let _hummock_storage = HummockStorage::new(
-        object_client,
-        hummock_options,
-        local_version_manager,
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
-    )
-    .await
-    .unwrap();
-
-    // Send a request to the prometheus service func.
-    let registry = prometheus::default_registry();
-    let mut response = prometheus_service(
-        Request::get("/metrics").body(Body::default()).unwrap(),
-        registry,
-    )
-    .await
-    .unwrap();
-
-    let bytes = hyper::body::to_bytes(response.body_mut()).await.unwrap();
-    let s = std::str::from_utf8(&bytes[..]).unwrap();
-
-    println!("\n---{}---\n", s);
-
-    assert!(s.contains("state_store_batched_write_counts"));
-    assert!(!s.contains("state_store_batched_counts"));
-}
-
-#[tokio::test]
-/// Fix this when we finished epoch management.
-#[ignore]
 async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
-    let hummock_options = HummockOptions::default_for_test();
-    let local_version_manager = Arc::new(LocalVersionManager::new(
-        object_client.clone(),
-        &hummock_options.remote_dir,
-        None,
-    ));
-    let hummock_storage = HummockStorage::new(
-        object_client,
+    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let hummock_options = Arc::new(default_config_for_test());
+
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
+        sstable_store,
         local_version_manager,
         Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
         ))),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -121,12 +78,7 @@ async fn test_basic() {
 
     // Write first batch.
     hummock_storage
-        .write_batch(
-            batch1
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch1,
-        )
+        .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
         .unwrap();
 
@@ -144,12 +96,7 @@ async fn test_basic() {
     // Write second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
-        .write_batch(
-            batch2
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch2,
-        )
+        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
         .await
         .unwrap();
 
@@ -160,12 +107,7 @@ async fn test_basic() {
     // Write third batch.
     let epoch3 = epoch2 + 1;
     hummock_storage
-        .write_batch(
-            batch3
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch3,
-        )
+        .write_batch(batch3.into_iter().map(|(k, v)| (k, v.into())), epoch3)
         .await
         .unwrap();
 
@@ -228,22 +170,20 @@ async fn count_iter(iter: &mut UserIterator<'_>) -> usize {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let mem_objstore = Arc::new(InMemObjectStore::new());
-    let hummock_options = HummockOptions::default_for_test();
-    let local_version_manager = Arc::new(LocalVersionManager::new(
-        mem_objstore.clone(),
-        &hummock_options.remote_dir,
-        None,
-    ));
+    let object_store = Arc::new(InMemObjectStore::new());
+    let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
+    let hummock_options = Arc::new(default_config_for_test());
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
     )));
 
-    let hummock_storage = HummockStorage::new(
-        mem_objstore.clone(),
+    let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
+        sstable_store.clone(),
         local_version_manager.clone(),
         hummock_meta_client.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -272,22 +212,18 @@ async fn test_reload_storage() {
 
     // Write first batch.
     hummock_storage
-        .write_batch(
-            batch1
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch1,
-        )
+        .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
         .unwrap();
 
     // Mock somthing happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
-    let hummock_storage = HummockStorage::new(
-        mem_objstore,
-        HummockOptions::default_for_test(),
+    let hummock_storage = HummockStorage::with_default_stats(
+        Arc::new(default_config_for_test()),
+        sstable_store,
         local_version_manager,
         hummock_meta_client,
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -306,12 +242,7 @@ async fn test_reload_storage() {
     // Write second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
-        .write_batch(
-            batch2
-                .into_iter()
-                .map(|(k, v)| (k.to_vec(), v.map(|x| x.to_vec()).into())),
-            epoch2,
-        )
+        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
         .await
         .unwrap();
 

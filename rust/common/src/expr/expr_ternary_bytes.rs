@@ -1,6 +1,19 @@
-use std::marker::PhantomData;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+//! For expression that accept 3 arguments + 1 bytes writer as input.
 
-/// For expression that accept 3 arguments + 1 bytes writer as input.
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::TernaryBytesExpression;
 use crate::expr::BoxedExpression;
@@ -15,14 +28,15 @@ pub fn new_substr_start_end(
     len: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(TernaryBytesExpression::<Utf8Array, I32Array, I32Array, _> {
-        expr_ia1: items,
-        expr_ia2: off,
-        expr_ia3: len,
-        return_type,
-        func: substr_start_for,
-        _phantom: PhantomData,
-    })
+    Box::new(
+        TernaryBytesExpression::<Utf8Array, I32Array, I32Array, _>::new(
+            items,
+            off,
+            len,
+            return_type,
+            substr_start_for,
+        ),
+    )
 }
 
 pub fn new_replace_expr(
@@ -32,14 +46,13 @@ pub fn new_replace_expr(
     return_type: DataType,
 ) -> BoxedExpression {
     Box::new(
-        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _> {
-            expr_ia1: s,
-            expr_ia2: from_str,
-            expr_ia3: to_str,
+        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _>::new(
+            s,
+            from_str,
+            to_str,
             return_type,
-            func: replace,
-            _phantom: PhantomData,
-        },
+            replace,
+        ),
     )
 }
 
@@ -50,14 +63,13 @@ pub fn new_translate_expr(
     return_type: DataType,
 ) -> BoxedExpression {
     Box::new(
-        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _> {
-            expr_ia1: s,
-            expr_ia2: match_str,
-            expr_ia3: replace_str,
+        TernaryBytesExpression::<Utf8Array, Utf8Array, Utf8Array, _>::new(
+            s,
+            match_str,
+            replace_str,
             return_type,
-            func: translate,
-            _phantom: PhantomData,
-        },
+            translate,
+        ),
     )
 }
 

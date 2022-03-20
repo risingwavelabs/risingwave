@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::cmp::Ordering;
 
 use risingwave_common::array::{DataChunk, Row, RowRef};
@@ -366,9 +380,11 @@ mod tests {
                     array! {I32Array, [Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
                 ));
                 let column2 = Column::new(Arc::new(
-          array! {F32Array, [Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}
-            .into(),
-        ));
+                    array! {F32Array, [
+                        Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)
+                    ]}
+                    .into(),
+                ));
 
                 let chunk =
                     DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");

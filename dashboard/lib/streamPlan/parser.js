@@ -1,3 +1,19 @@
+/*
+ * Copyright 2022 Singularity Data
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
 import { graphBfs, treeBfs } from "../algo";
 import { cloneDeep } from "lodash";
 
@@ -89,7 +105,6 @@ export class Actor {
 
   }
 }
-
 
 export default class StreamPlanParser {
   /**
@@ -272,9 +287,9 @@ export default class StreamPlanParser {
 
     let rootNode;
     this.parsedActorMap.set(actorId, actor);
-    if (actorProto.dispatcher && actorProto.dispatcher.type) {
+    if (actorProto.dispatcher && actorProto.dispatcher[0].type) {
       let nodeBeforeDispatcher = this.parseNode(actor.actorId, actorProto.nodes);
-      rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher.type, actorProto.downstreamActorId);
+      rootNode = this.newDispatcher(actor.actorId, actorProto.dispatcher[0].type, actorProto.downstreamActorId);
       rootNode.nextNodes = [nodeBeforeDispatcher];
     } else {
       rootNode = this.parseNode(actorId, actorProto.nodes);
@@ -315,7 +330,7 @@ export default class StreamPlanParser {
         this.parseActor(this.actorId2Proto.get(upStreamActorId)).output.push(newNode);
       }
     }
-
+    // console.log(newNode.typeInfo)
     if (newNode.type === "mviewNode") {
       this.actorIdTomviewNodes.set(actorId, newNode);
     }

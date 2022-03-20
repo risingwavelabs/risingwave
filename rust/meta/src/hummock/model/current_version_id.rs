@@ -1,18 +1,57 @@
-use prost::Message;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_common::error::Result;
-use risingwave_pb::hummock::hummock_version::HummockVersionRefId;
+use risingwave_pb::hummock::HummockVersionRefId;
 use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::storage::{MetaStore, Operation, Transaction};
+use crate::model::{MetadataModel, Transactional};
+use crate::storage::MetaStore;
 
-/// Hummock version id key.
+/// Hummock current version id key.
 /// `cf(hummock_default)`: `hummock_version_id_key` -> `HummockVersionRefId`
-const HUMMOCK_VERSION_ID_LEY: &str = "version_id";
+const HUMMOCK_VERSION_ID_KEY: &str = "current_version_id";
 
+/// `CurrentHummockVersionId` tracks the current version id.
+#[derive(Clone, Debug, PartialEq)]
 pub struct CurrentHummockVersionId {
     id: HummockVersionId,
 }
+
+impl MetadataModel for CurrentHummockVersionId {
+    type ProstType = HummockVersionRefId;
+    type KeyType = String;
+
+    fn cf_name() -> String {
+        HUMMOCK_DEFAULT_CF_NAME.to_string()
+    }
+
+    fn to_protobuf(&self) -> Self::ProstType {
+        HummockVersionRefId { id: self.id }
+    }
+
+    fn from_protobuf(prost: Self::ProstType) -> Self {
+        Self { id: prost.id }
+    }
+
+    fn key(&self) -> Result<Self::KeyType> {
+        Ok(HUMMOCK_VERSION_ID_KEY.to_string())
+    }
+}
+
+impl Transactional for CurrentHummockVersionId {}
 
 impl CurrentHummockVersionId {
     pub fn new() -> CurrentHummockVersionId {
@@ -21,25 +60,8 @@ impl CurrentHummockVersionId {
         }
     }
 
-    fn cf_name() -> &'static str {
-        HUMMOCK_DEFAULT_CF_NAME
-    }
-
-    fn key() -> &'static str {
-        HUMMOCK_VERSION_ID_LEY
-    }
-
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<CurrentHummockVersionId> {
-        let byte_vec = meta_store_ref
-            .get_cf(
-                CurrentHummockVersionId::cf_name(),
-                CurrentHummockVersionId::key().as_bytes(),
-            )
-            .await?;
-        let instant = CurrentHummockVersionId {
-            id: HummockVersionRefId::decode(byte_vec.as_slice())?.id,
-        };
-        Ok(instant)
+    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CurrentHummockVersionId>> {
+        CurrentHummockVersionId::select(meta_store_ref, &HUMMOCK_VERSION_ID_KEY.to_string()).await
     }
 
     /// Increase version id, return previous one
@@ -47,14 +69,6 @@ impl CurrentHummockVersionId {
         let previous_id = self.id;
         self.id += 1;
         previous_id
-    }
-
-    pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.add_operations(vec![Operation::Put {
-            cf: CurrentHummockVersionId::cf_name().to_string(),
-            key: CurrentHummockVersionId::key().as_bytes().to_vec(),
-            value: HummockVersionRefId { id: self.id }.encode_to_vec(),
-        }]);
     }
 
     pub fn id(&self) -> HummockVersionId {
