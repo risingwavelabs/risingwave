@@ -22,7 +22,7 @@ dashborad/
 TODO: Find a suitable testing framework
 
 ## Development
-Start the system (run the following script at ./risingwave-dev)
+Start the system
 ```bash
 ./risedev d
 sqllogictest -p 4567 -d dev './e2e_test/streaming/tpch/tpch.slt'
