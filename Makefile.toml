@@ -310,13 +310,49 @@ category = "RiseDev - Check"
 script = """
 #!/bin/bash
 set -e
-cargo install cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
+
+for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
+do
+  echo "install: $(tput setaf 4)$tool$(tput sgr0)"
+  cargo install $tool
+  echo
+done
+
+echo "install: $(tput setaf 4)risinglightdb/sqllogictest-rs$(tput sgr0)"
 cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
+echo
+
+echo "check: $(tput setaf 4)tmux >= v3.2a$(tput sgr0)"
+tmux -V || echo "$(tput setaf 3)tmux$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)yq >= 4$(tput sgr0)"
+yq -V || echo "$(tput setaf 3)yq$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)psql >= 14$(tput sgr0)"
+psql -V || echo "$(tput setaf 3)psql$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)cmake$(tput sgr0)"
+cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
+echo
+
+echo "check: $(tput setaf 4)java == 11$(tput sgr0)"
+java --version || echo "$(tput setaf 3)java$(tput sgr0) not found."
+echo
 """
 description = "Install required tools to do pre-CI check and run e2e tests"
 
+[tasks.warn-on-missing-tools]
+private = true
+script = """
+echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(tput sgr0) to install required tools."
+"""
+
 [tasks.test-cov]
 category = "RiseDev - Check"
+dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
 set -e
@@ -329,11 +365,10 @@ description = "Run unit tests and report coverage"
 
 [tasks.test]
 category = "RiseDev - Check"
+dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
 set -e
-
-echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(tput sgr0) to install required tools."
 
 cd rust
 cargo nextest run
@@ -342,12 +377,11 @@ description = "Run unit tests"
 
 [tasks.check]
 category = "RiseDev - Check"
+dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
 
 cd rust
-
-echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(tput sgr0) to install required tools."
 
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks"
 cargo hakari generate
