@@ -161,7 +161,7 @@ set -e
 
 rm -rf "${PREFIX_UI}"
 cd dashboard && npm run build-static
-cd .. && ln -s dashboard/out ${PREFIX_UI}
+cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 """
 
 [tasks.build-risingwave]
