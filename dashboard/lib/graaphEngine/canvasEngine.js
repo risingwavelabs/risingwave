@@ -1,4 +1,6 @@
 import { fabric } from "fabric";
+
+// Disable cache to improve performance.
 fabric.Object.prototype.objectCaching = false;
 fabric.Object.prototype.statefullCache = false;
 fabric.Object.prototype.noScaleCache = true;
@@ -23,10 +25,14 @@ export class DrawElement {
     this.eventHandler = new Map();
   }
 
+  // TODO: this method is for migrating from d3.js to fabric.js.
+  // This should be replaced by a more suitable way.
   _attrMap(key, value) {
     return [key, value];
   }
 
+  // TODO: this method is for migrating from d3.js to fabric.js.
+  // This should be replaced by a more suitable way.
   attr(key, value) {
     let setting = this._attrMap(key, value);
     if (setting && setting.length === 2) {
@@ -37,10 +43,11 @@ export class DrawElement {
 
   _afterPosition() {
     let ele = this.props.canvasElement;
-    ele && this.props.engine.addDrawElement(this);
+    ele && this.props.engine._addDrawElement(this);
   }
 
-
+  // TODO: this method is for migrating from d3.js to fabric.js.
+  // This should be replaced by a more suitable way.
   position(x, y) {
     this.props.canvasElement.set("left", x);
     this.props.canvasElement.set("top", y);
@@ -57,6 +64,8 @@ export class DrawElement {
     return this.eventHandler.get(event);
   }
 
+  // TODO: this method is for migrating from d3.js to fabric.js.
+  // This should be replaced by a more suitable way.
   style(key, value) {
     return this.attr(key, value);
   }
@@ -328,9 +337,14 @@ class GridMapper {
 }
 
 export class CanvasEngine {
+  /**
+   * @param {string} canvasId The DOM id of the canvas
+   * @param {number} height the height of the canvas
+   * @param {number} width the width of the canvas
+   */
   constructor(canvasId, height, width) {
     let canvas = new fabric.Canvas(canvasId);
-    // canvas.selection = false;
+    canvas.selection = false; // improve performance
 
     this.height = height;
     this.width = width;
@@ -350,7 +364,7 @@ export class CanvasEngine {
         if (zoom > 10) zoom = 10;
         if (zoom < 0.03) zoom = 0.03;
         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
-        that.refreshView();
+        that._refreshView();
         evt.preventDefault();
         evt.stopPropagation();
 
@@ -368,7 +382,7 @@ export class CanvasEngine {
       this.lastPosX = evt.clientX;
       this.lastPosY = evt.clientY;
 
-      that.handleClickEvent(opt.target);
+      that._handleClickEvent(opt.target);
     });
 
     canvas.on('mouse:move', function (opt) {
@@ -386,19 +400,27 @@ export class CanvasEngine {
     });
   }
 
+  /**
+   * Move the current view point.
+   * @param {number} deltaX 
+   * @param {number} deltaY 
+   */
   async moveCamera(deltaX, deltaY) {
     this.canvas.setZoom(this.canvas.getZoom()); // essential for rendering (seems like a bug)
     let vpt = this.canvas.viewportTransform;
     vpt[4] += deltaX;
     vpt[5] += deltaY;
-    this.refreshView();
+    this._refreshView();
   }
 
-  async handleClickEvent(target) {
+  /**
+   * Invoke the click hander of an object.
+   * @param {fabric.Object} target 
+   */
+  async _handleClickEvent(target) {
     if (target === null) {
       return;
     }
-
     let ele = this.canvasElementToDrawElement.get(target);
     let func = ele.getEventHandler("click");
     if (func) {
@@ -406,8 +428,12 @@ export class CanvasEngine {
     }
   }
 
-  async refreshView() {
-    const padding = 50;
+  /**
+   * Set the objects in the current view point visible. 
+   * And set other objects not visible.
+   */
+  async _refreshView() {
+    const padding = 50; // Make the rendering area a little larger.
     let vpt = this.canvas.viewportTransform;
     let zoom = this.canvas.getZoom();
     let cameraWidth = this.width
@@ -425,10 +451,17 @@ export class CanvasEngine {
         e.visible = false;
       }
     });
+
     this.canvas.requestRenderAll();
   }
 
-  addDrawElement(ele) {
+  /**
+   * Register an element to the engine. This should 
+   * be called when a DrawElement instance is added
+   * to the canvas.
+   * @param {DrawElement} ele 
+   */
+  _addDrawElement(ele) {
     let canvasElement = ele.props.canvasElement;
     this.canvasElementToDrawElement.set(canvasElement, ele);
     this.gridMapper.addObject(
@@ -441,9 +474,11 @@ export class CanvasEngine {
   }
 
   /**
-   * 
-   * @param {string} clazz 
-   * @param {DrawElement} element 
+   * Assign a class to an object or remove a class from it.
+   * @param {string} clazz class name
+   * @param {DrawElement} element target object
+   * @param {boolean} flag true if the object is assigned, otherwise
+   * remove the class from the object
    */
   classedElement(clazz, element, flag) {
     if (!flag) {
@@ -457,6 +492,12 @@ export class CanvasEngine {
     }
   }
 
+  /**
+   * Move current view point to the object specified by
+   * the selector. The selector is the class of the 
+   * target object for now.
+   * @param {string} selector The class of the target object
+   */
   locateTo(selector) {
     //
     let selectorSet = this.clazzMap.get(selector);
@@ -472,27 +513,48 @@ export class CanvasEngine {
         vpt[4] = (-x + this.width * 0.5) * scale;
         vpt[5] = (-y + this.height * 0.5) * scale;
         this.canvas.requestRenderAll();
-        this.refreshView();
+        this._refreshView();
       }
     }
   }
 
+  /**
+   * Move current view point to (0, 0)
+   */
   resetCamera() {
     let zoom = this.canvas.getZoom();
-    zoom *= 0.999; ƒ
+    zoom *= 0.999; 
     this.canvas.setZoom(zoom);
     let vpt = this.canvas.viewportTransform;
     vpt[4] = 0;
     vpt[5] = 0;
     this.canvas.requestRenderAll();
-    this.refreshView();
+    this._refreshView();
   }
 
+  /**
+   * Dispose the current canvas. Remove all the objects to
+   * free memory. All objects in the canvas will be removed.
+   */
   cleanGraph() {
     console.log("clean called");
     this.canvas.dispose();
   }
 
+  /**
+   * Resize the canvas. This is called when the browser size
+   * is changed, such that the canvas can fix the current 
+   * size of the browser. 
+   * 
+   * Note that the outter div box of the canvas will be set
+   * according to the parameters. However, the width and 
+   * height of the canvas is double times of the parameters.
+   * This is the feature of fabric.js to keep the canvas
+   * in high resolution all the time.
+   * 
+   * @param {number} width the width of the canvas
+   * @param {number} height the height of the canvas
+   */
   resize(width, height) {
     this.width = width;
     this.height = height;
