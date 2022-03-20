@@ -31,7 +31,7 @@ impl BlockCache {
         }
     }
 
-    // TODO: Optimize for concurrent get https://github.com/singularity-data/risingwave-dev/pull/627#discussion_r817354730 .
+    // TODO: Optimize for concurrent get https://github.com/singularity-data/risingwave/pull/627#discussion_r817354730 .
     pub fn get(&self, sst_id: u64, block_idx: u64) -> Option<Arc<Block>> {
         self.inner.get(&Self::key(sst_id, block_idx))
     }

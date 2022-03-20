@@ -4,7 +4,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "build-static": "next export"
+    "build-static": "next build && next export"
   },
   "dependencies": {
     "@emotion/react": "^11.7.1",
