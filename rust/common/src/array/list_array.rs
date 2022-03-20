@@ -3,9 +3,11 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 
+#[allow(unused_imports)]
 use itertools::Itertools;
 use risingwave_pb::data::{
-    Array as ProstArray, ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
+    Array as ProstArray, 
+    // ArrayType as ProstArrayType, DataType as ProstDataType, ListArrayData,
 };
 
 use super::{
@@ -32,6 +34,17 @@ impl ArrayBuilder for ListArrayBuilder {
     #[cfg(not(test))]
     fn new(_capacity: usize) -> Result<Self> {
         panic!("Must use new_with_meta.")
+    }
+    
+    #[cfg(test)]
+    fn new(capacity: usize) -> Result<Self> {
+        Self::new_with_meta(
+            capacity,
+            ArrayMeta::List {
+                // Default datatype
+                datatype: DataType::Int32
+            },
+        )
     }
 
     fn new_with_meta(capacity: usize, meta: ArrayMeta) -> Result<Self> {
@@ -163,7 +176,7 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    pub fn from_protobuf(array: &ProstArray) -> Result<ArrayImpl> {
+    pub fn from_protobuf(_array: &ProstArray) -> Result<ArrayImpl> {
         todo!()
         // ensure!(
         //     array.values.is_empty(),
@@ -355,9 +368,9 @@ impl Ord for ListRef<'_> {
 
 #[cfg(test)]
 mod tests {
-    use more_asserts::assert_gt;
+    // use more_asserts::assert_gt;
 
-    use super::*;
+    // use super::*;
     use crate::{array, empty_array, try_match_expand};
 
     #[test]

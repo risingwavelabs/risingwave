@@ -22,7 +22,7 @@ macro_rules! empty_array {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;
-            let mut builder = <$array as Array>::Builder::new(0).unwrap();
+            let builder = <$array as Array>::Builder::new(0).unwrap();
             builder.finish().unwrap()
         }
     };
