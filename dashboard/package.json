@@ -4,7 +4,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "build-static": "next export"
+    "build-static": "next export",
+    "build-prod": "next export && rm -rf ../.risingwave/ui && rm -rf ui && cp -r out ui && mv ui ../.risingwave"
   },
   "dependencies": {
     "@emotion/react": "^11.7.1",

@@ -36,6 +36,18 @@ The website will be served at port 3000.
 npm run dev
 ```
 
+## Test with risingwave meta node
+To replace the built static files in risingwave with your newest code, run the following scripts:
+Build NextJS: This will generate the `out` folder in `dashboard`, if you have already built the code, skip this setp.
+```
+npm run build
+```
+Build static files and move it to meta node.
+```
+npm run build-prod
+```
+
+
 ## Deployment
 #### Static HTML files
 Build static files for standalone deployment without node.js. The built files are generated at `./out`
