@@ -291,7 +291,7 @@ impl<'a> ScalarRef<'a> for ListRef<'a> {
 
     fn to_owned_scalar(&self) -> ListValue {
         let fields = self
-            .fields_ref()
+            .values_ref()
             .iter()
             .map(|f| f.map(|s| s.into_scalar_impl()))
             .collect();

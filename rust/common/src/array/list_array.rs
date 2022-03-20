@@ -70,8 +70,8 @@ impl ArrayBuilder for ListArrayBuilder {
             Some(v) => {
                 self.bitmap.append(true);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last + value.unwrap().fields_ref().len());
-                for f in v.fields_ref() {
+                self.offsets.push(last + value.unwrap().values_ref().len());
+                for f in v.values_ref() {
                     self.value.append_datum_ref(f)?;
                 }
             }
@@ -241,7 +241,7 @@ impl ListArray {
 
 #[derive(Clone, Debug, Eq, Default, PartialEq, Hash)]
 pub struct ListValue {
-    fields: Vec<Datum>,
+    values: Vec<Datum>,
 }
 
 impl fmt::Display for ListValue {
@@ -263,8 +263,8 @@ impl Ord for ListValue {
 }
 
 impl ListValue {
-    pub fn new(fields: Vec<Datum>) -> Self {
-        Self { fields }
+    pub fn new(values: Vec<Datum>) -> Self {
+        Self { values }
     }
 }
 
@@ -275,13 +275,13 @@ pub enum ListRef<'a> {
 }
 
 impl<'a> ListRef<'a> {
-    pub fn fields_ref(&self) -> Vec<DatumRef<'a>> {
+    pub fn values_ref(&self) -> Vec<DatumRef<'a>> {
         match self {
             ListRef::Indexed { arr, idx } => (arr.offsets[*idx]..arr.offsets[*idx + 1])
                 .map(|o| arr.value.value_at(o))
                 .collect(),
             ListRef::ValueRef { val } => val
-                .fields
+                .values
                 .iter()
                 .map(|d| d.as_ref().map(|s| s.as_scalar_ref_impl()))
                 .collect::<Vec<DatumRef<'a>>>(),
@@ -300,21 +300,21 @@ impl Hash for ListRef<'_> {
 
 impl PartialEq for ListRef<'_> {
     fn eq(&self, other: &Self) -> bool {
-        self.fields_ref().eq(&other.fields_ref())
+        self.values_ref().eq(&other.values_ref())
     }
 }
 
 impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let l = self.fields_ref();
-        let r = other.fields_ref();
+        let l = self.values_ref();
+        let r = other.values_ref();
         debug_assert_eq!(
             l.len(),
             r.len(),
             "Lists must have the same length to be compared"
         );
         let it = l.iter().enumerate().find_map(|(idx, v)| {
-            let ord = cmp_list_field(v, &r[idx]);
+            let ord = cmp_list_value(v, &r[idx]);
             if let Ordering::Equal = ord {
                 None
             } else {
@@ -325,7 +325,7 @@ impl PartialOrd for ListRef<'_> {
     }
 }
 
-fn cmp_list_field(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ordering {
+fn cmp_list_value(l: &Option<ScalarRefImpl>, r: &Option<ScalarRefImpl>) -> Ordering {
     match (l, r) {
         // Comparability check was performed by frontend beforehand.
         (Some(sl), Some(sr)) => sl.partial_cmp(sr).unwrap(),
@@ -369,7 +369,7 @@ mod tests {
     use crate::{array, empty_array, try_match_expand};
 
     #[test]
-    fn test_list_with_fields() {
+    fn test_list_with_values() {
         use crate::array::*;
         let arr = ListArray::from_slices(
             &[true, false, true, true],
