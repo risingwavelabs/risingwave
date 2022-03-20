@@ -37,14 +37,10 @@ npm run dev
 ```
 
 ## Test with risingwave meta node
-To replace the built static files in risingwave with your newest code, run the following scripts:
-Build NextJS: This will generate the `out` folder in `dashboard`, if you have already built the code, skip this setp.
+To replace the built static files in risingwave with your newest code, 
+run the following scripts in the root directory:
 ```
-npm run build
-```
-Build static files and move it to meta node.
-```
-npm run build-prod
+./risedev export-dashboard-v2
 ```
 
 
@@ -53,7 +49,6 @@ npm run build-prod
 Build static files for standalone deployment without node.js. The built files are generated at `./out`
 Check more details at [Static HTML Export](https://nextjs.org/docs/advanced-features/static-html-export).
 ```bash
-npm run build
 npm run build-static
 ```
 
