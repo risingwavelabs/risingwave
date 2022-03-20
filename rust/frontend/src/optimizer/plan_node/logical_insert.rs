@@ -19,7 +19,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchInsert, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 use crate::catalog::ColumnId;
 
@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     table: BaseTableRef,
     columns: Vec<ColumnId>,
     input: PlanRef,
@@ -41,7 +41,7 @@ impl LogicalInsert {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let id = ctx.borrow_mut().get_id();
-        let base = LogicalBase { id, schema, ctx };
+        let base = PlanBase::new_logical(id, ctx, schema);
 
         Self {
             table,

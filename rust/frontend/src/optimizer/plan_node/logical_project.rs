@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
     ToStream,
 };
 use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -30,7 +30,7 @@ use crate::utils::{ColIndexMapping, Substitute};
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
@@ -56,11 +56,7 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
         LogicalProject {
             input,
             base,

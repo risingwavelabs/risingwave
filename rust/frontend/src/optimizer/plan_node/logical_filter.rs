@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
     ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
@@ -32,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     predicate: Condition,
     input: PlanRef,
 }
@@ -44,11 +44,7 @@ impl LogicalFilter {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let base = LogicalBase {
-            schema,
-            ctx: ctx.clone(),
-            id: ctx.borrow_mut().get_id(),
-        };
+        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
         LogicalFilter {
             input,
             base,

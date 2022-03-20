@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalBase, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
@@ -27,7 +27,7 @@ use crate::session::QueryContextRef;
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     table_name: String,
     table_id: TableId,
     columns: Vec<ColumnId>,
@@ -42,11 +42,7 @@ impl LogicalScan {
         schema: Schema,
         ctx: QueryContextRef,
     ) -> Self {
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
         Self {
             table_name,
             table_id,

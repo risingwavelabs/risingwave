@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::{FieldOrder, Order, WithSchema};
 use crate::utils::ColIndexMapping;
@@ -24,7 +24,7 @@ use crate::utils::ColIndexMapping;
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalTopN {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
@@ -35,11 +35,7 @@ impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
         LogicalTopN {
             input,
             limit,

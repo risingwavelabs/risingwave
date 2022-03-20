@@ -20,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
+    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
 use crate::expr::ExprImpl;
@@ -37,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// condition.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
@@ -58,11 +58,7 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx.borrow_mut().get_id(), ctx.clone(), schema);
         LogicalJoin {
             left,
             right,

@@ -74,43 +74,6 @@ pub type PlanRef = Rc<dyn PlanNode>;
 #[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
 
-/// the common fields of logical nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct LogicalBase {
-    pub id: PlanNodeId,
-    pub schema: Schema,
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of batch nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-
-#[derive(Clone, Debug)]
-pub struct BatchBase {
-    pub id: PlanNodeId,
-    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
-    /// correctness, but insert unnecessary sort in plan
-    pub order: Order,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of stream nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct StreamBase {
-    pub id: PlanNodeId,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-    pub ctx: QueryContextRef, /* TODO: pk derive
-                               * pub pk_indices: Vec<u32> */
-}
-
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
@@ -172,6 +135,8 @@ impl dyn PlanNode {
     }
 }
 
+mod plan_base;
+pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
 pub use plan_tree_node::*;
