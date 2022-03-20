@@ -34,13 +34,13 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
-use risingwave_common::catalog::Schema;
+
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{
-    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
+    WithConvention, WithDistribution, WithOrder, WithSchema,
 };
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
@@ -214,7 +214,7 @@ pub use stream_source_scan::StreamSourceScan;
 pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
-use crate::session::QueryContextRef;
+
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]

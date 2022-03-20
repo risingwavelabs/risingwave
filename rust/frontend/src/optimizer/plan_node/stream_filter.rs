@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
+use crate::optimizer::property::{WithDistribution, WithSchema};
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
@@ -35,7 +35,7 @@ impl StreamFilter {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_stream(
-            ctx.clone(),
+            ctx,
             logical.schema().clone(),
             logical.distribution().clone(),
         );

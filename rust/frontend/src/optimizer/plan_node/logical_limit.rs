@@ -32,7 +32,7 @@ impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = PlanBase::new_logical(ctx.clone(), schema);
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalLimit {
             input,
             limit,

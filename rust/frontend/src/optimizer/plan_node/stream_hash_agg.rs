@@ -30,7 +30,7 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let base = PlanBase::new_stream(
-            ctx.clone(),
+            ctx,
             logical.schema().clone(),
             Distribution::any().clone(),
         );

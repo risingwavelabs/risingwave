@@ -58,7 +58,7 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = PlanBase::new_logical(ctx.clone(), schema);
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalJoin {
             left,
             right,

@@ -32,7 +32,7 @@ impl StreamSourceScan {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_stream(
-            ctx.clone(),
+            ctx,
             logical.schema().clone(),
             Distribution::any().clone(),
         );

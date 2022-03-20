@@ -20,7 +20,7 @@ use risingwave_pb::plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
