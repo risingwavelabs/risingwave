@@ -23,7 +23,7 @@ use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 mod binary_op;
 mod column;
 mod function;
-pub mod value;
+mod value;
 
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
