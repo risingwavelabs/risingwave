@@ -25,7 +25,7 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: QueryContextRef,
     pub schema: Schema,
-    pub pk_indices: Vec<u32>,
+    pub pk_indices: Vec<usize>,
     /// The order property of the PlanNode's output, store an `Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -34,7 +34,7 @@ pub struct PlanBase {
     pub dist: Distribution,
 }
 impl PlanBase {
-    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<u32>) -> Self {
+    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
         let id = ctx.borrow_mut().get_id();
         Self {
             id,
@@ -48,7 +48,7 @@ impl PlanBase {
     pub fn new_stream(
         ctx: QueryContextRef,
         schema: Schema,
-        pk_indices: Vec<u32>,
+        pk_indices: Vec<usize>,
         dist: Distribution,
     ) -> Self {
         let id = ctx.borrow_mut().get_id();
@@ -64,7 +64,7 @@ impl PlanBase {
     pub fn new_batch(
         ctx: QueryContextRef,
         schema: Schema,
-        pk_indices: Vec<u32>,
+        pk_indices: Vec<usize>,
         dist: Distribution,
         order: Order,
     ) -> Self {

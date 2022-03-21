@@ -86,10 +86,10 @@ impl LogicalJoin {
     fn derive_schema(
         left_schema: &Schema,
         right_schema: &Schema,
-        left_pk: &[u32],
-        right_pk: &[u32],
+        left_pk: &[usize],
+        right_pk: &[usize],
         join_type: JoinType,
-    ) -> (Schema, Vec<u32>) {
+    ) -> (Schema, Vec<usize>) {
         let mut new_fields =
             Vec::with_capacity(left_schema.fields.len() + right_schema.fields.len());
         match join_type {

@@ -90,7 +90,7 @@ impl dyn PlanNode {
         Ok(output)
     }
 
-    pub fn pk_indices(&self) -> &[u32] {
+    pub fn pk_indices(&self) -> &[usize] {
         &self.plan_base().pk_indices
     }
 
