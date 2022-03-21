@@ -23,7 +23,7 @@ use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Decimal,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
@@ -192,24 +192,6 @@ pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     let buf = serializer.into_inner();
     debug_assert_eq!(buf.len(), 4);
     Ok(buf)
-}
-
-fn serialize_decimal(decimal: &Decimal) -> Result<Vec<u8>> {
-    let (mut mantissa, mut scale) = decimal.mantissa_scale_for_serialization();
-    if mantissa < 0 {
-        mantissa = -mantissa;
-        // We use the most significant bit of `scale` to denote whether decimal is negative or not.
-        scale += 1 << 7;
-    }
-    let mut byte_array = vec![1, scale];
-    while mantissa != 0 {
-        let byte = (mantissa % 100) as u8;
-        byte_array.push(byte);
-        mantissa /= 100;
-    }
-    // Add 100 marker for the end of decimal (cuz `byte` always can not be 100 in above loop).
-    byte_array.push(100);
-    Ok(byte_array)
 }
 
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
