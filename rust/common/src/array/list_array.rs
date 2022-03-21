@@ -49,7 +49,7 @@ impl ArrayBuilder for ListArrayBuilder {
             Ok(Self {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 offsets: vec![0],
-                value: Box::new(datatype.create_array_builder(capacity).unwrap()),
+                value: Box::new(datatype.create_array_builder(capacity)?),
                 value_type: datatype,
                 len: 0,
             })
