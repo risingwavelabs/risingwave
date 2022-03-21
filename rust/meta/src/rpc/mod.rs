@@ -19,6 +19,7 @@ mod service;
 
 pub use service::catalog_service::CatalogServiceImpl;
 pub use service::cluster_service::ClusterServiceImpl;
+pub use service::ddl_service::DdlServiceImpl;
 pub use service::epoch_service::EpochServiceImpl;
 pub use service::heartbeat_service::HeartbeatServiceImpl;
 pub use service::hummock_service::HummockServiceImpl;
