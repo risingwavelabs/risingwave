@@ -1,4 +1,4 @@
-// Copyright 2022 Singularity Data
+ // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,6 +121,7 @@ impl StateStoreImpl {
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
+                    Some(state_store_stats.clone()),
                 ));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(

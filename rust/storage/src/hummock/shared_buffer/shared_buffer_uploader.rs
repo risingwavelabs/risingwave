@@ -96,7 +96,7 @@ impl SharedBufferUploader {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
-
+        
         let buffers = match self.batches_to_upload.remove(&epoch) {
             Some(m) => m,
             None => return Ok(()),
@@ -107,7 +107,7 @@ impl SharedBufferUploader {
             let iters = buffers
                 .into_iter()
                 .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
-            MergeIterator::new(iters)
+            MergeIterator::new(iters, Some(self.stats.clone()))
         };
         let sub_compact_context = SubCompactContext {
             options: self.options.clone(),

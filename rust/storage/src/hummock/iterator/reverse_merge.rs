@@ -53,7 +53,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, None);
         let mut i = 0;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -90,7 +90,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, None);
         let test_validator = &validators[2];
 
         // right edge case
@@ -137,7 +137,7 @@ mod test {
             Box::new(ReverseSSTableIterator::new(Arc::new(table0), sstable_store)),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, None);
 
         mi.rewind().await.unwrap();
         let mut count = 0;

@@ -277,7 +277,7 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
@@ -318,7 +318,7 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
@@ -385,7 +385,7 @@ mod tests {
                 sstable_store.clone(),
             )),
         ];
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
         let mut ui = UserIterator::for_test(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
@@ -427,7 +427,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
 
         let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
@@ -507,7 +507,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
 
         let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
         let end_key = Excluded(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
@@ -588,7 +588,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
         let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
 
         let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
@@ -671,7 +671,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = MergeIterator::new(iters);
+        let mi = MergeIterator::new(iters, None);
         let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
 
         let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));

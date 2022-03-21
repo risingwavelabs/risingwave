@@ -234,7 +234,7 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
+        let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string(), None));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -406,6 +406,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         for i in 0..3 {
@@ -429,6 +430,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         assert!(merge_iterator.is_valid());
@@ -481,6 +483,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         for i in 0..3 {
@@ -538,6 +541,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         for i in (0..3).rev() {
@@ -561,6 +565,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         assert!(merge_iterator.is_valid());
@@ -615,6 +620,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            None,
         );
         merge_iterator.rewind().await.unwrap();
         for i in (0..3).rev() {

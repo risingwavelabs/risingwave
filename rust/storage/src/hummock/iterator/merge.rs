@@ -50,7 +50,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = MergeIterator::new(iters);
+        let mut mi = MergeIterator::new(iters, None);
         let mut i = 0;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -84,7 +84,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = MergeIterator::new(iters);
+        let mut mi = MergeIterator::new(iters, None);
         let test_validator = &validators[2];
 
         // right edge case
@@ -131,7 +131,7 @@ mod test {
             Box::new(SSTableIterator::new(Arc::new(table1), sstable_store)),
         ];
 
-        let mut mi = MergeIterator::new(iters);
+        let mut mi = MergeIterator::new(iters, None);
 
         mi.rewind().await.unwrap();
         let mut count = 0;

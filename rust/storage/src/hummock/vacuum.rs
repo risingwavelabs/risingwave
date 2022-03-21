@@ -70,6 +70,7 @@ mod tests {
         let sstable_store_ref = Arc::new(SstableStore::new(
             Arc::new(InMemObjectStore::new()),
             String::from("test_dir"),
+            None,
         ));
 
         // Put some SSTs to object store

@@ -343,7 +343,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(object_store, path))
+    Arc::new(SstableStore::new(object_store, path, None))
 }
 
 #[cfg(test)]

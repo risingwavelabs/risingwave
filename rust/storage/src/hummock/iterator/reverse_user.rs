@@ -303,7 +303,7 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
         ui.rewind().await.unwrap();
 
@@ -355,7 +355,7 @@ mod tests {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
         let test_validator = &validators[2];
 
@@ -418,7 +418,7 @@ mod tests {
             )),
             Box::new(SSTableIterator::new(Arc::new(table1), sstable_store)),
         ];
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
 
         ui.rewind().await.unwrap();
@@ -463,7 +463,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
 
         let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
@@ -543,7 +543,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
 
         let begin_key = Excluded(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
         let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
@@ -624,7 +624,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
         let end_key = Included(user_key(iterator_test_key_of_epoch(0, 7, 0).as_slice()).to_vec());
 
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, end_key));
@@ -703,7 +703,7 @@ mod tests {
             Arc::new(table),
             sstable_store,
         ))];
-        let mi = ReverseMergeIterator::new(iters);
+        let mi = ReverseMergeIterator::new(iters, None);
         let begin_key = Included(user_key(iterator_test_key_of_epoch(0, 2, 0).as_slice()).to_vec());
 
         let mut ui = ReverseUserIterator::new(mi, (begin_key, Unbounded));
@@ -795,7 +795,7 @@ mod tests {
             Arc::new(clone_sst(&table)),
             sstable_store,
         ))];
-        let rsi = ReverseMergeIterator::new(iters);
+        let rsi = ReverseMergeIterator::new(iters, None);
         let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
         let num_puts: usize = truth
             .iter()
