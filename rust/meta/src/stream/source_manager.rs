@@ -25,7 +25,7 @@ pub struct SourceManager<S>
 {
     meta_store_ref: Arc<S>,
     barrier_manager_ref: BarrierManagerRef<S>,
-    enumerators: Mutex<HashMap<u32, SplitEnumeratorImpl>>,
+    enumerators: Arc<Mutex<HashMap<u32, SplitEnumeratorImpl>>>,
 }
 
 pub struct CreateSourceContext {
@@ -52,7 +52,7 @@ impl<S> SourceManager<S>
         Ok(Self {
             meta_store_ref,
             barrier_manager_ref,
-            enumerators: Mutex::new(HashMap::new()),
+            enumerators: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -61,12 +61,10 @@ impl<S> SourceManager<S>
     }
 
     pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {
-        // let enumerator = extract_split_enumerator(&ctx.properties).to_rw_result()?;
-
-
-
+        let mut enumerator = extract_split_enumerator(&ctx.properties).to_rw_result()?;
+        let splits = enumerator.list_splits().await.to_rw_result()?;
+        let _ = splits;
         todo!()
-
     }
 
     pub async fn drop_source(&self, _ctx: DropSourceContext) -> Result<()> {
@@ -77,7 +75,7 @@ impl<S> SourceManager<S>
         todo!()
     }
 
-    async fn assign_splits(&self ) -> Result<()> {
+    async fn assign_splits(&self) -> Result<()> {
         todo!()
         //self.barrier_manager_ref.run_command()
     }

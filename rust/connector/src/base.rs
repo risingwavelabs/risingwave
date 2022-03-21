@@ -33,6 +33,7 @@ pub enum SourceOffset {
 
 use crate::kafka;
 use crate::pulsar;
+use crate::pulsar::PulsarSplitEnumerator;
 
 
 pub trait SourceMessage {
@@ -76,7 +77,7 @@ pub enum SplitImpl {
 }
 
 impl SplitEnumeratorImpl {
-    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
+    pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         match self {
             SplitEnumeratorImpl::Kafka(k) => {
                 k.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::Kafka).collect_vec())
@@ -97,6 +98,9 @@ pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<
     match source_type.as_ref() {
         "kafka" => {
             KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka)
+        },
+        "pulsar" => {
+            PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
         }
         _ => Err(anyhow!("unsupported source type: {}", source_type)),
     }

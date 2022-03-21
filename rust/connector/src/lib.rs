@@ -32,6 +32,7 @@ mod kafka;
 mod kinesis;
 mod pulsar;
 mod state;
+mod utils;
 
 pub use base::*;
 
