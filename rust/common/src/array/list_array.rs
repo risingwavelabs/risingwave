@@ -68,8 +68,9 @@ impl ArrayBuilder for ListArrayBuilder {
             Some(v) => {
                 self.bitmap.append(true);
                 let last = *self.offsets.last().unwrap();
-                self.offsets.push(last + value.unwrap().values_ref().len());
-                for f in v.values_ref() {
+                let values_ref = v.values_ref();
+                self.offsets.push(last + values_ref.len());
+                for f in values_ref {
                     self.value.append_datum_ref(f)?;
                 }
             }
