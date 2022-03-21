@@ -28,9 +28,6 @@ rust_fmt:
 	echo "This command is deprecated. Use ./risedev check instead."
 	exit 1
 
-rust_fmt:
-	cd rust && cargo fmt --all
-
 rust_fmt_check:
 	echo "This command is deprecated. Use ./risedev check instead."
 	exit 1
