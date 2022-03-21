@@ -97,10 +97,10 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
         match node.0.next().await {
             Ok(_) => {}
             Err(e) => {
-                // If the iterator is invalid, we should remove it from heap. Otherwise
-                // PeekMut::drop will attempt to sift down the element, causing access of an invalid
-                // iterator.
+                // If the iterator returns error, we should clear the heap, so that this iterator
+                // becomes invalid.
                 PeekMut::pop(node);
+                self.heap.clear();
                 return Err(e);
             }
         }
