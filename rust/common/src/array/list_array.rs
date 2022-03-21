@@ -3,10 +3,8 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 use std::hash::{Hash, Hasher};
 
-use itertools::{
-    Itertools,
-    EitherOrBoth::{Both, Left, Right}
-};
+use itertools::EitherOrBoth::{Both, Left, Right};
+use itertools::Itertools;
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
 
 use super::{
@@ -309,19 +307,17 @@ impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let l = self.values_ref();
         let r = other.values_ref();
-        let it = l.iter().zip_longest(r.iter()).find_map(|e| {
-            match e {
-                Both(ls, rs) => {  
-                    let ord = cmp_list_value(ls, rs);
-                    if let Ordering::Equal = ord {
-                        None
-                    } else {
-                        Some(ord)
-                    }
-                },
-                Left(_) => Some(Ordering::Greater),
-                Right(_) => Some(Ordering::Less)               
+        let it = l.iter().zip_longest(r.iter()).find_map(|e| match e {
+            Both(ls, rs) => {
+                let ord = cmp_list_value(ls, rs);
+                if let Ordering::Equal = ord {
+                    None
+                } else {
+                    Some(ord)
+                }
             }
+            Left(_) => Some(Ordering::Greater),
+            Right(_) => Some(Ordering::Less),
         });
         it.or(Some(Ordering::Equal))
     }
@@ -513,7 +509,9 @@ mod tests {
                 Some(listarray2.into()),
                 Some(listarray3.into()),
             ],
-            DataType::List { datatype: Box::new(DataType::Int32) },
+            DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
         )
         .unwrap();
         let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
@@ -553,11 +551,11 @@ mod tests {
                 )),])),
             ]
         );
-        
+
         let mut builder = ListArrayBuilder::new_with_meta(
             3,
             ArrayMeta::List {
-                datatype: Box::new(DataType::List { 
+                datatype: Box::new(DataType::List {
                     datatype: Box::new(DataType::Int32),
                 }),
             },
@@ -599,8 +597,8 @@ mod tests {
             ListValue::new(vec![Some(1.into()), Some(2.into()), None]),
             ListValue::new(vec![Some(1.into()), Some(2.into()), Some(1.into())]),
         );
-        // Null value in first ARRAY results into a Greater ordering regardless of the smaller ARRAY length.
-        // ARRAY[1, null] > ARRAY[1, 2, 3]
+        // Null value in first ARRAY results into a Greater ordering regardless of the smaller ARRAY
+        // length. ARRAY[1, null] > ARRAY[1, 2, 3]
         assert_gt!(
             ListValue::new(vec![Some(1.into()), None]),
             ListValue::new(vec![Some(1.into()), Some(2.into()), Some(3.into())]),
@@ -608,7 +606,7 @@ mod tests {
         // ARRAY[1, null] == ARRAY[1, null]
         assert_eq!(
             ListValue::new(vec![Some(1.into()), None]),
-            ListValue::new(vec![Some(1.into()), None]),            
+            ListValue::new(vec![Some(1.into()), None]),
         );
     }
 }

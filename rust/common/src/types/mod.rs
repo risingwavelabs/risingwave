@@ -102,7 +102,7 @@ impl From<&ProstDataType> for DataType {
             },
             TypeName::List => DataType::List {
                 datatype: Box::new(DataType::Int32),
-            }
+            },
         }
     }
 }
@@ -127,14 +127,13 @@ impl DataType {
             DataType::Struct { .. } => {
                 todo!()
             }
-            DataType::List { datatype } => {
-                ListArrayBuilder::new_with_meta(
-                    capacity,
-                    ArrayMeta::List {
-                        datatype: datatype.to_owned(),
-                    }
-                )?.into()
-            }
+            DataType::List { datatype } => ListArrayBuilder::new_with_meta(
+                capacity,
+                ArrayMeta::List {
+                    datatype: datatype.to_owned(),
+                },
+            )?
+            .into(),
         })
     }
 
