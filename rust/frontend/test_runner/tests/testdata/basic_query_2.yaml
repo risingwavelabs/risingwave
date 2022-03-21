@@ -1,3 +1,4 @@
+<<<<<<< HEAD:rust/frontend/test_runner/tests/testdata/basic_query.yaml
 - sql: |-
     values (11, 22), (33+(1+2), 44);
   batch_plan: |
@@ -115,6 +116,8 @@
       BatchDelete { table_name: "t" }
         BatchFilter { predicate: ($1 = 1:Int32) }
           BatchScan { table: t, columns: [_row_id, v1, v2] }
+=======
+>>>>>>> b7839b9af2350b0d7c6df3012adc7d80b5bfe2b9:rust/frontend/test_runner/tests/testdata/basic_query_2.yaml
 - sql: |
     create table t (v1 int, v2 int);
     delete from t;

@@ -91,16 +91,25 @@ impl dyn PlanNode {
 
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
+        self.to_batch_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto without the identity field
+    /// (for testing).
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_batch_prost())
+            .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         BatchPlanProst {
             children,
-            identity,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
             node_body,
         }
     }
@@ -110,6 +119,12 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
+        self.to_stream_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a stream plan proto without identity (for
+    /// testing).
+    pub fn to_stream_prost_identity(&self, identity: bool) -> StreamPlanProst {
         if let Some(stream_scan) = self.as_stream_table_scan() {
             return stream_scan.adhoc_to_stream_prost();
         }
@@ -118,13 +133,16 @@ impl dyn PlanNode {
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost())
+            .map(|plan| plan.to_stream_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
-            identity,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
             node,
             operator_id: 0,
             pk_indices: vec![],

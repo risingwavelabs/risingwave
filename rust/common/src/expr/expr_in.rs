@@ -46,7 +46,7 @@ impl InExpression {
         }
     }
 
-    fn check_in_sarg(&self, datum: &Datum) -> bool {
+    fn exists(&self, datum: &Datum) -> bool {
         self.set.contains(datum)
     }
 }
@@ -56,7 +56,7 @@ impl Expression for InExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> crate::error::Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> crate::error::Result<ArrayRef> {
         let input_array = self.input_ref.eval(input)?;
         let visibility = input.visibility();
         let mut output_array = BoolArrayBuilder::new(input.cardinality())?;
@@ -66,13 +66,13 @@ impl Expression for InExpression {
                     if !vis {
                         continue;
                     }
-                    let ret = self.check_in_sarg(&data.to_owned_datum());
+                    let ret = self.exists(&data.to_owned_datum());
                     output_array.append(Some(ret))?;
                 }
             }
             None => {
                 for data in input_array.iter() {
-                    let ret = self.check_in_sarg(&data.to_owned_datum());
+                    let ret = self.exists(&data.to_owned_datum());
                     output_array.append(Some(ret))?;
                 }
             }
@@ -96,7 +96,7 @@ mod tests {
             Some(ScalarImpl::Utf8("abc".to_string())),
             Some(ScalarImpl::Utf8("def".to_string())),
         ];
-        let mut search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
+        let search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
         let column = column! {Utf8Array, [Some("abc"), Some("a"), Some("def"), Some("abc")]};
         let data_chunk = DataChunk::builder().columns(vec![column]).build();
         let res = search_expr.eval(&data_chunk).unwrap();
