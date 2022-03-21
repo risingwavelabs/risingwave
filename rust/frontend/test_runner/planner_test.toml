@@ -31,6 +31,7 @@ done
 
 echo "If you want to apply the planner test data, run: $(tput setaf 2)./risedev do-apply-planner-test$(tput sgr 0)"
 '''
+category = "RiseDev - Test"
 
 [tasks.do-apply-planner-test]
 description = "Apply planner test data"
@@ -52,3 +53,4 @@ done
 
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 '''
+category = "RiseDev - Test"

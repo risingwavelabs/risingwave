@@ -19,15 +19,13 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::ValuesNode;
 
-use super::{
-    BatchBase, LogicalValues, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch,
-};
+use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct BatchValues {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalValues,
 }
 
@@ -37,12 +35,12 @@ impl_plan_tree_node_for_leaf!(BatchValues);
 impl BatchValues {
     pub fn new(logical: LogicalValues) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::Broadcast,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::Broadcast,
+            Order::any().clone(),
+        );
         BatchValues { logical, base }
     }
 }

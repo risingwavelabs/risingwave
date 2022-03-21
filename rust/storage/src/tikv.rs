@@ -18,7 +18,6 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use risingwave_common::array::{InternalError, RwError};
 use risingwave_common::error::{Result, ToRwResult};
 use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
@@ -44,7 +43,7 @@ impl TikvStateStore {
     pub async fn client(&self) -> &tikv_client::transaction::Client {
         self.client
             .get_or_init(|| async {
-                let client = TransactionClient::new(self.pd.clone()).await.unwrap();
+                let client = TransactionClient::new(self.pd.clone(), None).await.unwrap();
                 client
             })
             .await
@@ -57,10 +56,7 @@ impl StateStore for TikvStateStore {
 
     async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
         let mut txn = self.client().await.begin_optimistic().await.unwrap();
-        let res = txn
-            .get(key.to_owned())
-            .await
-            .map_or(Err(RwError::from(InternalError("".into()))), Ok)?;
+        let res = txn.get(key.to_owned()).await.expect("key not found");
         txn.commit().await.unwrap();
         Ok(res.map(Bytes::from))
     }
@@ -148,8 +144,8 @@ impl StateStore for TikvStateStore {
 
     async fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
-        epoch: u64,
+        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
     }
@@ -162,7 +158,7 @@ impl StateStore for TikvStateStore {
         unimplemented!()
     }
 
-    async fn wait_epoch(&self, _epoch: u64) {
+    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
         unimplemented!()
     }
 

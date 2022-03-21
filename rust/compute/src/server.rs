@@ -29,7 +29,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
@@ -79,12 +79,14 @@ pub async fn compute_node_serve(
     let registry = prometheus::Registry::new();
     // Initialize state store.
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
         meta_client.clone(),
         state_store_metrics.clone(),
+        hummock_metrics.clone(),
     )
     .await
     .unwrap();

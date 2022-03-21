@@ -117,7 +117,7 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
 
         self.seek_idx(table_idx, Some(key)).await?;
         if !self.is_valid() {
-            // seek to next block
+            // seek to next table
             self.seek_idx(table_idx + 1, None).await?;
         }
         Ok(())

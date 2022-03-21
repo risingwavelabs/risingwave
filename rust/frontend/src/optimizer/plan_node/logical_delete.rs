@@ -19,33 +19,31 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchDelete, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::binder::BaseTableRef;
+use super::{BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::binder::BoundBaseTable;
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
 ///
 /// It corresponds to the `DELETE` statements in SQL.
 #[derive(Debug, Clone)]
 pub struct LogicalDelete {
-    pub base: LogicalBase,
-    table: BaseTableRef,
+    pub base: PlanBase,
+    table: BoundBaseTable,
     input: PlanRef,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table: BaseTableRef) -> Self {
+    pub fn new(input: PlanRef, table: BoundBaseTable) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let id = ctx.borrow_mut().get_id();
-        let base = LogicalBase { id, schema, ctx };
-
+        let base = PlanBase::new_logical(ctx, schema);
         Self { base, table, input }
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table: BaseTableRef) -> Result<Self> {
+    pub fn create(input: PlanRef, table: BoundBaseTable) -> Result<Self> {
         Ok(Self::new(input, table))
     }
 

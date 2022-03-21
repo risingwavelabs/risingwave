@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::{LogicalProject, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, WithSchema};
 
@@ -26,7 +26,7 @@ use crate::optimizer::property::{Distribution, WithSchema};
 /// rows.
 #[derive(Debug, Clone)]
 pub struct StreamProject {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalProject,
 }
 
@@ -40,11 +40,7 @@ impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         StreamProject { logical, base }
     }
 }

@@ -16,11 +16,12 @@
 use futures::future::try_join_all;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
-use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::ddl_service::ddl_service_server::DdlService;
+use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
@@ -40,7 +41,7 @@ use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
-pub struct CatalogServiceImpl<S> {
+pub struct DdlServiceImpl<S> {
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
@@ -51,7 +52,7 @@ pub struct CatalogServiceImpl<S> {
     stream_clients: StreamClientsRef,
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -74,7 +75,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> CatalogService for CatalogServiceImpl<S>
+impl<S> DdlService for DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -293,7 +294,7 @@ where
     }
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
