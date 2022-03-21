@@ -57,8 +57,14 @@ impl fmt::Display for LogicalJoin {
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
-        let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = PlanBase::new_logical(ctx, schema);
+        let (schema, pk) = Self::derive_schema(
+            left.schema(),
+            right.schema(),
+            left.pk_indices(),
+            right.pk_indices(),
+            join_type,
+        );
+        let base = PlanBase::new_logical(ctx, schema, pk);
         LogicalJoin {
             left,
             right,
@@ -77,13 +83,23 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
-    fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
-        let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
+    fn derive_schema(
+        left_schema: &Schema,
+        right_schema: &Schema,
+        left_pk: &[u32],
+        right_pk: &[u32],
+        join_type: JoinType,
+    ) -> (Schema, Vec<u32>) {
+        let mut new_fields =
+            Vec::with_capacity(left_schema.fields.len() + right_schema.fields.len());
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                new_fields.extend_from_slice(&left.fields);
-                new_fields.extend_from_slice(&right.fields);
-                Schema { fields: new_fields }
+                new_fields.extend_from_slice(&left_schema.fields);
+                new_fields.extend_from_slice(&right_schema.fields);
+                (
+                    Schema { fields: new_fields },
+                    left_pk.iter().chain(right_pk.iter()).cloned().collect(),
+                )
             }
             _ => unimplemented!(),
         }
