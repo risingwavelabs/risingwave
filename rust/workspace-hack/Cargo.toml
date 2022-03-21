@@ -54,7 +54,6 @@ tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "http
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-zstd-sys = { version = "1", features = ["legacy", "std"] }
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
@@ -100,6 +99,5 @@ tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "http
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
-zstd-sys = { version = "1", features = ["legacy", "std"] }
 
 ### END HAKARI SECTION

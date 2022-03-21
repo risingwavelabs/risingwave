@@ -45,7 +45,7 @@ rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", 
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"
-tikv-client = { git = "https://github.com/tikv/client-rust", rev = "68b7f1", optional = true }
+tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
     "fs",
     "rt",
