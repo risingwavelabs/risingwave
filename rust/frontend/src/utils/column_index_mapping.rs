@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::cmp::max;
 use std::fmt::Debug;
 use std::vec;
 
@@ -39,6 +40,16 @@ impl ColIndexMapping {
             .filter_map(|x| *x)
             .max_by_key(|x| *x)
             .unwrap_or(0);
+        Self { map, target_upper }
+    }
+
+    pub fn with_target_upper(map: Vec<Option<usize>>, target_upper: usize) -> Self {
+        let max_target = map
+            .iter()
+            .filter_map(|x| *x)
+            .max_by_key(|x| *x)
+            .unwrap_or(0);
+        assert!(max_target <= target_upper);
         Self { map, target_upper }
     }
 
@@ -140,7 +151,18 @@ impl ColIndexMapping {
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
         }
-        Self::new(map)
+        Self::with_target_upper(map, max(self.target_upper(), following.target_upper()))
+    }
+
+    /// inverse the mapping, if a target corresponds more than one source, it will choose any one as
+    /// it inverse mapping's target
+    #[must_use]
+    pub fn inverse(&self) -> Self {
+        let mut map = vec![None; self.target_upper()];
+        for (src, dst) in self.mapping_pairs() {
+            map[dst] = Some(src);
+        }
+        Self::with_target_upper(map, self.source_upper())
     }
 
     /// return iter of (src, dst) order by src
