@@ -65,7 +65,7 @@ pub enum DataType {
     Timestampz,
     Interval,
     Struct { fields: Arc<[DataType]> },
-    List {},
+    List { datatype: Box<DataType> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -100,7 +100,9 @@ impl From<&ProstDataType> for DataType {
             TypeName::Struct => DataType::Struct {
                 fields: Arc::new([]),
             },
-            TypeName::List => DataType::List {},
+            TypeName::List => DataType::List {
+                datatype: Box::new(DataType::Int32),
+            }
         }
     }
 }
@@ -125,8 +127,13 @@ impl DataType {
             DataType::Struct { .. } => {
                 todo!()
             }
-            DataType::List { .. } => {
-                todo!()
+            DataType::List { datatype } => {
+                ListArrayBuilder::new_with_meta(
+                    capacity,
+                    ArrayMeta::List {
+                        datatype: datatype.to_owned(),
+                    }
+                )?.into()
             }
         })
     }

@@ -41,7 +41,7 @@ impl ArrayBuilder for ListArrayBuilder {
             capacity,
             ArrayMeta::List {
                 // Default datatype
-                datatype: DataType::Int32,
+                datatype: Box::new(DataType::Int16),
             },
         )
     }
@@ -52,7 +52,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 bitmap: BitmapBuilder::with_capacity(capacity),
                 offsets: vec![0],
                 value: Box::new(datatype.create_array_builder(capacity)?),
-                value_type: datatype,
+                value_type: *datatype,
                 len: 0,
             })
         } else {
@@ -169,7 +169,7 @@ impl Array for ListArray {
         let array_builder = ListArrayBuilder::new_with_meta(
             capacity,
             ArrayMeta::List {
-                datatype: self.value_type.clone(),
+                datatype: Box::new(self.value_type.clone()),
             },
         )?;
         Ok(ArrayBuilderImpl::List(array_builder))
@@ -412,7 +412,7 @@ mod tests {
         let mut builder = ListArrayBuilder::new_with_meta(
             4,
             ArrayMeta::List {
-                datatype: DataType::Int32,
+                datatype: Box::new(DataType::Int32),
             },
         )
         .unwrap();
@@ -447,7 +447,7 @@ mod tests {
         let mut builder = ListArrayBuilder::new_with_meta(
             4,
             ArrayMeta::List {
-                datatype: DataType::Int32,
+                datatype: Box::new(DataType::Int32),
             },
         )
         .unwrap();
@@ -513,7 +513,7 @@ mod tests {
                 Some(listarray2.into()),
                 Some(listarray3.into()),
             ],
-            DataType::List {},
+            DataType::List { datatype: Box::new(DataType::Int32) },
         )
         .unwrap();
         let actual = ListArray::from_protobuf(&nestarray.to_protobuf()).unwrap();
@@ -553,6 +553,23 @@ mod tests {
                 )),])),
             ]
         );
+        
+        let mut builder = ListArrayBuilder::new_with_meta(
+            3,
+            ArrayMeta::List {
+                datatype: Box::new(DataType::List { 
+                    datatype: Box::new(DataType::Int32),
+                }),
+            },
+        )
+        .unwrap();
+        nested_list_values.iter().for_each(|v| {
+            builder
+                .append(v.as_ref().map(|s| s.as_scalar_ref()))
+                .unwrap()
+        });
+        let nestarray = builder.finish().unwrap();
+        assert_eq!(nestarray.values_vec(), nested_list_values);
     }
 
     #[test]
