@@ -219,6 +219,8 @@ fn serialize_decimal(decimal: &Decimal) -> Result<Vec<u8>> {
         byte_array.push(byte);
         mantissa /= 100;
     }
+    // Add 100 marker for the end of decimal (cuz `byte` always can not be 100 in above loop).
+    byte_array.push(100);
     Ok(byte_array)
 }
 
@@ -254,7 +256,7 @@ fn deserialize_decimal(deserializer: &mut memcomparable::Deserializer<impl Buf>)
             ))));
         }
     }
-    let bytes = deserializer.read_decimal()?;
+    let bytes = deserializer.read_decimal_v2()?;
     let mut scale = bytes[0];
     let neg = if (scale & 1 << 7) > 0 {
         scale &= !(1 << 7);
