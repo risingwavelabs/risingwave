@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -117,7 +117,7 @@ impl TableFragments {
     }
 
     /// Update state of chain node inside actors.
-    pub fn update_chain_actor_state(&mut self, chain_actors: &[ActorId], state: ChainState) {
+    pub fn update_chain_actor_state(&mut self, chain_actors: &HashSet<ActorId>, state: ChainState) {
         for fragment in self.fragments.values_mut() {
             for actor in &mut fragment.actors {
                 if chain_actors.contains(&actor.actor_id) {

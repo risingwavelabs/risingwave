@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use log::debug;
@@ -200,7 +200,7 @@ where
                     .values()
                     .flatten()
                     .map(|info| info.actor_id)
-                    .collect::<Vec<ActorId>>();
+                    .collect::<HashSet<ActorId>>();
                 table_fragments.update_chain_actor_state(&chain_actors, ChainState::ReadingMview);
                 self.fragment_manager
                     .update_table_fragments(table_fragments)
