@@ -166,7 +166,6 @@ impl ColPrunable for LogicalJoin {
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
-            .into()
         }
     }
 }

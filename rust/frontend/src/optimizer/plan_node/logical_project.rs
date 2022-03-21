@@ -81,7 +81,7 @@ impl LogicalProject {
     ///
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
-    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
         assert_eq!(
             input.schema().fields().len(),
             mapping.source_upper() + 1,
@@ -89,6 +89,11 @@ impl LogicalProject {
             input,
             mapping
         );
+        if mapping.is_empty() {
+            // The parent actually doesn't need the output of the input.
+            // This can happen when the parent node only selects constant expressions.
+            return input;
+        }
         let mut input_refs = vec![None; mapping.target_upper() + 1];
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
@@ -102,7 +107,7 @@ impl LogicalProject {
             .collect();
 
         let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias)
+        LogicalProject::new(input, exprs, alias).into()
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
