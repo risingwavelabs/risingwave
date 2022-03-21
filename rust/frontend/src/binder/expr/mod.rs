@@ -15,7 +15,9 @@
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, Expr, UnaryOperator};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
+};
 
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
@@ -57,6 +59,9 @@ impl Binder {
                 results,
                 else_result,
             )?))),
+            Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_trim(expr, trim_where)?,
+            ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
@@ -96,6 +101,30 @@ impl Binder {
         FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
             ErrorCode::NotImplementedError(format!("{:?} {:?}", op, return_type)).into()
         })
+    }
+    pub(super) fn bind_trim(
+        &mut self,
+        expr: Box<Expr>,
+        // ([BOTH | LEADING | TRAILING], <expr>)
+        trim_where: Option<(TrimWhereField, Box<Expr>)>,
+    ) -> Result<FunctionCall> {
+        let mut inputs = vec![self.bind_expr(*expr)?];
+        let func_type = match trim_where {
+            Some(t) => {
+                inputs.push(self.bind_expr(*t.1)?);
+                match t.0 {
+                    TrimWhereField::Both => ExprType::Trim,
+                    TrimWhereField::Leading => ExprType::Ltrim,
+                    TrimWhereField::Trailing => ExprType::Rtrim,
+                }
+            }
+            None => ExprType::Trim,
+        };
+        Ok(FunctionCall::new_with_return_type(
+            func_type,
+            inputs,
+            DataType::Varchar,
+        ))
     }
 
     pub(super) fn bind_case(
