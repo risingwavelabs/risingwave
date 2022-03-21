@@ -57,7 +57,7 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalProject {
             input,
             base,

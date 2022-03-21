@@ -34,7 +34,6 @@ impl BatchHashAgg {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            logical.plan_base().pk_indices.to_vec(),
             Distribution::any().clone(),
             Order::any().clone(),
         );

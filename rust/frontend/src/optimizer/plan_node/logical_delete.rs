@@ -38,7 +38,7 @@ impl LogicalDelete {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema, vec![0]);
+        let base = PlanBase::new_logical(ctx, schema);
         Self { base, table, input }
     }
 

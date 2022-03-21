@@ -40,7 +40,7 @@ impl LogicalInsert {
     pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema, vec![0]);
+        let base = PlanBase::new_logical(ctx, schema);
         Self {
             table,
             columns,

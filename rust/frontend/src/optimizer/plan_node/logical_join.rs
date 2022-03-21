@@ -64,7 +64,7 @@ impl LogicalJoin {
             right.pk_indices(),
             join_type,
         );
-        let base = PlanBase::new_logical(ctx, schema, pk);
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalJoin {
             left,
             right,

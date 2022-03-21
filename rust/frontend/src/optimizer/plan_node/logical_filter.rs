@@ -45,7 +45,7 @@ impl LogicalFilter {
         }
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
-        let base = PlanBase::new_logical(ctx, schema, pk_indices);
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalFilter {
             input,
             base,

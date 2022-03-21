@@ -35,13 +35,13 @@ pub struct PlanBase {
     pub dist: Distribution,
 }
 impl PlanBase {
-    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
+    pub fn new_logical(ctx: QueryContextRef, schema: Schema) -> Self {
         let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,
             schema,
-            pk_indices,
+            pk_indices: vec![],
             dist: Distribution::any().clone(),
             order: Order::any().clone(),
         }
@@ -65,7 +65,6 @@ impl PlanBase {
     pub fn new_batch(
         ctx: QueryContextRef,
         schema: Schema,
-        pk_indices: Vec<usize>,
         dist: Distribution,
         order: Order,
     ) -> Self {
@@ -76,7 +75,7 @@ impl PlanBase {
             schema,
             dist,
             order,
-            pk_indices,
+            pk_indices: vec![],
         }
     }
 }

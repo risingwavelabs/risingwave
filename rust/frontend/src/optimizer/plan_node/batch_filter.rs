@@ -39,7 +39,6 @@ impl BatchFilter {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            logical.plan_base().pk_indices.clone(),
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );
