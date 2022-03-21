@@ -11,6 +11,11 @@ import "common.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
+// Hash mapping for meta. Stores mapping from virtual key to parallel unit id.
+message ParallelUnitMapping {
+  repeated uint32 hash_mapping = 1;
+}
+
 // will be deprecated and replaced by catalog.Table and catalog.Source
 message Table {
   plan.TableRefId table_ref_id = 1;
