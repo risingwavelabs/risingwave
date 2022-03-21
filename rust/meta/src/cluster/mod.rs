@@ -27,7 +27,7 @@ use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::{HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
@@ -95,6 +95,12 @@ where
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
+    }
+
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub async fn get_cluster_core_guard(&self) -> RwLockReadGuard<'_, StoredClusterManagerCore> {
+        self.core.read().await
     }
 
     pub async fn add_worker_node(
@@ -465,7 +471,7 @@ impl StoredClusterManagerCore {
         self.workers.remove(&WorkerKey(worker_node.host.unwrap()));
     }
 
-    fn list_worker_node(
+    pub fn list_worker_node(
         &self,
         worker_type: WorkerType,
         worker_state: Option<State>,

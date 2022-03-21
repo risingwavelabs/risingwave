@@ -16,21 +16,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use risingwave_common::error::Result;
-use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
-use tokio::sync::mpsc::{self, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Mutex;
 use tokio::time;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
 use crate::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
 
-const BUFFER_SIZE: usize = 4;
 /// Interval before retry when notify fail.
 const NOTIFY_RETRY_INTERVAL: u64 = 10;
 
@@ -57,24 +53,6 @@ impl NotificationManager {
         }
     }
 
-    /// Create a pair of sender and receiver using `mpsc::channel`.
-    /// Save sender in `NotificationManager` and use receiver to create a stream sent to rpc client.
-    pub async fn subscribe(
-        &self,
-        host_address: HostAddress,
-        worker_type: WorkerType,
-    ) -> Result<ReceiverStream<Notification>> {
-        let mut core_guard = self.core.lock().await;
-        let (tx, rx) = mpsc::channel(BUFFER_SIZE);
-        match worker_type {
-            WorkerType::ComputeNode => core_guard.be_senders.insert(WorkerKey(host_address), tx),
-            WorkerType::Frontend => core_guard.fe_senders.insert(WorkerKey(host_address), tx),
-            _ => unreachable!(),
-        };
-
-        Ok(ReceiverStream::new(rx))
-    }
-
     /// Send a `SubscribeResponse` to frontend.
     pub async fn notify_fe(&self, operation: Operation, info: &Info) {
         let mut core_guard = self.core.lock().await;
@@ -98,6 +76,24 @@ impl NotificationManager {
     pub fn delete_sender(&self, worker_key: WorkerKey) {
         self.tx.send(worker_key).unwrap();
     }
+
+    pub async fn insert_fe_sender(
+        &self,
+        worker_key: WorkerKey,
+        sender: UnboundedSender<Notification>,
+    ) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.fe_senders.insert(worker_key, sender);
+    }
+
+    pub async fn insert_be_sender(
+        &self,
+        worker_key: WorkerKey,
+        sender: UnboundedSender<Notification>,
+    ) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.be_senders.insert(worker_key, sender);
+    }
 }
 
 impl Default for NotificationManager {
@@ -108,9 +104,9 @@ impl Default for NotificationManager {
 
 struct NotificationManagerCore {
     /// The notification sender to frontends.
-    fe_senders: HashMap<WorkerKey, Sender<Notification>>,
+    fe_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to backends.
-    be_senders: HashMap<WorkerKey, Sender<Notification>>,
+    be_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
@@ -130,15 +126,13 @@ impl NotificationManagerCore {
                 if keys.contains(worker_key) {
                     break;
                 }
-                let result = sender
-                    .send(Ok(SubscribeResponse {
-                        status: None,
-                        operation: operation as i32,
-                        info: Some(info.clone()),
-                        // TODO: pass the version when call notify
-                        version: 0,
-                    }))
-                    .await;
+                let result = sender.send(Ok(SubscribeResponse {
+                    status: None,
+                    operation: operation as i32,
+                    info: Some(info.clone()),
+                    // TODO: pass the version when call notify
+                    version: 0,
+                }));
                 if result.is_ok() {
                     break;
                 }
@@ -162,15 +156,13 @@ impl NotificationManagerCore {
                 if keys.contains(worker_key) {
                     break;
                 }
-                let result = sender
-                    .send(Ok(SubscribeResponse {
-                        status: None,
-                        operation: operation as i32,
-                        info: Some(info.clone()),
-                        // TODO: pass the version when call notify
-                        version: 0,
-                    }))
-                    .await;
+                let result = sender.send(Ok(SubscribeResponse {
+                    status: None,
+                    operation: operation as i32,
+                    info: Some(info.clone()),
+                    // TODO: pass the version when call notify
+                    version: 0,
+                }));
                 if result.is_ok() {
                     break;
                 }

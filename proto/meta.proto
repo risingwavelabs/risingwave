@@ -115,6 +115,7 @@ service CatalogService {
 }
 
 // Below for heartbeat.
+
 message HeartbeatRequest {
   uint32 node_id = 1;
   common.WorkerType worker_type = 2;
@@ -209,6 +210,8 @@ service StreamManagerService {
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
+
+// Below for cluster service.
 
 message AddWorkerNodeRequest {
   common.WorkerType worker_type = 1;

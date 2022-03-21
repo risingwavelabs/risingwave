@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::manager::NotificationManagerRef;
 use crate::model::{CatalogVersionGenerator, MetadataModel};
@@ -56,6 +56,12 @@ where
             meta_store_ref,
             nm,
         })
+    }
+
+    /// Used in `NotificationService::subscribe`.
+    /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
+    pub async fn get_catalog_core_guard(&self) -> MutexGuard<'_, CatalogManagerCore<S>> {
+        self.core.lock().await
     }
 
     pub async fn get_catalog(&self) -> Result<Catalog> {
@@ -360,7 +366,7 @@ type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
 /// between tables.
-struct CatalogManagerCore<S> {
+pub struct CatalogManagerCore<S> {
     meta_store_ref: Arc<S>,
     /// Cached database key information.
     databases: HashSet<DatabaseKey>,
@@ -430,7 +436,7 @@ where
         Ok(version)
     }
 
-    async fn get_catalog(&self) -> Result<Catalog> {
+    pub async fn get_catalog(&self) -> Result<Catalog> {
         Ok((
             Database::list(&*self.meta_store_ref).await?,
             Schema::list(&*self.meta_store_ref).await?,
