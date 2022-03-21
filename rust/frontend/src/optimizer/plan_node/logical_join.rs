@@ -170,7 +170,7 @@ impl LogicalJoin {
         left_pk
             .iter()
             .map(|index| l2o.map(*index))
-            .chain(right_pk.iter().map(|iindex| r2o.map(*index)))
+            .chain(right_pk.iter().map(|index| r2o.map(*index)))
             .collect()
     }
 
