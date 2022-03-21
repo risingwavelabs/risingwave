@@ -41,7 +41,9 @@ pub use interval::*;
 pub use ordered_float::IntoOrdered;
 use paste::paste;
 
-use crate::array::{ArrayBuilderImpl, PrimitiveArrayItemType, StructRef, StructValue};
+use crate::array::{
+    ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef, StructValue,
+};
 
 pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
 pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
@@ -63,6 +65,7 @@ pub enum DataType {
     Timestampz,
     Interval,
     Struct { fields: Arc<[DataType]> },
+    List { datatype: Box<DataType> },
 }
 
 const DECIMAL_DEFAULT_PRECISION: u32 = 20;
@@ -97,6 +100,9 @@ impl From<&ProstDataType> for DataType {
             TypeName::Struct => DataType::Struct {
                 fields: Arc::new([]),
             },
+            TypeName::List => DataType::List {
+                datatype: Box::new(DataType::Int32),
+            },
         }
     }
 }
@@ -121,6 +127,13 @@ impl DataType {
             DataType::Struct { .. } => {
                 todo!()
             }
+            DataType::List { datatype } => ListArrayBuilder::new_with_meta(
+                capacity,
+                ArrayMeta::List {
+                    datatype: datatype.to_owned(),
+                },
+            )?
+            .into(),
         })
     }
 
@@ -141,6 +154,7 @@ impl DataType {
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
             DataType::Struct { .. } => TypeName::Struct,
+            DataType::List { .. } => TypeName::List,
         }
     }
 
@@ -170,6 +184,7 @@ impl DataType {
             DataType::Timestampz => DataSize::Fixed(size_of::<i64>()),
             DataType::Interval => DataSize::Variable,
             DataType::Struct { .. } => DataSize::Variable,
+            DataType::List { .. } => DataSize::Variable,
         }
     }
 
@@ -211,6 +226,7 @@ impl DataType {
             DataType::Timestampz => 13,
             DataType::Interval => 14,
             DataType::Struct { .. } => 15,
+            DataType::List { .. } => 16,
         }
     }
 }
@@ -288,7 +304,8 @@ macro_rules! for_all_scalar_variants {
             { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
             { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
-            { Struct, struct, StructValue, StructRef<'scalar> }
+            { Struct, struct, StructValue, StructRef<'scalar> },
+            { List, list, ListValue, ListRef<'scalar> }
         }
     };
 }
@@ -552,6 +569,7 @@ impl std::hash::Hash for ScalarImpl {
                     Self::NaiveDateTime(naivedatetime) => naivedatetime.hash(state),
                     Self::NaiveTime(naivetime) => naivetime.hash(state),
                     Self::Struct(v) => v.hash(state),
+                    Self::List(v) => v.hash(state),
                 }
             };
         }

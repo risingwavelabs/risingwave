@@ -128,6 +128,7 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
         ScalarImpl::NaiveDateTime(_) => todo!(),
         ScalarImpl::NaiveTime(_) => todo!(),
         ScalarImpl::Struct(_) => todo!(),
+        ScalarImpl::List(_) => todo!(),
     };
     Some(RexNode::Constant(ConstantValue { body }))
 }
