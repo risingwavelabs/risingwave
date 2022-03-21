@@ -52,7 +52,7 @@ service EpochService {
 }
 
 // Below for catalog service.
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message CreateRequest {
   uint32 node_id = 1;
   oneof catalog_body {
@@ -62,14 +62,14 @@ message CreateRequest {
   }
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message CreateResponse {
   common.Status status = 1;
   int32 id = 2;
   uint64 version = 3;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message DropRequest {
   uint32 node_id = 1;
   oneof catalog_id {
@@ -79,7 +79,7 @@ message DropRequest {
   }
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message DropResponse {
   common.Status status = 1;
   uint64 version = 2;
@@ -96,13 +96,13 @@ message Catalog {
   repeated Table tables = 4;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message GetCatalogResponse {
   common.Status status = 1;
   Catalog catalog = 2;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 service CatalogService {
   rpc GetCatalog(GetCatalogRequest) returns (GetCatalogResponse);
   rpc Create(CreateRequest) returns (CreateResponse);
@@ -167,7 +167,7 @@ message ActorLocation {
   repeated stream_plan.StreamActor actors = 2;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message CreateMaterializedViewRequest {
   uint32 node_id = 1;
   // TODO: remove this, do catalog init in Meta and return in response.
@@ -175,18 +175,18 @@ message CreateMaterializedViewRequest {
   stream_plan.StreamNode stream_node = 3;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message CreateMaterializedViewResponse {
   common.Status status = 1;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message DropMaterializedViewRequest {
   uint32 node_id = 1;
   plan.TableRefId table_ref_id = 2;
 }
 
-// will be deprecated and replaced by catalog.CatalogService
+// will be deprecated and replaced by DdlService
 message DropMaterializedViewResponse {
   common.Status status = 1;
 }

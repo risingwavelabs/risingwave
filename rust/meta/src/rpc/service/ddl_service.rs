@@ -41,7 +41,7 @@ use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
-pub struct CatalogServiceImpl<S> {
+pub struct DdlServiceImpl<S> {
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
@@ -52,7 +52,7 @@ pub struct CatalogServiceImpl<S> {
     stream_clients: StreamClientsRef,
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -75,7 +75,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> DdlService for CatalogServiceImpl<S>
+impl<S> DdlService for DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -294,7 +294,7 @@ where
     }
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
