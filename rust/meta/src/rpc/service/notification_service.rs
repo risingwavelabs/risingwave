@@ -24,12 +24,13 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::{StoredClusterManagerRef, WorkerKey};
-use crate::manager::{CatalogManagerRef, Notification, NotificationManagerRef};
+use crate::manager::{CatalogManagerRef, EpochGeneratorRef, Notification, NotificationManagerRef};
 use crate::storage::MetaStore;
 pub struct NotificationServiceImpl<S> {
     notification_manager: NotificationManagerRef,
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: StoredClusterManagerRef<S>,
+    epoch_generator: EpochGeneratorRef,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -40,11 +41,13 @@ where
         notification_manager: NotificationManagerRef,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: StoredClusterManagerRef<S>,
+        epoch_generator: EpochGeneratorRef,
     ) -> Self {
         Self {
             notification_manager,
             catalog_manager,
             cluster_manager,
+            epoch_generator,
         }
     }
 }
@@ -96,7 +99,7 @@ where
                     status: None,
                     operation: Operation::Snapshot as i32,
                     info: Some(Info::FeSnapshot(meta_snapshot)),
-                    version: 0,
+                    version: self.epoch_generator.generate().into_inner(),
                 }))
                 .unwrap();
                 self.notification_manager

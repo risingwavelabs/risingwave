@@ -41,7 +41,7 @@ async fn get_hummock_meta_client() -> MockHummockMetaClient {
             .await
             .unwrap(),
     );
-    let notification_manager = Arc::new(NotificationManager::new());
+    let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
     let cluster_manager =
         StoredClusterManager::new(env, notification_manager, Duration::from_secs(3600))
             .await

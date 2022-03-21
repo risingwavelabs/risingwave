@@ -123,7 +123,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
-    let notification_manager = Arc::new(NotificationManager::new());
+    let notification_manager = Arc::new(NotificationManager::new(epoch_generator_ref.clone()));
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
@@ -211,6 +211,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         notification_manager,
         catalog_manager_v2_ref,
         cluster_manager.clone(),
+        epoch_generator_ref.clone(),
     );
 
     if let Some(prometheus_addr) = prometheus_addr {

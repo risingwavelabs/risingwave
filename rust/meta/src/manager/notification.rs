@@ -23,6 +23,7 @@ use tokio::sync::Mutex;
 use tokio::time;
 use tonic::Status;
 
+use super::{Epoch, EpochGeneratorRef};
 use crate::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
@@ -41,28 +42,24 @@ pub struct NotificationManager {
 pub type NotificationManagerRef = Arc<NotificationManager>;
 
 impl NotificationManager {
-    pub fn new() -> Self {
+    pub fn new(epoch_generator: EpochGeneratorRef) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         Self {
-            core: Mutex::new(NotificationManagerCore {
-                fe_senders: HashMap::new(),
-                be_senders: HashMap::new(),
-                rx,
-            }),
+            core: Mutex::new(NotificationManagerCore::new(rx, epoch_generator)),
             tx,
         }
     }
 
     /// Send a `SubscribeResponse` to frontend.
-    pub async fn notify_fe(&self, operation: Operation, info: &Info) {
+    pub async fn notify_fe(&self, operation: Operation, info: &Info) -> Epoch {
         let mut core_guard = self.core.lock().await;
-        core_guard.notify_fe(operation, info).await;
+        core_guard.notify_fe(operation, info).await
     }
 
     /// Send a `SubscribeResponse` to backend.
-    pub async fn notify_be(&self, operation: Operation, info: &Info) {
+    pub async fn notify_be(&self, operation: Operation, info: &Info) -> Epoch {
         let mut core_guard = self.core.lock().await;
-        core_guard.notify_be(operation, info).await;
+        core_guard.notify_be(operation, info).await
     }
 
     /// Send a `SubscribeResponse` to frontend and backend.
@@ -96,12 +93,6 @@ impl NotificationManager {
     }
 }
 
-impl Default for NotificationManager {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 struct NotificationManagerCore {
     /// The notification sender to frontends.
     fe_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
@@ -110,10 +101,22 @@ struct NotificationManagerCore {
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
+    /// Use epoch as notification version.
+    epoch_generator: EpochGeneratorRef,
 }
 
 impl NotificationManagerCore {
-    async fn notify_fe(&mut self, operation: Operation, info: &Info) {
+    fn new(rx: UnboundedReceiver<WorkerKey>, epoch_generator: EpochGeneratorRef) -> Self {
+        Self {
+            fe_senders: HashMap::new(),
+            be_senders: HashMap::new(),
+            rx,
+            epoch_generator,
+        }
+    }
+
+    async fn notify_fe(&mut self, operation: Operation, info: &Info) -> Epoch {
+        let epoch = self.epoch_generator.generate();
         let mut keys = HashSet::new();
         for (worker_key, sender) in &self.fe_senders {
             loop {
@@ -130,8 +133,7 @@ impl NotificationManagerCore {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    // TODO: pass the version when call notify
-                    version: 0,
+                    version: epoch.into_inner(),
                 }));
                 if result.is_ok() {
                     break;
@@ -140,10 +142,12 @@ impl NotificationManagerCore {
             }
         }
         self.remove_by_key(keys);
+        epoch
     }
 
     /// Send a `SubscribeResponse` to backend.
-    async fn notify_be(&mut self, operation: Operation, info: &Info) {
+    async fn notify_be(&mut self, operation: Operation, info: &Info) -> Epoch {
+        let epoch = self.epoch_generator.generate();
         let mut keys = HashSet::new();
         for (worker_key, sender) in &self.be_senders {
             loop {
@@ -160,8 +164,7 @@ impl NotificationManagerCore {
                     status: None,
                     operation: operation as i32,
                     info: Some(info.clone()),
-                    // TODO: pass the version when call notify
-                    version: 0,
+                    version: epoch.into_inner(),
                 }));
                 if result.is_ok() {
                     break;
@@ -170,6 +173,7 @@ impl NotificationManagerCore {
             }
         }
         self.remove_by_key(keys);
+        epoch
     }
 
     fn remove_by_key(&mut self, keys: HashSet<WorkerKey>) {

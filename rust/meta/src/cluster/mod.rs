@@ -536,7 +536,7 @@ mod tests {
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),
-                Arc::new(NotificationManager::new()),
+                Arc::new(NotificationManager::new(env.epoch_generator_ref())),
                 Duration::new(0, 0),
             )
             .await

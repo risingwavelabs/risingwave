@@ -27,7 +27,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::manager::NotificationManagerRef;
-use crate::model::{CatalogVersionGenerator, MetadataModel};
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 pub type DatabaseId = u32;
@@ -72,13 +72,14 @@ where
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
-            let version = core.new_version_id().await?;
             database.insert(&*self.meta_store_ref).await?;
             core.add_database(database);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::DatabaseV2(database.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -92,13 +93,14 @@ where
         let mut core = self.core.lock().await;
         let database = Database::select(&*self.meta_store_ref, &database_id).await?;
         if let Some(database) = database {
-            let version = core.new_version_id().await?;
             Database::delete(&*self.meta_store_ref, &database_id).await?;
             core.drop_database(&database);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Delete, &Info::DatabaseV2(database))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -111,13 +113,14 @@ where
     pub async fn create_schema(&self, schema: &Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_schema(schema) {
-            let version = core.new_version_id().await?;
             schema.insert(&*self.meta_store_ref).await?;
             core.add_schema(schema);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::SchemaV2(schema.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -131,13 +134,14 @@ where
         let mut core = self.core.lock().await;
         let schema = Schema::select(&*self.meta_store_ref, &schema_id).await?;
         if let Some(schema) = schema {
-            let version = core.new_version_id().await?;
             Schema::delete(&*self.meta_store_ref, &schema_id).await?;
             core.drop_schema(&schema);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Delete, &Info::SchemaV2(schema))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -168,13 +172,14 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            let version = core.new_version_id().await?;
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -203,16 +208,17 @@ where
     pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_table(table) {
-            let version = core.new_version_id().await?;
             table.insert(&*self.meta_store_ref).await?;
             core.add_table(table);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -237,16 +243,17 @@ where
                 )
                 .into()),
                 None => {
-                    let version = core.new_version_id().await?;
                     Table::delete(&*self.meta_store_ref, &table_id).await?;
                     core.drop_table(&table);
                     for &dependent_relation_id in &table.dependent_relations {
                         core.decrease_ref_count(dependent_relation_id);
                     }
 
-                    self.nm
+                    let version = self
+                        .nm
                         .notify_fe(Operation::Delete, &Info::TableV2(table))
-                        .await;
+                        .await
+                        .into_inner();
 
                     Ok(version)
                 }
@@ -276,13 +283,14 @@ where
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            let version = core.new_version_id().await?;
             source.insert(&*self.meta_store_ref).await?;
             core.add_source(source);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -308,13 +316,14 @@ where
     pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_source(source) {
-            let version = core.new_version_id().await?;
             source.insert(&*self.meta_store_ref).await?;
             core.add_source(source);
 
-            self.nm
+            let version = self
+                .nm
                 .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
-                .await;
+                .await
+                .into_inner();
 
             Ok(version)
         } else {
@@ -339,13 +348,14 @@ where
                 )
                 .into()),
                 None => {
-                    let version = core.new_version_id().await?;
                     Source::delete(&*self.meta_store_ref, &source_id).await?;
                     core.drop_source(&source);
 
-                    self.nm
+                    let version = self
+                        .nm
                         .notify_fe(Operation::Delete, &Info::Source(source))
-                        .await;
+                        .await
+                        .into_inner();
 
                     Ok(version)
                 }
@@ -379,8 +389,6 @@ pub struct CatalogManagerCore<S> {
     /// Relation refer count mapping.
     relation_ref_count: HashMap<RelationId, usize>,
 
-    /// Catalog version generator.
-    version_generator: CatalogVersionGenerator,
     // In-progress creation tracker
     in_progress_creation_tracker: HashSet<RelationKey>,
 }
@@ -415,7 +423,6 @@ where
             (table.database_id, table.schema_id, table.name)
         }));
 
-        let version_generator = CatalogVersionGenerator::new(&*meta_store_ref).await?;
         let in_progress_creation_tracker = HashSet::new();
 
         Ok(Self {
@@ -425,15 +432,8 @@ where
             sources,
             tables,
             relation_ref_count,
-            version_generator,
             in_progress_creation_tracker,
         })
-    }
-
-    async fn new_version_id(&mut self) -> Result<CatalogVersion> {
-        let version = self.version_generator.next();
-        self.version_generator.insert(&*self.meta_store_ref).await?;
-        Ok(version)
     }
 
     pub async fn get_catalog(&self) -> Result<Catalog> {
