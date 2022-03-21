@@ -121,7 +121,7 @@ mod tests {
 
         for (start, len, expected) in cases {
             let is_negative_len = matches!(len, Some(ScalarImpl::Int32(len_i32)) if len_i32 < 0);
-            let mut expr = new_substr_start_end(
+            let expr = new_substr_start_end(
                 Box::new(LiteralExpression::new(
                     DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),
@@ -157,7 +157,7 @@ mod tests {
         ];
 
         for (text, pattern, replacement, expected) in cases {
-            let mut expr = new_replace_expr(
+            let expr = new_replace_expr(
                 Box::new(LiteralExpression::new(
                     DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),
