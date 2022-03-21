@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{LogicalJoin, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::{Distribution, WithSchema};
 

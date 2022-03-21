@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, PlanNode, ToStreamProst};
+use super::{LogicalScan, PlanBase, ToStreamProst};
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 

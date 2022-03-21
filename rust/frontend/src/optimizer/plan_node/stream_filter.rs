@@ -18,9 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
-use super::{LogicalFilter, PlanNode, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{WithDistribution, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]

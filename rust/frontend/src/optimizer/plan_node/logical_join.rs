@@ -98,7 +98,7 @@ impl LogicalJoin {
                 ColIndexMapping::new(
                     (0..left_len)
                         .into_iter()
-                        .map(|x| Some(x))
+                        .map(Some)
                         .chain(iter::repeat(None).take(right_len))
                         .collect_vec(),
                 )

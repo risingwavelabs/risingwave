@@ -18,9 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::{LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::WithSchema;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
