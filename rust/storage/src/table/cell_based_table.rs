@@ -149,13 +149,13 @@ impl<S: StateStore> CellBasedTable<S> {
         &mut self,
         pk: Row,
         cell_value: Option<Row>,
-        column_descs: Vec<ColumnDesc>,
+        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(&column_descs);
+        let column_ids = generate_column_id(column_descs);
         let bytes = self
             .cell_based_row_serializer
             .serialize(&arrange_key_buf, cell_value, column_ids)
@@ -191,13 +191,13 @@ impl<S: StateStore> CellBasedTable<S> {
         &mut self,
         pk: Row,
         cell_value: Option<Row>,
-        column_descs: Vec<ColumnDesc>,
+        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(&column_descs);
+        let column_ids = generate_column_id(column_descs);
         let bytes = self
             .cell_based_row_serializer
             .serialize(&arrange_key_buf, cell_value, column_ids)
@@ -220,12 +220,12 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn batch_insert_row(
         &mut self,
         rows: Vec<(Row, Option<Row>)>,
-        column_descs: Vec<ColumnDesc>,
+        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let column_ids = generate_column_id(&column_descs);
+        let column_ids = generate_column_id(column_descs);
         for (pk, cell_values) in rows {
             let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
             let bytes = self
