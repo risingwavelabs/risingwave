@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-mod materialize;
-mod state;
+//! value encoding is an encoding format which converts the data into a form that do not guarantee
+//! directly compared with memcmp.
 
-#[cfg(test)]
-mod table_state_tests;
-#[cfg(test)]
-pub mod test_utils;
+#![deny(missing_docs)]
 
-pub use materialize::*;
-pub use state::*;
+mod de;
+mod ser;
+
+pub use de::Deserializer;
+pub use ser::Serializer;

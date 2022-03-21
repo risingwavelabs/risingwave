@@ -179,6 +179,12 @@ impl Barrier {
     pub fn is_stop_mutation(&self) -> bool {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
+    pub fn is_add_output(&self) -> bool {
+        self.mutation
+            .as_ref()
+            .map(|m| m.is_add_output())
+            .unwrap_or(false)
+    }
 
     pub fn current_epoch(&self) -> u64 {
         self.epoch.curr
@@ -195,6 +201,11 @@ impl Mutation {
     /// Return true if the mutation is stop.
     pub fn is_stop(&self) -> bool {
         matches!(self, Mutation::Stop(_))
+    }
+
+    /// Return ture if the mutation is add output.
+    pub fn is_add_output(&self) -> bool {
+        matches!(self, Mutation::AddOutput(_))
     }
 }
 

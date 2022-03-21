@@ -451,7 +451,6 @@ mod tests {
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),
-                    None,
                     notification_manager,
                     Duration::from_secs(3600),
                 )
