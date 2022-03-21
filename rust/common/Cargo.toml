@@ -31,6 +31,7 @@ tokio-stream = "0.1"
 toml = "0.5"
 tonic = "0.6"
 twox-hash = "1"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = "0.8"

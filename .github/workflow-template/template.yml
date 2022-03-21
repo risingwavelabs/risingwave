@@ -6,7 +6,7 @@ on:
 
 env:
   RUST_TOOLCHAIN: nightly-2022-03-09
-  CACHE_KEY_SUFFIX: v20220318v2
+  CACHE_KEY_SUFFIX: v20220320
   CARGO_TERM_COLOR: always
   RW_CI: true
 
@@ -444,14 +444,18 @@ jobs:
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-build
 
-      - name: Install cargo-sort
+      - name: Install required tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          cargo install cargo-sort
+          cargo install cargo-sort cargo-hakari
 
       - name: Run rust cargo-sort check
         run: |
           cd rust && cargo sort -c -w
+
+      - name: Run rust cargo-hakari check
+        run: |
+          cd rust && cargo hakari verify
 
       - name: Run rust format check
         run: |

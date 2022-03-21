@@ -45,13 +45,13 @@ engine, storage engine and meta service.
 
 RiseDev is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
 
-```
+```shell
 brew install tmux
 ```
 
 Then, in the root directory, simply run:
 
-```
+```shell
 ./risedev d # shortcut for ./risedev dev
 psql -h localhost -p 4567 -d dev
 ```
@@ -62,19 +62,19 @@ There are a lot of other running configurations, like `ci-1node`, `ci-3node`, `d
 
 To stop the playground,
 
-```
+```shell
 ./risedev k # shortcut for ./risedev kill
 ```
 
 And you can configure components for RiseDev.
 
-```
+```shell
 ./risedev configure
 ```
 
 For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
 
-```
+```shell
 ./risedev p
 ```
 
@@ -84,7 +84,7 @@ For more information, refer to `README.md` under `rust/risedevtool`.
 
 To preview the web page, install Node.js, and
 
-```
+```shell
 cd rust/meta/src/dashboard && npx reload -b
 ```
 

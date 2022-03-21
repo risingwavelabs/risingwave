@@ -21,6 +21,7 @@ risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 toml = "0.5"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [[bin]]
 name = "ss-bench"
