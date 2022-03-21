@@ -101,7 +101,21 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
 
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
-        node.0.next().await?;
+        // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
+        // return. Once the iterator enters an invalid state, we should remove it from heap
+        // before returning.
+
+        match node.0.next().await {
+            Ok(_) => {}
+            Err(e) => {
+                // If the iterator returns error, we should clear the heap, so that this iterator
+                // becomes invalid.
+                PeekMut::pop(node);
+                self.heap.clear();
+                return Err(e);
+            }
+        }
+
         if !node.0.is_valid() {
             // put back to `unused_iters`
             let node = PeekMut::pop(node);
