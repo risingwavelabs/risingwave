@@ -17,15 +17,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-< < < < < < < HEAD
-use log::info;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::ErrorCode::InternalError;
-== == == =
 use log::{debug, info};
 use uuid::Uuid;
-
-> > > > > > > a9410a9a (add create source)
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_pb::common::{ActorInfo, WorkerType};
@@ -59,10 +53,7 @@ pub struct CreateMaterializedViewContext {
 
 /// Stream Manager
 
-pub struct StreamManager<S>
-    where
-        S: MetaStore,
-{
+pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 
