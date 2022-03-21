@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::binder::BaseTableRef;
+use crate::binder::BoundBaseTable;
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
 ///
@@ -28,13 +28,13 @@ use crate::binder::BaseTableRef;
 #[derive(Debug, Clone)]
 pub struct LogicalDelete {
     pub base: PlanBase,
-    table: BaseTableRef,
+    table: BoundBaseTable,
     input: PlanRef,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table: BaseTableRef) -> Self {
+    pub fn new(input: PlanRef, table: BoundBaseTable) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
@@ -43,7 +43,7 @@ impl LogicalDelete {
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table: BaseTableRef) -> Result<Self> {
+    pub fn create(input: PlanRef, table: BoundBaseTable) -> Result<Self> {
         Ok(Self::new(input, table))
     }
 

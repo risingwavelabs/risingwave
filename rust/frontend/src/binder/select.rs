@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
-use crate::binder::{Binder, TableRef};
+use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
 #[derive(Debug)]
@@ -29,7 +29,7 @@ pub struct BoundSelect {
     pub distinct: bool,
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
-    pub from: Option<TableRef>,
+    pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
 }

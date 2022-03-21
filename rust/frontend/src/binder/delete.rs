@@ -15,12 +15,12 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
-use super::{BaseTableRef, Binder};
+use super::{BoundBaseTable, Binder};
 use crate::expr::ExprImpl;
 
 #[derive(Debug)]
 pub struct BoundDelete {
-    pub table: BaseTableRef,
+    pub table: BoundBaseTable,
     pub selection: Option<ExprImpl>,
 }
 

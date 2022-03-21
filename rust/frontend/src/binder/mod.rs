@@ -35,7 +35,7 @@ pub use query::BoundQuery;
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
-pub use table_ref::{BaseTableRef, BoundJoin, TableRef};
+pub use table_ref::{BoundBaseTable, BoundJoin, Relation};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;

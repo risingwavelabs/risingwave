@@ -15,21 +15,21 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
-use crate::binder::{BaseTableRef, BoundJoin, TableRef};
+use crate::binder::{BoundBaseTable, BoundJoin, Relation};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalScan, PlanRef};
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_table_ref(&mut self, table_ref: TableRef) -> Result<PlanRef> {
+    pub(super) fn plan_table_ref(&mut self, table_ref: Relation) -> Result<PlanRef> {
         match table_ref {
-            TableRef::BaseTable(t) => self.plan_base_table_ref(*t),
+            Relation::BaseTable(t) => self.plan_base_table_ref(*t),
             // TODO: order is ignored in the subquery
-            TableRef::SubQuery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
-            TableRef::Join(join) => self.plan_join(*join),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
+            Relation::Join(join) => self.plan_join(*join),
         }
     }
 
-    pub(super) fn plan_base_table_ref(&mut self, table_ref: BaseTableRef) -> Result<PlanRef> {
+    pub(super) fn plan_base_table_ref(&mut self, table_ref: BoundBaseTable) -> Result<PlanRef> {
         let (column_ids, fields) = table_ref
             .columns
             .iter()

@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::binder::BaseTableRef;
+use crate::binder::BoundBaseTable;
 use crate::catalog::ColumnId;
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
@@ -30,14 +30,14 @@ use crate::catalog::ColumnId;
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
     pub base: PlanBase,
-    table: BaseTableRef,
+    table: BoundBaseTable,
     columns: Vec<ColumnId>,
     input: PlanRef,
 }
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
+    pub fn new(input: PlanRef, table: BoundBaseTable, columns: Vec<ColumnId>) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let base = PlanBase::new_logical(ctx, schema);
@@ -50,7 +50,7 @@ impl LogicalInsert {
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
-    pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
+    pub fn create(input: PlanRef, table: BoundBaseTable, columns: Vec<ColumnId>) -> Result<Self> {
         Ok(Self::new(input, table, columns))
     }
 
