@@ -282,7 +282,9 @@ where
         let start = Instant::now();
 
         info!("start barrier flush");
-        self.barrier_manager_ref.wait_for_next_barrier_to_collect().await?;
+        self.barrier_manager_ref
+            .wait_for_next_barrier_to_collect()
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         info!("barrier flushed in {:?}", elapsed);
@@ -393,10 +395,7 @@ mod tests {
             &self,
             _request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            Ok(Response::new(InjectBarrierResponse {
-                request_id: "".to_string(),
-                status: None,
-            }))
+            Ok(Response::new(InjectBarrierResponse::default()))
         }
 
         async fn create_source(

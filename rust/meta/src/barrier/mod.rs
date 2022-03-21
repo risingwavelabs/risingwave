@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::InjectBarrierRequest;
+use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
 use tokio::sync::{oneshot, watch, RwLock};
 use uuid::Uuid;
@@ -84,6 +84,43 @@ impl Notifier {
 }
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
+
+#[derive(Default)]
+struct UnfinishedNotifiers(HashMap<u64, (usize, Vec<Notifier>)>);
+
+impl UnfinishedNotifiers {
+    fn add(
+        &mut self,
+        epoch: u64,
+        worker_count: usize,
+        notifiers: impl IntoIterator<Item = Notifier>,
+    ) {
+        if worker_count == 0 {
+            notifiers.into_iter().for_each(Notifier::notify_finished);
+        } else {
+            let old = self
+                .0
+                .insert(epoch, (worker_count, notifiers.into_iter().collect()));
+            assert!(old.is_none());
+        }
+    }
+
+    fn finish_one(&mut self, epoch: u64) {
+        tracing::debug!("finish one for epoch {}", epoch);
+
+        match self.0.entry(epoch) {
+            Entry::Occupied(mut o) => {
+                o.get_mut().0 -= 1;
+                if o.get().0 == 0 {
+                    tracing::debug!("finish all for epoch {}", epoch);
+                    let notifiers = o.remove().1;
+                    notifiers.into_iter().for_each(Notifier::notify_finished);
+                }
+            }
+            Entry::Vacant(_) => panic!(),
+        }
+    }
+}
 
 /// A buffer or queue for scheduling barriers.
 struct ScheduledBarriers {
@@ -210,7 +247,7 @@ where
 
         // TODO: persist these states
         let mut prev_epoch = INVALID_EPOCH;
-        let mut all_notifiers: HashMap<u64, Vec<_>> = Default::default();
+        let mut unfinished = UnfinishedNotifiers::default();
 
         loop {
             tokio::select! {
@@ -247,21 +284,16 @@ where
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
 
             match self.run_inner(&command_context).await {
-                Ok(finished_epochs) => {
+                Ok(responses) => {
                     // Notify about barrier collected.
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
-                    // Add notifiers for this epoch to all_notifiers.
-                    all_notifiers
-                        .entry(new_epoch)
-                        .or_default()
-                        .extend(notifiers);
+                    // Add notifiers for this epoch to unfinished notifiers.
+                    unfinished.add(new_epoch, responses.len(), notifiers);
 
                     // For those finished epochs, notify about finished.
-                    for epoch in finished_epochs {
-                        if let Some(notifiers) = all_notifiers.remove(&epoch) {
-                            notifiers.into_iter().for_each(Notifier::notify_finished);
-                        }
+                    for epoch in responses.into_iter().flat_map(|r| r.finished_epochs) {
+                        unfinished.finish_one(epoch);
                     }
 
                     // Update the current epoch.
@@ -279,7 +311,10 @@ where
     }
 
     /// running a scheduled command.
-    async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<Vec<u64>> {
+    async fn run_inner<'a>(
+        &self,
+        command_context: &CommandContext<'a, S>,
+    ) -> Result<Vec<InjectBarrierResponse>> {
         let mutation = command_context.to_mutation()?;
         let info = command_context.info;
 
@@ -319,9 +354,13 @@ where
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.
-                    client.inject_barrier(request).await.to_rw_result()?;
+                    let response = client
+                        .inject_barrier(request)
+                        .await
+                        .to_rw_result()?
+                        .into_inner();
 
-                    Ok::<_, RwError>(())
+                    Ok::<_, RwError>(response)
                 }
                 .into()
             }
@@ -346,12 +385,12 @@ where
                 }
             };
         }
-        collect_result?;
+        let responses: Vec<InjectBarrierResponse> = collect_result?;
 
         timer.observe_duration();
         command_context.post_collect().await?; // do some post stuffs
 
-        Ok(vec![command_context.curr_epoch])
+        Ok(responses)
     }
 }
 

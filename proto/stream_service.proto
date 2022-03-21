@@ -64,7 +64,7 @@ message InjectBarrierRequest {
 message InjectBarrierResponse {
   string request_id = 1;
   common.Status status = 2;
-  // repeated uint64 finished_epochs = 5;
+  repeated uint64 finished_epochs = 3;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
