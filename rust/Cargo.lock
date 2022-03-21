@@ -3439,6 +3439,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
+ "workspace-hack",
  "yaml-rust",
 ]
 
@@ -3639,6 +3640,7 @@ dependencies = [
  "bytes",
  "chrono",
  "crc32fast",
+ "crossbeam-channel",
  "either",
  "farmhash",
  "futures 0.3.21",
@@ -3668,6 +3670,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
+ "tokio-util 0.7.0",
  "tonic",
  "twox-hash",
  "url",
