@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use crate::binder::{BoundBaseTable, Binder, BoundQuery};
+use crate::binder::{Binder, BoundBaseTable, BoundQuery};
 
 #[derive(Debug)]
 pub struct BoundInsert {

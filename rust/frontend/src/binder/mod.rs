@@ -22,20 +22,20 @@ mod delete;
 pub(crate) mod expr;
 mod insert;
 mod query;
+mod relation;
 mod select;
 mod set_expr;
 mod statement;
-mod relation;
 mod values;
 
 pub use bind_context::BindContext;
 pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
+pub use relation::{BoundBaseTable, BoundJoin, Relation};
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
-pub use relation::{BoundBaseTable, BoundJoin, Relation};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;

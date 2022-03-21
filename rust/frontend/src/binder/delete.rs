@@ -15,7 +15,7 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
-use super::{BoundBaseTable, Binder};
+use super::{Binder, BoundBaseTable};
 use crate::expr::ExprImpl;
 
 #[derive(Debug)]

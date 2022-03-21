@@ -21,10 +21,10 @@ use crate::session::QueryContextRef;
 mod delete;
 mod insert;
 mod query;
+mod relation;
 mod select;
 mod set_expr;
 mod statement;
-mod relation;
 mod values;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
