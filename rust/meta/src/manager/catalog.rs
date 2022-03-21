@@ -178,7 +178,9 @@ where
             }
 
             // Notify frontends to create table.
-            self.nm.notify_frontend(Operation::Add, &Info::Table(table)).await;
+            self.nm
+                .notify_frontend(Operation::Add, &Info::Table(table))
+                .await;
 
             Ok(version)
         } else {
