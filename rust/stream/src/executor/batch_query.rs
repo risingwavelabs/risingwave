@@ -20,7 +20,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
+// use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
+use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
@@ -33,12 +34,12 @@ const DEFAULT_BATCH_SIZE: usize = 100;
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The primary key indices of the schema
     pk_indices: PkIndices,
-    /// The [`MViewTable`] that needs to be queried
-    table: MViewTable<S>,
+    /// The [`CellBasedTable`] that needs to be queried
+    table: CellBasedTable<S>,
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
-    /// Inner iterator that reads [`MViewTable`]
-    iter: Option<MViewTableIter<S>>,
+    /// Inner iterator that reads [`CellBasedTable`]
+    iter: Option<CellBasedTableRowIter<S>>,
 
     schema: Schema,
 
@@ -74,7 +75,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = MViewTable::new_adhoc(keyspace, column_descs);
+        let table = CellBasedTable::new_adhoc(keyspace, column_descs);
         Ok(Box::new(BatchQueryExecutor::new(
             table,
             params.pk_indices,
@@ -84,12 +85,12 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 }
 
 impl<S: StateStore> BatchQueryExecutor<S> {
-    pub fn new(table: MViewTable<S>, pk_indices: PkIndices, op_info: String) -> Self {
+    pub fn new(table: CellBasedTable<S>, pk_indices: PkIndices, op_info: String) -> Self {
         Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
     }
 
     pub fn new_with_batch_size(
-        table: MViewTable<S>,
+        table: CellBasedTable<S>,
         pk_indices: PkIndices,
         batch_size: usize,
         op_info: String,

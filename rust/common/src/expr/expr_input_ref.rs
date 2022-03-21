@@ -34,7 +34,7 @@ impl Expression for InputRefExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         Ok(input.column_at(self.idx).array())
     }
 }

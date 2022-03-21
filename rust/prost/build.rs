@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "catalog",
         "common",
         "data",
+        "ddl_service",
         "expr",
         "meta",
         "plan",

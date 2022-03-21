@@ -15,7 +15,9 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+use console::style;
+use futures::StreamExt;
 use risingwave_frontend_test_runner::TestCase;
 
 #[tokio::main]
@@ -23,6 +25,8 @@ async fn main() -> Result<()> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let dir = Path::new(manifest_dir).join("tests").join("testdata");
     println!("Using test cases from {:?}", dir);
+
+    let mut futures = vec![];
 
     use walkdir::WalkDir;
     for entry in WalkDir::new(dir) {
@@ -50,23 +54,62 @@ async fn main() -> Result<()> {
                 .to_string()
                 + ".apply.yaml";
 
-            println!(".. {:?} -> {:?}", entry.file_name(), target);
+            let path = path.to_path_buf();
+            let filename = entry.file_name().to_os_string();
 
-            let file_content = tokio::fs::read_to_string(path).await?;
-            let cases: Vec<TestCase> = serde_yaml::from_str(&file_content)?;
-            let mut updated_cases = vec![];
+            futures.push(async move {
+                let func = async {
+                    let file_content = tokio::fs::read_to_string(&path).await?;
+                    let cases: Vec<TestCase> = serde_yaml::from_str(&file_content)?;
+                    let mut updated_cases = vec![];
 
-            for case in cases {
-                let result = case.run(false).await?;
-                let updated_case = result.as_test_case(&case.sql);
-                updated_cases.push(updated_case);
-            }
+                    for case in cases {
+                        let result = case.run(false).await?;
+                        let updated_case = result.as_test_case(&case.sql);
+                        updated_cases.push(updated_case);
+                    }
 
-            let contents = serde_yaml::to_string(&updated_cases)?;
+                    let contents = serde_yaml::to_string(&updated_cases)?;
 
-            tokio::fs::write(path.parent().unwrap().join(target), &contents).await?;
+                    tokio::fs::write(path.parent().unwrap().join(&target), &contents).await?;
+
+                    Ok::<_, anyhow::Error>(())
+                };
+
+                match func.await {
+                    Ok(_) => {
+                        println!(
+                            "{} {} -> {}",
+                            style("success").green().bold(),
+                            filename.to_string_lossy(),
+                            target,
+                        );
+                        true
+                    }
+                    Err(err) => {
+                        println!(
+                            "{} {} \n        {}",
+                            style(" failed").red().bold(),
+                            filename.to_string_lossy(),
+                            err
+                        );
+                        false
+                    }
+                }
+            });
         }
     }
 
-    Ok(())
+    let result = futures::stream::iter(futures)
+        .buffer_unordered(8)
+        .collect::<Vec<_>>()
+        .await
+        .iter()
+        .all(|x| *x);
+
+    if result {
+        Ok(())
+    } else {
+        Err(anyhow!("some test case failed"))
+    }
 }

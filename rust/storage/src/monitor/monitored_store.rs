@@ -75,7 +75,7 @@ where
     async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
         self.stats.get_counts.inc();
 
-        let timer = self.stats.get_latency.start_timer();
+        let timer = self.stats.get_duration.start_timer();
         let value = self.inner.get(key, epoch).await?;
         timer.observe_duration();
 
@@ -99,7 +99,7 @@ where
     {
         self.stats.range_scan_counts.inc();
 
-        let timer = self.stats.range_scan_latency.start_timer();
+        let timer = self.stats.range_scan_duration.start_timer();
         let result = self.inner.scan(key_range, limit, epoch).await?;
         timer.observe_duration();
 
@@ -120,14 +120,14 @@ where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
     {
-        self.stats.reverse_range_scan_counts.inc();
+        self.stats.range_reverse_scan_counts.inc();
 
-        let timer = self.stats.range_scan_latency.start_timer();
+        let timer = self.stats.range_reverse_scan_duration.start_timer();
         let result = self.inner.scan(key_range, limit, epoch).await?;
         timer.observe_duration();
 
         self.stats
-            .range_scan_size
+            .range_reverse_scan_size
             .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
 
         Ok(result)

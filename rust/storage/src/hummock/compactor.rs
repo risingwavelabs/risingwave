@@ -119,6 +119,7 @@ impl Compactor {
                             ))
                         },
                     )),
+                context.stats.clone(),
             );
 
             let context_clone = context.clone();
@@ -320,8 +321,9 @@ impl Compactor {
         mut compact_task: CompactTask,
     ) -> HummockResult<()> {
         let result = Compactor::run_compact(context, &mut compact_task).await;
-        if result.is_err() {
+        if let Err(ref e) = result {
             compact_task.sorted_output_ssts.clear();
+            tracing::warn!("compactor error: {}", e);
         }
 
         let is_task_ok = result.is_ok();
