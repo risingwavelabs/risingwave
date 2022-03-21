@@ -35,13 +35,34 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TestCase {
+    /// The SQL statements
     pub sql: String,
+
+    /// The original logical plan
     pub logical_plan: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
+
+    /// Distributed batch plan `.gen_dist_batch_query_plan()`
     pub batch_plan: Option<String>,
+
+    /// Proto JSON of generated batch plan
+    pub batch_plan_proto: Option<String>,
+
+    /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
+
+    /// Proto JSON of generated stream plan
+    pub stream_plan_proto: Option<String>,
+
+    /// Error of binder
     pub binder_error: Option<String>,
+
+    /// Error of planner
     pub planner_error: Option<String>,
+
+    /// Error of optimizer
     pub optimizer_error: Option<String>,
 }
 
@@ -49,12 +70,31 @@ pub struct TestCase {
 #[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TestCaseResult {
+    /// The original logical plan
     pub logical_plan: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan()`
     pub optimized_logical_plan: Option<String>,
+
+    /// Distributed batch plan `.gen_dist_batch_query_plan()`
     pub batch_plan: Option<String>,
+
+    /// Proto JSON of generated batch plan
+    pub batch_plan_proto: Option<String>,
+
+    /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
+
+    /// Proto JSON of generated stream plan
+    pub stream_plan_proto: Option<String>,
+
+    /// Error of binder
     pub binder_error: Option<String>,
+
+    /// Error of planner
     pub planner_error: Option<String>,
+
+    /// Error of optimizer
     pub optimizer_error: Option<String>,
 }
 
@@ -67,6 +107,8 @@ impl TestCaseResult {
             optimized_logical_plan: self.optimized_logical_plan,
             batch_plan: self.batch_plan,
             stream_plan: self.stream_plan,
+            stream_plan_proto: self.stream_plan_proto,
+            batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
             binder_error: self.binder_error,
@@ -146,14 +188,36 @@ impl TestCase {
                 Some(explain_plan(&logical_plan.gen_optimized_logical_plan()));
         }
 
-        // Only generate batch_plan if it is specified in test case
-        if self.batch_plan.is_some() {
-            ret.batch_plan = Some(explain_plan(&logical_plan.gen_dist_batch_query_plan()));
+        if self.batch_plan.is_some() || self.batch_plan_proto.is_some() {
+            let batch_plan = logical_plan.gen_dist_batch_query_plan();
+
+            // Only generate batch_plan if it is specified in test case
+            if self.batch_plan.is_some() {
+                ret.batch_plan = Some(explain_plan(&batch_plan));
+            }
+
+            // Only generate batch_plan_proto if it is specified in test case
+            if self.batch_plan_proto.is_some() {
+                ret.batch_plan_proto = Some(serde_json::to_string_pretty(
+                    &batch_plan.to_batch_prost_without_identity(),
+                )?);
+            }
         }
 
-        // Only generate stream_plan if it is specified in test case
-        if self.stream_plan.is_some() {
-            ret.stream_plan = Some(explain_plan(&logical_plan.gen_create_mv_plan()));
+        if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
+            let stream_plan = logical_plan.gen_create_mv_plan();
+
+            // Only generate stream_plan if it is specified in test case
+            if self.stream_plan.is_some() {
+                ret.stream_plan = Some(explain_plan(&stream_plan));
+            }
+
+            // Only generate stream_plan_proto if it is specified in test case
+            if self.stream_plan_proto.is_some() {
+                ret.stream_plan_proto = Some(serde_json::to_string_pretty(
+                    &stream_plan.to_stream_prost_without_identity(),
+                )?);
+            }
         }
 
         Ok(ret)
@@ -180,6 +244,16 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
     )?;
     check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
     check_option_plan_eq("stream_plan", &expected.stream_plan, &actual.stream_plan)?;
+    check_option_plan_eq(
+        "stream_plan_proto",
+        &expected.stream_plan_proto,
+        &actual.stream_plan_proto,
+    )?;
+    check_option_plan_eq(
+        "batch_plan_proto",
+        &expected.batch_plan_proto,
+        &actual.batch_plan_proto,
+    )?;
 
     Ok(())
 }

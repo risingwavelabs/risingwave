@@ -1,0 +1,246 @@
+- sql: |
+    /* test filter protobuf encoding */
+    create table t (v1 int);
+    select * from t where v1<1;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "input": [
+                        {
+                          "mergeNode": {}
+                        },
+                        {
+                          "chainNode": {}
+                        }
+                      ],
+                      "identity": "StreamTableScan { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } }",
+                      "chainNode": {}
+                    }
+                  ],
+                  "identity": "StreamFilter { base: PlanBase { id: PlanNodeId(10), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalFilter { base: PlanBase { id: PlanNodeId(9), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, predicate: Condition { conjunctions: [($1 < 1:Int32)] }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } } } }",
+                  "filterNode": {
+                    "searchCondition": {
+                      "exprType": "LESS_THAN",
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      },
+                      "funcCall": {
+                        "children": [
+                          {
+                            "exprType": "INPUT_REF",
+                            "returnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "inputRef": {
+                              "columnIdx": 1
+                            }
+                          },
+                          {
+                            "exprType": "CONSTANT_VALUE",
+                            "returnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "constant": {
+                              "body": "AAAAAQ=="
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "identity": "StreamExchange { base: PlanBase { id: PlanNodeId(11), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamFilter { base: PlanBase { id: PlanNodeId(10), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalFilter { base: PlanBase { id: PlanNodeId(9), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, predicate: Condition { conjunctions: [($1 < 1:Int32)] }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } } } } }",
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "_row_id"
+                  },
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "identity": "StreamProject { base: PlanBase { id: PlanNodeId(13), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalProject { base: PlanBase { id: PlanNodeId(12), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, exprs: [$0, $1], expr_alias: [Some(\"_row_id\"), Some(\"v1\")], input: StreamExchange { base: PlanBase { id: PlanNodeId(11), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamFilter { base: PlanBase { id: PlanNodeId(10), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalFilter { base: PlanBase { id: PlanNodeId(9), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, predicate: Condition { conjunctions: [($1 < 1:Int32)] }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 15 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } } } } } } }",
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              },
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }
+- sql: |
+    /* test projection */
+    create table t (v1 int);
+    select * from t;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "mergeNode": {}
+                    },
+                    {
+                      "chainNode": {}
+                    }
+                  ],
+                  "identity": "StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } }",
+                  "chainNode": {}
+                }
+              ],
+              "identity": "StreamExchange { base: PlanBase { id: PlanNodeId(6), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } } }",
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "_row_id"
+                  },
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "identity": "StreamProject { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalProject { base: PlanBase { id: PlanNodeId(7), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, exprs: [$0, $1], expr_alias: [Some(\"_row_id\"), Some(\"v1\")], input: StreamExchange { base: PlanBase { id: PlanNodeId(6), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [_row_id:Int32, v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(0), ColumnId(1)] } } } } }",
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              },
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }
+- sql: |
+    /* test projection for single column */
+    create table t (v1 int, v2 int);
+    select v1 from t;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "mergeNode": {}
+                    },
+                    {
+                      "chainNode": {}
+                    }
+                  ],
+                  "identity": "StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(1)] } }",
+                  "chainNode": {}
+                }
+              ],
+              "identity": "StreamExchange { base: PlanBase { id: PlanNodeId(6), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(1)] } } }",
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "identity": "StreamProject { base: PlanBase { id: PlanNodeId(8), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalProject { base: PlanBase { id: PlanNodeId(7), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, exprs: [$0], expr_alias: [Some(\"v1\")], input: StreamExchange { base: PlanBase { id: PlanNodeId(6), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Single }, input: StreamTableScan { base: PlanBase { id: PlanNodeId(5), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, logical: LogicalScan { base: PlanBase { id: PlanNodeId(3), ctx: RefCell { value: QueryContext { current id = 10 } }, schema: Schema { fields: [v1:Int32] }, order: Order { field_order: [] }, dist: Any }, table_name: \"t\", table_id: TableId { table_id: 5 }, columns: [ColumnId(1)] } } } } }",
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }

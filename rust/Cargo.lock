@@ -3931,6 +3931,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
+ "serde_json",
  "serde_with",
  "serde_yaml",
  "tempfile",
