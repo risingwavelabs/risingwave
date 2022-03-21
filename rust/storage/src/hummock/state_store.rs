@@ -23,7 +23,6 @@ use crate::hummock::iterator::DirectedUserIterator;
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
-///
 #[derive(Clone)]
 pub struct HummockStateStore {
     pub storage: HummockStorage,
