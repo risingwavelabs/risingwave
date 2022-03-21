@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::{self};
 
 use fixedbitset::FixedBitSet;
@@ -6,7 +20,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
+    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
 use crate::expr::ExprImpl;
@@ -23,7 +37,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// condition.
 #[derive(Debug, Clone)]
 pub struct LogicalJoin {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     left: PlanRef,
     right: PlanRef,
     on: Condition,
@@ -32,10 +46,11 @@ pub struct LogicalJoin {
 
 impl fmt::Display for LogicalJoin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalJoin")
-            .field("type", &self.join_type())
-            .field("on", &self.on)
-            .finish()
+        write!(
+            f,
+            "LogicalJoin {{ type: {:?}, on: {} }}",
+            &self.join_type, &self.on
+        )
     }
 }
 
@@ -43,11 +58,7 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalJoin {
             left,
             right,

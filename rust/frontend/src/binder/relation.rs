@@ -1,5 +1,20 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::hash_map::Entry;
 
+use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
@@ -9,34 +24,35 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
-use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
+/// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
+/// It is usually part of the `from` clause.
 #[derive(Debug)]
-pub enum TableRef {
-    BaseTable(Box<BaseTableRef>),
-    SubQuery(Box<SubQuery>),
+pub enum Relation {
+    BaseTable(Box<BoundBaseTable>),
+    Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
 }
 
 #[derive(Debug)]
 pub struct BoundJoin {
-    pub left: TableRef,
-    pub right: TableRef,
+    pub left: Relation,
+    pub right: Relation,
     pub cond: ExprImpl,
 }
 
-#[derive(Debug, Clone)]
-pub struct BaseTableRef {
+#[derive(Debug)]
+pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub columns: Vec<ColumnCatalog>,
+    pub cell_based_desc: CellBasedTableDesc,
+    pub columns: Vec<ColumnDesc>,
 }
 
 #[derive(Debug)]
-pub struct SubQuery {
+pub struct BoundSubquery {
     pub query: BoundQuery,
 }
 
@@ -44,7 +60,7 @@ impl Binder {
     pub(super) fn bind_vec_table_with_joins(
         &mut self,
         from: Vec<TableWithJoins>,
-    ) -> Result<Option<TableRef>> {
+    ) -> Result<Option<Relation>> {
         let mut from_iter = from.into_iter();
         let first = match from_iter.next() {
             Some(t) => t,
@@ -53,7 +69,7 @@ impl Binder {
         let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
-            root = TableRef::Join(Box::new(BoundJoin {
+            root = Relation::Join(Box::new(BoundJoin {
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
@@ -62,7 +78,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
+    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
@@ -74,7 +90,7 @@ impl Binder {
                         right,
                         cond,
                     };
-                    root = TableRef::Join(Box::new(join));
+                    root = Relation::Join(Box::new(join));
                 }
                 _ => return Err(ErrorCode::NotImplementedError("Non inner-join".into()).into()),
             }
@@ -106,10 +122,10 @@ impl Binder {
         })
     }
 
-    pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<TableRef> {
+    pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, .. } => {
-                Ok(TableRef::BaseTable(Box::new(self.bind_table(name)?)))
+                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
             }
             TableFactor::Derived {
                 lateral, subquery, ..
@@ -117,7 +133,7 @@ impl Binder {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(TableRef::SubQuery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -128,35 +144,49 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+    /// return the (schema_name, table_name)
+    pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
             .pop()
             .ok_or_else(|| ErrorCode::InternalError("empty table name".into()))?
             .value;
+
         let schema_name = identifiers
             .pop()
             .map(|ident| ident.value)
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
-        let table_catalog = self
-            .catalog
-            .get_schema(&schema_name)
-            .and_then(|c| c.get_table(&table_name))
-            .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?;
-        let columns = table_catalog.columns().to_vec();
-        let table_id = table_catalog.id();
+        Ok((schema_name, table_name))
+    }
+    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
+        let (schema_name, table_name) = Self::resolve_table_name(name)?;
+        let table_catalog = {
+            let schema_catalog = self
+                .get_schema_by_name(&schema_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
+            schema_catalog
+                .get_table_by_name(&table_name)
+                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
+                .clone()
+        };
 
+        let table_id = table_catalog.id();
+        let cell_based_desc = table_catalog.cell_based_table();
+        let columns = table_catalog.columns().to_vec();
+
+        let columns = columns
+            .into_iter()
+            .map(|c| c.column_desc)
+            .collect::<Vec<ColumnDesc>>();
         self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type())),
+            columns.iter().cloned().map(|c| (c.name, c.data_type)),
             table_name.clone(),
         )?;
 
-        Ok(BaseTableRef {
+        Ok(BoundBaseTable {
             name: table_name,
+            cell_based_desc,
             table_id,
             columns,
         })
@@ -204,7 +234,7 @@ impl Binder {
     ///
     /// After finishing binding, we pop the previous context from the stack. And
     /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<SubQuery> {
+    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
         self.push_context();
         let query = self.bind_query(query)?;
         self.pop_context();
@@ -212,6 +242,6 @@ impl Binder {
             itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
             UNNAMED_SUBQUERY.to_string(),
         )?;
-        Ok(SubQuery { query })
+        Ok(BoundSubquery { query })
     }
 }

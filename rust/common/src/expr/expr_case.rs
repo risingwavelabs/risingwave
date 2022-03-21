@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use itertools::Itertools;
 
 use crate::array::{ArrayRef, DataChunk};
@@ -43,14 +57,14 @@ impl Expression for CaseExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut els = self
             .else_clause
-            .as_deref_mut()
+            .as_deref()
             .map(|else_clause| else_clause.eval(input).unwrap());
         let when_thens = self
             .when_clauses
-            .iter_mut()
+            .iter()
             .map(|when_clause| {
                 (
                     when_clause.when.eval(input).unwrap(),
@@ -117,7 +131,7 @@ mod tests {
             DataType::Float32,
             Some(4.1f32.into()),
         ));
-        let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
         let col = create_column_i32(&[Some(1), Some(2), Some(3), Some(4), Some(5)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();
@@ -144,7 +158,7 @@ mod tests {
                 Some(3.1f32.into()),
             )),
         )];
-        let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let col = create_column_i32(&[Some(3), Some(4), Some(3), Some(4)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();

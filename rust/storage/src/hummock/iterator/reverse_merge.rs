@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use super::variants::BACKWARD;
 use crate::hummock::iterator::merge_inner::MergeIteratorInner;
 
@@ -16,6 +30,7 @@ mod test {
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::ReverseSSTableIterator;
+    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_reverse_merge_basic() {
@@ -39,7 +54,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut i = 0;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -76,7 +91,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let test_validator = &validators[2];
 
         // right edge case
@@ -123,7 +138,7 @@ mod test {
             Box::new(ReverseSSTableIterator::new(Arc::new(table0), sstable_store)),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         mi.rewind().await.unwrap();
         let mut count = 0;

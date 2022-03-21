@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -220,7 +234,11 @@ mod tests {
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
         let remote_dir = "/test";
-        let sstable_store = Arc::new(SstableStore::new(obj_client, remote_dir.to_string()));
+        let sstable_store = Arc::new(SstableStore::new(
+            obj_client,
+            remote_dir.to_string(),
+            Arc::new(StateStoreMetrics::unused()),
+        ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
             MockHummockMetaService::new(),
@@ -392,6 +410,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         for i in 0..3 {
@@ -415,6 +434,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         assert!(merge_iterator.is_valid());
@@ -467,6 +487,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         for i in 0..3 {
@@ -524,6 +545,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         for i in (0..3).rev() {
@@ -547,6 +569,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         assert!(merge_iterator.is_valid());
@@ -601,6 +624,7 @@ mod tests {
             iters
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator),
+            Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
         for i in (0..3).rev() {

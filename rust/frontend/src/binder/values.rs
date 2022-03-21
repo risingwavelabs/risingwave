@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -47,7 +61,7 @@ impl Binder {
     }
 
     /// Find compatible type for `left` and `right`.
-    fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
+    pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
         if (left == right || left.is_numeric() && right.is_numeric())
             || (left.is_string() && right.is_string()
                 || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
@@ -67,7 +81,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
+    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
         } else {
@@ -82,18 +96,16 @@ impl Binder {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use itertools::zip_eq;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
-    use crate::catalog::database_catalog::DatabaseCatalog;
+    use crate::binder::test_utils::mock_binder;
 
     #[test]
     fn test_bind_values() {
-        let catalog = DatabaseCatalog::new(0);
-        let mut binder = Binder::new(Arc::new(catalog));
+        let mut binder = mock_binder();
 
         // Test i32 -> decimal.
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));

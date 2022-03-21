@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
 use std::fmt;
 
@@ -9,10 +23,10 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary,
-    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHashAgg,
+    StreamSimpleAgg, ToBatch, ToStream,
 };
-use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
 use crate::optimizer::property::WithSchema;
 use crate::utils::ColIndexMapping;
@@ -46,7 +60,7 @@ impl fmt::Debug for PlanAggCall {
 /// functions in the `SELECT` clause.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     agg_calls: Vec<PlanAggCall>,
     agg_call_alias: Vec<Option<String>>,
     group_keys: Vec<usize>,
@@ -102,16 +116,44 @@ impl ExprRewriter for ExprHandler {
         let begin = self.project.len();
         self.project.extend(inputs);
         let end = self.project.len();
+        let inputs: Vec<usize> = (begin..end).collect();
 
-        self.agg_calls.push(PlanAggCall {
-            agg_kind,
-            return_type: return_type.clone(),
-            inputs: (begin..end).collect(),
-        });
-        ExprImpl::from(InputRef::new(
-            self.group_column_index.len() + self.agg_calls.len() - 1,
-            return_type,
-        ))
+        if agg_kind == AggKind::Avg {
+            // Rewrite avg to sum/count.
+            self.agg_calls.push(PlanAggCall {
+                agg_kind: AggKind::Sum,
+                return_type: return_type.clone(),
+                inputs: inputs.clone(),
+            });
+            let left = InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type.clone(),
+            );
+
+            self.agg_calls.push(PlanAggCall {
+                agg_kind: AggKind::Count,
+                return_type: DataType::Int64,
+                inputs,
+            });
+            let right = InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type,
+            );
+
+            ExprImpl::from(
+                FunctionCall::new(ExprType::Divide, vec![left.into(), right.into()]).unwrap(),
+            )
+        } else {
+            self.agg_calls.push(PlanAggCall {
+                agg_kind,
+                return_type: return_type.clone(),
+                inputs,
+            });
+            ExprImpl::from(InputRef::new(
+                self.group_column_index.len() + self.agg_calls.len() - 1,
+                return_type,
+            ))
+        }
     }
     // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
@@ -144,11 +186,7 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         Self {
             agg_calls,
             group_keys,

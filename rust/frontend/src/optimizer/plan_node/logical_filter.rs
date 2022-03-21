@@ -1,10 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatch,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
     ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
@@ -18,7 +32,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// If the condition allows nulls, then a null value is treated the same as false.
 #[derive(Debug, Clone)]
 pub struct LogicalFilter {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     predicate: Condition,
     input: PlanRef,
 }
@@ -30,11 +44,7 @@ impl LogicalFilter {
             assert_input_ref(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
-        let base = LogicalBase {
-            schema,
-            ctx: ctx.clone(),
-            id: ctx.borrow_mut().get_id(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalFilter {
             input,
             base,
@@ -65,9 +75,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
 impl_plan_tree_node_for_unary! {LogicalFilter}
 impl fmt::Display for LogicalFilter {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("LogicalFilter")
-            .field("predicate", &self.predicate)
-            .finish()
+        write!(f, "LogicalFilter {{ predicate: {} }}", self.predicate)
     }
 }
 

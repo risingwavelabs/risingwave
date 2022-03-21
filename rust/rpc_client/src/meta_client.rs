@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -7,7 +21,15 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
+use risingwave_pb::catalog::{
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
+};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::ddl_service::{
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
+    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
+    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
@@ -18,26 +40,23 @@ use risingwave_pb::hummock::{
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
-use risingwave_pb::meta::create_request::CatalogBody;
-use risingwave_pb::meta::drop_request::CatalogId;
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, Catalog, CreateRequest, CreateResponse, Database,
-    DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, DropRequest, DropResponse, FlushRequest,
-    FlushResponse, GetCatalogRequest, GetCatalogResponse, HeartbeatRequest, HeartbeatResponse,
-    ListAllNodesRequest, ListAllNodesResponse, Schema, SubscribeRequest, SubscribeResponse, Table,
+    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, FlushRequest,
+    FlushResponse, HeartbeatRequest, HeartbeatResponse, ListAllNodesRequest, ListAllNodesResponse,
+    SubscribeRequest, SubscribeResponse,
 };
-use risingwave_pb::plan::{DatabaseRefId, SchemaRefId, TableRefId};
+use risingwave_pb::stream_plan::StreamNode;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
 
-type DatabaseId = i32;
-type SchemaId = i32;
+type DatabaseId = u32;
+type SchemaId = u32;
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
@@ -127,56 +146,50 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_table(&self, table: Table) -> Result<(TableId, CatalogVersion)> {
-        let (table_id, version) = self.create_catalog_body(CatalogBody::Table(table)).await?;
-        Ok((
-            TableId {
-                table_id: table_id as u32,
-            },
-            version,
-        ))
+    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+        let request = CreateDatabaseRequest { db: Some(db) };
+        let resp = self.inner.create_database(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.database_id, resp.version))
     }
 
-    pub async fn create_database(&self, db: Database) -> Result<(DatabaseId, CatalogVersion)> {
-        self.create_catalog_body(CatalogBody::Database(db)).await
+    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+        let request = CreateSchemaRequest {
+            schema: Some(schema),
+        };
+        let resp = self.inner.create_schema(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.schema_id, resp.version))
     }
 
-    pub async fn create_schema(&self, schema: Schema) -> Result<(SchemaId, CatalogVersion)> {
-        self.create_catalog_body(CatalogBody::Schema(schema)).await
-    }
-
-    pub async fn create_catalog_body(
+    pub async fn create_materialized_view(
         &self,
-        catalog_body: CatalogBody,
-    ) -> Result<(i32, CatalogVersion)> {
-        let request = CreateRequest {
-            catalog_body: Some(catalog_body),
-            ..Default::default()
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<(TableId, CatalogVersion)> {
+        let request = CreateMaterializedViewRequest {
+            materialized_view: Some(table),
+            stream_node: Some(plan),
         };
-        let resp = self.inner.create(request).await?;
-        Ok((resp.id, resp.version))
+        let resp = self.inner.create_materialized_view(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn drop_table(&self, table_ref_id: TableRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::TableId(table_ref_id)).await
-    }
-
-    pub async fn drop_schema(&self, schema_ref_id: SchemaRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::SchemaId(schema_ref_id)).await
-    }
-
-    pub async fn drop_database(&self, database_ref_id: DatabaseRefId) -> Result<CatalogVersion> {
-        self.drop_catalog(CatalogId::DatabaseId(database_ref_id))
-            .await
-    }
-
-    pub async fn drop_catalog(&self, catalog_id: CatalogId) -> Result<CatalogVersion> {
-        let request = DropRequest {
-            catalog_id: Some(catalog_id),
-            ..Default::default()
+    pub async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<(TableId, u32, CatalogVersion)> {
+        let request = CreateMaterializedSourceRequest {
+            materialized_view: Some(table),
+            stream_node: Some(plan),
+            source: Some(source),
         };
-        let resp = MetaClientInner::drop(self.inner.as_ref(), request).await?;
-        Ok(resp.version)
+        let resp = self.inner.create_materialized_source(request).await?;
+        // TODO: handle error in `resp.status` here
+        Ok((resp.table_id.into(), resp.source_id, resp.version))
     }
 
     /// Unregister the current node to the cluster.
@@ -207,13 +220,6 @@ impl MetaClient {
         };
         let resp = self.inner.list_all_nodes(request).await?;
         Ok(resp.nodes)
-    }
-
-    /// Get Catalog from meta.
-    pub async fn get_catalog(&self) -> Result<Catalog> {
-        let mut resp = self.inner.get_catalog(GetCatalogRequest {}).await?;
-        let catalog = resp.catalog.take().unwrap();
-        Ok(catalog)
     }
 
     pub fn start_heartbeat_loop(
@@ -280,19 +286,7 @@ pub trait MetaClientInner: Send + Sync {
         Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
     }
 
-    async fn create(&self, _req: CreateRequest) -> Result<CreateResponse> {
-        unimplemented!()
-    }
-
-    async fn drop(&self, _req: DropRequest) -> Result<DropResponse> {
-        unimplemented!()
-    }
-
     async fn list_all_nodes(&self, _req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
-        unimplemented!()
-    }
-
-    async fn get_catalog(&self, _req: GetCatalogRequest) -> Result<GetCatalogResponse> {
         unimplemented!()
     }
 
@@ -352,6 +346,28 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
+    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
+        unimplemented!()
+    }
+
+    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
+        unimplemented!()
+    }
+
+    async fn create_materialized_source(
+        &self,
+        _req: CreateMaterializedSourceRequest,
+    ) -> Result<CreateMaterializedSourceResponse> {
+        unimplemented!()
+    }
+
+    async fn create_materialized_view(
+        &self,
+        _req: CreateMaterializedViewRequest,
+    ) -> Result<CreateMaterializedViewResponse> {
+        unimplemented!()
+    }
+
     async fn report_vacuum_task(
         &self,
         _req: ReportVacuumTaskRequest,
@@ -370,6 +386,7 @@ pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
+    // TODO: add catalog client for catalogV2
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
@@ -462,41 +479,11 @@ impl MetaClientInner for GrpcMetaClient {
             .into_inner())
     }
 
-    async fn create(&self, req: CreateRequest) -> Result<CreateResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .create(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn drop(&self, req: DropRequest) -> Result<DropResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .drop(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
     async fn list_all_nodes(&self, req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
         Ok(self
             .cluster_client
             .to_owned()
             .list_all_nodes(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn get_catalog(&self, req: GetCatalogRequest) -> Result<GetCatalogResponse> {
-        Ok(self
-            .catalog_client
-            .to_owned()
-            .get_catalog(req)
             .await
             .to_rw_result()?
             .into_inner())
@@ -598,6 +585,31 @@ impl MetaClientInner for GrpcMetaClient {
             .into_inner())
     }
 
+    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_materialized_source(
+        &self,
+        _req: CreateMaterializedSourceRequest,
+    ) -> Result<CreateMaterializedSourceResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
+
+    async fn create_materialized_view(
+        &self,
+        _req: CreateMaterializedViewRequest,
+    ) -> Result<CreateMaterializedViewResponse> {
+        // TODO: add catalog client for catalogV2
+        todo!()
+    }
     async fn report_vacuum_task(
         &self,
         req: ReportVacuumTaskRequest,

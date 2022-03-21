@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -32,7 +46,7 @@ impl InExpression {
         }
     }
 
-    fn check_in_sarg(&self, datum: &Datum) -> bool {
+    fn exists(&self, datum: &Datum) -> bool {
         self.set.contains(datum)
     }
 }
@@ -42,7 +56,7 @@ impl Expression for InExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> crate::error::Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> crate::error::Result<ArrayRef> {
         let input_array = self.input_ref.eval(input)?;
         let visibility = input.visibility();
         let mut output_array = BoolArrayBuilder::new(input.cardinality())?;
@@ -52,13 +66,13 @@ impl Expression for InExpression {
                     if !vis {
                         continue;
                     }
-                    let ret = self.check_in_sarg(&data.to_owned_datum());
+                    let ret = self.exists(&data.to_owned_datum());
                     output_array.append(Some(ret))?;
                 }
             }
             None => {
                 for data in input_array.iter() {
-                    let ret = self.check_in_sarg(&data.to_owned_datum());
+                    let ret = self.exists(&data.to_owned_datum());
                     output_array.append(Some(ret))?;
                 }
             }
@@ -82,7 +96,7 @@ mod tests {
             Some(ScalarImpl::Utf8("abc".to_string())),
             Some(ScalarImpl::Utf8("def".to_string())),
         ];
-        let mut search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
+        let search_expr = InExpression::new(input_ref, data.into_iter(), DataType::Boolean);
         let column = column! {Utf8Array, [Some("abc"), Some("a"), Some("def"), Some("abc")]};
         let data_chunk = DataChunk::builder().columns(vec![column]).build();
         let res = search_expr.eval(&data_chunk).unwrap();

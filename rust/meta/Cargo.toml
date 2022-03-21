@@ -51,9 +51,10 @@ tokio = { version = "1", features = [
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }
-tower-http = { version = "0.2", features = ["add-extension", "cors"] }
+tower-http = { version = "0.2", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 uuid = { version = "0.8", features = ["v4"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"

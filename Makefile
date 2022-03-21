@@ -1,5 +1,5 @@
 SHELL := /bin/bash
-.PHONY: all java java_test java_build java_check
+.PHONY: all java java_test java_build java_check rust
 all: java rust
 
 java: java_test
@@ -16,37 +16,47 @@ java_check:
 java_coverage_report:
 	cd java && ./gradlew jacocoRootReport
 
-rust: rust_check_all rust_test
+rust:
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
-rust_check_all: rust_fmt_check rust_clippy_check rust_cargo_sort_check
+rust_check_all:
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_fmt:
-	cd rust && cargo fmt --all
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_fmt_check:
-	cd rust && cargo fmt --all -- --check
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_clippy_check_locked:
-	cd rust && cargo clippy --all-targets --locked -- -D warnings
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_clippy_check:
-	cd rust && cargo clippy --all-targets -- -D warnings
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_cargo_sort_check:
-	cd rust && cargo sort -c -w
+	echo "This command is deprecated. Use ./risedev check instead."
+	exit 1
 
 rust_test:
-	cd rust && RUSTFLAGS=-Dwarnings cargo test
+	echo "This command is deprecated. Use ./risedev test instead."
+	exit 1
 
 rust_test_no_run:
-	cd rust && RUSTFLAGS=-Dwarnings cargo test --no-run
+	echo "This command is deprecated. Use ./risedev test instead."
+	exit 1
 
 # Note: "--skip-clean" must be used along with "CARGO_TARGET_DIR=..."
 # See also https://github.com/xd009642/tarpaulin/issues/777
 rust_test_with_coverage:
-	cd rust && RUSTFLAGS=-Dwarnings CARGO_TARGET_DIR=target/tarpaulin cargo tarpaulin --workspace \
-	  --exclude risingwave_pb --exclude-files tests/* --out Xml --force-clean --run-types Doctests Tests \
-	  -- --report-time -Z unstable-options
+	echo "This command is deprecated. Use ./risedev test-cov instead."
+	exit 1
 
 rust_build:
 	cd rust && cargo build

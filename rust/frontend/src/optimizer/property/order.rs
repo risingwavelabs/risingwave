@@ -1,3 +1,19 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
+use std::fmt;
+
 use itertools::Itertools;
 use paste::paste;
 use risingwave_pb::expr::InputRefExpr;
@@ -23,6 +39,19 @@ impl Order {
     }
 }
 
+impl fmt::Display for Order {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("[")?;
+        for (i, field_order) in self.field_order.iter().enumerate() {
+            if i > 0 {
+                f.write_str(", ")?;
+            }
+            field_order.fmt(f)?;
+        }
+        f.write_str("]")
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct FieldOrder {
@@ -40,12 +69,29 @@ impl FieldOrder {
     }
 }
 
+impl fmt::Display for FieldOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${} {}", self.index, self.direct)
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     Asc,
     Desc,
     Any, // only used in order requirement
+}
+
+impl fmt::Display for Direction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Direction::Asc => "ASC",
+            Direction::Desc => "DESC",
+            Direction::Any => "ANY",
+        };
+        f.write_str(s)
+    }
 }
 
 impl Direction {

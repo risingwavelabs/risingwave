@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 #![allow(dead_code)]
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -127,6 +141,59 @@ where
         }
     }
 
+    pub async fn start_create_table_process(&self, table: &Table) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.increase_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exists or in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_table_process(&self, table: &Table) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            let version = core.new_version_id().await?;
+            table.insert(&*self.meta_store_ref).await?;
+            core.add_table(table);
+
+            self.nm
+                .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exist or not in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_table_process(&self, table: &Table) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (table.database_id, table.schema_id, table.name.clone());
+        if !core.has_table(table) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            for &dependent_relation_id in &table.dependent_relations {
+                core.decrease_ref_count(dependent_relation_id);
+            }
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "table already exist or not in progress creation".to_string(),
+            )))
+        }
+    }
+
     pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_table(table) {
@@ -181,6 +248,53 @@ where
         } else {
             Err(RwError::from(InternalError(
                 "table doesn't exist".to_string(),
+            )))
+        }
+    }
+
+    pub async fn start_create_source_process(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exists or in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_source_process(&self, source: &Source) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            let version = core.new_version_id().await?;
+            source.insert(&*self.meta_store_ref).await?;
+            core.add_source(source);
+
+            self.nm
+                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_source_process(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in progress creation".to_string(),
             )))
         }
     }
@@ -242,6 +356,7 @@ type DatabaseKey = DatabaseId;
 type SchemaKey = (DatabaseId, String);
 type TableKey = (DatabaseId, SchemaId, String);
 type SourceKey = (DatabaseId, SchemaId, String);
+type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
 /// between tables.
@@ -260,6 +375,8 @@ struct CatalogManagerCore<S> {
 
     /// Catalog version generator.
     version_generator: CatalogVersionGenerator,
+    // In-progress creation tracker
+    in_progress_creation_tracker: HashSet<RelationKey>,
 }
 
 impl<S> CatalogManagerCore<S>
@@ -293,6 +410,7 @@ where
         }));
 
         let version_generator = CatalogVersionGenerator::new(&*meta_store_ref).await?;
+        let in_progress_creation_tracker = HashSet::new();
 
         Ok(Self {
             meta_store_ref,
@@ -302,6 +420,7 @@ where
             tables,
             relation_ref_count,
             version_generator,
+            in_progress_creation_tracker,
         })
     }
 
@@ -395,5 +514,18 @@ where
             }
             Entry::Vacant(_) => unreachable!(),
         }
+    }
+
+    fn has_in_progress_creation(&self, relation: &RelationKey) -> bool {
+        self.in_progress_creation_tracker
+            .contains(&relation.clone())
+    }
+
+    fn mark_creating(&mut self, relation: &RelationKey) {
+        self.in_progress_creation_tracker.insert(relation.clone());
+    }
+
+    fn unmark_creating(&mut self, relation: &RelationKey) {
+        self.in_progress_creation_tracker.remove(&relation.clone());
     }
 }

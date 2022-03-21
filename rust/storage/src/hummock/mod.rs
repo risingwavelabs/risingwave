@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 //! Hummock is the state store of the streaming system.
 
 use std::fmt;
@@ -76,8 +90,12 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     sstable_store: SstableStoreRef,
+
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
+
+    /// Statisctics
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl HummockStorage {
@@ -130,6 +148,7 @@ impl HummockStorage {
             hummock_meta_client,
             sstable_store,
             shared_buffer_manager,
+            stats,
         };
         Ok(instance)
     }
@@ -152,9 +171,11 @@ impl HummockStorage {
             .shared_buffer_manager
             .get(key, (version.max_committed_epoch() + 1)..=epoch)
         {
+            self.stats.get_shared_buffer_hit_counts.inc();
             return Ok(v.into_put_value().map(|x| x.to_vec()));
         }
 
+        let mut table_counts = 0;
         for level in &version.levels() {
             match level.level_type() {
                 LevelType::Overlapping => {
@@ -163,7 +184,9 @@ impl HummockStorage {
                             .pick_few_tables(&level.table_ids)
                             .await?,
                         key,
+                        self.stats.clone(),
                     )?;
+                    table_counts += tables.len();
                     table_iters.extend(tables.into_iter().map(|table| {
                         Box::new(SSTableIterator::new(table, self.sstable_store.clone()))
                             as BoxedHummockIterator
@@ -175,7 +198,9 @@ impl HummockStorage {
                             .pick_few_tables(&level.table_ids)
                             .await?,
                         key,
+                        self.stats.clone(),
                     )?;
+                    table_counts += tables.len();
                     table_iters.push(Box::new(ConcatIterator::new(
                         tables,
                         self.sstable_store.clone(),
@@ -184,7 +209,10 @@ impl HummockStorage {
             }
         }
 
-        let mut it = MergeIterator::new(table_iters);
+        self.stats
+            .iter_merge_sstable_counts
+            .observe(table_counts as f64);
+        let mut it = MergeIterator::new(table_iters, self.stats.clone());
 
         // Use `MergeIterator` to seek for the key with latest version to
         // get the latest key.
@@ -221,10 +249,9 @@ impl HummockStorage {
         validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
-        let overlapped_sstable_iters = self
-            .local_version_manager
-            .tables(&version.levels())
-            .await?
+        let tables = self.local_version_manager.tables(&version.levels()).await?;
+        let tables_count = tables.len();
+        let overlapped_sstable_iters = tables
             .into_iter()
             .filter(|t| {
                 let table_start = user_key(t.meta.smallest_key.as_slice());
@@ -244,9 +271,15 @@ impl HummockStorage {
                 .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
                 .into_iter()
                 .map(|i| Box::new(i) as BoxedHummockIterator);
-            MergeIterator::new(overlapped_shared_buffer_iters.chain(overlapped_sstable_iters))
+            MergeIterator::new(
+                overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
+                self.stats.clone(),
+            )
         } else {
-            MergeIterator::new(overlapped_sstable_iters)
+            self.stats
+                .iter_merge_sstable_counts
+                .observe(tables_count as f64);
+            MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
         };
 
         // TODO: avoid this clone
@@ -302,9 +335,10 @@ impl HummockStorage {
                 .map(|i| Box::new(i) as BoxedHummockIterator);
             ReverseMergeIterator::new(
                 overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
+                self.stats.clone(),
             )
         } else {
-            ReverseMergeIterator::new(overlapped_sstable_iters)
+            ReverseMergeIterator::new(overlapped_sstable_iters, self.stats.clone())
         };
 
         // TODO: avoid this clone

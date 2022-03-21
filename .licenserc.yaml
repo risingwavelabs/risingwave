@@ -1,0 +1,13 @@
+header:
+  license:
+    spdx-id: Apache-2.0
+    copyright-owner: Singularity Data
+
+  paths:
+    - 'rust/**/*.rs'
+    # - 'java/**/*.java'
+    # - 'java/**/*.kt'
+    - 'dashboard/**/*.js'
+    - 'rust/**/*.html'
+
+  comment: on-failure

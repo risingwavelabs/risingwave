@@ -1,25 +1,35 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalAgg,
 }
 
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         StreamHashAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -33,8 +43,8 @@ impl StreamHashAgg {
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("StreamHashAgg")
-            .field("aggs", &self.agg_calls())
             .field("group_keys", &self.group_keys())
+            .field("aggs", &self.agg_calls())
             .finish()
     }
 }

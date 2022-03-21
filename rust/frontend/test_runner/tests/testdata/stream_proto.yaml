@@ -1,0 +1,236 @@
+- sql: |
+    /* test filter protobuf encoding */
+    create table t (v1 int);
+    select * from t where v1<1;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "input": [
+                        {
+                          "mergeNode": {}
+                        },
+                        {
+                          "chainNode": {}
+                        }
+                      ],
+                      "chainNode": {}
+                    }
+                  ],
+                  "filterNode": {
+                    "searchCondition": {
+                      "exprType": "LESS_THAN",
+                      "returnType": {
+                        "typeName": "BOOLEAN",
+                        "isNullable": true
+                      },
+                      "funcCall": {
+                        "children": [
+                          {
+                            "exprType": "INPUT_REF",
+                            "returnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "inputRef": {
+                              "columnIdx": 1
+                            }
+                          },
+                          {
+                            "exprType": "CONSTANT_VALUE",
+                            "returnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "constant": {
+                              "body": "AAAAAQ=="
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              ],
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "_row_id"
+                  },
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              },
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }
+- sql: |
+    /* test projection */
+    create table t (v1 int);
+    select * from t;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "mergeNode": {}
+                    },
+                    {
+                      "chainNode": {}
+                    }
+                  ],
+                  "chainNode": {}
+                }
+              ],
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "_row_id"
+                  },
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              },
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }
+- sql: |
+    /* test projection for single column */
+    create table t (v1 int, v2 int);
+    select v1 from t;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "input": [
+                    {
+                      "mergeNode": {}
+                    },
+                    {
+                      "chainNode": {}
+                    }
+                  ],
+                  "chainNode": {}
+                }
+              ],
+              "exchangeNode": {
+                "fields": [
+                  {
+                    "dataType": {
+                      "typeName": "INT32",
+                      "isNullable": true
+                    },
+                    "name": "v1"
+                  }
+                ],
+                "strategy": {
+                  "type": "SIMPLE"
+                }
+              }
+            }
+          ],
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {}
+    }

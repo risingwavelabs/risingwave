@@ -45,7 +45,7 @@ rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", 
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"
-tikv-client = { version = "0.1.0", optional = true }
+tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
     "fs",
     "rt",
@@ -60,6 +60,7 @@ tokio-stream = "0.1"
 tonic = "0.6"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }

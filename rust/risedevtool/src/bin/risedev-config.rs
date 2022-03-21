@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 #![feature(let_else)]
 
 use std::fs::OpenOptions;
@@ -17,6 +31,7 @@ pub enum Components {
     Tracing,
     ComputeNodeAndMetaNode,
     Frontend,
+    Dashboard,
     Release,
     AllInOne,
 }
@@ -29,6 +44,7 @@ impl Components {
             Self::Etcd => "[Component] Etcd",
             Self::ComputeNodeAndMetaNode => "[Build] Rust components",
             Self::Frontend => "[Build] Java frontend",
+            Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
@@ -61,6 +77,10 @@ to RiseDev directory."
                 "
 Required if you want to build frontend. Otherwise you will
 need to manually download and copy it to RiseDev directory."
+            }
+            Self::Dashboard => {
+                "
+Required if you want to build dashboard v2 from source."
             }
             Self::Tracing => {
                 "
@@ -102,6 +122,7 @@ and use `risingwave` in all-in-one mode."
             Self::Etcd => "ENABLE_ETCD",
             Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
             Self::Frontend => "ENABLE_BUILD_FRONTEND",
+            Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
@@ -120,8 +141,9 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
     println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
     println!();
     println!(
-        "Use {} to navigate, and use {} to select. Press {} to continue.",
-        style("arrow keys").bold(),
+        "Use {} to navigate, use {} to go to next page, and use {} to select. Press {} to continue.",
+        style("arrow up / down").bold(),
+        style("arrow left / right").bold(),
         style("space").bold(),
         style("enter").bold()
     );
@@ -129,29 +151,42 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
 
     let all_components = Components::into_enum_iter().collect_vec();
 
+    const ITEMS_PER_PAGE: usize = 6;
+
     let items = all_components
         .iter()
-        .map(|c| {
-            (
-                format!(
-                    "{}{}",
-                    c.title(),
-                    style(
-                        ("\n".to_string() + c.description().trim())
-                            .split('\n')
-                            .join("\n      ")
-                    )
-                    .dim()
-                ),
-                chosen.contains(c),
+        .enumerate()
+        .map(|(idx, c)| {
+            let title = c.title();
+            let desc = style(
+                ("\n".to_string() + c.description().trim())
+                    .split('\n')
+                    .join("\n      "),
             )
+            .dim();
+
+            let instruction = if (idx + 1) % ITEMS_PER_PAGE == 0 || idx == all_components.len() - 1
+            {
+                format!(
+                    "\n\n  page {}/{}, use {} to navigate",
+                    style(((idx + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE).to_string()).bold(),
+                    (all_components.len() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE,
+                    style("arrow key left / right").blue(),
+                )
+            } else {
+                String::new()
+            };
+
+            (format!("{title}{desc}{instruction}",), chosen.contains(c))
         })
         .collect_vec();
 
     let chosen_indices: Vec<usize> = MultiSelect::new()
         .items_checked(&items)
+        .max_length(ITEMS_PER_PAGE)
         .interact_opt()?
         .ok_or_else(|| anyhow!("no selection made"))?;
+
     let chosen = chosen_indices
         .into_iter()
         .map(|i| all_components[i])
@@ -207,6 +242,19 @@ fn main() -> Result<()> {
         configure(&chosen)?
     };
 
+    for component in Components::into_enum_iter() {
+        println!(
+            "{}: {}",
+            component.title(),
+            if chosen.contains(&component) {
+                style("enabled").green()
+            } else {
+                style("disabled").dim()
+            }
+        );
+    }
+    println!();
+
     println!("Writing configuration into {}...", file_path);
 
     let mut file = BufWriter::new(
@@ -219,8 +267,21 @@ fn main() -> Result<()> {
     );
 
     writeln!(file, "RISEDEV_CONFIGURED=true")?;
-    for component in chosen {
-        writeln!(file, "{}=true", component.env())?;
+    writeln!(file)?;
+
+    for component in Components::into_enum_iter() {
+        writeln!(file, "# {}", component.title())?;
+        writeln!(
+            file,
+            "# {}",
+            component.description().trim().split('\n').join("\n# ")
+        )?;
+        if chosen.contains(&component) {
+            writeln!(file, "{}=true", component.env())?;
+        } else {
+            writeln!(file, "# {}=true", component.env())?;
+        }
+        writeln!(file)?;
     }
 
     file.flush()?;

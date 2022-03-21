@@ -1,30 +1,42 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::LimitNode;
 
-use super::{
-    BatchBase, LogicalLimit, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
 pub struct BatchLimit {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalLimit,
 }
 
 impl BatchLimit {
     pub fn new(logical: LogicalLimit) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = BatchBase {
-            order: logical.input().order().clone(),
-            dist: logical.input().distribution().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            logical.input().distribution().clone(),
+            logical.input().order().clone(),
+        );
         BatchLimit { logical, base }
     }
 }
