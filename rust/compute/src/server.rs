@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -15,7 +29,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
-use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::{StreamEnvironment, StreamManager};
@@ -65,12 +79,14 @@ pub async fn compute_node_serve(
     let registry = prometheus::Registry::new();
     // Initialize state store.
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
         meta_client.clone(),
         state_store_metrics.clone(),
+        hummock_metrics.clone(),
     )
     .await
     .unwrap();

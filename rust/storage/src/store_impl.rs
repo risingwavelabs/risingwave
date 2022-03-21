@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::Debug;
 use std::sync::Arc;
 
@@ -9,7 +23,7 @@ use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStateStore, SstableStore};
 use crate::memory::MemoryStateStore;
-use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
+use crate::monitor::{HummockMetrics, MonitoredStateStore as Monitored, StateStoreMetrics};
 use crate::object::{InMemObjectStore, ObjectStore, S3ObjectStore};
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -74,7 +88,8 @@ impl StateStoreImpl {
         s: &str,
         config: Arc<StorageConfig>,
         meta_client: MetaClient,
-        stats: Arc<StateStoreMetrics>,
+        state_store_stats: Arc<StateStoreMetrics>,
+        hummock_stats: Arc<HummockMetrics>,
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
@@ -112,30 +127,33 @@ impl StateStoreImpl {
                         config.clone(),
                         sstable_store.clone(),
                         Arc::new(LocalVersionManager::new(sstable_store)),
-                        Arc::new(RpcHummockMetaClient::new(meta_client, stats.clone())),
-                        stats.clone(),
+                        Arc::new(RpcHummockMetaClient::new(
+                            meta_client,
+                            hummock_stats.clone(),
+                        )),
+                        state_store_stats.clone(),
                     )
                     .await
                     .map_err(RwError::from)?,
                 );
-                StateStoreImpl::HummockStateStore(inner.monitored(stats))
+                StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 
             "in_memory" | "in-memory" => {
                 tracing::warn!("in-memory state backend should never be used in benchmarks and production environment.");
-                StateStoreImpl::shared_in_memory_store(stats.clone())
+                StateStoreImpl::shared_in_memory_store(state_store_stats.clone())
             }
 
             tikv if tikv.starts_with("tikv") => {
                 let inner =
                     TikvStateStore::new(vec![tikv.strip_prefix("tikv://").unwrap().to_string()]);
-                StateStoreImpl::TikvStateStore(inner.monitored(stats))
+                StateStoreImpl::TikvStateStore(inner.monitored(state_store_stats))
             }
 
             rocksdb if rocksdb.starts_with("rocksdb_local://") => {
                 let inner =
                     RocksDBStateStore::new(rocksdb.strip_prefix("rocksdb_local://").unwrap());
-                StateStoreImpl::RocksDBStateStore(inner.monitored(stats))
+                StateStoreImpl::RocksDBStateStore(inner.monitored(state_store_stats))
             }
 
             other => unimplemented!("{} state store is not supported", other),

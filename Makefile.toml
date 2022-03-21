@@ -139,8 +139,8 @@ dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-us
 [tasks.extract-dashboard-artifact]
 category = "RisingWave"
 description = "Extract dashboard artifact"
+condition = { env_not_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
 script = '''
-#!@shell
 #!/bin/bash
 
 # we allow this script to fail
@@ -151,6 +151,18 @@ rm -rf "${PREFIX_UI}"
 git worktree prune
 git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
+
+[tasks.export-dashboard-v2]
+category = "RisingWave"
+condition = { env_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
+script = """
+#!/bin/bash
+set -e
+
+rm -rf "${PREFIX_UI}"
+cd dashboard && npm run build-static
+cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
+"""
 
 [tasks.build-risingwave]
 category = "RisingWave"
@@ -217,6 +229,7 @@ dependencies = [
   "build-frontend",
   "post-build-frontend",
   "extract-dashboard-artifact",
+  "export-dashboard-v2",
   "prepare-config"
 ]
 
