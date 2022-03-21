@@ -27,6 +27,8 @@ use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
+/// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
+/// It is usually part of the `from` clause.
 #[derive(Debug)]
 pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
