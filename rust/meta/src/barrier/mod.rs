@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,34 +43,35 @@ mod info;
 
 #[derive(Debug, Default)]
 struct Notifier {
-    /// Get notified when scheduled barrier is about to send or failed.
-    to_send: Option<oneshot::Sender<Result<()>>>,
+    /// Get notified when scheduled barrier is about to send.
+    to_send: Option<oneshot::Sender<()>>,
 
-    /// Get notified when scheduled barrier is collected(finished) or failed.
-    collected: Option<oneshot::Sender<Result<()>>>,
+    /// Get notified when scheduled barrier is finished or failed.
+    finished: Option<oneshot::Sender<Result<()>>>,
 }
 
 impl Notifier {
     /// Notify when we are about to send a barrier.
     fn notify_to_send(&mut self) {
         if let Some(tx) = self.to_send.take() {
+            tx.send(()).ok();
+        }
+    }
+
+    /// Notify when we have finished a barrier from all actors.
+    fn notify_finished(self) {
+        assert!(self.to_send.is_none());
+
+        if let Some(tx) = self.finished {
             tx.send(Ok(())).ok();
         }
     }
 
-    /// Notify when we have collected a barrier from all actors.
-    fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
-            tx.send(Ok(())).ok();
-        }
-    }
+    /// Notify when we failed to finish a barrier.
+    fn notify_failed(self, err: RwError) {
+        assert!(self.to_send.is_none());
 
-    /// Notify when we failed to send a barrier or collected a barrier.
-    fn notify_failed(&mut self, err: RwError) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(Err(err.clone())).ok();
-        }
-        if let Some(tx) = self.collected.take() {
+        if let Some(tx) = self.finished {
             tx.send(Err(err)).ok();
         }
     }
@@ -201,7 +202,10 @@ where
         let mut min_interval = tokio::time::interval(Self::INTERVAL);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
+        // TODO: persist these states
         let mut prev_epoch = INVALID_EPOCH;
+        let mut all_notifiers: HashMap<u64, Vec<Notifier>> = Default::default();
+
         loop {
             tokio::select! {
                 // Wait for the minimal interval,
@@ -235,22 +239,33 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
+            all_notifiers
+                .entry(new_epoch)
+                .or_default()
+                .extend(notifiers);
+
             match self.run_inner(&command_context).await {
-                Ok(_) => {
+                Ok(finished_epochs) => {
+                    for epoch in finished_epochs {
+                        if let Some(notifiers) = all_notifiers.remove(&epoch) {
+                            notifiers.into_iter().for_each(Notifier::notify_finished);
+                        }
+                    }
                     prev_epoch = new_epoch;
-                    notifiers.iter_mut().for_each(Notifier::notify_collected);
                 }
                 Err(e) => {
-                    notifiers
-                        .iter_mut()
-                        .for_each(|notify| notify.notify_failed(e.clone()));
+                    if let Some(notifiers) = all_notifiers.remove(&new_epoch) {
+                        notifiers
+                            .into_iter()
+                            .for_each(|n| n.notify_failed(e.clone()));
+                    }
                 }
             }
         }
     }
 
     /// running a scheduled command.
-    async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
+    async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<Vec<u64>> {
         let mutation = command_context.to_mutation()?;
         let info = command_context.info;
 
@@ -320,7 +335,9 @@ where
         collect_result?;
 
         timer.observe_duration();
-        command_context.post_collect().await // do some post stuffs
+        command_context.post_collect().await?; // do some post stuffs
+
+        Ok(vec![command_context.curr_epoch])
     }
 }
 
@@ -353,7 +370,7 @@ where
             },
         )
         .await?;
-        rx.await.unwrap()
+        Ok(rx.await.unwrap())
     }
 
     /// Run a command and return when it's completely finished.
@@ -362,7 +379,7 @@ where
         self.do_schedule(
             command,
             Notifier {
-                collected: Some(tx),
+                finished: Some(tx),
                 ..Default::default()
             },
         )
@@ -375,7 +392,7 @@ where
     pub async fn wait_for_next_barrier(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
-            collected: Some(tx),
+            finished: Some(tx),
             ..Default::default()
         };
         self.scheduled_barriers
