@@ -57,14 +57,14 @@ impl Expression for CaseExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut els = self
             .else_clause
-            .as_deref_mut()
+            .as_deref()
             .map(|else_clause| else_clause.eval(input).unwrap());
         let when_thens = self
             .when_clauses
-            .iter_mut()
+            .iter()
             .map(|when_clause| {
                 (
                     when_clause.when.eval(input).unwrap(),
@@ -131,7 +131,7 @@ mod tests {
             DataType::Float32,
             Some(4.1f32.into()),
         ));
-        let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
         let col = create_column_i32(&[Some(1), Some(2), Some(3), Some(4), Some(5)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();
@@ -158,7 +158,7 @@ mod tests {
                 Some(3.1f32.into()),
             )),
         )];
-        let mut searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let col = create_column_i32(&[Some(3), Some(4), Some(3), Some(4)]).unwrap();
         let input = DataChunk::builder().columns([col].to_vec()).build();
         let output = searched_case_expr.eval(&input).unwrap();
