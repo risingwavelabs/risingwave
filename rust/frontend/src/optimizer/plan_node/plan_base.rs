@@ -25,7 +25,7 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: QueryContextRef,
     pub schema: Schema,
-    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
+    /// The order property of the PlanNode's output, store an `Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
