@@ -121,6 +121,7 @@ impl StateStoreImpl {
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store,
                     config.data_directory.to_string(),
+                    state_store_stats.clone(),
                 ));
                 let inner = HummockStateStore::new(
                     HummockStorage::new(

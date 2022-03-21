@@ -22,12 +22,14 @@ use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::{
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
-    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::ddl_service::{
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
+    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
+    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+};
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
     AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,

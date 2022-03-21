@@ -23,6 +23,7 @@ use risingwave_pb::hummock::SstableMeta;
 
 use super::{Block, BlockCache, Sstable};
 use crate::hummock::{HummockError, HummockResult};
+use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
 // TODO: Define policy based on use cases (read / comapction / ...).
@@ -36,17 +37,20 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    // TODO: meta is also supposed to be block, and meta cache will be removed.
+    /// TODO: meta is also supposed to be block, and meta cache will be removed.
     meta_cache: Cache<u64, SstableMeta>,
+    /// Statistics.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl SstableStore {
-    pub fn new(store: ObjectStoreRef, path: String) -> Self {
+    pub fn new(store: ObjectStoreRef, path: String, stats: Arc<StateStoreMetrics>) -> Self {
         Self {
             path,
             store,
             block_cache: BlockCache::new(65536),
             meta_cache: Cache::new(1024),
+            stats,
         }
     }
 
@@ -56,6 +60,8 @@ impl SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<usize> {
+        let timer = self.stats.sst_block_put_remote_duration.start_timer();
+
         // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
         // reuse block encoding later.
         let meta = Bytes::from(sst.meta.encode_to_vec());
@@ -75,6 +81,8 @@ impl SstableStore {
                 .map_err(HummockError::object_io_error)?;
             return Err(HummockError::object_io_error(e));
         }
+
+        timer.observe_duration();
 
         if let CachePolicy::Fill = policy {
             // TODO: use concurrent put object
@@ -97,7 +105,12 @@ impl SstableStore {
         block_index: u64,
         policy: CachePolicy,
     ) -> HummockResult<Arc<Block>> {
+        self.stats.sst_block_request_counts.inc();
+
         let fetch_block = async move {
+            self.stats.sst_block_request_miss_counts.inc();
+            let timer = self.stats.sst_block_fetch_remote_duration.start_timer();
+
             let block_meta = sst
                 .meta
                 .block_metas
@@ -114,6 +127,8 @@ impl SstableStore {
                 .await
                 .map_err(HummockError::object_io_error)?;
             let block = Block::decode(block_data)?;
+
+            timer.observe_duration();
             Ok(Arc::new(block))
         };
 
