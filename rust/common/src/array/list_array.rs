@@ -307,11 +307,6 @@ impl PartialOrd for ListRef<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         let l = self.values_ref();
         let r = other.values_ref();
-        debug_assert_eq!(
-            l.len(),
-            r.len(),
-            "Lists must have the same length to be compared"
-        );
         let it = l.iter().enumerate().find_map(|(idx, v)| {
             let ord = cmp_list_value(v, &r[idx]);
             if let Ordering::Equal = ord {
