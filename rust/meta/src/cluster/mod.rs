@@ -30,7 +30,6 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 
-use crate::hummock::HummockManager;
 use crate::manager::{
     HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
     NotificationManagerRef,
@@ -67,7 +66,6 @@ impl Hash for WorkerKey {
 pub struct StoredClusterManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    hummock_manager_ref: Option<Arc<HummockManager<S>>>,
     dispatch_manager_ref: HashDispatchManagerRef<S>,
     max_heartbeat_interval: Duration,
     notification_manager_ref: NotificationManagerRef,
@@ -80,7 +78,6 @@ where
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
-        hummock_manager_ref: Option<Arc<HummockManager<S>>>,
         notification_manager_ref: NotificationManagerRef,
         max_heartbeat_interval: Duration,
     ) -> Result<Self> {
@@ -93,7 +90,6 @@ where
         Ok(Self {
             meta_store_ref,
             id_gen_manager_ref: env.id_gen_manager_ref(),
-            hummock_manager_ref,
             dispatch_manager_ref,
             notification_manager_ref,
             max_heartbeat_interval,
@@ -191,16 +187,6 @@ where
             Some(worker) => {
                 let worker_node = worker.to_protobuf();
 
-                if let Some(hummock_manager_ref) = self.hummock_manager_ref.as_ref() {
-                    // It's desirable these operations are committed atomically.
-                    // But meta store transaction across *Manager is not intuitive.
-                    // TODO #93: So we rely on a safe guard that periodically purges hummock context
-                    // resource owned by stale worker nodes.
-                    hummock_manager_ref
-                        .release_context_resource(worker_node.id)
-                        .await?;
-                }
-
                 // Alter consistent hash mapping.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.dispatch_manager_ref
@@ -256,13 +242,6 @@ where
         core.update_worker_ttl(host_address, expire_at);
     }
 
-    /// TODO: Java frontend doesn't send heartbeat. Remove this function after we use
-    /// Rust frontend.
-    async fn get_workers_to_init_or_delete(&self, now: u64) -> Vec<Worker> {
-        let core = self.core.read().await;
-        core.get_workers_to_init_or_delete(now)
-    }
-
     pub async fn start_heartbeat_checker(
         cluster_manager_ref: StoredClusterManagerRef<S>,
         check_interval: Duration,
@@ -284,8 +263,18 @@ where
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("Clock may have gone backwards")
                     .as_secs();
-                let workers_to_init_or_delete =
-                    cluster_manager_ref.get_workers_to_init_or_delete(now).await;
+                let workers_to_init_or_delete = cluster_manager_ref
+                    .core
+                    .read()
+                    .await
+                    .workers
+                    .values()
+                    // TODO: Java frontend doesn't send heartbeat. Remove this line after using Rust
+                    // frontend.
+                    .filter(|worker| worker.to_protobuf().r#type != WorkerType::Frontend as i32)
+                    .filter(|worker| worker.expire_at() < now)
+                    .cloned()
+                    .collect_vec();
                 for worker in workers_to_init_or_delete {
                     let key = worker.key().expect("illegal key");
                     if worker.expire_at() == INVALID_EXPIRE_AT {
@@ -341,11 +330,6 @@ where
     ) -> Vec<WorkerNode> {
         let core = self.core.read().await;
         core.list_worker_node(worker_type, worker_state)
-    }
-
-    pub async fn get_worker_count(&self, worker_type: Option<WorkerType>) -> usize {
-        let core = self.core.read().await;
-        core.get_worker_count(worker_type)
     }
 
     pub async fn list_parallel_units(
@@ -497,16 +481,6 @@ impl StoredClusterManagerCore {
             .collect::<Vec<_>>()
     }
 
-    fn get_worker_count(&self, worker_type: Option<WorkerType>) -> usize {
-        self.workers
-            .iter()
-            .filter(|(_, worker)| match worker_type {
-                Some(worker_type) => worker.worker_type() == worker_type,
-                None => true,
-            })
-            .count()
-    }
-
     fn list_parallel_units(
         &self,
         parallel_unit_type: Option<ParallelUnitType>,
@@ -538,15 +512,6 @@ impl StoredClusterManagerCore {
             Entry::Vacant(_) => {}
         }
     }
-
-    fn get_workers_to_init_or_delete(&self, now: u64) -> Vec<Worker> {
-        self.workers
-            .iter()
-            .filter(|(_, worker)| worker.worker_type() != WorkerType::Frontend)
-            .filter(|(_, worker)| worker.expire_at() < now)
-            .map(|(_, worker)| worker.clone())
-            .collect_vec()
-    }
 }
 
 #[cfg(test)]
@@ -556,22 +521,15 @@ mod tests {
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
     use crate::manager::NotificationManager;
-    use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
 
     #[tokio::test]
     async fn test_cluster_manager() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let hummock_manager = Arc::new(
-            HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
-                .await
-                .unwrap(),
-        );
 
         let cluster_manager = Arc::new(
             StoredClusterManager::new(
                 env.clone(),
-                Some(hummock_manager.clone()),
                 Arc::new(NotificationManager::new()),
                 Duration::new(0, 0),
             )

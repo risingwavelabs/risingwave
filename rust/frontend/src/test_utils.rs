@@ -144,7 +144,6 @@ impl FrontendMockMetaClient {
         // let cluster_manager = Arc::new(
         //     StoredClusterManager::new(
         //         env.clone(),
-        //         None,
         //         notification_manager.clone(),
         //         Duration::from_secs(3600),
         //     )
