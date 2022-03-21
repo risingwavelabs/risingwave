@@ -43,7 +43,7 @@ pub struct BoundJoin {
     pub cond: ExprImpl,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
