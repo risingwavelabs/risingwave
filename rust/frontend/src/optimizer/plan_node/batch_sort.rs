@@ -19,16 +19,15 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnOrder, OrderByNode};
 
-use super::{BatchBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithOrder, WithSchema};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
 #[derive(Debug, Clone)]
 pub struct BatchSort {
-    pub base: BatchBase,
+    pub base: PlanBase,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl BatchSort {
@@ -36,17 +35,8 @@ impl BatchSort {
         let ctx = input.ctx();
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
-        let base = BatchBase {
-            order,
-            dist,
-            ctx: ctx.clone(),
-            id: ctx.borrow_mut().get_id(),
-        };
-        BatchSort {
-            input,
-            base,
-            schema,
-        }
+        let base = PlanBase::new_batch(ctx, schema, dist, order);
+        BatchSort { input, base }
     }
 }
 
@@ -68,7 +58,7 @@ impl_plan_tree_node_for_unary! {BatchSort}
 
 impl WithSchema for BatchSort {
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.base.schema
     }
 }
 
@@ -89,7 +79,7 @@ impl ToBatchProst for BatchSort {
             .order
             .field_order
             .iter()
-            .map(|field_order| self.schema[field_order.index].data_type.to_protobuf())
+            .map(|field_order| self.schema()[field_order.index].data_type.to_protobuf())
             .collect_vec();
         let column_orders = column_orders_without_type
             .into_iter()

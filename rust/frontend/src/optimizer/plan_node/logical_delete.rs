@@ -19,7 +19,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchDelete, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchDelete, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::binder::BaseTableRef;
 
 /// [`LogicalDelete`] iterates on input relation and delete the data from specified table.
@@ -27,7 +27,7 @@ use crate::binder::BaseTableRef;
 /// It corresponds to the `DELETE` statements in SQL.
 #[derive(Debug, Clone)]
 pub struct LogicalDelete {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     table: BaseTableRef,
     input: PlanRef,
 }
@@ -38,9 +38,7 @@ impl LogicalDelete {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let id = ctx.borrow_mut().get_id();
-        let base = LogicalBase { id, schema, ctx };
-
+        let base = PlanBase::new_logical(ctx, schema);
         Self { base, table, input }
     }
 

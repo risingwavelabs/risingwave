@@ -19,14 +19,14 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::plan_node::BatchBase;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::plan_node::PlanBase;
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
 pub struct BatchFilter {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalFilter,
 }
 
@@ -34,12 +34,12 @@ impl BatchFilter {
     pub fn new(logical: LogicalFilter) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            logical.input().distribution().clone(),
+            logical.input().order().clone(),
+        );
         BatchFilter { logical, base }
     }
 

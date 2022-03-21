@@ -34,14 +34,11 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{
-    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
-};
+use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -73,43 +70,6 @@ pub type PlanRef = Rc<dyn PlanNode>;
 
 #[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
-
-/// the common fields of logical nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct LogicalBase {
-    pub id: PlanNodeId,
-    pub schema: Schema,
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of batch nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-
-#[derive(Clone, Debug)]
-pub struct BatchBase {
-    pub id: PlanNodeId,
-    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
-    /// correctness, but insert unnecessary sort in plan
-    pub order: Order,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of stream nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct StreamBase {
-    pub id: PlanNodeId,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-    pub ctx: QueryContextRef, /* TODO: pk derive
-                               * pub pk_indices: Vec<u32> */
-}
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
@@ -172,6 +132,8 @@ impl dyn PlanNode {
     }
 }
 
+mod plan_base;
+pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
 pub use plan_tree_node::*;
@@ -249,7 +211,6 @@ pub use stream_source_scan::StreamSourceScan;
 pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
-use crate::session::QueryContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]

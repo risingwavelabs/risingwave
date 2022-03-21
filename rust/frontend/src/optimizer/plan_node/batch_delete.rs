@@ -19,27 +19,26 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::DeleteNode;
 
 use super::{
-    BatchBase, LogicalDelete, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchDelete` implements [`LogicalDelete`]
 #[derive(Debug, Clone)]
 pub struct BatchDelete {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalDelete,
 }
 
 impl BatchDelete {
     pub fn new(logical: LogicalDelete) -> Self {
         let ctx = logical.base.ctx.clone();
-        let id = ctx.borrow_mut().get_id();
-        let base = BatchBase {
-            id,
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
+        let base = PlanBase::new_batch(
             ctx,
-        };
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
         Self { base, logical }
     }
 }
