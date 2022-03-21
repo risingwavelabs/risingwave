@@ -264,10 +264,10 @@ mod tests {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<FORWARD>::default()
-                    .id(0)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
-                    .map_value(move |id, x| {
-                        iterator_test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    .sort_index(0)
+                    .map_key(move |sort_index, x| iterator_test_key_of(sort_index, x * 3 + (iter_id as usize)))
+                    .map_value(move |sort_index, x| {
+                        iterator_test_value_of(sort_index, x * 3 + (iter_id as usize) + 1)
                     })
                     .finish()
             })
@@ -304,11 +304,11 @@ mod tests {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<FORWARD>::default()
-                    .id(0)
+                    .sort_index(0)
                     .total(20)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
-                    .map_value(move |id, x| {
-                        iterator_test_value_of(id, x * 3 + (iter_id as usize) + 1)
+                    .map_key(move |sort_index, x| iterator_test_key_of(sort_index, x * 3 + (iter_id as usize)))
+                    .map_value(move |sort_index, x| {
+                        iterator_test_value_of(sort_index, x * 3 + (iter_id as usize) + 1)
                     })
                     .finish()
             })
@@ -361,7 +361,7 @@ mod tests {
     async fn test_delete() {
         let sstable_store = mock_sstable_store();
 
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 1, 100, HummockValue::Put(iterator_test_value_of(0, 1))),
             (0, 2, 300, HummockValue::Delete),
@@ -405,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn test_range_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -486,7 +486,7 @@ mod tests {
     #[tokio::test]
     async fn test_range() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -566,7 +566,7 @@ mod tests {
     #[tokio::test]
     async fn test_range_to_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -649,7 +649,7 @@ mod tests {
     #[tokio::test]
     async fn test_range_from() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),

@@ -38,12 +38,12 @@ mod test {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<BACKWARD>::default()
-                    .id(0)
-                    .map_key(move |id, x| {
-                        iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    .sort_index(0)
+                    .map_key(move |sort_index, x| {
+                        iterator_test_key_of(sort_index, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
-                    .map_value(move |id, x| {
-                        iterator_test_value_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    .map_value(move |sort_index, x| {
+                        iterator_test_value_of(sort_index, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
                     .finish()
             })
@@ -78,10 +78,10 @@ mod test {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<BACKWARD>::default()
-                    .id(0)
+                    .sort_index(0)
                     .total(20)
-                    .map_key(move |id, x| {
-                        iterator_test_key_of(id, base_key - x * 3 + (3 - iter_id as usize))
+                    .map_key(move |sort_index, x| {
+                        iterator_test_key_of(sort_index, base_key - x * 3 + (3 - iter_id as usize))
                     })
                     .finish()
             })

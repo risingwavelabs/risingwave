@@ -285,13 +285,13 @@ mod tests {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<BACKWARD>::default()
-                    .id(0)
-                    .map_key(move |id, x| {
-                        iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    .sort_index(0)
+                    .map_key(move |sort_index, x| {
+                        iterator_test_key_of(sort_index, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
-                    .map_value(move |id, x| {
+                    .map_value(move |sort_index, x| {
                         iterator_test_value_of(
-                            id,
+                            sort_index,
                             base_key_value - x * 3 + (3 - iter_id as usize) + 1,
                         )
                     })
@@ -336,14 +336,14 @@ mod tests {
         let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
             .map(|iter_id| {
                 TestIteratorBuilder::<BACKWARD>::default()
-                    .id(0)
+                    .sort_index(0)
                     .total(20)
-                    .map_key(move |id, x| {
-                        iterator_test_key_of(id, base_key_value - x * 3 + (3 - iter_id as usize))
+                    .map_key(move |sort_index, x| {
+                        iterator_test_key_of(sort_index, base_key_value - x * 3 + (3 - iter_id as usize))
                     })
-                    .map_value(move |id, x| {
+                    .map_value(move |sort_index, x| {
                         iterator_test_value_of(
-                            id,
+                            sort_index,
                             base_key_value - x * 3 + (3 - iter_id as usize) + 1,
                         )
                     })
@@ -397,7 +397,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_delete() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 2, 300, HummockValue::Delete),
             (0, 1, 100, HummockValue::Put(iterator_test_value_of(0, 1))),
@@ -439,7 +439,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -522,7 +522,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -602,7 +602,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_to_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),
@@ -681,7 +681,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_from() {
         let sstable_store = mock_sstable_store();
-        // key=[table, idx, epoch], value
+        // key=[sort_index, idx, epoch], value
         let kv_pairs = vec![
             (0, 0, 200, HummockValue::Delete),
             (0, 0, 100, HummockValue::Put(iterator_test_value_of(0, 0))),

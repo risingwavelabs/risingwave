@@ -50,16 +50,16 @@ mod tests {
         iter.rewind().await.unwrap();
 
         while iter.is_valid() {
-            let table_idx = (i / TEST_KEYS_COUNT) as u64;
+            let sort_index = (i / TEST_KEYS_COUNT) as u64;
             let key = iter.key();
             let val = iter.value();
             assert_eq!(
                 key,
-                iterator_test_key_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
+                iterator_test_key_of(sort_index, i % TEST_KEYS_COUNT).as_slice()
             );
             assert_eq!(
                 val.into_put_value().unwrap(),
-                iterator_test_value_of(table_idx, i % TEST_KEYS_COUNT).as_slice()
+                iterator_test_value_of(sort_index, i % TEST_KEYS_COUNT).as_slice()
             );
             i += 1;
 
