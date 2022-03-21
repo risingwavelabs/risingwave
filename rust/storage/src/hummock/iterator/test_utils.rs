@@ -22,6 +22,7 @@ use std::sync::Arc;
 use super::variants::*;
 use crate::hummock::key::{key_with_epoch, user_key, Epoch};
 use crate::hummock::{sstable_store, HummockResult, HummockValue, SSTableBuilderOptions, Sstable};
+use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreRef};
 
 pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
@@ -343,7 +344,11 @@ pub fn mock_sstable_store() -> SstableStoreRef {
 
 pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
     let path = "test".to_string();
-    Arc::new(SstableStore::new(object_store, path))
+    Arc::new(SstableStore::new(
+        object_store,
+        path,
+        Arc::new(StateStoreMetrics::unused()),
+    ))
 }
 
 #[cfg(test)]

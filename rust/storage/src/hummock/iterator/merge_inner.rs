@@ -14,6 +14,7 @@
 //
 use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -22,6 +23,7 @@ use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
+use crate::monitor::StateStoreMetrics;
 
 pub struct Node<'a, const DIRECTION: usize>(BoxedHummockIterator<'a>);
 
@@ -56,14 +58,21 @@ pub struct MergeIteratorInner<'a, const DIRECTION: usize> {
 
     /// The heap for merge sort.
     heap: BinaryHeap<Node<'a, DIRECTION>>,
+
+    /// Statistics.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
-    pub fn new(iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>) -> Self {
+    pub fn new(
+        iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
         Self {
             unused_iters: iterators.into_iter().collect(),
             heap: BinaryHeap::new(),
+            stats,
         }
     }
 
@@ -88,6 +97,8 @@ impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
 #[async_trait]
 impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
+        let timer = self.stats.iter_merge_next_duration.start_timer();
+
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
         node.0.next().await?;
@@ -99,6 +110,8 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
             // this will update the heap top
             drop(node);
         }
+
+        timer.observe_duration();
 
         Ok(())
     }
@@ -123,9 +136,13 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
+        let timer = self.stats.iter_merge_seek_duration.start_timer();
+
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.seek(key))).await?;
         self.build_heap();
+
+        timer.observe_duration();
         Ok(())
     }
 }
