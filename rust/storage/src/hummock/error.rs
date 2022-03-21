@@ -93,12 +93,18 @@ impl From<prost::DecodeError> for TracedHummockError {
     }
 }
 
-#[derive(Error, Debug)]
-#[error("{source}")]
+#[derive(Error)]
+#[error("{source:?}\n{backtrace:#}")]
 pub struct TracedHummockError {
     #[from]
     source: HummockError,
     backtrace: Backtrace,
+}
+
+impl std::fmt::Debug for TracedHummockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self)
+    }
 }
 
 impl From<TracedHummockError> for RwError {
