@@ -118,7 +118,8 @@ impl<B: Buf> Deserializer<B> {
         }
     }
 
-    fn read_decimal(&mut self) -> Result<Vec<u8>> {
+    /// Read u8 from Bytes input in decimal form (Do not include null tag).
+    pub fn read_decimal(&mut self) -> Result<Vec<u8>> {
         let flag = self.input.get_u8();
         if !(0x8..=0x22).contains(&flag) {
             return Err(Error::InvalidBytesEncoding(flag));
