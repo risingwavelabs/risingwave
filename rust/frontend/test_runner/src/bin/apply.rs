@@ -84,7 +84,7 @@ async fn main() -> Result<()> {
                             filename.to_string_lossy(),
                             target,
                         );
-                        return true;
+                        true
                     }
                     Err(err) => {
                         println!(
@@ -93,7 +93,7 @@ async fn main() -> Result<()> {
                             filename.to_string_lossy(),
                             err
                         );
-                        return false;
+                        false
                     }
                 }
             });

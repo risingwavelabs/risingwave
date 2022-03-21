@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
                 .contains(".apply.yaml")
         {
             let file_name = path.file_name().unwrap().to_string_lossy();
-            let test_case_name = file_name.split(".").next().unwrap();
+            let test_case_name = file_name.split('.').next().unwrap();
 
             writeln!(
                 f,
