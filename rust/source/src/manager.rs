@@ -17,23 +17,29 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use parking_lot::{Mutex, MutexGuard};
+use async_trait::async_trait;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
+use risingwave_connector::base::SourceReader;
+use risingwave_connector::kinesis::source::reader::KinesisSplitReader;
+use risingwave_connector::ConnectorConfig;
 
+use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
 use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
 
 pub type SourceRef = Arc<SourceImpl>;
 
+#[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
-    fn create_source(
+    async fn create_source(
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser>,
+        parser: Arc<dyn SourceParser + Send + Sync>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
@@ -81,23 +87,17 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
 
+#[async_trait]
 impl SourceManager for MemSourceManager {
-    fn create_source(
+    async fn create_source(
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser>,
+        parser: Arc<dyn SourceParser + Send + Sync>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()> {
-        let mut tables = self.get_sources()?;
-
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
 
         let source = match config {
             SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
@@ -105,6 +105,18 @@ impl SourceManager for MemSourceManager {
                 Arc::new(columns.clone()),
                 parser.clone(),
             )),
+            SourceConfig::Connector(config) => {
+                let split_reader: Arc<tokio::sync::Mutex<dyn SourceReader + Send + Sync>> = match config {
+                    ConnectorConfig::Kinesis(kc) => Arc::new(tokio::sync::Mutex::new(
+                        KinesisSplitReader::new(kc.clone()).await,
+                    )),
+                };
+                SourceImpl::Connector(ConnectorSource {
+                    parser: parser.clone(),
+                    reader: split_reader,
+                    column_descs: columns.clone(),
+                })
+            }
         };
 
         let desc = SourceDesc {
@@ -113,7 +125,12 @@ impl SourceManager for MemSourceManager {
             columns,
             row_id_index,
         };
-
+        let mut tables = self.get_sources()?;
+        ensure!(
+            !tables.contains_key(source_id),
+            "Source id already exists: {:?}",
+            source_id
+        );
         tables.insert(*source_id, desc);
 
         Ok(())
@@ -224,14 +241,9 @@ mod tests {
 
         // create source
         let mem_source_manager = MemSourceManager::new();
-        let new_source = mem_source_manager.create_source(
-            &table_id,
-            format,
-            parser,
-            &config,
-            source_columns,
-            Some(0),
-        );
+        let new_source = mem_source_manager
+            .create_source(&table_id, format, parser, &config, source_columns, Some(0))
+            .await;
         assert!(new_source.is_ok());
 
         // get source

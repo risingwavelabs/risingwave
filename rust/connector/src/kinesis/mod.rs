@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-mod config;
+pub mod config;
 mod enumerator;
-mod source;
+pub mod source;
 mod split;

@@ -29,16 +29,19 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use connector_source::ConnectorSource;
 pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
+use risingwave_connector::ConnectorConfig;
 pub use table_v2::*;
 
 pub mod parser;
 
+mod connector_source;
 mod high_level_kafka;
 mod manager;
 
@@ -50,6 +53,7 @@ extern crate maplit;
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
+    Connector(ConnectorConfig),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +69,7 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
+    Connector(ConnectorSource),
 }
 
 impl SourceImpl {

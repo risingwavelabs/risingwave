@@ -46,7 +46,7 @@ pub(super) struct CreateSourceExecutor {
     table_id: TableId,
     config: SourceConfig,
     format: SourceFormat,
-    parser: Option<Arc<dyn SourceParser>>,
+    parser: Option<Arc<dyn SourceParser + Send + Sync>>,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
     properties: HashMap<String, String>,
@@ -153,7 +153,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateSourceExecutor {
     async fn open(&mut self) -> Result<()> {
-        let parser: Arc<dyn SourceParser> = match self.format {
+        let parser: Arc<dyn SourceParser + Send + Sync> = match self.format {
             SourceFormat::Json => {
                 let parser: Arc<dyn SourceParser> = Arc::new(JSONParser {});
                 Ok(parser)
@@ -187,14 +187,16 @@ impl Executor for CreateSourceExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        self.source_manager.create_source(
-            &self.table_id,
-            self.format.clone(),
-            self.parser.clone().unwrap(),
-            &self.config,
-            self.columns.clone(),
-            self.row_id_index,
-        )?;
+        self.source_manager
+            .create_source(
+                &self.table_id,
+                self.format.clone(),
+                self.parser.clone().unwrap(),
+                &self.config,
+                self.columns.clone(),
+                self.row_id_index,
+            )
+            .await?;
 
         Ok(None)
     }
