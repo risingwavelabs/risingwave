@@ -75,7 +75,8 @@ impl CellBasedRowDeserializer {
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
             // do nothing
         } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
-            if let Some(datum) = deserialize_cell(cell, &column_desc.data_type)? {
+            let mut de = memcomparable::Deserializer::new(cell.clone());
+            if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
                 assert!(old.is_none());
             }
