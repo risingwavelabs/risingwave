@@ -20,6 +20,15 @@ message CreateDatabaseResponse {
   uint64 version = 3;
 }
 
+message DropDatabaseRequest {
+  uint32 database_id = 1;
+}
+
+message DropDatabaseResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateSchemaRequest {
   catalog.Schema schema = 1;
 }
@@ -30,6 +39,15 @@ message CreateSchemaResponse {
   uint64 version = 3;
 }
 
+message DropSchemaRequest {
+  uint32 schema_id = 1;
+}
+
+message DropSchemaResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateSourceRequest {
   catalog.Source source = 1;
 }
@@ -38,6 +56,35 @@ message CreateSourceResponse {
   common.Status status = 1;
   uint32 source_id = 2;
   uint64 version = 3;
+}
+
+message DropSourceRequest {
+  uint32 source_id = 1;
+}
+
+message DropSourceResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
+message CreateMaterializedViewRequest {
+  catalog.Table materialized_view = 1;
+  stream_plan.StreamNode stream_node = 2;
+}
+
+message CreateMaterializedViewResponse {
+  common.Status status = 1;
+  uint32 table_id = 2;
+  uint64 version = 3;
+}
+
+message DropMaterializedViewRequest {
+  uint32 table_id = 1;
+}
+
+message DropMaterializedViewResponse {
+  common.Status status = 1;
+  uint64 version = 2;
 }
 
 message CreateMaterializedSourceRequest {
@@ -53,59 +100,12 @@ message CreateMaterializedSourceResponse {
   uint64 version = 4;
 }
 
-message CreateMaterializedViewRequest {
-  catalog.Table materialized_view = 1;
-  stream_plan.StreamNode stream_node = 2;
-}
-
-message CreateMaterializedViewResponse {
-  common.Status status = 1;
-  uint32 table_id = 2;
-  uint64 version = 3;
-}
-
-message DropDatabaseRequest {
-  uint32 database_id = 1;
-}
-
-message DropDatabaseResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
-
-message DropSchemaRequest {
-  uint32 schema_id = 1;
-}
-
-message DropSchemaResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
-
-message DropSourceRequest {
-  uint32 source_id = 1;
-}
-
-message DropSourceResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
-
 message DropMaterializedSourceRequest {
   uint32 source_id = 1;
   uint32 table_id = 2;
 }
 
 message DropMaterializedSourceResponse {
-  common.Status status = 1;
-  uint64 version = 2;
-}
-
-message DropMaterializedViewRequest {
-  uint32 table_id = 1;
-}
-
-message DropMaterializedViewResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
