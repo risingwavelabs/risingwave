@@ -18,7 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::FilterNode;
 
-use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    LogicalFilter, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::Condition;
@@ -37,6 +39,7 @@ impl BatchFilter {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            logical.plan_base().pk_indices.clone(),
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );

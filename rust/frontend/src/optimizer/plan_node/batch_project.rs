@@ -20,7 +20,8 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ProjectNode;
 
 use super::{
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ToDistributedBatch,
 };
 use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
@@ -40,6 +41,7 @@ impl BatchProject {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            logical.plan_base().pk_indices.to_vec(),
             Distribution::any().clone(),
             Order::any().clone(),
         );

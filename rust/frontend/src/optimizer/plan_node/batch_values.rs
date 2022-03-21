@@ -38,6 +38,7 @@ impl BatchValues {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            vec![],
             Distribution::Broadcast,
             Order::any().clone(),
         );

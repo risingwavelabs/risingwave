@@ -18,7 +18,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::InsertNode;
 
-use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    LogicalInsert, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
@@ -36,6 +38,7 @@ impl BatchInsert {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            logical.plan_base().pk_indices.to_vec(),
             Distribution::any().clone(),
             Order::any().clone(),
         );

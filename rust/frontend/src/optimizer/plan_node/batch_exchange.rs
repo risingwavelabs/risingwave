@@ -33,7 +33,8 @@ impl BatchExchange {
     pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = PlanBase::new_batch(ctx, schema, dist, order);
+        let pk_indices = input.pk_indices().to_vec();
+        let base = PlanBase::new_batch(ctx, schema, pk_indices, dist, order);
         BatchExchange { input, base }
     }
 }

@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
 
-use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanNode, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
@@ -42,6 +42,7 @@ impl BatchSeqScan {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            logical.plan_base().pk_indices.to_vec(),
             Distribution::any().clone(),
             Order::any().clone(),
         );

@@ -17,7 +17,9 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use super::{
+    LogicalAgg, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+};
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -32,6 +34,7 @@ impl BatchHashAgg {
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
+            logical.plan_base().pk_indices.to_vec(),
             Distribution::any().clone(),
             Order::any().clone(),
         );

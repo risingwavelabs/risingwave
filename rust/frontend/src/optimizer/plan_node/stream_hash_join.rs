@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use super::{LogicalJoin, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::{Distribution, WithSchema};
 
@@ -37,7 +37,12 @@ impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.plan_base().pk_indices.clone(),
+            Distribution::any().clone(),
+        );
 
         Self {
             base,

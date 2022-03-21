@@ -17,7 +17,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
-use super::{LogicalScan, PlanBase, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNode, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamSourceScan` represents a scan from source.
@@ -31,7 +31,12 @@ impl StreamSourceScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.plan_base().pk_indices.clone(),
+            Distribution::any().clone(),
+        );
         Self { logical, base }
     }
 }

@@ -146,8 +146,7 @@ impl LogicalProject {
         let i2o = Self::i2o_col_mapping(input_schema, output_schema, exprs);
         input_pk
             .iter()
-            .enumerate()
-            .map(|(i, pk_col)| i2o.try_map(*pk_col))
+            .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
             .unwrap_or(vec![])
     }
