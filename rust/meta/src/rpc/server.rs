@@ -175,9 +175,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .unwrap(),
     );
     let catalog_manager_v2_ref = Arc::new(
-        CatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
-            .await
-            .unwrap(),
+        CatalogManager::new(
+            meta_store_ref.clone(),
+            env.id_gen_manager_ref(),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     let vacuum_trigger_ref = Arc::new(hummock::VacuumTrigger::new(

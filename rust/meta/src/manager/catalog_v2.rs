@@ -19,13 +19,14 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
+use super::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::NotificationManagerRef;
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
@@ -50,12 +51,49 @@ impl<S> CatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>, nm: NotificationManagerRef) -> Result<Self> {
-        Ok(Self {
+    pub async fn new(
+        meta_store_ref: Arc<S>,
+        id_gen_manager: IdGeneratorManagerRef<S>,
+        nm: NotificationManagerRef,
+    ) -> Result<Self> {
+        let catalog_manager = Self {
             core: Mutex::new(CatalogManagerCore::new(meta_store_ref.clone()).await?),
             meta_store_ref,
             nm,
-        })
+        };
+        catalog_manager.init(id_gen_manager).await?;
+        Ok(catalog_manager)
+    }
+
+    // Create default database and schema.
+    async fn init(&self, id_gen_manager: IdGeneratorManagerRef<S>) -> Result<()> {
+        let mut database = Database {
+            name: DEFAULT_DATABASE_NAME.to_string(),
+            ..Default::default()
+        };
+        if !self.core.lock().await.has_database(&database) {
+            database.id = id_gen_manager
+                .generate::<{ IdCategory::Database }>()
+                .await? as u32;
+            self.create_database(&database).await?;
+        }
+        let databases = Database::list(&*self.meta_store_ref)
+            .await?
+            .into_iter()
+            .filter(|db| db.name == DEFAULT_DATABASE_NAME)
+            .collect::<Vec<Database>>();
+        assert_eq!(1, databases.len());
+
+        let mut schema = Schema {
+            name: DEFAULT_SCHEMA_NAME.to_string(),
+            database_id: databases[0].id,
+            ..Default::default()
+        };
+        if !self.core.lock().await.has_schema(&schema) {
+            schema.id = id_gen_manager.generate::<{ IdCategory::Schema }>().await? as u32;
+            self.create_schema(&schema).await?;
+        }
+        Ok(())
     }
 
     /// Used in `NotificationService::subscribe`.
@@ -368,7 +406,7 @@ where
     }
 }
 
-type DatabaseKey = DatabaseId;
+type DatabaseKey = String;
 type SchemaKey = (DatabaseId, String);
 type TableKey = (DatabaseId, SchemaId, String);
 type SourceKey = (DatabaseId, SchemaId, String);
@@ -405,7 +443,7 @@ where
 
         let mut relation_ref_count = HashMap::new();
 
-        let databases = HashSet::from_iter(databases.into_iter().map(|database| (database.id)));
+        let databases = HashSet::from_iter(databases.into_iter().map(|database| (database.name)));
         let schemas = HashSet::from_iter(
             schemas
                 .into_iter()
@@ -446,15 +484,15 @@ where
     }
 
     fn has_database(&self, database: &Database) -> bool {
-        self.databases.contains(&database.id)
+        self.databases.contains(database.get_name())
     }
 
     fn add_database(&mut self, database: &Database) {
-        self.databases.insert(database.id);
+        self.databases.insert(database.name.clone());
     }
 
     fn drop_database(&mut self, database: &Database) -> bool {
-        self.databases.remove(&database.id)
+        self.databases.remove(database.get_name())
     }
 
     fn has_schema(&self, schema: &Schema) -> bool {
