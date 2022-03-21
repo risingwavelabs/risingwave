@@ -40,13 +40,13 @@
     select count(v1) from t where v2 > 2
   logical_plan: |
     LogicalProject { exprs: [$0], expr_alias: [None] }
-      LogicalAgg { group_keys: [], agg_calls: [Count(0)] }
+      LogicalAgg { group_keys: [], agg_calls: [count($0)] }
         LogicalProject { exprs: [$1], expr_alias: [None] }
           LogicalFilter { predicate: ($2 > 2:Int32) }
             LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
     LogicalProject { exprs: [$0], expr_alias: [None] }
-      LogicalAgg { group_keys: [], agg_calls: [Count(0)] }
+      LogicalAgg { group_keys: [], agg_calls: [count($0)] }
         LogicalProject { exprs: [$0], expr_alias: [None] }
           LogicalFilter { predicate: ($1 > 2:Int32) }
             LogicalScan { table: t, columns: [v1, v2] }
