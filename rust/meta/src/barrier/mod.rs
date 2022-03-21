@@ -46,8 +46,11 @@ struct Notifier {
     /// Get notified when scheduled barrier is about to send.
     to_send: Option<oneshot::Sender<()>>,
 
-    /// Get notified when scheduled barrier is finished or failed.
-    finished: Option<oneshot::Sender<Result<()>>>,
+    /// Get notified when scheduled barrier is collected or failed.
+    collected: Option<oneshot::Sender<Result<()>>>,
+
+    /// Get notified when scheduled barrier is finished.
+    finished: Option<oneshot::Sender<()>>,
 }
 
 impl Notifier {
@@ -59,20 +62,23 @@ impl Notifier {
     }
 
     /// Notify when we have finished a barrier from all actors.
-    fn notify_finished(self) {
-        assert!(self.to_send.is_none());
-
-        if let Some(tx) = self.finished {
+    fn notify_collected(&mut self) {
+        if let Some(tx) = self.collected.take() {
             tx.send(Ok(())).ok();
         }
     }
 
-    /// Notify when we failed to finish a barrier.
-    fn notify_failed(self, err: RwError) {
-        assert!(self.to_send.is_none());
-
-        if let Some(tx) = self.finished {
+    /// Notify when we failed to collect a barrier. This function consumes `self`.
+    fn notify_collection_failed(self, err: RwError) {
+        if let Some(tx) = self.collected {
             tx.send(Err(err)).ok();
+        }
+    }
+
+    /// Notify when we have finished a barrier from all actors. This function consumes `self`.
+    fn notify_finished(self) {
+        if let Some(tx) = self.finished {
+            tx.send(()).ok();
         }
     }
 }
@@ -204,7 +210,7 @@ where
 
         // TODO: persist these states
         let mut prev_epoch = INVALID_EPOCH;
-        let mut all_notifiers: HashMap<u64, Vec<Notifier>> = Default::default();
+        let mut all_notifiers: HashMap<u64, Vec<_>> = Default::default();
 
         loop {
             tokio::select! {
@@ -239,26 +245,34 @@ where
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            all_notifiers
-                .entry(new_epoch)
-                .or_default()
-                .extend(notifiers);
 
             match self.run_inner(&command_context).await {
                 Ok(finished_epochs) => {
+                    // Notify about barrier collected.
+                    notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                    // Add notifiers for this epoch to all_notifiers.
+                    all_notifiers
+                        .entry(new_epoch)
+                        .or_default()
+                        .extend(notifiers);
+
+                    // For those finished epochs, notify about finished.
                     for epoch in finished_epochs {
                         if let Some(notifiers) = all_notifiers.remove(&epoch) {
                             notifiers.into_iter().for_each(Notifier::notify_finished);
                         }
                     }
+
+                    // Update the current epoch.
                     prev_epoch = new_epoch;
                 }
+
                 Err(e) => {
-                    if let Some(notifiers) = all_notifiers.remove(&new_epoch) {
-                        notifiers
-                            .into_iter()
-                            .for_each(|n| n.notify_failed(e.clone()));
-                    }
+                    // Notify about barrier collection failed.
+                    notifiers
+                        .into_iter()
+                        .for_each(|n| n.notify_collection_failed(e.clone()));
                 }
             }
         }
@@ -370,35 +384,44 @@ where
             },
         )
         .await?;
-        Ok(rx.await.unwrap())
+
+        rx.await.unwrap();
+        Ok(())
     }
 
     /// Run a command and return when it's completely finished.
     pub async fn run_command(&self, command: Command) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
+        let (collect_tx, collect_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
         self.do_schedule(
             command,
             Notifier {
-                finished: Some(tx),
+                collected: Some(collect_tx),
+                finished: Some(finish_tx),
                 ..Default::default()
             },
         )
         .await?;
-        rx.await.unwrap()
+
+        collect_rx.await.unwrap()?;
+        finish_rx.await.unwrap();
+        Ok(())
     }
 
-    /// Wait for the next barrier to finish. Note that the barrier flowing in our stream graph is
+    /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier(&self) -> Result<()> {
+    pub async fn wait_for_next_barrier_to_collect(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
-            finished: Some(tx),
+            collected: Some(tx),
             ..Default::default()
         };
         self.scheduled_barriers
             .attach_notifiers(once(notifier))
             .await;
-        rx.await.unwrap()
+
+        rx.await.unwrap()?;
+        Ok(())
     }
 }
 

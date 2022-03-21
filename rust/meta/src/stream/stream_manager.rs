@@ -282,7 +282,7 @@ where
         let start = Instant::now();
 
         info!("start barrier flush");
-        self.barrier_manager_ref.wait_for_next_barrier().await?;
+        self.barrier_manager_ref.wait_for_next_barrier_to_collect().await?;
 
         let elapsed = Instant::now().duration_since(start);
         info!("barrier flushed in {:?}", elapsed);
