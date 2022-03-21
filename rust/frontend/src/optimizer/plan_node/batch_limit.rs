@@ -18,9 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::LimitNode;
 
-use super::{
-    LogicalLimit, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input

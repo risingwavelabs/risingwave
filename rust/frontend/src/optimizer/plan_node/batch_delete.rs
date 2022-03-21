@@ -19,7 +19,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::DeleteNode;
 
 use super::{
-    LogicalDelete, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 

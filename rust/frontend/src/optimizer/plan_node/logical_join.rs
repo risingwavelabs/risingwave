@@ -57,7 +57,7 @@ impl fmt::Display for LogicalJoin {
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
-        let (schema, pk) = Self::derive_schema(
+        let (schema, _pk) = Self::derive_schema(
             left.schema(),
             right.schema(),
             left.pk_indices(),

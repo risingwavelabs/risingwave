@@ -53,7 +53,7 @@ impl LogicalProject {
         }
 
         let schema = Self::derive_schema(&exprs, &expr_alias);
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &schema, &exprs);
+        let _pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &schema, &exprs);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }

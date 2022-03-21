@@ -19,7 +19,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashJoinNode;
 
 use super::{
-    EqJoinPredicate, LogicalJoin, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};

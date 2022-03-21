@@ -17,9 +17,7 @@ use std::fmt;
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
-use super::{
-    LogicalAgg, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]

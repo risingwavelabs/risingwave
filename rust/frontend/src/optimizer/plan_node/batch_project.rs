@@ -20,8 +20,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ProjectNode;
 
 use super::{
-    LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatchProst,
-    ToDistributedBatch,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
