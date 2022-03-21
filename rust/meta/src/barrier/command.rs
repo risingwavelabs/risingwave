@@ -36,11 +36,11 @@ use crate::stream::FragmentManagerRef;
 /// barriers to send, and may do different stuffs after the barrier is collected.
 #[derive(Debug, Clone)]
 pub enum Command {
-    /// `Plain` command generates a barrier with the mutation it carries.
+    /// `Plain` command generates a barrier with nothing mutation.
     ///
     /// Barriers from all actors marked as `Created` state will be collected.
     /// After the barrier is collected, it does nothing.
-    Plain(Mutation),
+    Plain,
 
     /// `DropMaterializedView` command generates a `Stop` barrier by the given [`TableRefId`]. The
     /// catalog has ensured that this materialized view is safe to be dropped by reference counts
@@ -66,7 +66,7 @@ pub enum Command {
 
 impl Command {
     pub fn checkpoint() -> Self {
-        Self::Plain(Mutation::Nothing(NothingMutation {}))
+        Self::Plain
     }
 
     pub fn creating_table_id(&self) -> Option<TableId> {
@@ -123,7 +123,7 @@ where
     /// Generate a mutation for the given command.
     pub fn to_mutation(&self) -> Result<Mutation> {
         let mutation = match &self.command {
-            Command::Plain(mutation) => mutation.clone(),
+            Command::Plain => Mutation::Nothing(NothingMutation {}),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self
@@ -154,7 +154,7 @@ where
     /// Do some stuffs after barriers are collected, for the given command.
     pub async fn post_collect(&self) -> Result<()> {
         match &self.command {
-            Command::Plain(_) => {}
+            Command::Plain => {}
 
             Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
