@@ -282,21 +282,19 @@ impl Binder {
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let data_type = match data_type {
-        AstDataType::SmallInt(_) => DataType::Int16,
-        AstDataType::Int(_) => DataType::Int32,
-        AstDataType::BigInt(_) => DataType::Int64,
-        AstDataType::Float(_) => DataType::Float64,
-        AstDataType::Double => DataType::Float64,
-        AstDataType::String => DataType::Varchar,
         AstDataType::Boolean => DataType::Boolean,
+        AstDataType::SmallInt(None) => DataType::Int16,
+        AstDataType::Int(None) => DataType::Int32,
+        AstDataType::BigInt(None) => DataType::Int64,
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
+        AstDataType::Decimal(None, None) => DataType::Decimal,
         AstDataType::Char(_) => DataType::Char,
         AstDataType::Varchar(_) => DataType::Varchar,
-        AstDataType::Decimal(_, _) => DataType::Decimal,
         AstDataType::Date => DataType::Date,
         AstDataType::Time => DataType::Time,
         AstDataType::Timestamp => DataType::Timestamp,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Real => DataType::Float32,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
         },
