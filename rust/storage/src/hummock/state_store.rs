@@ -23,9 +23,6 @@ use crate::hummock::iterator::DirectedUserIterator;
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
-///
-/// TODO: this wrapper introduces extra overhead of async trait, may be turned into an enum if
-/// possible.
 #[derive(Clone)]
 pub struct HummockStateStore {
     pub storage: HummockStorage,
