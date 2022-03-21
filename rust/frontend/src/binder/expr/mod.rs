@@ -15,7 +15,9 @@
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, Expr, UnaryOperator, TrimWhereField};
+use risingwave_sqlparser::ast::{
+    BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
+};
 
 use crate::binder::Binder;
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
@@ -58,7 +60,7 @@ impl Binder {
                 else_result,
             )?))),
             Expr::Trim { expr, trim_where } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_trim(*expr,trim_where)?,
+                self.bind_trim(*expr, trim_where)?,
             ))),
             Expr::Identifier(ident) => self.bind_column(&[ident]),
             Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
