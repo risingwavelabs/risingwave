@@ -21,7 +21,9 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode, ActorMapping};
+use risingwave_pb::stream_plan::{
+    ActorMapping, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+};
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, FragmentId};

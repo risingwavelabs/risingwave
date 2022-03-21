@@ -30,9 +30,9 @@ const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
 /// Hardcoded key for mapping storage.
 const HASH_MAPPING_KEY: &str = "consistent_hash_mapping";
 
-/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnitId` based 
+/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnitId` based
 /// on consistent hash, which serves for load balance of the cluster. Specifically, `Dispatcher`
-/// dispatches compute tasks to downstream actors in a load balanced way according to the 
+/// dispatches compute tasks to downstream actors in a load balanced way according to the
 /// mapping. When the mapping changes, every compute node in the cluster should be informed.
 #[derive(Debug, Clone)]
 pub struct ConsistentHashMapping(ParallelUnitMapping);

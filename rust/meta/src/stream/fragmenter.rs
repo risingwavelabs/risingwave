@@ -23,7 +23,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode, ActorMapping};
+use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::cluster::ParallelUnitId;
