@@ -29,7 +29,7 @@ use crate::types::{option_as_scalar_ref, DataType, Scalar};
 
 macro_rules! gen_eval {
     { $macro:tt, $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
-        fn eval(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
             paste! {
                 $(
                     let [<ret_ $arg:lower>] = self.[<expr_ $arg:lower>].eval(data_chunk)?;

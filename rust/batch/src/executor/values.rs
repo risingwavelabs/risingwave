@@ -88,7 +88,7 @@ impl Executor for ValuesExecutor {
             .build();
 
         for row in self.rows.drain(0..self.rows.len()) {
-            for (mut expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
+            for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
                 builder.append_array(&out)?;
             }

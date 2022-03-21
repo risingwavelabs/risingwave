@@ -14,8 +14,10 @@
 //
 use std::cmp::Reverse;
 
+use bytes::Buf;
 use itertools::Itertools;
 use memcomparable::from_slice;
+use serde::Deserialize;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
@@ -194,6 +196,7 @@ pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+/// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
 pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     if let Some(ScalarImpl::Decimal(decimal)) = cell {
@@ -216,17 +219,19 @@ fn serialize_decimal(decimal: &Decimal) -> Result<Vec<u8>> {
         byte_array.push(byte);
         mantissa /= 100;
     }
+    // Add 100 marker for the end of decimal (cuz `byte` always can not be 100 in above loop).
+    byte_array.push(100);
     Ok(byte_array)
 }
 
-pub fn deserialize_cell(bytes: &[u8], ty: &DataType) -> Result<Datum> {
+/// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
+pub fn deserialize_cell(
+    deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    ty: &DataType,
+) -> Result<Datum> {
     match ty {
-        &DataType::Decimal => deserialize_decimal(bytes),
-        _ => {
-            let mut deserializer = memcomparable::Deserializer::new(bytes);
-            let datum = deserialize_datum_from(ty, &mut deserializer)?;
-            Ok(datum)
-        }
+        &DataType::Decimal => deserialize_decimal(deserializer),
+        _ => Ok(deserialize_datum_from(ty, deserializer)?),
     }
 }
 
@@ -236,9 +241,9 @@ pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     Ok(column_id.into())
 }
 
-fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
+fn deserialize_decimal(deserializer: &mut memcomparable::Deserializer<impl Buf>) -> Result<Datum> {
     // None denotes NULL which is a valid value while Err means invalid encoding.
-    let null_tag = bytes[0];
+    let null_tag = u8::deserialize(&mut *deserializer)?;
     match null_tag {
         0 => {
             return Ok(None);
@@ -251,7 +256,8 @@ fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
             ))));
         }
     }
-    let mut scale = bytes[1];
+    let bytes = deserializer.read_decimal_v2()?;
+    let mut scale = bytes[0];
     let neg = if (scale & 1 << 7) > 0 {
         scale &= !(1 << 7);
         true
@@ -259,7 +265,7 @@ fn deserialize_decimal(bytes: &[u8]) -> Result<Datum> {
         false
     };
     let mut mantissa: i128 = 0;
-    for (exp, byte) in bytes.iter().skip(2).enumerate() {
+    for (exp, byte) in bytes.iter().skip(1).enumerate() {
         mantissa += (*byte as i128) * 100i128.pow(exp as u32);
     }
     if neg {
