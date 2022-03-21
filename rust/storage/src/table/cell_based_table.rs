@@ -39,7 +39,7 @@ use crate::{Keyspace, StateStore};
 /// if the key of the column id does not exist, it will be Null in the relation
 #[derive(Clone)]
 pub struct CellBasedTable<S: StateStore> {
-    /// The keyspace that the pk and value of the original table has
+    /// The keyspace that the pk and value of the original table has.
     keyspace: Keyspace<S>,
 
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
