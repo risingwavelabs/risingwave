@@ -193,6 +193,7 @@ where
             )))
         }
     }
+
     pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_table(table) {
@@ -247,6 +248,53 @@ where
         } else {
             Err(RwError::from(InternalError(
                 "table doesn't exist".to_string(),
+            )))
+        }
+    }
+
+    pub async fn start_create_source_process(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && !core.has_in_progress_creation(&key) {
+            core.mark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exists or in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_source_process(&self, source: &Source) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            let version = core.new_version_id().await?;
+            source.insert(&*self.meta_store_ref).await?;
+            core.add_source(source);
+
+            self.nm
+                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
+
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in progress creation".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_source_process(&self, source: &Source) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let key = (source.database_id, source.schema_id, source.name.clone());
+        if !core.has_source(source) && core.has_in_progress_creation(&key) {
+            core.unmark_creating(&key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in progress creation".to_string(),
             )))
         }
     }

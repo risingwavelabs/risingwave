@@ -22,13 +22,13 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
-use risingwave_pb::catalog::{
+use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
+use risingwave_pb::common::WorkerNode;
+use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
-    Database as ProstDatabase, Schema as ProstSchema,
 };
-use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
@@ -144,7 +144,6 @@ impl FrontendMockMetaClient {
         // let cluster_manager = Arc::new(
         //     StoredClusterManager::new(
         //         env.clone(),
-        //         None,
         //         notification_manager.clone(),
         //         Duration::from_secs(3600),
         //     )

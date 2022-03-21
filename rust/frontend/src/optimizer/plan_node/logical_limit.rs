@@ -16,13 +16,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{BatchLimit, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::WithSchema;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
 pub struct LogicalLimit {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     input: PlanRef,
     limit: usize,
     offset: usize,
@@ -32,11 +32,7 @@ impl LogicalLimit {
     fn new(input: PlanRef, limit: usize, offset: usize) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalLimit {
             input,
             limit,

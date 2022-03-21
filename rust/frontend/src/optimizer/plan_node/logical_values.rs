@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchValues, ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
@@ -25,7 +25,7 @@ use crate::session::QueryContextRef;
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     rows: Vec<Vec<ExprImpl>>,
 }
 
@@ -37,11 +37,7 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         Self { rows, base }
     }
 

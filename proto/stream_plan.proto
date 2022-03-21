@@ -6,9 +6,13 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
-import "common.proto";
 import "expr.proto";
 import "plan.proto";
+
+// Hash mapping for compute node. Stores mapping from virtual key to actor id.
+message ActorMapping {
+  repeated uint32 hash_mapping = 1;
+}
 
 message SourceNode {
   enum SourceType {
@@ -142,8 +146,8 @@ message DispatchStrategy {
 message Dispatcher {
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
-  // The hash mapping for consistent hashing.
-  common.HashMapping hash_mapping = 3;
+  // The hash mapping for consistent hash.
+  ActorMapping hash_mapping = 3;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }

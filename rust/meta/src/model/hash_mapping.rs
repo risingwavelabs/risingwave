@@ -15,7 +15,7 @@
 #![allow(dead_code)]
 
 use risingwave_common::error::Result;
-use risingwave_pb::common::HashMapping;
+use risingwave_pb::meta::ParallelUnitMapping;
 
 use super::MetadataModel;
 use crate::cluster::ParallelUnitId;
@@ -30,16 +30,15 @@ const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
 /// Hardcoded key for mapping storage.
 const HASH_MAPPING_KEY: &str = "consistent_hash_mapping";
 
-/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnitId` or
-/// `ActorId` based on consistent hash, which serves for load balance of the cluster.
-/// Specifically, `Dispatcher`dispatches compute tasks to downstream actors in a load balanced
-/// way according to the mapping. When the mapping changes, every compute node in the cluster
-/// should be informed.
+/// `ConsistentHashMapping` stores the hash mapping from `VirtualKey` to `ParallelUnitId` based
+/// on consistent hash, which serves for load balance of the cluster. Specifically, `Dispatcher`
+/// dispatches compute tasks to downstream actors in a load balanced way according to the
+/// mapping. When the mapping changes, every compute node in the cluster should be informed.
 #[derive(Debug, Clone)]
-pub struct ConsistentHashMapping(HashMapping);
+pub struct ConsistentHashMapping(ParallelUnitMapping);
 
 impl MetadataModel for ConsistentHashMapping {
-    type ProstType = HashMapping;
+    type ProstType = ParallelUnitMapping;
     type KeyType = String;
 
     fn cf_name() -> String {
@@ -61,7 +60,7 @@ impl MetadataModel for ConsistentHashMapping {
 
 impl ConsistentHashMapping {
     pub fn new() -> Self {
-        Self(HashMapping {
+        Self(ParallelUnitMapping {
             hash_mapping: Vec::new(),
         })
     }

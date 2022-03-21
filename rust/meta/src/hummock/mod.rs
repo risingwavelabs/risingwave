@@ -39,6 +39,20 @@ pub use vacuum::*;
 
 use crate::storage::MetaStore;
 
+pub fn start_hummock_workers<S>(
+    hummock_manager_ref: Arc<HummockManager<S>>,
+    compactor_manager_ref: Arc<CompactorManager>,
+    vacuum_trigger_ref: Arc<VacuumTrigger<S>>,
+) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
+where
+    S: MetaStore,
+{
+    vec![
+        start_compaction_trigger(hummock_manager_ref, compactor_manager_ref),
+        VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
+    ]
+}
+
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
 /// A vacuum trigger is started here too.

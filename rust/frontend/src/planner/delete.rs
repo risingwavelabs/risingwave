@@ -23,13 +23,15 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
-        let scan = self.plan_base_table_ref(delete.table.clone())?;
+        let table_name = delete.table.name.clone();
+        let table_id = delete.table.table_id;
+        let scan = self.plan_base_table(delete.table)?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create(scan, expr)?
         } else {
             scan
         };
-        let plan: PlanRef = LogicalDelete::create(input, delete.table)?.into();
+        let plan: PlanRef = LogicalDelete::create(input, table_name, table_id)?.into();
 
         let order = Order::any().clone();
         let dist = Distribution::Single;

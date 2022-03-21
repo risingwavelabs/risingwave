@@ -25,7 +25,7 @@ impl Planner {
         // Plan the FROM clause.
         let mut root = match select.from {
             None => self.create_dummy_values()?,
-            Some(t) => self.plan_table_ref(t)?,
+            Some(t) => self.plan_relation(t)?,
         };
         // Plan the WHERE clause.
         root = match select.where_clause {

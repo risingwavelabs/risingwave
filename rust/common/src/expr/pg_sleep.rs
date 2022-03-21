@@ -47,7 +47,7 @@ impl Expression for PgSleepExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         use std::time::Duration;
 
         use num_traits::ToPrimitive;
@@ -83,8 +83,7 @@ mod tests {
 
     #[test]
     fn test_pg_sleep() -> Result<()> {
-        let mut expr =
-            PgSleepExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
+        let expr = PgSleepExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
 
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;

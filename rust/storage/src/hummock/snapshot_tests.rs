@@ -43,7 +43,11 @@ async fn gen_and_upload_table(
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
     // get remote table
-    let sstable_store = Arc::new(SstableStore::new(object_store, remote_dir.to_string()));
+    let sstable_store = Arc::new(SstableStore::new(
+        object_store,
+        remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
+    ));
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
         table_id,
@@ -157,6 +161,7 @@ async fn test_snapshot() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -233,6 +238,7 @@ async fn test_snapshot_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -288,6 +294,7 @@ async fn test_snapshot_reverse_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

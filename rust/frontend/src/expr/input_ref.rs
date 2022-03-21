@@ -14,7 +14,10 @@
 //
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
+use risingwave_pb::expr::agg_call::Arg as ProstAggCallArg;
+use risingwave_pb::expr::InputRefExpr;
 
 use super::Expr;
 use crate::expr::ExprType;
@@ -22,6 +25,31 @@ use crate::expr::ExprType;
 pub struct InputRef {
     index: usize,
     data_type: DataType,
+}
+
+#[derive(Clone, Copy)]
+pub struct InputRefDisplay(pub usize);
+
+pub fn column_idx_to_inputref_proto(column_idx: usize) -> InputRefExpr {
+    InputRefExpr {
+        column_idx: column_idx as i32,
+    }
+}
+
+pub fn input_ref_to_column_indices(input_refs: &[InputRef]) -> Vec<usize> {
+    input_refs.iter().map(|x| x.index()).collect_vec()
+}
+
+impl fmt::Display for InputRefDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${}", self.0)
+    }
+}
+
+impl fmt::Debug for InputRefDisplay {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${}", self.0)
+    }
 }
 
 impl fmt::Display for InputRef {
@@ -38,7 +66,7 @@ impl fmt::Debug for InputRef {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            write!(f, "${}", self.index)
+            write!(f, "{}", InputRefDisplay(self.index))
         }
     }
 }
@@ -61,7 +89,16 @@ impl InputRef {
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
     }
+
+    /// Convert [`InputRef`] to an arg of agg call.
+    pub fn to_agg_arg_protobuf(&self) -> ProstAggCallArg {
+        ProstAggCallArg {
+            input: Some(column_idx_to_inputref_proto(self.index)),
+            r#type: Some(self.data_type.to_protobuf()),
+        }
+    }
 }
+
 impl Expr for InputRef {
     fn return_type(&self) -> DataType {
         self.data_type.clone()

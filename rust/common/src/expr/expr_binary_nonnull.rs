@@ -455,7 +455,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -503,7 +503,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -554,7 +554,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

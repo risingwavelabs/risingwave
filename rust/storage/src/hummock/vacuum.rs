@@ -63,6 +63,7 @@ mod tests {
     use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
+    use crate::monitor::StateStoreMetrics;
     use crate::object::InMemObjectStore;
 
     #[tokio::test]
@@ -70,6 +71,7 @@ mod tests {
         let sstable_store_ref = Arc::new(SstableStore::new(
             Arc::new(InMemObjectStore::new()),
             String::from("test_dir"),
+            Arc::new(StateStoreMetrics::unused()),
         ));
 
         // Put some SSTs to object store
