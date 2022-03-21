@@ -7,7 +7,6 @@ option java_package = "com.risingwave.proto.catalog";
 option optimize_for = SPEED;
 
 import "plan.proto";
-import "stream_plan.proto";
 
 enum RowFormatType {
   JSON = 0;
