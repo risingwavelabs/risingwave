@@ -25,6 +25,7 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: QueryContextRef,
     pub schema: Schema,
+    /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
     pub pk_indices: Vec<usize>,
     /// The order property of the PlanNode's output, store an `Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
