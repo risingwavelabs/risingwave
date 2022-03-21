@@ -7,10 +7,10 @@ description = "Value encoding format."
 
 [dependencies]
 bytes = "1"
+memcomparable = { path = "../memcomparable" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
 workspace-hack = { version = "0.1", path = "../../workspace-hack" }
-memcomparable = { path = "../memcomparable" }
 
 [dev-dependencies]
 rand = "0.8"

@@ -27,7 +27,6 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
-value-encoding = { path = "../utils/value-encoding" }
 moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
@@ -61,6 +60,7 @@ tokio-stream = "0.1"
 tonic = "0.6"
 tracing = { version = "0.1", features = ["release_max_level_info"] }
 twox-hash = "1"
+value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

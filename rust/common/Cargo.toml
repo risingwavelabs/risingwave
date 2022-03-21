@@ -17,7 +17,6 @@ lazy_static = "1"
 log = "0.4"
 lru = "0.7"
 memcomparable = { path = "../utils/memcomparable" }
-value-encoding = { path = "../utils/value-encoding" }
 more-asserts = "0.2"
 num-traits = "0.2"
 paste = "1"
@@ -32,6 +31,7 @@ tokio-stream = "0.1"
 toml = "0.5"
 tonic = "0.6"
 twox-hash = "1"
+value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
