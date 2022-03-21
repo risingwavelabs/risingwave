@@ -21,7 +21,9 @@ use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::chain_node::State as ChainState;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::cluster::NodeId;
@@ -100,6 +102,28 @@ impl TableFragments {
     pub fn update_actors_state(&mut self, state: ActorState) {
         for actor_status in self.actor_status.values_mut() {
             actor_status.set_state(state);
+        }
+    }
+
+    /// Update chain node state recursively.
+    fn update_chain_node_state(stream_node: &mut StreamNode, state: ChainState) {
+        if let Some(Node::ChainNode(ref mut chain_node)) = stream_node.node.as_mut() {
+            chain_node.state = state as i32;
+        } else {
+            for node in &mut stream_node.input {
+                Self::update_chain_node_state(node, state);
+            }
+        }
+    }
+
+    /// Update state of chain node inside actors.
+    pub fn update_chain_actor_state(&mut self, chain_actors: &[ActorId], state: ChainState) {
+        for fragment in self.fragments.values_mut() {
+            for actor in &mut fragment.actors {
+                if chain_actors.contains(&actor.actor_id) {
+                    Self::update_chain_node_state(actor.nodes.as_mut().unwrap(), state);
+                }
+            }
         }
     }
 

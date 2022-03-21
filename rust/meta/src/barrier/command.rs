@@ -23,6 +23,7 @@ use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::plan::TableRefId;
+use risingwave_pb::stream_plan::chain_node::State as ChainState;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
@@ -195,6 +196,12 @@ where
                 // TODO: all related updates should be done in one transaction.
                 let mut table_fragments = table_fragments.clone();
                 table_fragments.update_actors_state(ActorState::Running);
+                let chain_actors = dispatches
+                    .values()
+                    .flatten()
+                    .map(|info| info.actor_id)
+                    .collect::<Vec<ActorId>>();
+                table_fragments.update_chain_actor_state(&chain_actors, ChainState::ReadingMview);
                 self.fragment_manager
                     .update_table_fragments(table_fragments)
                     .await?;

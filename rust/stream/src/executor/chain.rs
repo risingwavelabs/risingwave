@@ -18,19 +18,13 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::chain_node::State as ChainState;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
 use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, StreamManagerCore};
-
-#[derive(Debug)]
-enum ChainState {
-    Init,
-    ReadingSnapshot,
-    ReadingMView,
-}
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
@@ -68,10 +62,16 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
         let schema = snapshot.schema().clone();
+
+        let state = ChainState::from_i32(node.state).unwrap();
+        // Currently only support building chain executor from state Init or ReadingMview.
+        assert!(state == ChainState::Init || state == ChainState::ReadingMview);
+
         Ok(Box::new(ChainExecutor::new(
             snapshot,
             mview,
             schema,
+            state,
             column_idxs,
             params.op_info,
         )))
@@ -83,13 +83,14 @@ impl ChainExecutor {
         snapshot: Box<dyn Executor>,
         mview: Box<dyn Executor>,
         schema: Schema,
+        state: ChainState,
         column_idxs: Vec<usize>,
         op_info: String,
     ) -> Self {
         Self {
             snapshot,
             mview,
-            state: ChainState::Init,
+            state,
             schema,
             column_idxs,
             op_info,
@@ -127,7 +128,7 @@ impl ChainExecutor {
             Err(e) => {
                 // TODO: Refactor this once we find a better way to know the upstream is done.
                 if let ErrorCode::Eof = e.inner() {
-                    self.state = ChainState::ReadingMView;
+                    self.state = ChainState::ReadingMview;
                     return self.read_mview().await;
                 }
                 Err(e)
@@ -156,7 +157,8 @@ impl ChainExecutor {
         match &self.state {
             ChainState::Init => self.init().await,
             ChainState::ReadingSnapshot => self.read_snapshot().await,
-            ChainState::ReadingMView => self.read_mview().await,
+            ChainState::ReadingMview => self.read_mview().await,
+            ChainState::Invalid => panic!("invalid chain state"),
         }
     }
 }
@@ -193,6 +195,7 @@ mod test {
     use risingwave_common::column_nonnull;
     use risingwave_common::error::{ErrorCode, Result, RwError};
     use risingwave_common::types::DataType;
+    use risingwave_pb::stream_plan::chain_node::State as ChainState;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -291,8 +294,14 @@ mod test {
             ],
         ));
 
-        let mut chain =
-            ChainExecutor::new(first, second, schema, vec![0], "ChainExecutor".to_string());
+        let mut chain = ChainExecutor::new(
+            first,
+            second,
+            schema,
+            ChainState::Init,
+            vec![0],
+            "ChainExecutor".to_string(),
+        );
         let mut count = 0;
         loop {
             let k = &chain.next().await.unwrap();

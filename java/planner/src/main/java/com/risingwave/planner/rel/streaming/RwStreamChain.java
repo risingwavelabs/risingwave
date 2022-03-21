@@ -82,6 +82,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
     builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
     builder.addAllUpstreamFields(upstreamFields);
+    builder.setState(ChainNode.State.INIT);
     ChainNode chainNode = builder.build();
     return StreamNode.newBuilder()
         .setChainNode(chainNode)

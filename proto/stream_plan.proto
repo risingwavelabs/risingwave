@@ -88,11 +88,18 @@ message ExchangeNode {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
+  enum State {
+    INVALID = 0;
+    INIT = 1;
+    READING_SNAPSHOT = 2;
+    READING_MVIEW = 3;
+  }
   plan.TableRefId table_ref_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
   repeated int32 pk_indices = 3;
   repeated int32 column_ids = 4;
+  State state = 5;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
