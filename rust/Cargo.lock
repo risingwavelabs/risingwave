@@ -3926,6 +3926,8 @@ name = "risingwave_frontend_test_runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console",
+ "futures 0.3.21",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",

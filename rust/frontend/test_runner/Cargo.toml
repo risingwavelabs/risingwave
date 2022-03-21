@@ -6,6 +6,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+console = "0.15"
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 risingwave_frontend = { path = ".." }
 risingwave_sqlparser = { path = "../../sqlparser" }
 serde = { version = "1", features = ["derive"] }
@@ -25,6 +27,10 @@ workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [dev-dependencies]
 tempfile = "3"
+
+[build-dependencies]
+anyhow = "1"
+walkdir = "2"
 
 [[bin]]
 name = "planner-test-apply"
