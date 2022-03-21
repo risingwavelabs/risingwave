@@ -148,7 +148,7 @@ impl LogicalProject {
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
             .collect::<Option<Vec<_>>>()
-            .unwrap_or(vec![])
+            .unwrap_or_default()
     }
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.exprs
