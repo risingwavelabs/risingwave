@@ -20,9 +20,8 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::common::HashMapping;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode, ActorMapping};
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, FragmentId};
@@ -73,7 +72,7 @@ impl StreamActorBuilder {
         })
     }
 
-    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<u32>, hash_mapping: HashMapping) {
+    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<u32>, hash_mapping: ActorMapping) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,
             column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
