@@ -156,7 +156,7 @@ impl LogicalJoin {
         Schema { fields }
     }
 
-    pub fn derive_pk(left_pk: &[usize], right_pk: &[usize], join_type: JoinType) -> Vec<usize> {
+    fn derive_pk(left_pk: &[usize], right_pk: &[usize], join_type: JoinType) -> Vec<usize> {
         let left_len = left_pk.len();
         let right_len = right_pk.len();
         let l2o = Self::l2o_col_mapping(left_len, right_len, join_type);
@@ -167,7 +167,13 @@ impl LogicalJoin {
             .chain(right_pk.iter().map(|index| r2o.map(*index)))
             .collect()
     }
-
+    pub fn pk_indices(&self) -> Vec<usize> {
+        Self::derive_pk(
+            self.left.pk_indices(),
+            self.right.pk_indices(),
+            self.join_type,
+        )
+    }
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on
