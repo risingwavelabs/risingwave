@@ -152,16 +152,20 @@ pub async fn setup_compute_env(
     WorkerNode,
 ) {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(
-        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
-            .await
-            .unwrap(),
-    );
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
             Arc::new(NotificationManager::new()),
             Duration::from_secs(1),
+        )
+        .await
+        .unwrap(),
+    );
+    let hummock_manager = Arc::new(
+        HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            Arc::new(MetaMetrics::new()),
         )
         .await
         .unwrap(),

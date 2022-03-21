@@ -511,7 +511,7 @@ async fn test_release_context_resource() -> Result<()> {
         2
     );
     hummock_manager
-        .release_context_resource(context_id_1)
+        .release_contexts(&vec![context_id_1])
         .await
         .unwrap();
     let pinned_versions = HummockPinnedVersion::list(&*env.meta_store_ref())
@@ -526,11 +526,11 @@ async fn test_release_context_resource() -> Result<()> {
     assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
     hummock_manager
-        .release_context_resource(context_id_1)
+        .release_contexts(&vec![context_id_1])
         .await
         .unwrap();
     hummock_manager
-        .release_context_resource(context_id_2)
+        .release_contexts(&vec![context_id_2])
         .await
         .unwrap();
     assert_eq!(

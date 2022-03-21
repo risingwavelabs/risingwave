@@ -36,16 +36,21 @@ use crate::storage::MemStore;
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(
-        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+    let notification_manager = Arc::new(NotificationManager::new());
+    let cluster_manager = Arc::new(
+        StoredClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
             .await
             .unwrap(),
     );
-    let notification_manager = Arc::new(NotificationManager::new());
-    let cluster_manager =
-        StoredClusterManager::new(env, notification_manager, Duration::from_secs(3600))
-            .await
-            .unwrap();
+    let hummock_manager = Arc::new(
+        HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            Arc::new(MetaMetrics::new()),
+        )
+        .await
+        .unwrap(),
+    );
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 80,
