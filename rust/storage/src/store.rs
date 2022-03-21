@@ -36,7 +36,6 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     ///
-    /// TODO: in some cases, the scan can be optimized into a `multi_get` request.
     async fn scan<R, B>(
         &self,
         key_range: R,
