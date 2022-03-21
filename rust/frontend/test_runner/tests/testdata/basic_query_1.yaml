@@ -77,25 +77,18 @@
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1] }
 - sql: |
-    create table t (v1 varchar);
-    select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34')) from t;
+    select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [((Length(Rtrim("12":Varchar, "1":Varchar)) + Length(Ltrim("23":Varchar, "2":Varchar))) + Length(Trim("34":Varchar, "3":Varchar)))], expr_alias: [None] }
-        BatchScan { table: t, columns: [] }
-  stream_plan: |
-    StreamMaterialize { table_id: 0 }
-      StreamProject { exprs: [((Length(Rtrim("12":Varchar, "1":Varchar)) + Length(Ltrim("23":Varchar, "2":Varchar))) + Length(Trim("34":Varchar, "3":Varchar)))], expr_alias: [None] }
-        StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [] }
+        BatchValues { rows: [[]] }
 - sql: |
-    create table t ();
-    select position(replace('1','1','2'),'123') from t where '12' like '%1';
+    select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [Position(Replace("1":Varchar, "1":Varchar, "2":Varchar), "123":Varchar)], expr_alias: [None] }
         BatchFilter { predicate: Like("12":Varchar, "%1":Varchar) }
-          BatchScan { table: t, columns: [] }
+          BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
