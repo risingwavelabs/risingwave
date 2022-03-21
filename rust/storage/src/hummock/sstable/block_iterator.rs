@@ -187,6 +187,7 @@ mod tests {
     use super::*;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::{CachePolicy, HummockValue, SstableStore};
+    use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStore};
 
     #[tokio::test]
@@ -200,7 +201,11 @@ mod tests {
         };
 
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_store = Arc::new(SstableStore::new(obj_client, REMOTE_DIR.to_string(), None));
+        let sstable_store = Arc::new(SstableStore::new(
+            obj_client,
+            REMOTE_DIR.to_string(),
+            Arc::new(StateStoreMetrics::unused()),
+        ));
 
         let sst = gen_test_sstable(
             opt,

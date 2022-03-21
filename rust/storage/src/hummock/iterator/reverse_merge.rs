@@ -30,6 +30,7 @@ mod test {
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::ReverseSSTableIterator;
+    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_reverse_merge_basic() {
@@ -53,7 +54,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters, None);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut i = 0;
         mi.rewind().await.unwrap();
         while mi.is_valid() {
@@ -90,7 +91,7 @@ mod test {
             .map(|x| Box::new(x) as BoxedHummockIterator)
             .collect_vec();
 
-        let mut mi = ReverseMergeIterator::new(iters, None);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let test_validator = &validators[2];
 
         // right edge case
@@ -137,7 +138,7 @@ mod test {
             Box::new(ReverseSSTableIterator::new(Arc::new(table0), sstable_store)),
         ];
 
-        let mut mi = ReverseMergeIterator::new(iters, None);
+        let mut mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         mi.rewind().await.unwrap();
         let mut count = 0;

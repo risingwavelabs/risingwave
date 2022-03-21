@@ -107,7 +107,7 @@ impl SharedBufferUploader {
             let iters = buffers
                 .into_iter()
                 .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
-            MergeIterator::new(iters, Some(self.stats.clone()))
+            MergeIterator::new(iters, self.stats.clone())
         };
         let sub_compact_context = SubCompactContext {
             options: self.options.clone(),

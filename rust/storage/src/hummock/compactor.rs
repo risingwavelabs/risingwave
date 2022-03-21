@@ -119,7 +119,7 @@ impl Compactor {
                             ))
                         },
                     )),
-                Some(context.stats.clone()),
+                context.stats.clone(),
             );
 
             let context_clone = context.clone();

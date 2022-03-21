@@ -60,14 +60,14 @@ pub struct MergeIteratorInner<'a, const DIRECTION: usize> {
     heap: BinaryHeap<Node<'a, DIRECTION>>,
 
     /// Statistics.
-    stats: Option<Arc<StateStoreMetrics>>,
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
     /// Caller should make sure that `iterators`'s direction is the same as `DIRECTION`.
     pub fn new(
         iterators: impl IntoIterator<Item = BoxedHummockIterator<'a>>,
-        stats: Option<Arc<StateStoreMetrics>>,
+        stats: Arc<StateStoreMetrics>,
     ) -> Self {
         Self {
             unused_iters: iterators.into_iter().collect(),
@@ -97,17 +97,7 @@ impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
 #[async_trait]
 impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
-        let timer = if self.stats.is_some() {
-            Some(
-                self.stats
-                    .as_ref()
-                    .unwrap()
-                    .iter_merge_next_duration
-                    .start_timer(),
-            )
-        } else {
-            None
-        };
+        let timer = self.stats.iter_merge_next_duration.start_timer();
 
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
@@ -121,9 +111,7 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
             drop(node);
         }
 
-        if let Some(timer) = timer {
-            timer.observe_duration();
-        }
+        timer.observe_duration();
 
         Ok(())
     }
@@ -148,26 +136,13 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
     }
 
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        let timer = if self.stats.is_some() {
-            Some(
-                self.stats
-                    .as_ref()
-                    .unwrap()
-                    .iter_merge_seek_duration
-                    .start_timer(),
-            )
-        } else {
-            None
-        };
+        let timer = self.stats.iter_merge_seek_duration.start_timer();
 
         self.reset_heap();
         futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.seek(key))).await?;
         self.build_heap();
 
-        if let Some(timer) = timer {
-            timer.observe_duration();
-        }
-
+        timer.observe_duration();
         Ok(())
     }
 }

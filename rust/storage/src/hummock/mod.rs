@@ -212,7 +212,7 @@ impl HummockStorage {
         self.stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
-        let mut it = MergeIterator::new(table_iters, Some(self.stats.clone()));
+        let mut it = MergeIterator::new(table_iters, self.stats.clone());
 
         // Use `MergeIterator` to seek for the key with latest version to
         // get the latest key.
@@ -273,13 +273,13 @@ impl HummockStorage {
                 .map(|i| Box::new(i) as BoxedHummockIterator);
             MergeIterator::new(
                 overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                Some(self.stats.clone()),
+                self.stats.clone(),
             )
         } else {
             self.stats
                 .iter_merge_sstable_counts
                 .observe(tables_count as f64);
-            MergeIterator::new(overlapped_sstable_iters, Some(self.stats.clone()))
+            MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
         };
 
         // TODO: avoid this clone
@@ -335,10 +335,10 @@ impl HummockStorage {
                 .map(|i| Box::new(i) as BoxedHummockIterator);
             ReverseMergeIterator::new(
                 overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                Some(self.stats.clone()),
+                self.stats.clone(),
             )
         } else {
-            ReverseMergeIterator::new(overlapped_sstable_iters, Some(self.stats.clone()))
+            ReverseMergeIterator::new(overlapped_sstable_iters, self.stats.clone())
         };
 
         // TODO: avoid this clone
