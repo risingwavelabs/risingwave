@@ -199,7 +199,7 @@ impl TestCase {
             // Only generate batch_plan_proto if it is specified in test case
             if self.batch_plan_proto.is_some() {
                 ret.batch_plan_proto = Some(serde_json::to_string_pretty(
-                    &batch_plan.to_batch_prost_without_identity(),
+                    &batch_plan.to_batch_prost_identity(false),
                 )?);
             }
         }
@@ -215,7 +215,7 @@ impl TestCase {
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
                 ret.stream_plan_proto = Some(serde_json::to_string_pretty(
-                    &stream_plan.to_stream_prost_without_identity(),
+                    &stream_plan.to_stream_prost_identity(false),
                 )?);
             }
         }
