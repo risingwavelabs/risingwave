@@ -273,10 +273,9 @@ impl<S: StateStore> CellBasedTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            Ok(Some(deserialize_cell(
-                &buf[..],
-                &self.schema.fields[*column_index].data_type,
-            )?))
+            let mut de = memcomparable::Deserializer::new(buf);
+            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+            Ok(Some(cell))
         } else {
             Ok(None)
         }
