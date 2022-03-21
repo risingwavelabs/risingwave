@@ -23,7 +23,7 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
-        let scan = self.plan_base_table_ref(delete.table.clone())?;
+        let scan = self.plan_base_table(delete.table.clone())?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create(scan, expr)?
         } else {

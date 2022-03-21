@@ -24,7 +24,7 @@ mod query;
 mod select;
 mod set_expr;
 mod statement;
-mod table_ref;
+mod relation;
 mod values;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
