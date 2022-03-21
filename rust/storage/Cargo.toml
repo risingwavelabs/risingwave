@@ -27,6 +27,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
+value-encoding = { path = "../utils/value-encoding" }
 moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
