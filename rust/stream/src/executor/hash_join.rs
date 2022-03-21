@@ -185,10 +185,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
     async fn next(&mut self) -> Result<Message> {
         let msg = self.aligner.next().await;
         if let Some(barrier) = self.try_init_executor(&msg) {
-            self.side_l.ht.update_epoch(barrier.epoch.curr);
-            self.side_r.ht.update_epoch(barrier.epoch.curr);
+            let epoch = barrier.current_epoch();
+            self.side_l.ht.update_epoch(epoch);
+            self.side_r.ht.update_epoch(epoch);
             return Ok(Message::Barrier(barrier));
         }
+
         match msg {
             AlignedMessage::Left(message) => match message {
                 Ok(chunk) => self.consume_chunk_left(chunk).await,
@@ -200,10 +202,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
             },
             AlignedMessage::Barrier(barrier) => {
                 self.flush_data().await?;
-                let epoch = barrier.epoch.curr;
+                let epoch = barrier.current_epoch();
                 self.side_l.ht.update_epoch(epoch);
                 self.side_r.ht.update_epoch(epoch);
-                self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                self.update_executor_state(ExecutorState::Active(epoch));
                 Ok(Message::Barrier(barrier))
             }
         }

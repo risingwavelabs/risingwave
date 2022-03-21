@@ -63,7 +63,7 @@ pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -
         Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
-            executor.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+            executor.update_executor_state(ExecutorState::Active(barrier.current_epoch()));
             Ok(Message::Barrier(barrier))
         }
     };

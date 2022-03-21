@@ -91,7 +91,7 @@ impl ManagedBarrierState {
         tracing::trace!(
             target: "events::stream::barrier::collect_barrier",
             "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
-            barrier.epoch.curr,
+            barrier.current_epoch(),
             actor_id,
             self
         );
@@ -103,7 +103,7 @@ impl ManagedBarrierState {
                 }
 
                 *self = Self::Stashed {
-                    epoch: barrier.epoch.curr,
+                    epoch: barrier.current_epoch(),
                     collected_actors: once(actor_id).collect(),
                 }
             }
@@ -112,7 +112,7 @@ impl ManagedBarrierState {
                 epoch,
                 collected_actors,
             } => {
-                assert_eq!(barrier.epoch.curr, *epoch);
+                assert_eq!(barrier.current_epoch(), *epoch);
 
                 let new = collected_actors.insert(actor_id);
                 assert!(new);
@@ -123,7 +123,7 @@ impl ManagedBarrierState {
                 remaining_actors,
                 ..
             } => {
-                assert_eq!(barrier.epoch.curr, *epoch);
+                assert_eq!(barrier.current_epoch(), *epoch);
 
                 let exist = remaining_actors.remove(&actor_id);
                 assert!(exist);
@@ -145,7 +145,7 @@ impl ManagedBarrierState {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
 
                 *self = Self::Issued {
-                    epoch: barrier.epoch.curr,
+                    epoch: barrier.current_epoch(),
                     remaining_actors,
                     collect_notifier,
                 };
@@ -156,7 +156,7 @@ impl ManagedBarrierState {
                 epoch,
                 collected_actors,
             } => {
-                assert_eq!(barrier.epoch.curr, *epoch);
+                assert_eq!(barrier.current_epoch(), *epoch);
 
                 let remaining_actors = actor_ids_to_collect
                     .into_iter()
@@ -164,7 +164,7 @@ impl ManagedBarrierState {
                     .collect();
 
                 *self = Self::Issued {
-                    epoch: barrier.epoch.curr,
+                    epoch: barrier.current_epoch(),
                     remaining_actors,
                     collect_notifier,
                 };

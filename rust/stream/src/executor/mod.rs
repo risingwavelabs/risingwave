@@ -179,6 +179,10 @@ impl Barrier {
     pub fn is_stop_mutation(&self) -> bool {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
+
+    pub fn current_epoch(&self) -> u64 {
+        self.epoch.curr
+    }
 }
 
 impl PartialEq for Barrier {
@@ -416,7 +420,7 @@ pub trait StatefulExecutor: Executor {
             ExecutorState::Init => {
                 if let Ok(barrier) = msg.try_into() {
                     // Move to Active state
-                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+                    self.update_executor_state(ExecutorState::Active(barrier.current_epoch()));
                     Some(barrier.clone())
                 } else {
                     panic!("The first message the executor receives is not a barrier");

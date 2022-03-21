@@ -54,7 +54,7 @@ async fn test_managed_barrier_collection() -> Result<()> {
             let msg = rx.try_recv().unwrap();
             let barrier = match msg {
                 Message::Barrier(b) => {
-                    assert_eq!(b.epoch.curr, epoch);
+                    assert_eq!(b.current_epoch(), epoch);
                     b
                 }
                 _ => unreachable!(),
@@ -120,7 +120,7 @@ async fn test_managed_barrier_collection_before_send_request() -> Result<()> {
             let msg = rx.try_recv().unwrap();
             let barrier = match msg {
                 Message::Barrier(b) => {
-                    assert_eq!(b.epoch.curr, epoch);
+                    assert_eq!(b.current_epoch(), epoch);
                     b
                 }
                 _ => unreachable!(),
