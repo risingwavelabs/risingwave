@@ -98,7 +98,6 @@ impl SourceManager for MemSourceManager {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()> {
-
         let source = match config {
             SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
                 config.clone(),
@@ -106,11 +105,12 @@ impl SourceManager for MemSourceManager {
                 parser.clone(),
             )),
             SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<dyn SourceReader + Send + Sync>> = match config {
-                    ConnectorConfig::Kinesis(kc) => Arc::new(tokio::sync::Mutex::new(
-                        KinesisSplitReader::new(kc.clone()).await,
-                    )),
-                };
+                let split_reader: Arc<tokio::sync::Mutex<dyn SourceReader + Send + Sync>> =
+                    match config {
+                        ConnectorConfig::Kinesis(kc) => Arc::new(tokio::sync::Mutex::new(
+                            KinesisSplitReader::new(kc.clone()).await,
+                        )),
+                    };
                 SourceImpl::Connector(ConnectorSource {
                     parser: parser.clone(),
                     reader: split_reader,

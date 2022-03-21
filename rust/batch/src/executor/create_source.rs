@@ -20,6 +20,8 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::kinesis::config::AwsConfigInfo;
+use risingwave_connector::ConnectorConfig;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
@@ -27,8 +29,6 @@ use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
     SourceFormat, SourceManagerRef, SourceParser,
 };
-use risingwave_connector::ConnectorConfig;
-use risingwave_connector::kinesis::config::AwsConfigInfo;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
