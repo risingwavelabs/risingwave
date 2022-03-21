@@ -76,10 +76,6 @@ message ListArrayData {
   DataType value_type = 3;
 }
 
-// message ListArrayData {
-//   DataType datatype = 1;
-// }
-
 enum ArrayType {
   INT16 = 0;
   INT32 = 1;
