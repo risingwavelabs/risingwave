@@ -70,6 +70,7 @@ pub(super) async fn handle_create_source(
     };
 
     let catalog_writer = session.env().catalog_writer();
+    // FIX ME
     catalog_writer
         .create_materialized_table_source_workaround(table)
         .await?;
