@@ -52,11 +52,12 @@ impl LogicalProject {
             return LogicalProject::new(input.input(), exprs, expr_alias);
         }
 
-        let schema = Self::derive_schema(&exprs, &expr_alias);
+        let (schema, pk_indices) =
+            Self::derive_schema(&exprs, &expr_alias, input.schema(), input.pk_indices());
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
             input,
             base,
@@ -103,7 +104,12 @@ impl LogicalProject {
         LogicalProject::new(input, exprs, alias)
     }
 
-    fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
+    fn derive_schema(
+        exprs: &[ExprImpl],
+        expr_alias: &[Option<String>],
+        input_schema: &Schema,
+        input_pk_indices: &[usize],
+    ) -> (Schema, Vec<usize>) {
         let fields = exprs
             .iter()
             .zip_eq(expr_alias.iter())
@@ -116,7 +122,8 @@ impl LogicalProject {
                 }
             })
             .collect();
-        Schema { fields }
+        todo!()
+        // Schema { fields }
     }
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.exprs

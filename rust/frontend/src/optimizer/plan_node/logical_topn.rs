@@ -35,7 +35,8 @@ impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = PlanBase::new_logical(ctx, schema);
+        let pk_indices = input.pk_indices().to_vec();
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalTopN {
             input,
             limit,
