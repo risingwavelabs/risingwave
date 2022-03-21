@@ -95,11 +95,11 @@
       customer,
       orders,
       lineitem
-    /*
     where
       c_mktsegment = 'FURNITURE'
       and c_custkey = o_custkey
       and l_orderkey = o_orderkey
+    /*
       and o_orderdate < date '1995-03-29'
       and l_shipdate > date '1995-03-29'
     */
@@ -114,11 +114,12 @@
     LogicalProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
       LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
         LogicalProject { exprs: [$20, $14, $17, ($25 * (1:Int32 - $26))], expr_alias: [ ,  ,  ,  ] }
-          LogicalJoin { type: Inner, on: true:Boolean }
+          LogicalFilter { predicate: ($7 = "FURNITURE":Varchar) AND ($1 = $11) AND ($20 = $10) }
             LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
-              LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
-            LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+              LogicalJoin { type: Inner, on: true:Boolean }
+                LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
+                LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
+              LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
 - id: tpch_q6
   before:
     - create_tables
