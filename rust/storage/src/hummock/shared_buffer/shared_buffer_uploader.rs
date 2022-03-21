@@ -96,7 +96,7 @@ impl SharedBufferUploader {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
-        
+
         let buffers = match self.batches_to_upload.remove(&epoch) {
             Some(m) => m,
             None => return Ok(()),
