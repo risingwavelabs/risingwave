@@ -18,11 +18,8 @@ mod source;
 mod split;
 mod topic;
 
-
 pub use enumerator::*;
 pub use split::*;
-
-
 
 const PULSAR_CONFIG_TOPIC_KEY: &str = "pulsar.topic";
 const PULSAR_CONFIG_ADMIN_URL_KEY: &str = "pulsar.admin.url";

@@ -48,10 +48,8 @@ use crate::rpc::service::epoch_service::EpochServiceImpl;
 use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
-
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
 use crate::stream::{FragmentManager, SourceManager, StreamManager};
-
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -76,8 +74,8 @@ pub async fn rpc_serve(
                         .with_keep_alive(Duration::from_secs(3), Duration::from_secs(5)),
                 ),
             )
-                .await
-                .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
+            .await
+            .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
             let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(
                 addr,
@@ -87,7 +85,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 ui_path,
             )
-                .await
+            .await
         }
         MetaStoreBackend::Mem => {
             let meta_store_ref = Arc::new(MemStore::default());
@@ -99,7 +97,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 ui_path,
             )
-                .await
+            .await
         }
     })
 }
@@ -132,8 +130,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             notification_manager.clone(),
             max_heartbeat_interval,
         )
-            .await
-            .unwrap(),
+        .await
+        .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {
@@ -168,8 +166,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             barrier_manager_ref.clone(),
             cluster_manager.clone(),
         )
-            .await
-            .unwrap(),
+        .await
+        .unwrap(),
     );
     let catalog_manager_ref = Arc::new(
         StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
@@ -203,7 +201,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager_ref.run().await.unwrap();
         });
     }
-
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
@@ -241,10 +238,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         #[cfg(not(test))]
-            StoredClusterManager::start_heartbeat_checker(
-            cluster_manager,
-            Duration::from_secs(1),
-        )
+        StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
             .await,
         hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];

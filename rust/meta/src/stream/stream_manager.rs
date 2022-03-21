@@ -17,26 +17,25 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
+use log::info;
 use risingwave_common::catalog::TableId;
-use log::{debug, info};
-use uuid::Uuid;
-use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
+use uuid::Uuid;
 
+use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{NodeId, StoredClusterManagerRef};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
-
-use super::ScheduledLocations;
+use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
@@ -71,8 +70,8 @@ pub struct StreamManager<S> {
 }
 
 impl<S> StreamManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -301,36 +300,26 @@ mod tests {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use tokio::sync::mpsc::UnboundedSender;
-    use tokio::task::JoinHandle;
-    use tonic::{Request, Response, Status};
-
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-
-    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
-
-    use risingwave_pb::meta::table_fragments::Fragment;
-    use risingwave_pb::meta::table_fragments::fragment::FragmentType;
-    use risingwave_pb::stream_plan::*;
-
-    use risingwave_pb::stream_service::stream_service_server::{
-        StreamService, StreamServiceServer,
+    use risingwave_pb::meta::table_fragments::fragment::{
+        FragmentDistributionType, FragmentType, FragmentType,
     };
-    use risingwave_pb::stream_service::*;
-    use tokio::sync::mpsc::UnboundedSender;
-    use tokio::task::JoinHandle;
-    use tonic::{Request, Response, Status};
-
+    use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::stream_plan::*;
+    use risingwave_pb::stream_service::stream_service_server::{
+        StreamService, StreamService, StreamServiceServer, StreamServiceServer,
+    };
     use risingwave_pb::stream_service::{
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
     };
-    use risingwave_pb::stream_service::stream_service_server::{
-        StreamService, StreamServiceServer,
-    };
+    use tokio::sync::mpsc::UnboundedSender;
+    use tokio::task::JoinHandle;
+    use tonic::{Request, Request, Response, Response, Status, Status};
 
+    use super::*;
     use crate::barrier::BarrierManager;
     use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
@@ -339,8 +328,6 @@ mod tests {
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
     use crate::stream::FragmentManager;
-
-    use super::*;
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
@@ -475,7 +462,7 @@ mod tests {
                     notification_manager,
                     Duration::from_secs(3600),
                 )
-                    .await?,
+                .await?,
             );
             let host = HostAddress {
                 host: host.to_string(),
@@ -505,7 +492,7 @@ mod tests {
                 barrier_manager_ref.clone(),
                 cluster_manager.clone(),
             )
-                .await?;
+            .await?;
 
             // TODO: join barrier service back to local thread
             tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });

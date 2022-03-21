@@ -14,13 +14,11 @@
 //
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
-
 
 use crate::base::SplitEnumerator;
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
@@ -34,15 +32,19 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaOffset,
 }
 
-
 impl KafkaSplitEnumerator {
     pub fn new(properties: &HashMap<String, String>) -> Result<KafkaSplitEnumerator> {
-        let broker_address = properties.get(KAFKA_CONFIG_BROKER_KEY).ok_or_else(|| anyhow!("broker_address not found"))?;
-        let topic = properties.get(KAFKA_CONFIG_TOPIC_KEY).ok_or_else(|| anyhow!("topic not found"))?;
+        let broker_address = properties
+            .get(KAFKA_CONFIG_BROKER_KEY)
+            .ok_or_else(|| anyhow!("broker_address not found"))?;
+        let topic = properties
+            .get(KAFKA_CONFIG_TOPIC_KEY)
+            .ok_or_else(|| anyhow!("topic not found"))?;
 
         let client: BaseConsumer = rdkafka::ClientConfig::new()
             .set("bootstrap.servers", broker_address)
-            .create_with_context(DefaultConsumerContext).unwrap();
+            .create_with_context(DefaultConsumerContext)
+            .unwrap();
 
         Ok(Self {
             broker_address: broker_address.clone(),
@@ -58,7 +60,7 @@ impl KafkaSplitEnumerator {
 #[async_trait]
 impl SplitEnumerator for KafkaSplitEnumerator {
     type Split = KafkaSplit;
-    
+
     async fn list_splits(&mut self) -> anyhow::Result<Vec<KafkaSplit>> {
         let topic_partitions = self.fetch_topic_partition()?;
 

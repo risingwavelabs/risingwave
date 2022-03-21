@@ -1,27 +1,20 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use dashmap::mapref::entry::Entry;
-use dashmap::mapref::one::Ref;
-use dashmap::DashMap;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_connector::base::SplitEnumerator;
 use risingwave_connector::{extract_split_enumerator, SplitEnumeratorImpl};
-use risingwave_pb::catalog::{Source, StreamSourceInfo};
 use risingwave_pb::plan::TableRefId;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 use crate::barrier::BarrierManagerRef;
-use crate::cluster::StoredClusterManagerRef;
-use crate::manager::{MetaSrvEnv, StoredCatalogManagerRef};
-use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 pub struct SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     meta_store_ref: Arc<S>,
     barrier_manager_ref: BarrierManagerRef<S>,
@@ -40,8 +33,8 @@ pub struct DropSourceContext {
 }
 
 impl<S> SourceManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         meta_store_ref: Arc<S>,
@@ -71,12 +64,12 @@ impl<S> SourceManager<S>
         todo!()
     }
 
-    pub async fn list_splits(&self, table_id: TableRefId) -> Result<()> {
+    pub async fn list_splits(&self, _table_id: TableRefId) -> Result<()> {
         todo!()
     }
 
     async fn assign_splits(&self) -> Result<()> {
         todo!()
-        //self.barrier_manager_ref.run_command()
+        // self.barrier_manager_ref.run_command()
     }
 }

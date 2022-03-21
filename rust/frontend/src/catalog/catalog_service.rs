@@ -151,4 +151,9 @@ impl CatalogWriter {
     ) -> Result<()> {
         todo!()
     }
+
+    pub async fn create_source(&self, source: ProstSource) -> Result<()> {
+        let (_id, version) = self.meta_client.create_source(source).await?;
+        self.wait_version(version).await
+    }
 }

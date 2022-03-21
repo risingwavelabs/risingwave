@@ -12,28 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use anyhow::Result;
-use std::collections::{BTreeMap, HashMap};
-use std::hash::Hash;
+use std::collections::HashMap;
 
-use anyhow::{anyhow, Error};
-
-
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
-use serde::{Deserialize, Serialize};
 use kafka::enumerator::KafkaSplitEnumerator;
+use serde::{Deserialize, Serialize};
 
 pub enum SourceOffset {
     Number(i64),
     String(String),
 }
 
-use crate::kafka;
-use crate::pulsar;
 use crate::pulsar::PulsarSplitEnumerator;
-
+use crate::{kafka, pulsar};
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
@@ -78,29 +72,29 @@ pub enum SplitImpl {
 impl SplitEnumeratorImpl {
     pub async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
         match self {
-            SplitEnumeratorImpl::Kafka(k) => {
-                k.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::Kafka).collect_vec())
-            }
-            SplitEnumeratorImpl::Pulsar(p) => {
-                p.list_splits().await.map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec())
-            }
+            SplitEnumeratorImpl::Kafka(k) => k
+                .list_splits()
+                .await
+                .map(|ss| ss.into_iter().map(SplitImpl::Kafka).collect_vec()),
+            SplitEnumeratorImpl::Pulsar(p) => p
+                .list_splits()
+                .await
+                .map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec()),
         }
     }
 }
 
-pub fn extract_split_enumerator(properties: &HashMap<String, String>) -> Result<SplitEnumeratorImpl> {
+pub fn extract_split_enumerator(
+    properties: &HashMap<String, String>,
+) -> Result<SplitEnumeratorImpl> {
     let source_type = match properties.get("upstream.source") {
         None => return Err(anyhow!("upstream.source not found")),
         Some(value) => value,
     };
 
     match source_type.as_ref() {
-        "kafka" => {
-            KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka)
-        },
-        "pulsar" => {
-            PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
-        }
+        "kafka" => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
+        "pulsar" => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
         _ => Err(anyhow!("unsupported source type: {}", source_type)),
     }
 }

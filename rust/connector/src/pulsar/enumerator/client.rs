@@ -19,10 +19,9 @@ use async_trait::async_trait;
 
 use crate::base::SplitEnumerator;
 use crate::pulsar::admin::PulsarAdminClient;
-use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_TOPIC_KEY};
 use crate::pulsar::split::{PulsarOffset, PulsarSplit};
 use crate::pulsar::topic::{parse_topic, ParsedTopic};
-
+use crate::pulsar::{PULSAR_CONFIG_ADMIN_URL_KEY, PULSAR_CONFIG_TOPIC_KEY};
 
 pub struct PulsarSplitEnumerator {
     admin_client: PulsarAdminClient,
@@ -33,12 +32,11 @@ pub struct PulsarSplitEnumerator {
 
 macro_rules! extract {
     ($node_type:expr, $source:expr) => {
-        $node_type.get($source).ok_or_else(|| {
-            anyhow::anyhow!("property {} not found", $source)
-        })?
+        $node_type
+            .get($source)
+            .ok_or_else(|| anyhow::anyhow!("property {} not found", $source))?
     };
 }
-
 
 impl PulsarSplitEnumerator {
     pub(crate) fn new(properties: &HashMap<String, String>) -> Result<PulsarSplitEnumerator> {

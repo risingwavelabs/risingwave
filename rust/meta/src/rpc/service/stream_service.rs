@@ -19,18 +19,17 @@ use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::StoredClusterManagerRef;
-use crate::cluster::StoredClusterManager;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{CreateSourceContext, DropSourceContext, FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
 #[derive(Clone)]
 pub struct StreamServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     sm: StreamManagerRef<S>,
 
@@ -43,14 +42,14 @@ pub struct StreamServiceImpl<S>
 }
 
 impl<S> StreamServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub fn new(
         sm: StreamManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         cluster_manager: StoredClusterManagerRef<S>,
-        source_manager_ref: SourceManagerRef<S>,
+        _source_manager_ref: SourceManagerRef<S>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
@@ -65,8 +64,8 @@ impl<S> StreamServiceImpl<S>
 
 #[async_trait::async_trait]
 impl<S> StreamManagerService for StreamServiceImpl<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     #[cfg_attr(coverage, no_coverage)]
     async fn create_materialized_view(
@@ -120,7 +119,6 @@ impl<S> StreamManagerService for StreamServiceImpl<S>
             Err(e) => Err(e.to_grpc_status()),
         }
     }
-
 
     #[cfg(not(tarpaulin_include))]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
