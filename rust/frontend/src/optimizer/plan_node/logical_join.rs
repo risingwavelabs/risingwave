@@ -145,11 +145,11 @@ impl LogicalJoin {
         let out_column_num = Self::out_column_num(left_len, right_len, join_type);
         let o2l = Self::o2l_col_mapping(left_len, right_len, join_type);
         let o2r = Self::o2r_col_mapping(left_len, right_len, join_type);
-        let mut fields = (0..out_column_num)
+        let fields = (0..out_column_num)
             .into_iter()
             .map(|i| match (o2l.try_map(i), o2r.try_map(i)) {
-                (Some(l_i), None) => left_schema.fields()[l_i],
-                (None, Some(r_i)) => right_schema.fields()[r_i],
+                (Some(l_i), None) => left_schema.fields()[l_i].clone(),
+                (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
                 _ => panic!(),
             })
             .collect();
