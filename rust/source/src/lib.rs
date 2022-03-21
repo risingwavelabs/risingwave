@@ -25,6 +25,7 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(mutex_unlock)]
 
 use std::fmt::Debug;
 
@@ -41,7 +42,7 @@ pub use table_v2::*;
 
 pub mod parser;
 
-mod connector_source;
+pub mod connector_source;
 mod high_level_kafka;
 mod manager;
 

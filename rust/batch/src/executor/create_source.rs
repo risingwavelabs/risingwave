@@ -27,12 +27,15 @@ use risingwave_source::{
     DebeziumJsonParser, HighLevelKafkaSourceConfig, ProtobufParser, SourceColumnDesc, SourceConfig,
     SourceFormat, SourceManagerRef, SourceParser,
 };
+use risingwave_connector::ConnectorConfig;
+use risingwave_connector::kinesis::config::AwsConfigInfo;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";
+const KINESIS_SOURCE: &str = "kinesis";
 
 const KAFKA_TOPIC_KEY: &str = "kafka.topic";
 const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
@@ -74,6 +77,11 @@ impl CreateSourceExecutor {
             topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
             properties: Default::default(),
         }))
+    }
+
+    fn extract_kinesis_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
+        let config = AwsConfigInfo::build(properties)?;
+        Ok(SourceConfig::Connector(config))
     }
 }
 
@@ -122,6 +130,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
             KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            KINESIS_SOURCE => CreateSourceExecutor::extract_kinesis_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
@@ -155,7 +164,7 @@ impl Executor for CreateSourceExecutor {
     async fn open(&mut self) -> Result<()> {
         let parser: Arc<dyn SourceParser + Send + Sync> = match self.format {
             SourceFormat::Json => {
-                let parser: Arc<dyn SourceParser> = Arc::new(JSONParser {});
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
                 Ok(parser)
             }
             SourceFormat::Protobuf => {
@@ -166,7 +175,7 @@ impl Executor for CreateSourceExecutor {
                     )))
                 })?;
 
-                let parser: Arc<dyn SourceParser> = Arc::new(ProtobufParser::new(
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(ProtobufParser::new(
                     self.schema_location.as_str(),
                     message_name,
                 )?);
@@ -174,7 +183,7 @@ impl Executor for CreateSourceExecutor {
                 Ok(parser)
             }
             SourceFormat::DebeziumJson => {
-                let parser: Arc<dyn SourceParser> = Arc::new(DebeziumJsonParser {});
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
                 Ok(parser)
             }
             _ => Err(RwError::from(InternalError(

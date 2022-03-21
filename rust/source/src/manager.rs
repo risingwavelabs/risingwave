@@ -125,12 +125,24 @@ impl SourceManager for MemSourceManager {
             columns,
             row_id_index,
         };
+<<<<<<< HEAD
         let mut tables = self.get_sources()?;
         ensure!(
             !tables.contains_key(source_id),
             "Source id already exists: {:?}",
             source_id
         );
+||||||| parent of 91e37142 (stage)
+
+=======
+
+        let mut tables = self.get_sources()?;
+        ensure!(
+            !tables.contains_key(source_id),
+            "Source id already exists: {:?}",
+            source_id
+        );
+>>>>>>> 91e37142 (stage)
         tables.insert(*source_id, desc);
 
         Ok(())

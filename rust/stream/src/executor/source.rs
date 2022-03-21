@@ -31,8 +31,12 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::*;
-use risingwave_storage::StateStore;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+
+use risingwave_source::connector_source::ConnectorStreamSource;
+use risingwave_connector::state;
+use risingwave_storage::{Keyspace, StateStore};
+use risingwave_storage::memory::MemoryStateStore;
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
@@ -158,6 +162,16 @@ impl SourceExecutor {
             )?),
             SourceImpl::TableV2(s) => {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
+            },
+            SourceImpl::Connector(s) => {
+                let mem_state_store = MemoryStateStore::new();
+                Box::new(ConnectorStreamSource{
+                    source_reader: s.clone(),
+                    state_store: state::SourceStateHandler::new(Keyspace::executor_root(
+                        mem_state_store,
+                        executor_id.clone(),
+                    )),
+                })
             }
         };
 

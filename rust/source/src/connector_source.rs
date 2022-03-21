@@ -15,6 +15,7 @@ use tokio::sync::Mutex;
 use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParser, StreamSourceReader};
 
+#[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<dyn SourceParser + Send + Sync>,
     pub reader: Arc<Mutex<dyn SourceReader + Send + Sync>>,
@@ -89,8 +90,8 @@ impl ConnectorSource {
 
 #[derive(Debug)]
 pub struct ConnectorStreamSource {
-    source_reader: ConnectorSource,
-    state_store: state::SourceStateHandler<MemoryStateStore>,
+    pub source_reader: ConnectorSource,
+    pub state_store: state::SourceStateHandler<MemoryStateStore>,
 }
 
 #[async_trait]
