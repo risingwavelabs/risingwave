@@ -160,7 +160,6 @@ pub async fn setup_compute_env(
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
-            Some(hummock_manager.clone()),
             Arc::new(NotificationManager::new()),
             Duration::from_secs(1),
         )

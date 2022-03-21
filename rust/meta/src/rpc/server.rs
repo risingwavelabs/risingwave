@@ -123,7 +123,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
-            Some(hummock_manager.clone()),
             notification_manager.clone(),
             max_heartbeat_interval,
         )
@@ -198,16 +197,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
-    let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
-        hummock::start_compaction_trigger(hummock_manager, compactor_manager),
+    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         #[cfg(not(test))]
         StoredClusterManager::start_heartbeat_checker(
             cluster_manager.clone(),
             Duration::from_secs(1),
         )
         .await,
-        hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];
+    sub_tasks.extend(hummock::start_hummock_workers(
+        hummock_manager,
+        compactor_manager,
+        vacuum_trigger_ref,
+    ));
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
