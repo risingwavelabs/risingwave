@@ -74,7 +74,7 @@ where
         match worker_type {
             WorkerType::ComputeNode => {
                 self.notification_manager
-                    .insert_be_sender(WorkerKey(host_address), tx)
+                    .insert_compute_sender(WorkerKey(host_address), tx)
                     .await
             }
             WorkerType::Frontend => {
@@ -103,7 +103,7 @@ where
                 }))
                 .unwrap();
                 self.notification_manager
-                    .insert_fe_sender(WorkerKey(host_address), tx)
+                    .insert_frontend_sender(WorkerKey(host_address), tx)
                     .await
             }
             _ => unreachable!(),

@@ -31,7 +31,7 @@ pub type Notification = std::result::Result<SubscribeResponse, Status>;
 /// Interval before retry when notify fail.
 const NOTIFY_RETRY_INTERVAL: u64 = 10;
 
-/// [`NotificationManager`] is used to send notification to frontend and backend.
+/// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager {
     core: Mutex<NotificationManagerCore>,
     /// Sender used `Self::delete_sender` method.
@@ -50,23 +50,23 @@ impl NotificationManager {
         }
     }
 
-    /// Send a `SubscribeResponse` to frontend.
-    pub async fn notify_fe(&self, operation: Operation, info: &Info) -> Epoch {
+    /// Send a `SubscribeResponse` to frontends.
+    pub async fn notify_frontend(&self, operation: Operation, info: &Info) -> Epoch {
         let mut core_guard = self.core.lock().await;
-        core_guard.notify_fe(operation, info).await
+        core_guard.notify_frontend(operation, info).await
     }
 
-    /// Send a `SubscribeResponse` to backend.
-    pub async fn notify_be(&self, operation: Operation, info: &Info) -> Epoch {
+    /// Send a `SubscribeResponse` to compute nodes.
+    pub async fn notify_compute(&self, operation: Operation, info: &Info) -> Epoch {
         let mut core_guard = self.core.lock().await;
-        core_guard.notify_be(operation, info).await
+        core_guard.notify_compute(operation, info).await
     }
 
-    /// Send a `SubscribeResponse` to frontend and backend.
+    /// Send a `SubscribeResponse` to frontends and compute nodes.
     pub async fn notify_all(&self, operation: Operation, info: &Info) {
         let mut core_guard = self.core.lock().await;
-        core_guard.notify_fe(operation, info).await;
-        core_guard.notify_be(operation, info).await;
+        core_guard.notify_frontend(operation, info).await;
+        core_guard.notify_compute(operation, info).await;
     }
 
     /// Tell `NotificationManagerCore` to skip some retry and delete senders.
@@ -74,30 +74,30 @@ impl NotificationManager {
         self.tx.send(worker_key).unwrap();
     }
 
-    pub async fn insert_fe_sender(
+    pub async fn insert_frontend_sender(
         &self,
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
-        core_guard.fe_senders.insert(worker_key, sender);
+        core_guard.frontend_senders.insert(worker_key, sender);
     }
 
-    pub async fn insert_be_sender(
+    pub async fn insert_compute_sender(
         &self,
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
-        core_guard.be_senders.insert(worker_key, sender);
+        core_guard.compute_senders.insert(worker_key, sender);
     }
 }
 
 struct NotificationManagerCore {
     /// The notification sender to frontends.
-    fe_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
-    /// The notification sender to backends.
-    be_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to compute nodes.
+    compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
@@ -108,17 +108,17 @@ struct NotificationManagerCore {
 impl NotificationManagerCore {
     fn new(rx: UnboundedReceiver<WorkerKey>, epoch_generator: EpochGeneratorRef) -> Self {
         Self {
-            fe_senders: HashMap::new(),
-            be_senders: HashMap::new(),
+            frontend_senders: HashMap::new(),
+            compute_senders: HashMap::new(),
             rx,
             epoch_generator,
         }
     }
 
-    async fn notify_fe(&mut self, operation: Operation, info: &Info) -> Epoch {
+    async fn notify_frontend(&mut self, operation: Operation, info: &Info) -> Epoch {
         let epoch = self.epoch_generator.generate();
         let mut keys = HashSet::new();
-        for (worker_key, sender) in &self.fe_senders {
+        for (worker_key, sender) in &self.frontend_senders {
             loop {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
@@ -146,10 +146,10 @@ impl NotificationManagerCore {
     }
 
     /// Send a `SubscribeResponse` to backend.
-    async fn notify_be(&mut self, operation: Operation, info: &Info) -> Epoch {
+    async fn notify_compute(&mut self, operation: Operation, info: &Info) -> Epoch {
         let epoch = self.epoch_generator.generate();
         let mut keys = HashSet::new();
-        for (worker_key, sender) in &self.be_senders {
+        for (worker_key, sender) in &self.compute_senders {
             loop {
                 // Heartbeat may delete worker.
                 // We assume that after a worker is disconnected, before it recalls subscribe, we
@@ -178,9 +178,9 @@ impl NotificationManagerCore {
 
     fn remove_by_key(&mut self, keys: HashSet<WorkerKey>) {
         keys.into_iter().for_each(|key| {
-            self.fe_senders
+            self.frontend_senders
                 .remove(&key)
-                .or_else(|| self.be_senders.remove(&key));
+                .or_else(|| self.compute_senders.remove(&key));
         });
     }
 }

@@ -175,7 +175,7 @@ where
                 // Notify frontends of new compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_fe(Operation::Add, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Add, &Info::Node(worker_node))
                         .await;
                 }
 
@@ -209,7 +209,7 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_fe(Operation::Delete, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Delete, &Info::Node(worker_node))
                         .await;
                 }
 

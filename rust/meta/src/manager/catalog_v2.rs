@@ -77,7 +77,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::DatabaseV2(database.to_owned()))
+                .notify_frontend(Operation::Add, &Info::DatabaseV2(database.to_owned()))
                 .await
                 .into_inner();
 
@@ -98,7 +98,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Delete, &Info::DatabaseV2(database))
+                .notify_frontend(Operation::Delete, &Info::DatabaseV2(database))
                 .await
                 .into_inner();
 
@@ -118,7 +118,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::SchemaV2(schema.to_owned()))
+                .notify_frontend(Operation::Add, &Info::SchemaV2(schema.to_owned()))
                 .await
                 .into_inner();
 
@@ -139,7 +139,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Delete, &Info::SchemaV2(schema))
+                .notify_frontend(Operation::Delete, &Info::SchemaV2(schema))
                 .await
                 .into_inner();
 
@@ -177,7 +177,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
+                .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
 
@@ -216,7 +216,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::TableV2(table.to_owned()))
+                .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
 
@@ -251,7 +251,7 @@ where
 
                     let version = self
                         .nm
-                        .notify_fe(Operation::Delete, &Info::TableV2(table))
+                        .notify_frontend(Operation::Delete, &Info::TableV2(table))
                         .await
                         .into_inner();
 
@@ -288,7 +288,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
 
@@ -321,7 +321,7 @@ where
 
             let version = self
                 .nm
-                .notify_fe(Operation::Add, &Info::Source(source.to_owned()))
+                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
 
@@ -353,7 +353,7 @@ where
 
                     let version = self
                         .nm
-                        .notify_fe(Operation::Delete, &Info::Source(source))
+                        .notify_frontend(Operation::Delete, &Info::Source(source))
                         .await
                         .into_inner();
 
