@@ -169,8 +169,8 @@ impl LogicalJoin {
         let r2o = Self::r2o_col_mapping(left_len, right_len, join_type);
         left_pk
             .iter()
-            .map(|index| l2o.map(*i))
-            .chain(right_pk.iter().map(|iindex| r2o.map(*i)))
+            .map(|index| l2o.map(*index))
+            .chain(right_pk.iter().map(|iindex| r2o.map(*index)))
             .collect()
     }
 
