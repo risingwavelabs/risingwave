@@ -39,13 +39,10 @@ impl fmt::Display for StreamProject {
 impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            logical.plan_base().pk_indices.clone(),
-            Distribution::any().clone(),
-        );
+        let input = logical.input();
+        let pk_indices = logical.pk_indices();
+        let dist = input.distribution().clone();
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
         StreamProject { logical, base }
     }
 }

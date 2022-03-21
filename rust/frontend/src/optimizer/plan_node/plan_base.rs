@@ -52,6 +52,7 @@ impl PlanBase {
         pk_indices: Vec<usize>,
         dist: Distribution,
     ) -> Self {
+        assert!(!pk_indices.is_empty());
         let id = ctx.borrow_mut().get_id();
         Self {
             id,

@@ -39,7 +39,7 @@ impl StreamMaterialize {
             ctx,
             input.schema().clone(),
             input.pk_indices().to_vec(),
-            Distribution::any().clone(),
+            input.distribution().clone(),
         );
         Self {
             base,
