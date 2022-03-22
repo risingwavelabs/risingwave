@@ -101,7 +101,6 @@ impl ColPrunable for LogicalTopN {
                 top_n,
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
-            .into()
         }
     }
 }

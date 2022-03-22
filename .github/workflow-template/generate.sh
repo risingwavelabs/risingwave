@@ -30,7 +30,7 @@ echo "$HEADER" >> ../workflows/pull-request.yml
 
 if [ "$1" == "--check" ] ; then
  if ! git diff --exit-code; then
-    echo "Please run generate.sh and commit after editing the workflow templates. Refer to CONTRIBUTING.md for more information."
+    echo "Please run $(tput setaf 4)./risedev apply-ci-template$(tput sgr0) and commit after editing the workflow templates. Refer to CONTRIBUTING.md for more information."
     exit 1
  fi
 fi

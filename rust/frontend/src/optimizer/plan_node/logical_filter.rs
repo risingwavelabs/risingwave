@@ -104,7 +104,6 @@ impl ColPrunable for LogicalFilter {
                 filter.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
-            .into()
         }
     }
 }

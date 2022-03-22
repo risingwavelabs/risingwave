@@ -19,6 +19,7 @@ use std::time::Duration;
 use etcd_client::{Client as EtcdClient, ConnectOptions};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::catalog_service_server::CatalogServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
@@ -32,11 +33,14 @@ use tokio::task::JoinHandle;
 
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
+use super::DdlServiceImpl;
 use crate::barrier::BarrierManager;
 use crate::cluster::StoredClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager};
+use crate::manager::{
+    CatalogManager, MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -119,7 +123,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
-    let notification_manager = Arc::new(NotificationManager::new());
+    let notification_manager = Arc::new(NotificationManager::new(epoch_generator_ref.clone()));
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
@@ -170,6 +174,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .await
             .unwrap(),
     );
+    let catalog_manager_v2_ref = Arc::new(
+        CatalogManager::new(
+            meta_store_ref.clone(),
+            env.id_gen_manager_ref(),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
 
     let vacuum_trigger_ref = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
@@ -179,6 +192,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
+    let ddl_srv = DdlServiceImpl::<S>::new(
+        env.clone(),
+        catalog_manager_v2_ref.clone(),
+        stream_manager_ref.clone(),
+        cluster_manager.clone(),
+        fragment_manager.clone(),
+    );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
         stream_manager_ref,
@@ -191,7 +211,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
         vacuum_trigger_ref.clone(),
     );
-    let notification_srv = NotificationServiceImpl::new(notification_manager);
+    let notification_srv = NotificationServiceImpl::new(
+        notification_manager,
+        catalog_manager_v2_ref,
+        cluster_manager.clone(),
+        epoch_generator_ref.clone(),
+    );
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -222,6 +247,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             .add_service(StreamManagerServiceServer::new(stream_srv))
             .add_service(HummockManagerServiceServer::new(hummock_srv))
             .add_service(NotificationServiceServer::new(notification_srv))
+            .add_service(DdlServiceServer::new(ddl_srv))
             .serve_with_incoming_shutdown(
                 tokio_stream::wrappers::TcpListenerStream::new(listener),
                 async move {
