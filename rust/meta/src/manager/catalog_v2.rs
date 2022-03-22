@@ -424,8 +424,6 @@ where
             for &dependent_relation_id in &mview.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
-            // Increase source_id's ref count in advance
-            core.increase_ref_count(source.id);
             Ok(())
         } else {
             Err(RwError::from(InternalError(
@@ -492,7 +490,6 @@ where
             for &dependent_relation_id in &mview.dependent_relations {
                 core.decrease_ref_count(dependent_relation_id);
             }
-            core.decrease_ref_count(source.id);
 
             Ok(())
         } else {
@@ -515,13 +512,16 @@ where
                 // decrease associated source's ref count first to avoid deadlock
                 if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) =
                     mview.optional_associated_source_id
-                    && associated_source_id == source_id
                 {
-                    core.decrease_ref_count(associated_source_id);
+                    if associated_source_id != source_id {
+                        return Err(RwError::from(InternalError(
+                            "mview's associated source id doesn't match source id".to_string(),
+                        )));
+                    }
                 } else {
                     return Err(RwError::from(InternalError(
-                        "mview do not have or have wrong associated source id".to_string(),
-                    )))
+                        "mview do not have associated source id".to_string(),
+                    )));
                 }
                 // check ref count
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
