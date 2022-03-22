@@ -240,7 +240,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         #[cfg(not(test))]
         StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
             .await,
-        hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager,
