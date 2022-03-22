@@ -76,7 +76,7 @@ where
         let req = request.into_inner();
 
         tracing::debug!(
-            plan = serde_json::to_string_pretty(&req).unwrap().as_str(),
+            plan = serde_json::to_string(&req).unwrap().as_str(),
             "create materialized view"
         );
 

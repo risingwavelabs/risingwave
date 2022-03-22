@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
@@ -386,7 +387,7 @@ pub struct GrpcMetaClient {
     pub cluster_client: ClusterServiceClient<Channel>,
     pub heartbeat_client: HeartbeatServiceClient<Channel>,
     pub catalog_client: CatalogServiceClient<Channel>,
-    // TODO: add catalog client for catalogV2
+    pub ddl_client: DdlServiceClient<Channel>,
     pub hummock_client: HummockManagerServiceClient<Channel>,
     pub notification_client: NotificationServiceClient<Channel>,
     pub stream_client: StreamManagerServiceClient<Channel>,
@@ -404,6 +405,7 @@ impl GrpcMetaClient {
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
+        let ddl_client = DdlServiceClient::new(channel.clone());
         let hummock_client = HummockManagerServiceClient::new(channel.clone());
         let notification_client = NotificationServiceClient::new(channel.clone());
         let stream_client = StreamManagerServiceClient::new(channel);
@@ -411,6 +413,7 @@ impl GrpcMetaClient {
             cluster_client,
             heartbeat_client,
             catalog_client,
+            ddl_client,
             hummock_client,
             notification_client,
             stream_client,
@@ -597,19 +600,30 @@ impl MetaClientInner for GrpcMetaClient {
 
     async fn create_materialized_source(
         &self,
-        _req: CreateMaterializedSourceRequest,
+        req: CreateMaterializedSourceRequest,
     ) -> Result<CreateMaterializedSourceResponse> {
-        // TODO: add catalog client for catalogV2
-        todo!()
+        Ok(self
+            .ddl_client
+            .to_owned()
+            .create_materialized_source(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
     }
 
     async fn create_materialized_view(
         &self,
-        _req: CreateMaterializedViewRequest,
+        req: CreateMaterializedViewRequest,
     ) -> Result<CreateMaterializedViewResponse> {
-        // TODO: add catalog client for catalogV2
-        todo!()
+        Ok(self
+            .ddl_client
+            .to_owned()
+            .create_materialized_view(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
     }
+
     async fn report_vacuum_task(
         &self,
         req: ReportVacuumTaskRequest,
