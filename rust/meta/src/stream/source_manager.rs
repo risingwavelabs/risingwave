@@ -50,7 +50,8 @@ where
     }
 
     pub async fn run(&self) -> Result<()> {
-        todo!()
+        // todo
+        Ok(())
     }
 
     pub async fn create_source(&self, ctx: CreateSourceContext) -> Result<()> {
