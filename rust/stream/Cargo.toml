@@ -56,6 +56,7 @@ tracing = { version = "0.1", features = ["release_max_level_info"] }
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"
+value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]

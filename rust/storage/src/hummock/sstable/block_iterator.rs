@@ -16,7 +16,6 @@ use std::cmp::Ordering::*;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use itertools::Itertools;
 
 use super::{Block, Header};
 use crate::hummock::version_cmp::VersionedComparator;
@@ -94,23 +93,38 @@ impl BlockIterator {
         true
     }
 
+    fn partition_point<F: FnMut(&mut BlockIterator, usize) -> bool>(
+        &mut self,
+        start: usize,
+        end: usize,
+        mut f: F,
+    ) -> usize {
+        let mut lo = start;
+        let mut hi = end;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let ret = f(self, mid);
+            if ret {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
     /// Seek to the first entry that is equal or greater than key.
     pub fn seek(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx as usize,
         };
-        let found_entry_idx = (start_index..self.block.len())
-            // TODO: remove this collect_vec
-            .collect_vec()
-            .partition_point(|idx| {
-                self.set_idx(*idx as isize);
-
-                // compare by version comparator
-                VersionedComparator::compare_key(&self.key, key) == Less
-            })
-            + start_index;
-
+        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
+            iter.set_idx(idx as isize);
+            VersionedComparator::compare_key(&iter.key, key) == Less
+        };
+        let found_entry_idx =
+            self.partition_point(start_index, self.block.len(), is_in_first_partition);
         self.set_idx(found_entry_idx as isize);
     }
 
@@ -120,14 +134,14 @@ impl BlockIterator {
             SeekPos::Origin => self.block.len(),
             SeekPos::Current => self.idx as usize + 1,
         };
-        let found_entry_idx = (0..end_index).collect_vec().partition_point(|idx| {
-            self.set_idx(*idx as isize);
+        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
+            iter.set_idx(idx as isize);
 
-            let ord = VersionedComparator::compare_key(&self.key, key);
+            let ord = VersionedComparator::compare_key(&iter.key, key);
             ord == Less || ord == Equal
-        });
-        let found_entry_idx = found_entry_idx as isize - 1;
-
+        };
+        let found_entry_idx =
+            self.partition_point(0, end_index, is_in_first_partition) as isize - 1;
         self.set_idx(found_entry_idx);
     }
 

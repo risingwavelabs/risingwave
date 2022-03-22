@@ -28,6 +28,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -273,7 +274,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            let mut de = memcomparable::Deserializer::new(buf);
+            let mut de = value_encoding::Deserializer::new(buf);
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
             Ok(Some(cell))
         } else {
