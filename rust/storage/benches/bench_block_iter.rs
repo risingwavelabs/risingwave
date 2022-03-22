@@ -42,8 +42,8 @@ fn block_v2_iter_prev(block: Arc<BlockV2>) {
 }
 
 fn bench_block_iter(c: &mut Criterion) {
-    let block = Arc::new(build_block(10, 100));
-    let blockv2 = Arc::new(build_block_v2(10, 100));
+    let block = Arc::new(build_block(10, 100000));
+    let blockv2 = Arc::new(build_block_v2(10, 100000));
 
     c.bench_with_input(
         BenchmarkId::new("block - iter next", ""),
@@ -83,8 +83,8 @@ criterion_main!(benches);
 
 fn build_block(t: u32, i: u64) -> Block {
     let options = SSTableBuilderOptions {
-        table_capacity: 65536,
-        block_size: 65536,
+        table_capacity: 65536000,
+        block_size: 65536000,
         bloom_false_positive: 0.1,
         checksum_algo: Algorithm::XxHash64,
     };
@@ -104,7 +104,7 @@ fn build_block(t: u32, i: u64) -> Block {
 
 fn build_block_v2(t: u32, i: u64) -> BlockV2 {
     let options = BlockV2BuilderOptions {
-        capacity: 65536,
+        capacity: 65536000,
         compression_algorithm: CompressionAlgorithm::None,
         restart_interval: 16,
     };
