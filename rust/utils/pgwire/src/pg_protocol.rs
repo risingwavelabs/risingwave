@@ -102,8 +102,8 @@ where
     }
 
     fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
-        self.session = Some(self.session_mgr.connect());
-        self.session = Some(self.session_mgr.connect());
+        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
+        self.session = Some(self.session_mgr.connect(DEFAULT_DATABASE_NAME)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::Encoding("utf8"),

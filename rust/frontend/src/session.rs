@@ -216,8 +216,8 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(&self) -> Arc<dyn Session> {
-        Arc::new(SessionImpl::new(self.env.clone(), "dev".to_string()))
+    fn connect(&self, database: &str) -> Result<Arc<dyn Session>> {
+        Ok(Arc::new(SessionImpl::new(self.env.clone(), database.to_string())))
     }
 }
 

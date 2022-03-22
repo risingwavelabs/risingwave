@@ -21,11 +21,12 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
+use risingwave_common::error::Result;
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
-    fn connect(&self) -> Arc<dyn Session>;
+    fn connect(&self, database: &str) -> Result<Arc<dyn Session>>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -93,12 +94,13 @@ mod tests {
     use crate::pg_response::{PgResponse, StatementType};
     use crate::pg_server::pg_serve;
     use crate::types::Row;
+    use risingwave_common::error::Result;
 
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
-        fn connect(&self) -> Arc<dyn super::Session> {
-            Arc::new(TestSession {})
+        fn connect(&self, database: &str) -> Result<Arc<dyn super::Session>> {
+            Ok(Arc::new(TestSession {}))
         }
     }
 
