@@ -123,7 +123,7 @@ jobs:
           ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
       - name: e2e test streaming 3-node
-        timeout-minutes: 2
+        timeout-minutes: 2.5
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers dev ci-3node
@@ -145,7 +145,7 @@ jobs:
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
       - name: e2e test streaming 3-node w/o cache
-        timeout-minutes: 2
+        timeout-minutes: 2.5
         run: |
           ~/cargo-make/makers clean-data
           RW_NO_CACHE=1 ~/cargo-make/makers dev ci-3node
