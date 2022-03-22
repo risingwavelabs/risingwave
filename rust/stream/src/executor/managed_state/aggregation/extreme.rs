@@ -22,7 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::*;
-use risingwave_common::util::value_encoding::{serialize_cell, deserialize_cell};
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
