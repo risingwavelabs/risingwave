@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-#![allow(dead_code)]
-#![allow(unused)]
 
 use std::collections::HashMap;
 use std::ops::Index;
@@ -23,7 +21,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
@@ -110,28 +108,54 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get(&self, pk: Row, column: &ColumnDesc, epoch: u64) -> Result<Option<Datum>> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
+    pub async fn get(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
+        assert!(
+            self.pk_serializer.is_some(),
+            "this table is adhoc and there's no sort key serializer"
+        );
+        let get_column_id = ColumnId::new(column_id);
+        let key = &[
+            &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
+            &serialize_column_id(&get_column_id)?,
+        ]
+        .concat();
         let state_store_get_res = self
             .keyspace
             .state_store()
             .get(&key.clone(), epoch)
             .await
-            .unwrap();
-        let column_id = column.column_id.get_id() as usize;
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row =
-            cell_based_row_deserializer.deserialize(&key, &state_store_get_res.unwrap())?;
-        match pk_and_row {
-            Some(pk_row) => {
-                return Ok(Some(pk_row.1.index(column_id).clone()));
+            .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
+
+        let mut cell_based_row_deserializer =
+            CellBasedRowDeserializer::new(self.column_descs.clone());
+        match state_store_get_res {
+            Some(get_res) => {
+                let pk_and_row =
+                    cell_based_row_deserializer.deserialize(&Bytes::from(key.clone()), &get_res)?;
+                match pk_and_row {
+                    Some(pk_row) => {
+                        return Ok(Some(pk_row.1.index(column_id as usize).clone()));
+                    }
+                    None => Ok(None),
+                }
             }
-            None => Ok(None),
+            None => {
+                let pk_and_row = cell_based_row_deserializer.take();
+                match pk_and_row {
+                    Some(pk_row) => {
+                        return Ok(Some(pk_row.1.index(column_id as usize).clone()));
+                    }
+                    None => Ok(None),
+                }
+            }
         }
     }
 
-    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Row> {
+    pub async fn get_row(&self, pk: Row, epoch: u64) -> Result<Row> {
+        assert!(
+            self.pk_serializer.is_some(),
+            "this table is adhoc and there's no sort key serializer"
+        );
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
         let key = Bytes::from(arrange_key_buf);
         let state_store_get_res = self
@@ -140,7 +164,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .get(&key.clone(), epoch)
             .await
             .unwrap();
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
+        let mut cell_based_row_deserializer =
+            CellBasedRowDeserializer::new(self.column_descs.to_vec());
         let pk_and_row =
             cell_based_row_deserializer.deserialize(&key, &state_store_get_res.unwrap())?;
         Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
@@ -181,7 +206,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .cell_based_row_serializer
             .serialize(&arrange_key_buf, cell_value, column_ids)
             .unwrap();
-        for (key, value) in bytes {
+        for (key, _value) in bytes {
             local.delete(key);
         }
         batch.ingest(epoch).await?;
@@ -204,7 +229,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .serialize(&arrange_key_buf, cell_value, column_ids)
             .unwrap();
         // delete original kv_pairs in state_store
-        for (key, value) in bytes.clone() {
+        for (key, _value) in bytes.clone() {
             local.delete(key);
         }
         // write updated kv_pairs in state_store
@@ -298,7 +323,7 @@ fn generate_column_id_to_column_index_mapping(
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     let mut column_ids = Vec::with_capacity(column_descs.len());
-    for (index, column_desc) in column_descs.iter().enumerate() {
+    for (_, column_desc) in column_descs.iter().enumerate() {
         column_ids.push(column_desc.column_id);
     }
     column_ids
@@ -325,7 +350,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
     async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
-        keyspace.state_store().wait_epoch(epoch).await;
+        keyspace.state_store().wait_epoch(epoch).await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
