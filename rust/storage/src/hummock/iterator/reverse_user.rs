@@ -266,9 +266,9 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of,
-        iterator_test_key_of_epoch, iterator_test_value_of, mock_sstable_store, test_key,
-        gen_iterator_test_sstable_base, TEST_KEYS_COUNT,gen_iterator_test_sstable
+        default_builder_opt_for_test, gen_iterator_test_sstable, gen_iterator_test_sstable_base,
+        gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
+        iterator_test_value_of, mock_sstable_store, test_key, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::variants::BACKWARD;
     use crate::hummock::iterator::{BoxedHummockIterator, UserIterator};
@@ -294,25 +294,31 @@ mod tests {
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table2),
-                sstable_store.clone(), )),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table1), sstable_store.clone())),
+                sstable_store.clone(),
+            )),
+            Box::new(ReverseSSTableIterator::new(
+                Arc::new(table1),
+                sstable_store.clone(),
+            )),
             Box::new(ReverseSSTableIterator::new(Arc::new(table0), sstable_store)),
         ];
 
         let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
-        let mut i = TEST_KEYS_COUNT*3;
+        let mut i = TEST_KEYS_COUNT * 3;
         ui.rewind().await.unwrap();
         while ui.is_valid() {
-            let sort_index = ((i-1) / TEST_KEYS_COUNT) as u64;
+            let sort_index = ((i - 1) / TEST_KEYS_COUNT) as u64;
             let key = ui.key();
             let val = ui.value();
             assert_eq!(
                 key,
-                user_key(iterator_test_key_of(sort_index,(i-1) % TEST_KEYS_COUNT).as_slice()));
+                user_key(iterator_test_key_of(sort_index, (i - 1) % TEST_KEYS_COUNT).as_slice())
+            );
             assert_eq!(
                 val,
-                iterator_test_value_of(sort_index, (i-1) % TEST_KEYS_COUNT).as_slice());
+                iterator_test_value_of(sort_index, (i - 1) % TEST_KEYS_COUNT).as_slice()
+            );
             i -= 1;
             ui.next().await.unwrap();
             if i == 0 {
@@ -325,35 +331,39 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_seek() {
         let sstable_store = mock_sstable_store();
-        let table0 =
-            gen_iterator_test_sstable_base(
-                0,
-                default_builder_opt_for_test(),
-                |x| x + 1,
-                sstable_store.clone(),
-                20,
-            ).await;
-        let table1 =
-            gen_iterator_test_sstable_base(
-                1,
-                default_builder_opt_for_test(),
-                |x| x + 1,
-                sstable_store.clone(),
-                20,
-            ).await;
-        let table2 =
-            gen_iterator_test_sstable_base(
-                2,
-                default_builder_opt_for_test(),
-                |x| x + 1,
-                sstable_store.clone(),
-                20,
-            ).await;
+        let table0 = gen_iterator_test_sstable_base(
+            0,
+            default_builder_opt_for_test(),
+            |x| x + 1,
+            sstable_store.clone(),
+            20,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_base(
+            1,
+            default_builder_opt_for_test(),
+            |x| x + 1,
+            sstable_store.clone(),
+            20,
+        )
+        .await;
+        let table2 = gen_iterator_test_sstable_base(
+            2,
+            default_builder_opt_for_test(),
+            |x| x + 1,
+            sstable_store.clone(),
+            20,
+        )
+        .await;
         let iters: Vec<BoxedHummockIterator> = vec![
             Box::new(ReverseSSTableIterator::new(
                 Arc::new(table0),
-                sstable_store.clone(), )),
-            Box::new(ReverseSSTableIterator::new(Arc::new(table1), sstable_store.clone())),
+                sstable_store.clone(),
+            )),
+            Box::new(ReverseSSTableIterator::new(
+                Arc::new(table1),
+                sstable_store.clone(),
+            )),
             Box::new(ReverseSSTableIterator::new(Arc::new(table2), sstable_store)),
         ];
 
@@ -361,41 +371,35 @@ mod tests {
         let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
 
         // right edge case
-        ui.seek(user_key(iterator_test_key_of(0,0).as_slice()))
+        ui.seek(user_key(iterator_test_key_of(0, 0).as_slice()))
             .await
             .unwrap();
         assert!(!ui.is_valid());
 
         // normal case
-        ui.seek(user_key(iterator_test_key_of(1, 4).as_slice())).await.unwrap();
+        ui.seek(user_key(iterator_test_key_of(1, 4).as_slice()))
+            .await
+            .unwrap();
         let k = ui.key();
         let v = ui.value();
-        assert_eq!(
-            v,
-            iterator_test_value_of(1, 4).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(1, 4).as_slice()));
-        ui.seek(user_key(iterator_test_key_of(0, 17).as_slice())).await.unwrap();
+        assert_eq!(v, iterator_test_value_of(1, 4).as_slice());
+        assert_eq!(k, user_key(iterator_test_key_of(1, 4).as_slice()));
+        ui.seek(user_key(iterator_test_key_of(0, 17).as_slice()))
+            .await
+            .unwrap();
         let k = ui.key();
         let v = ui.value();
-        assert_eq!(
-            v,
-            iterator_test_value_of(0, 17).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(0, 17).as_slice()));
+        assert_eq!(v, iterator_test_value_of(0, 17).as_slice());
+        assert_eq!(k, user_key(iterator_test_key_of(0, 17).as_slice()));
 
         // left edge case
-        ui.seek(user_key(iterator_test_key_of(2, 20).as_slice())).await.unwrap();
+        ui.seek(user_key(iterator_test_key_of(2, 20).as_slice()))
+            .await
+            .unwrap();
         let k = ui.key();
         let v = ui.value();
-        assert_eq!(
-            v,
-            iterator_test_value_of(2, 20).as_slice());
-        assert_eq!(
-            k,
-            user_key(iterator_test_key_of(2, 20).as_slice()));
+        assert_eq!(v, iterator_test_value_of(2, 20).as_slice());
+        assert_eq!(k, user_key(iterator_test_key_of(2, 20).as_slice()));
     }
 
     #[tokio::test]

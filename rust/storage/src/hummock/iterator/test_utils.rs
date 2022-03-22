@@ -68,7 +68,7 @@ impl Default for TestIteratorConfig {
                     .as_bytes()
                     .to_vec()
             }),
-            value_mapper: Box::new(|sort_index ,index| {
+            value_mapper: Box::new(|sort_index, index| {
                 format!("{:03}_value_test_{:05}", sort_index, index)
                     .as_bytes()
                     .iter()
@@ -294,9 +294,8 @@ pub async fn gen_iterator_test_sstable(
     opts: SSTableBuilderOptions,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_iterator_test_sstable_base(sst_id, opts, |x| x, sstable_store,TEST_KEYS_COUNT).await
+    gen_iterator_test_sstable_base(sst_id, opts, |x| x, sstable_store, TEST_KEYS_COUNT).await
 }
-
 
 // key=[sort_index, idx, epoch], value
 pub async fn gen_iterator_test_sstable_from_kv_pair(

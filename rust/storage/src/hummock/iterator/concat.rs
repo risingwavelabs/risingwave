@@ -150,21 +150,24 @@ mod tests {
             |x| x * 2,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-        ).await;
+        )
+        .await;
         let table1 = gen_iterator_test_sstable_base(
             1,
             default_builder_opt_for_test(),
             |x| x * 2,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-        ).await;
+        )
+        .await;
         let table2 = gen_iterator_test_sstable_base(
             2,
             default_builder_opt_for_test(),
             |x| x * 2,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
-        ).await;
+        )
+        .await;
         let mut iter = ConcatIterator::new(
             vec![Arc::new(table0), Arc::new(table1), Arc::new(table2)],
             sstable_store,
