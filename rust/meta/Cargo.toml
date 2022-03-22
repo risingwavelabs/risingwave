@@ -30,6 +30,7 @@ parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = "0.13"
 prost = "0.9"
+rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_pb = { path = "../prost" }
