@@ -19,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -88,7 +89,7 @@ impl<S: StateStore> JoinEntryState<S> {
     }
 
     fn fill_cached(
-        data: Vec<(Bytes, Bytes)>,
+        data: Vec<(Bytes, StorageValue)>,
         data_types: Arc<[DataType]>,
         pk_data_types: Arc<[DataType]>,
     ) -> Result<BTreeMap<PkType, StateValueType>> {
@@ -97,7 +98,7 @@ impl<S: StateStore> JoinEntryState<S> {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
             let key = pk_deserializer.deserialize_not_null(&raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
+            let value = deserializer.deserialize(raw_value.as_bytes())?;
             cached.insert(key, value);
         }
         Ok(cached)
