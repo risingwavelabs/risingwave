@@ -22,6 +22,7 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::{ensure, gen_error};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -421,9 +422,7 @@ where
         {
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
-            for &dependent_relation_id in &mview.dependent_relations {
-                core.increase_ref_count(dependent_relation_id);
-            }
+            ensure!(mview.dependent_relations.is_empty());
             Ok(())
         } else {
             Err(RwError::from(InternalError(
@@ -487,10 +486,6 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
-            for &dependent_relation_id in &mview.dependent_relations {
-                core.decrease_ref_count(dependent_relation_id);
-            }
-
             Ok(())
         } else {
             Err(RwError::from(InternalError(
