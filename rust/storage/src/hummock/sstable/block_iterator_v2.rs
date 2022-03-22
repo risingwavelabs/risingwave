@@ -103,8 +103,8 @@ impl BlockIteratorV2 {
         let prefix = self.decode_prefix_at(offset);
         self.key.truncate(prefix.overlap_len());
         self.key
-            .extend_from_slice(&self.block.slice(prefix.diff_key_range()));
-        self.value = self.block.slice(prefix.value_range());
+            .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
+        self.value = self.block.data().slice(prefix.value_range());
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         if self.restart_point_index + 1 < self.block.restart_point_len()
@@ -154,15 +154,15 @@ impl BlockIteratorV2 {
 
     /// Decode [`KeyPrefix`] at given offset.
     fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
-        KeyPrefix::decode(&mut &self.block.slice(offset..)[..], offset)
+        KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
     /// Search the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         self.block.search_restart_point_by(|probe| {
             let prefix = self.decode_prefix_at(*probe as usize);
-            let probe_key = self.block.slice(prefix.diff_key_range());
-            (&probe_key[..]).cmp(key)
+            let probe_key = &self.block.data()[prefix.diff_key_range()];
+            (probe_key).cmp(key)
         })
     }
 
@@ -176,8 +176,8 @@ impl BlockIteratorV2 {
     fn seek_restart_point_by_index(&mut self, index: usize) {
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset);
-        self.key = BytesMut::from(&self.block.slice(prefix.diff_key_range())[..]);
-        self.value = self.block.slice(prefix.value_range());
+        self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
+        self.value = self.block.data().slice(prefix.value_range());
         self.offset = offset;
         self.entry_len = prefix.entry_len();
         self.restart_point_index = index;
