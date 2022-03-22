@@ -17,8 +17,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 
 use crate::hummock::key::next_key;
-use crate::StateStore;
 use crate::storage_value::StorageValue;
+use crate::StateStore;
 
 /// Represents a unit part of [`Keyspace`].
 #[derive(Clone, Debug)]
@@ -150,7 +150,11 @@ impl<S: StateStore> Keyspace<S> {
     /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
-    pub async fn scan(&self, limit: Option<usize>, epoch: u64) -> Result<Vec<(Bytes, StorageValue)>> {
+    pub async fn scan(
+        &self,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, StorageValue)>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.scan(range, limit, epoch).await
     }

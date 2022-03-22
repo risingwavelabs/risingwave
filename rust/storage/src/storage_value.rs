@@ -13,7 +13,9 @@ impl From<Bytes> for StorageValue {
 
 impl From<Vec<u8>> for StorageValue {
     fn from(data: Vec<u8>) -> Self {
-        Self { user_value: data.into() }
+        Self {
+            user_value: data.into(),
+        }
     }
 }
 

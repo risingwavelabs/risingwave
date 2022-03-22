@@ -19,7 +19,8 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::StateStore;
-use crate::{StateStoreIter, storage_value::StorageValue};
+use crate::storage_value::StorageValue;
+use crate::StateStoreIter;
 
 #[derive(Clone)]
 pub struct TikvStateStore {}

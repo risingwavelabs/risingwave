@@ -14,9 +14,8 @@
 //
 use bytes::{Buf, BufMut, Bytes};
 
-use crate::storage_value::StorageValue;
-
 use super::{HummockError, HummockResult};
+use crate::storage_value::StorageValue;
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;

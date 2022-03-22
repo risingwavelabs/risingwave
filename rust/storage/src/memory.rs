@@ -86,7 +86,7 @@ impl MemoryStateStore {
     ) -> Result<()> {
         let mut inner = self.inner.lock().await;
         for (key, value) in kv_pairs {
-            inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes() ));
+            inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes()));
         }
         Ok(())
     }
@@ -144,7 +144,7 @@ impl StateStore for MemoryStateStore {
 
     async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
         let res = self.scan_inner(key..=key, Some(1), epoch).await?;
-        
+
         Ok(match res.as_slice() {
             [] => None,
             [(_, value)] => Some(value.clone()),
@@ -178,7 +178,11 @@ impl StateStore for MemoryStateStore {
         self.reverse_scan_inner(key_range, limit).await
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<StorageValue>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        epoch: u64,
+    ) -> Result<()> {
         self.ingest_batch_inner(kv_pairs, epoch).await
     }
 

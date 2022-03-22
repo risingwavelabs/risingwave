@@ -21,7 +21,8 @@ use futures::Future;
 use risingwave_common::error::Result;
 
 use super::StateStoreMetrics;
-use crate::{StateStore, StateStoreIter, storage_value::StorageValue};
+use crate::storage_value::StorageValue;
+use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -133,7 +134,11 @@ where
         Ok(result)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<StorageValue>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        epoch: u64,
+    ) -> Result<()> {
         if kv_pairs.is_empty() {
             return Ok(());
         }

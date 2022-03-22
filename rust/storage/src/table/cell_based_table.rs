@@ -122,8 +122,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .unwrap();
         let column_id = column.column_id.get_id() as usize;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row =
-            cell_based_row_deserializer.deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
+        let pk_and_row = cell_based_row_deserializer
+            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
         match pk_and_row {
             Some(pk_row) => {
                 return Ok(Some(pk_row.1.index(column_id).clone()));
@@ -142,8 +142,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .await
             .unwrap();
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
-        let pk_and_row =
-            cell_based_row_deserializer.deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
+        let pk_and_row = cell_based_row_deserializer
+            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
         Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
     }
 
@@ -348,8 +348,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             self.buf = self
                 .keyspace
                 .scan(Some(Self::SCAN_LIMIT), self.epoch)
-                .await?
-                ;
+                .await?;
         } else {
             let last_key = self.buf.last().unwrap().0.clone();
             let buf = self
@@ -444,7 +443,9 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value.as_bytes())?;
+            let pk_and_row = self
+                .cell_based_row_deserializer
+                .deserialize(key, value.as_bytes())?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),

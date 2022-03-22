@@ -20,9 +20,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
-use crate::storage_value::StorageValue;
-
 use super::{StateStore, StateStoreIter};
+use crate::storage_value::StorageValue;
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {}

@@ -71,7 +71,11 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
     ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
     ///   per-key modification history (e.g. in compaction), not across different keys.
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<StorageValue>)>, epoch: u64) -> Result<()>;
+    async fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        epoch: u64,
+    ) -> Result<()>;
 
     /// Functions the same as `ingest_batch`, except that data won't be persisted.
     async fn replicate_batch(
