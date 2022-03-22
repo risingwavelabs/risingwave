@@ -9,6 +9,7 @@ on:
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+
 jobs:
   start-runner-c:
     name: ec2-start-c
@@ -40,7 +41,7 @@ jobs:
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    name: compute-node-build
+    name: compute-node-build-release
     steps:
       - name: Checkout
         uses: actions/checkout@v2
