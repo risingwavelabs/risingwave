@@ -27,10 +27,11 @@ use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
 use super::info::BarrierActorInfo;
+use crate::cluster::NodeId;
 use crate::manager::StreamClientsRef;
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::FragmentManagerRef;
+use crate::stream::{FragmentManagerRef};
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
 /// barriers to send, and may do different stuffs after the barrier is collected.
@@ -50,6 +51,13 @@ pub enum Command {
     /// After the barrier is collected, it notifies the local stream manager of compute nodes to
     /// drop actors, and then delete the table fragments info from meta store.
     DropMaterializedView(TableRefId),
+
+    /// `StopActors` command generates a `Stop` barrier for whole active actors. This command
+    /// is used for recovery as the first step.
+    ///
+    /// After collected the barriers from all actors, it notifies the local stream manager of
+    /// compute nodes to drop actors, and then enter next step to update/build all the actors.
+    StopActors(HashMap<NodeId, Vec<ActorId>>),
 
     /// `CreateMaterializedView` command generates a `Add` barrier by given info.
     ///
@@ -132,6 +140,11 @@ where
                 Mutation::Stop(StopMutation { actors })
             }
 
+            Command::StopActors(actor_maps) => {
+                let actors = actor_maps.values().flatten().cloned().collect();
+                Mutation::Stop(StopMutation { actors })
+            }
+
             Command::CreateMaterializedView { dispatches, .. } => {
                 let actors = dispatches
                     .iter()
@@ -185,6 +198,31 @@ where
                 self.fragment_manager
                     .drop_table_fragments(&table_id)
                     .await?;
+            }
+
+            Command::StopActors(actor_maps) => {
+                // Tell compute nodes to drop actors.
+                let futures = actor_maps.iter().map(|(node_id, actors)| {
+                    let node = self.info.node_map.get(node_id).unwrap();
+                    let request_id = Uuid::new_v4().to_string();
+
+                    async move {
+                        let mut client = self.clients.get(node).await?;
+
+                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
+                        // TODO: remove table_ref_id in DropActorsRequest.
+                        let request = DropActorsRequest {
+                            request_id,
+                            table_ref_id: None,
+                            actor_ids: actors.to_owned(),
+                        };
+                        client.drop_actors(request).await.to_rw_result()?;
+
+                        Ok::<_, RwError>(())
+                    }
+                });
+
+                try_join_all(futures).await?;
             }
 
             Command::CreateMaterializedView {
