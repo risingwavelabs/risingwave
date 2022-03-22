@@ -282,7 +282,7 @@ pub fn iterator_test_key_of_epoch(sort_index: u64, idx: usize, epoch: Epoch) -> 
     )
 }
 
-/// The value of an sort_index-index , the 'sort_index' is used to sort
+/// The value of an sort_index-index , the `sort_index` is used to sort
 pub fn iterator_test_value_of(sort_index: u64, idx: usize) -> Vec<u8> {
     format!("{:03}_value_test_{:05}", sort_index, idx)
         .as_bytes()
