@@ -466,3 +466,23 @@ description = "Update CI workflow by applying templates"
 
 [tasks.c]
 alias = "check"
+
+[tasks.install]
+category = "RiseDev - Prepare"
+description = "Install RiseDev to user local"
+script = """
+#!/bin/bash
+set -e
+
+DIR="$(pwd)"
+INSTALL_PATH="$CARGO_HOME/bin/risedev"
+
+cat <<EOF > "${INSTALL_PATH}"
+#!/bin/bash
+set -e
+cd "$DIR"
+./risedev "\\$@"
+EOF
+chmod +x "${INSTALL_PATH}"
+echo RiseDev installed to $(tput setaf 4)${INSTALL_PATH}$(tput sgr0)
+"""

@@ -408,13 +408,18 @@ fn main() -> Result<()> {
             print!("{}", log_buffer);
 
             println!(
-                "* You may find logs using `{}` command",
+                "* You may find logs using {} command",
                 style("./risedev l").blue().bold()
             );
 
             println!(
                 "* Run {} to kill cluster.",
                 style("./risedev k").blue().bold()
+            );
+
+            println!(
+                "* Run {} to run `risedev` anywhere!",
+                style("./risedev install").blue().bold()
             );
 
             Ok(())
