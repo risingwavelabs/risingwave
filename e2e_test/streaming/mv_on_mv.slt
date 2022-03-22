@@ -19,9 +19,6 @@ statement ok
 create materialized view m4 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2 on m1.v1 = m2.v1;
 
 statement ok
-flush;
-
-statement ok
 insert into t1 values (2,1),(1,2),(1,1);
 
 statement ok
@@ -60,9 +57,6 @@ select v1, v2, v10, v20 from m4;
 statement ok
 create materialized view m5 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2 on m1.v1 = m2.v1;
 
-statement ok
-flush;
-
 query IIII
 select v1, v2, v10, v20 from m5;
 ----
@@ -90,9 +84,6 @@ create materialized view m7 as select sum(v1) as sum_v1, avg(v3) as avg_v3 from 
 
 statement ok
 create materialized view m8 as select sum(v1) as sum_v1 from m6 group by v2;
-
-statement ok
-flush;
 
 statement ok
 insert into t2 values (1,2,3),(1,5,6),(3,2,6);
@@ -132,9 +123,6 @@ create materialized view m9 as select * from t2;
 statement ok
 create materialized view m10 as select sum(v1) as sum_v1, sum(v3) as sum_v3 from m9 group by v2;
 
-statement ok
-flush;
-
 query III
 select v1, v2, v3 from m9;
 ----
@@ -152,9 +140,6 @@ statement ok
 create table t3(v1 int not null, v2 int not null, v3 int not null);
 
 statement ok
-flush;
-
-statement ok
 insert into t3 values (1,2,3),(1,5,6),(3,2,6);
 
 statement ok
@@ -165,9 +150,6 @@ create materialized view m11 as select v1, v2, v3 from t3;
 
 statement ok
 create materialized view m12 as select round(avg(v1), 1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from m11;
-
-statement ok
-flush;
 
 query III
 select v1, v2, v3 from m11;
@@ -185,9 +167,6 @@ statement ok
 create table t4(v1 real not null);
 
 statement ok
-flush;
-
-statement ok
 insert into t4 values(1),(2),(3);
 
 statement ok
@@ -198,9 +177,6 @@ create materialized view m13 as select * from t4;
 
 statement ok
 create materialized view m14 as select count(v1) as count_v1 from m13;
-
-statement ok
-flush;
 
 query I
 select v1 from m13;
@@ -216,15 +192,6 @@ select * from m14;
 
 statement ok
 create materialized view m15 as select * from (select t1.v1 as t1v1, t2.v1 as t2v1 from m13 t1 join m13 t2 on t1.v1 = t2.v1);
-
-statement ok
-flush;
-
-statement ok
-flush;
-
-statement ok
-flush;
 
 query II
 select v1, v10 from m15;

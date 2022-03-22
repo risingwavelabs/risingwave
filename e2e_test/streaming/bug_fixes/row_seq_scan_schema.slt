@@ -7,9 +7,6 @@ insert into t values (1,4,2), (2,3,3), (3,4,4), (4,3,5);
 statement ok
 create materialized view mv as select * from t;
 
-statement ok
-flush;
-
 query III rowsort
 select v1, v2, v3 from mv;
 ----
