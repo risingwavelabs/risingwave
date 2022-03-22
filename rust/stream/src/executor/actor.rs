@@ -58,9 +58,13 @@ impl Actor {
             match message {
                 Ok(Some(barrier)) => {
                     // collect barriers to local barrier manager
-                    self.context
-                        .lock_barrier_manager()
-                        .collect(self.id, &barrier)?;
+                    {
+                        let mut barrier_manager = self.context.lock_barrier_manager();
+                        barrier_manager.collect(self.id, &barrier)?;
+                        for epoch in barrier.finished_epochs {
+                            barrier_manager.finish(epoch, self.id)?;
+                        }
+                    }
 
                     // then stop this actor if asked
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {

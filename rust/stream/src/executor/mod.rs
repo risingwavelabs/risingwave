@@ -140,6 +140,8 @@ pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub span: tracing::Span,
+
+    pub finished_epochs: HashSet<u64>,
 }
 
 impl Default for Barrier {
@@ -148,6 +150,7 @@ impl Default for Barrier {
             span: tracing::Span::none(),
             epoch: Epoch::default(),
             mutation: None,
+            finished_epochs: Default::default(),
         }
     }
 }
@@ -292,6 +295,7 @@ impl Barrier {
             },
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            finished_epochs: Default::default(),
         })
     }
 }
@@ -355,6 +359,13 @@ impl Message {
     pub fn as_chunk(&self) -> Option<&StreamChunk> {
         match self {
             Self::Chunk(chunk) => Some(chunk),
+            _ => None,
+        }
+    }
+
+    pub fn as_barrier(&self) -> Option<&Barrier> {
+        match self {
+            Self::Barrier(barrier) => Some(barrier),
             _ => None,
         }
     }

@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 use std::iter::once;
 
-use super::{BarrierCollectResult, BarrierCollectTx};
+use super::BarrierCollectTx;
 use crate::executor::Barrier;
 use crate::task::ActorId;
 

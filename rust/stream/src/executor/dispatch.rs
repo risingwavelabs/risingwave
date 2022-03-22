@@ -246,10 +246,15 @@ impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
 impl<Inner: Dispatcher + Send + Sync + 'static> StreamConsumer for DispatchExecutor<Inner> {
     async fn next(&mut self) -> Result<Option<Barrier>> {
         let msg = self.input.next().await?;
-        let barrier = if let Message::Barrier(ref barrier) = msg {
-            Some(barrier.clone())
-        } else {
-            None
+        let barrier = msg.as_barrier().cloned();
+
+        let msg = {
+            let mut msg = msg;
+            match &mut msg {
+                Message::Chunk(_) => {}
+                Message::Barrier(barrier) => barrier.finished_epochs.clear(),
+            };
+            msg
         };
         self.dispatch(msg).await?;
 

@@ -226,7 +226,7 @@ where
     S: MetaStore,
 {
     const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
+        Duration::from_millis(if cfg!(debug_assertions) { 500 } else { 100 });
 
     /// Create a new [`BarrierManager`].
     pub fn new(

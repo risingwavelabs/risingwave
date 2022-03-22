@@ -28,7 +28,7 @@ use crate::task::{ExecutorParams, StreamManagerCore};
 #[derive(Debug)]
 enum ChainState {
     Init,
-    ReadingSnapshot,
+    ReadingSnapshot { epoch: u64 },
     ReadingMView,
 }
 
@@ -43,6 +43,9 @@ pub struct ChainExecutor {
     state: ChainState,
     schema: Schema,
     column_idxs: Vec<usize>,
+
+    finished_epoch: Option<u64>,
+
     /// Logical Operator Info
     op_info: String,
 }
@@ -92,32 +95,38 @@ impl ChainExecutor {
             state: ChainState::Init,
             schema,
             column_idxs,
+            finished_epoch: None,
             op_info,
-        }
-    }
-
-    fn mapping(&self, msg: Message) -> Result<Message> {
-        match msg {
-            Message::Chunk(chunk) => {
-                let columns = self
-                    .column_idxs
-                    .iter()
-                    .map(|i| chunk.columns()[*i].clone())
-                    .collect();
-                Ok(Message::Chunk(StreamChunk::new(
-                    chunk.ops().to_vec(),
-                    columns,
-                    chunk.visibility().clone(),
-                )))
-            }
-            _ => Ok(msg),
         }
     }
 
     /// Read next message from mview side.
     async fn read_mview(&mut self) -> Result<Message> {
         let msg = self.mview.next().await?;
-        self.mapping(msg)
+
+        // Mapping the chunk.
+        let msg = match msg {
+            Message::Chunk(chunk) => {
+                let columns = self
+                    .column_idxs
+                    .iter()
+                    .map(|i| chunk.columns()[*i].clone())
+                    .collect();
+                Message::Chunk(StreamChunk::new(
+                    chunk.ops().to_vec(),
+                    columns,
+                    chunk.visibility().clone(),
+                ))
+            }
+            Message::Barrier(mut barrier) => {
+                if let Some(finished_epoch) = self.finished_epoch.take() {
+                    barrier.finished_epochs.insert(finished_epoch);
+                }
+                Message::Barrier(barrier)
+            }
+        };
+
+        Ok(msg)
     }
 
     /// Read next message from snapshot side and update chain state if snapshot side reach EOF.
@@ -127,8 +136,14 @@ impl ChainExecutor {
             Err(e) => {
                 // TODO: Refactor this once we find a better way to know the upstream is done.
                 if let ErrorCode::Eof = e.inner() {
-                    self.state = ChainState::ReadingMView;
-                    return self.read_mview().await;
+                    match self.state {
+                        ChainState::ReadingSnapshot { epoch } => {
+                            self.state = ChainState::ReadingMView;
+                            self.finished_epoch = Some(epoch);
+                            return self.read_mview().await;
+                        }
+                        _ => unreachable!(),
+                    }
                 }
                 Err(e)
             }
@@ -148,7 +163,9 @@ impl ChainExecutor {
                     // If the barrier is a conf change from mview side, init snapshot from its epoch
                     // and set its state to reading snapshot.
                     self.snapshot.init(barrier.epoch.prev)?;
-                    self.state = ChainState::ReadingSnapshot;
+                    self.state = ChainState::ReadingSnapshot {
+                        epoch: barrier.epoch.curr,
+                    };
                 } else {
                     // If the barrier is not a conf change, means snapshot already read and state
                     // should be set to reading mview.
@@ -162,7 +179,7 @@ impl ChainExecutor {
     async fn next_inner(&mut self) -> Result<Message> {
         match &self.state {
             ChainState::Init => self.init().await,
-            ChainState::ReadingSnapshot => self.read_snapshot().await,
+            ChainState::ReadingSnapshot { .. } => self.read_snapshot().await,
             ChainState::ReadingMView => self.read_mview().await,
         }
     }
