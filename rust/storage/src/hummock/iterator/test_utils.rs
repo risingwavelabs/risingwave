@@ -282,7 +282,7 @@ pub fn iterator_test_key_of_epoch(sort_index: u64, idx: usize, epoch: Epoch) -> 
     )
 }
 
-/// The value of an index , the 'sort_index' is used to sort
+/// The value of an sort_index-index , the 'sort_index' is used to sort
 pub fn iterator_test_value_of(sort_index: u64, idx: usize) -> Vec<u8> {
     format!("{:03}_value_test_{:05}", sort_index, idx)
         .as_bytes()
@@ -294,8 +294,9 @@ pub async fn gen_iterator_test_sstable(
     opts: SSTableBuilderOptions,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    gen_iterator_test_sstable_base(sst_id, opts, |x| x, sstable_store).await
+    gen_iterator_test_sstable_base(sst_id, opts, |x| x, sstable_store,TEST_KEYS_COUNT).await
 }
+
 
 // key=[sort_index, idx, epoch], value
 pub async fn gen_iterator_test_sstable_from_kv_pair(
@@ -322,11 +323,12 @@ pub async fn gen_iterator_test_sstable_base(
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
     sstable_store: SstableStoreRef,
+    total: usize,
 ) -> Sstable {
     gen_test_sstable(
         opts,
         sst_id,
-        (0..TEST_KEYS_COUNT).map(|i| {
+        (0..total).map(|i| {
             (
                 iterator_test_key_of(sst_id, idx_mapping(i)),
                 HummockValue::Put(iterator_test_value_of(sst_id, idx_mapping(i))),
