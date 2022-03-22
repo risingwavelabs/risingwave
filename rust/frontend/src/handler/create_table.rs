@@ -18,15 +18,35 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable};
 use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
+use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Query};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::session::QueryContext;
+use crate::optimizer::PlanRef;
+use crate::planner::Planner;
+use crate::session::{QueryContext, SessionImpl};
 
 pub const ROWID_NAME: &str = "_row_id";
+
+pub(super) fn gen_create_table_associated_mv_plan(
+    session: &SessionImpl,
+    planner: &mut Planner,
+    query: Query,
+) -> Result<PlanRef> {
+    todo!()
+
+    // let bound_query = Binder::new(
+    //     session.env().catalog_reader().read_guard(),
+    //     session.database().to_string(),
+    // )
+    // .bind_query(query)?;
+    // let logical = planner.plan_query(bound_query)?;
+    // let plan = logical.gen_create_mv_plan();
+
+    // Ok(plan)
+}
 
 pub async fn handle_create_table(
     context: QueryContext,
@@ -34,12 +54,14 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
+
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), &schema_name, &table_name)?;
+
     let column_catalogs = iter::once(Ok(ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
@@ -60,6 +82,8 @@ pub async fn handle_create_table(
     }))
     .collect::<Result<_>>()?;
 
+    let source = ProstSource::default();
+
     let table = ProstTable {
         id: 0,
         schema_id,
@@ -72,10 +96,11 @@ pub async fn handle_create_table(
         optional_associated_source_id: None,
     };
 
+    let plan = gen_create_table_associated_mv_plan(todo!(), todo!(), todo!())?.to_stream_prost();
+
     let catalog_writer = session.env().catalog_writer();
-    // FIX ME
     catalog_writer
-        .create_materialized_table_source_workaround(table)
+        .create_materialized_source(source, table, plan)
         .await?;
 
     Ok(PgResponse::new(
