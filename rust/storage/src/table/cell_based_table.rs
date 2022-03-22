@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-#![allow(dead_code)]
-#![allow(unused)]
 
 use std::collections::HashMap;
-use std::ops::Index;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
@@ -111,40 +108,61 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get(&self, pk: Row, column: &ColumnDesc, epoch: u64) -> Result<Option<Datum>> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
+    pub async fn get(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
+        assert!(
+            self.pk_serializer.is_some(),
+            "this table is adhoc and there's no sort key serializer"
+        );
+        let get_column_id = ColumnId::new(column_id);
+        let column_index = self.column_id_to_column_index.get(&get_column_id).unwrap();
+        let key = &[
+            &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
+            &serialize_column_id(&get_column_id)?,
+        ]
+        .concat();
         let state_store_get_res = self
             .keyspace
-            .state_store()
             .get(&key.clone(), epoch)
             .await
-            .unwrap();
-        let column_id = column.column_id.get_id() as usize;
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        match pk_and_row {
-            Some(pk_row) => {
-                return Ok(Some(pk_row.1.index(column_id).clone()));
-            }
-            None => Ok(None),
+            .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
+
+        if let Some(state_store_get_res) = state_store_get_res {
+            let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
+            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+            Ok(Some(cell))
+        } else {
+            Ok(None)
         }
     }
 
-    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Row> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
-        let state_store_get_res = self
-            .keyspace
-            .state_store()
-            .get(&key.clone(), epoch)
-            .await
-            .unwrap();
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
+    pub async fn get_row(&self, pk: Row, column_ids: Vec<i32>, epoch: u64) -> Result<Row> {
+        assert!(
+            self.pk_serializer.is_some(),
+            "this table is adhoc and there's no sort key serializer"
+        );
+        let mut row = Vec::with_capacity(column_ids.len());
+        for column_id in column_ids {
+            let get_column_id = ColumnId::new(column_id);
+            let key = &[
+                &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
+                &serialize_column_id(&get_column_id)?,
+            ]
+            .concat();
+            let state_store_get_res = self
+                .keyspace
+                .get(&key.clone(), epoch)
+                .await
+                .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
+            let column_index = self.column_id_to_column_index.get(&get_column_id).unwrap();
+            if let Some(state_store_get_res) = state_store_get_res {
+                let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
+                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+                row.push(cell);
+            } else {
+                row.push(None);
+            }
+        }
+        Ok(Row::new(row))
     }
 
     pub async fn insert_row(
@@ -182,7 +200,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .cell_based_row_serializer
             .serialize(&arrange_key_buf, cell_value, column_ids)
             .unwrap();
-        for (key, value) in bytes {
+        for (key, _value) in bytes {
             local.delete(key);
         }
         batch.ingest(epoch).await?;
@@ -205,10 +223,14 @@ impl<S: StateStore> CellBasedTable<S> {
             .serialize(&arrange_key_buf, cell_value, column_ids)
             .unwrap();
         // delete original kv_pairs in state_store
-        for (key, value) in bytes.clone() {
+        for (key, _value) in bytes.clone() {
             local.delete(key);
         }
+        batch.ingest(epoch).await?;
+
         // write updated kv_pairs in state_store
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
         for (key, value) in bytes {
             match value {
                 Some(val) => local.put(key, val),
@@ -260,7 +282,6 @@ impl<S: StateStore> CellBasedTable<S> {
 
         let column_index = self.column_id_to_column_index.get(&column_id).unwrap();
         // TODO(MrCroxx): More efficient encoding is needed.
-
         let buf = self
             .keyspace
             .get(
@@ -273,7 +294,6 @@ impl<S: StateStore> CellBasedTable<S> {
             )
             .await
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
-
         if let Some(buf) = buf {
             let mut de = value_encoding::Deserializer::new(buf.to_bytes());
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
@@ -282,6 +302,7 @@ impl<S: StateStore> CellBasedTable<S> {
             Ok(None)
         }
     }
+
     pub fn schema(&self) -> &Schema {
         &self.schema
     }
@@ -299,7 +320,7 @@ fn generate_column_id_to_column_index_mapping(
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     let mut column_ids = Vec::with_capacity(column_descs.len());
-    for (index, column_desc) in column_descs.iter().enumerate() {
+    for (_, column_desc) in column_descs.iter().enumerate() {
         column_ids.push(column_desc.column_id);
     }
     column_ids
@@ -326,7 +347,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
     async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
-        keyspace.state_store().wait_epoch(epoch).await;
+        keyspace.state_store().wait_epoch(epoch).await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
