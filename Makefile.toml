@@ -486,3 +486,22 @@ EOF
 chmod +x "${INSTALL_PATH}"
 echo RiseDev installed to $(tput setaf 4)${INSTALL_PATH}$(tput sgr0)
 """
+
+[tasks.ci-start]
+category = "RiseDev - CI"
+dependencies = [
+  "clean-data",
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["${@}"]
+description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
+
+[tasks.ci-kill]
+category = "RiseDev - CI"
+dependencies = [
+  "k",
+  "l",
+  "check-logs",
+]
+description = "Kill cluster, dump logs and check logs"
