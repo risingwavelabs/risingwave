@@ -17,19 +17,6 @@ where
     barrier_manager_ref: BarrierManagerRef<S>,
 }
 
-#[allow(dead_code)]
-pub struct CreateSourceContext {
-    pub name: String,
-    pub source_id: u32,
-    pub discovery_new_split: bool,
-    pub properties: HashMap<String, String>,
-}
-
-#[allow(dead_code)]
-pub struct DropSourceContext {
-    pub id: u32,
-}
-
 impl<S> SourceManager<S>
 where
     S: MetaStore,
