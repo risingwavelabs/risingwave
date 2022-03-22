@@ -53,7 +53,7 @@ impl LogicalProject {
         }
 
         let schema = Self::derive_schema(&exprs, &expr_alias);
-        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &schema, &exprs);
+        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
@@ -67,21 +67,21 @@ impl LogicalProject {
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping(input: &Schema, output: &Schema, exprs: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; output.len()];
+    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
             map[i] = match expr {
                 ExprImpl::InputRef(input) => Some(input.index()),
                 _ => None,
             }
         }
-        ColIndexMapping::with_target_upper(map, input.len())
+        ColIndexMapping::with_target_upper(map, input_len)
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(input: &Schema, output: &Schema, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping(input, output, exprs).inverse()
+    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        Self::o2i_col_mapping(input_len, exprs).inverse()
     }
 
     pub fn create(
@@ -138,13 +138,8 @@ impl LogicalProject {
         Schema { fields }
     }
 
-    fn derive_pk(
-        input_schema: &Schema,
-        input_pk: &[usize],
-        output_schema: &Schema,
-        exprs: &[ExprImpl],
-    ) -> Vec<usize> {
-        let i2o = Self::i2o_col_mapping(input_schema, output_schema, exprs);
+    fn derive_pk(input_schema: &Schema, input_pk: &[usize], exprs: &[ExprImpl]) -> Vec<usize> {
+        let i2o = Self::i2o_col_mapping(input_schema.len(), exprs);
         input_pk
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
