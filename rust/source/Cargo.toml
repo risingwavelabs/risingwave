@@ -28,9 +28,9 @@ protobuf-codegen-pure = "2.25.2"
 rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
-risingwave_connector = { path = "../connector" }
 serde = { version = "1", features = ["derive"] }
 serde-protobuf = "0.8"
 serde-value = "0.7"
