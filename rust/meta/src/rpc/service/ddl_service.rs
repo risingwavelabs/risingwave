@@ -176,13 +176,13 @@ where
             .map_err(tonic_err)? as u32;
 
         self.catalog_manager
-            .start_create_source_process(&source)
+            .start_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
 
-        if let Err(e) = self.create_source_inner(&source).await {
+        if let Err(e) = self.create_source_on_compute_node(&source).await {
             self.catalog_manager
-                .cancel_create_source_process(&source)
+                .cancel_create_source_procedure(&source)
                 .await
                 .map_err(tonic_err)?;
             return Err(e.to_grpc_status());
@@ -191,7 +191,7 @@ where
         source.id = id;
         let version = self
             .catalog_manager
-            .finish_create_source_process(&source)
+            .finish_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
         Ok(Response::new(CreateSourceResponse {
@@ -206,7 +206,18 @@ where
         request: Request<DropSourceRequest>,
     ) -> Result<Response<DropSourceResponse>, Status> {
         let source_id = request.into_inner().source_id;
-        let version = self.drop_source_inner(source_id).await.map_err(tonic_err)?;
+
+        // 1. Drop source in catalog. Ref count will be checked.
+        let version = self
+            .catalog_manager
+            .drop_source(source_id)
+            .await
+            .map_err(tonic_err)?;
+
+        // 2. Drop source on compute nodes.
+        self.drop_source_on_compute_node(source_id)
+            .await
+            .map_err(tonic_err)?;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -230,14 +241,14 @@ where
 
         // 1. Mark current mview as "creating" and add reference count to dependent tables
         self.catalog_manager
-            .start_create_table_process(&mview)
+            .start_create_table_procedure(&mview)
             .await
             .map_err(tonic_err)?;
 
         // 2. Create mview in stream manager
-        if let Err(e) = self.create_materialized_view_inner(&stream_node, id).await {
+        if let Err(e) = self.create_mview_on_compute_node(&stream_node, id).await {
             self.catalog_manager
-                .cancel_create_table_process(&mview)
+                .cancel_create_table_procedure(&mview)
                 .await
                 .map_err(tonic_err)?;
             return Err(e.to_grpc_status());
@@ -245,7 +256,7 @@ where
         mview.id = id;
         let version = self
             .catalog_manager
-            .finish_create_table_process(&mview)
+            .finish_create_table_procedure(&mview)
             .await
             .map_err(tonic_err)?;
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -260,8 +271,15 @@ where
         request: Request<DropMaterializedViewRequest>,
     ) -> Result<Response<DropMaterializedViewResponse>, Status> {
         let table_id = request.into_inner().table_id;
+        // 1. Drop table in catalog. Ref count will be checked.
         let version = self
-            .drop_materialized_view_inner(table_id)
+            .catalog_manager
+            .drop_table(table_id)
+            .await
+            .map_err(tonic_err)?;
+
+        // 2. drop mv in stream manager
+        self.drop_mview_on_compute_node(table_id)
             .await
             .map_err(tonic_err)?;
 
@@ -334,7 +352,7 @@ where
         Ok(all_stream_clients)
     }
 
-    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
+    async fn create_source_on_compute_node(&self, source: &Source) -> RwResult<()> {
         // Create source on compute nodes.
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
@@ -352,11 +370,7 @@ where
         Ok(())
     }
 
-    async fn drop_source_inner(&self, source_id: SourceId) -> RwResult<CatalogVersion> {
-        // 1. Drop source in catalog. Ref count will be checked.
-        let version = self.catalog_manager.drop_source(source_id).await?;
-
-        // 2. Drop source on compute nodes.
+    async fn drop_source_on_compute_node(&self, source_id: SourceId) -> RwResult<()> {
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
             .all_stream_clients()
@@ -368,10 +382,10 @@ where
             });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
-        Ok(version)
+        Ok(())
     }
 
-    async fn create_materialized_view_inner(
+    async fn create_mview_on_compute_node(
         &self,
         stream_node: &StreamNode,
         id: TableId,
@@ -395,55 +409,47 @@ where
         Ok(())
     }
 
-    async fn drop_materialized_view_inner(&self, table_id: u32) -> RwResult<CatalogVersion> {
+    async fn drop_mview_on_compute_node(&self, table_id: u32) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
-        // 1. Drop table in catalog. Ref count will be checked.
-        let version = self.catalog_manager.drop_table(table_id).await?;
-
-        // 2. drop mv in stream manager
         // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
         self.stream_manager
             .drop_materialized_view(&TableRefId::from(&TableId::new(table_id)))
             .await?;
 
-        Ok(version)
+        Ok(())
     }
 
-    // TODO: transactional creation of source and mview
     async fn create_materialized_source_inner(
         &self,
         mut source: Source,
         mut mview: Table,
         mut stream_node: StreamNode,
     ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
-        // 1. Create source.
         let source_id = self
             .id_gen_manager
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
+        source.id = source_id;
 
         self.catalog_manager
-            .start_create_source_process(&source)
+            .start_create_materialized_source_procedure(&source, &mview)
             .await?;
 
-        if let Err(e) = self.create_source_inner(&source).await {
+        // Create source
+        if let Err(e) = self.create_source_on_compute_node(&source).await {
             self.catalog_manager
-                .cancel_create_source_process(&source)
+                .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
             return Err(e);
         }
-        source.id = source_id;
-        let _version_1 = self
-            .catalog_manager
-            .finish_create_source_process(&source)
-            .await?;
 
-        // 2. Fill in the correct source id for stream node.
+        // Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
             use risingwave_common::catalog::TableId;
             let mut source_count = 0;
             if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
-                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into(); // TODO: refactor using source id.
+                // TODO: refactor using source id.
+                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
                 source_count += 1;
             }
             for input in &mut stream_node.input {
@@ -458,37 +464,36 @@ where
             "require exactly 1 source node when creating materialized source"
         );
 
-        // 3. Fill in the correct source id for mview.
+        // Fill in the correct source id for mview.
         mview.optional_associated_source_id =
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 
-        // 4. Create materialized view.
+        // Create mview
         let mview_id = self
             .id_gen_manager
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
 
-        self.catalog_manager
-            .start_create_table_process(&mview)
-            .await?;
-
         if let Err(e) = self
-            .create_materialized_view_inner(&stream_node, mview_id)
+            .create_mview_on_compute_node(&stream_node, mview_id)
             .await
         {
             self.catalog_manager
-                .cancel_create_table_process(&mview)
+                .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
-            // drop source
-            self.drop_source_inner(source_id).await?;
+            // drop previously created source
+            self.drop_source_on_compute_node(source_id).await?;
             return Err(e);
         }
         mview.id = mview_id;
-        let version_2 = self
+
+        // Finally, update the catalog.
+        let version = self
             .catalog_manager
-            .finish_create_table_process(&mview)
+            .finish_create_materialized_source_procedure(&source, &mview)
             .await?;
-        Ok((source_id, mview_id, version_2))
+
+        Ok((source_id, mview_id, version))
     }
 
     async fn drop_materialized_source_inner(
@@ -496,13 +501,17 @@ where
         source_id: SourceId,
         table_id: TableId,
     ) -> RwResult<CatalogVersion> {
-        // 1. Drop mview.
-        let _version_1 = self.drop_materialized_view_inner(table_id).await?;
+        // 1. Drop materialized source in catalog, source_id will be checked if it is
+        // associated_source_id in mview.
+        let version = self
+            .catalog_manager
+            .drop_materialized_source(source_id, table_id)
+            .await?;
 
-        // 2. Drop source.
-        // TODO: should we extract the source id from the dropped mview and validate it?
-        let version_2 = self.drop_source_inner(source_id).await?;
+        // 2. Drop source and mv separately.
+        self.drop_source_on_compute_node(source_id).await?;
+        self.drop_mview_on_compute_node(table_id).await?;
 
-        Ok(version_2)
+        Ok(version)
     }
 }

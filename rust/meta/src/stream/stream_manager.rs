@@ -51,6 +51,7 @@ pub struct CreateMaterializedViewContext {
 }
 
 /// Stream Manager
+
 pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
@@ -310,7 +311,10 @@ mod tests {
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
-    use risingwave_pb::stream_service::*;
+    use risingwave_pb::stream_service::{
+        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
+    };
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};

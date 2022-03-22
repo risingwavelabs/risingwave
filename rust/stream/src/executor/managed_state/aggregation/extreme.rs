@@ -292,7 +292,7 @@ where
                 .await?;
 
             for (raw_key, raw_value) in all_data {
-                let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
+                let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
                 let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
@@ -386,7 +386,7 @@ where
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
-            let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
+            let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
             let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;

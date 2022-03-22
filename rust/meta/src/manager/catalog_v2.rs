@@ -22,14 +22,16 @@ use anyhow::anyhow;
 use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::{ensure, gen_error};
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::{IdCategory, IdGeneratorManagerRef};
 use crate::manager::NotificationManagerRef;
-use crate::model::MetadataModel;
-use crate::storage::MetaStore;
+use crate::model::{MetadataModel, Transactional};
+use crate::storage::{MetaStore, Transaction};
 
 pub type DatabaseId = u32;
 pub type SchemaId = u32;
@@ -189,7 +191,7 @@ where
         }
     }
 
-    pub async fn start_create_table_process(&self, table: &Table) -> Result<()> {
+    pub async fn start_create_table_procedure(&self, table: &Table) -> Result<()> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && !core.has_in_progress_creation(&key) {
@@ -200,12 +202,12 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "table already exists or in progress creation".to_string(),
+                "table already exists or in creating procedure".to_string(),
             )))
         }
     }
 
-    pub async fn finish_create_table_process(&self, table: &Table) -> Result<CatalogVersion> {
+    pub async fn finish_create_table_procedure(&self, table: &Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
@@ -222,12 +224,12 @@ where
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
-                "table already exist or not in progress creation".to_string(),
+                "table already exist or not in creating procedure".to_string(),
             )))
         }
     }
 
-    pub async fn cancel_create_table_process(&self, table: &Table) -> Result<()> {
+    pub async fn cancel_create_table_procedure(&self, table: &Table) -> Result<()> {
         let mut core = self.core.lock().await;
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
@@ -238,7 +240,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "table already exist or not in progress creation".to_string(),
+                "table already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -303,7 +305,7 @@ where
         }
     }
 
-    pub async fn start_create_source_process(&self, source: &Source) -> Result<()> {
+    pub async fn start_create_source_procedure(&self, source: &Source) -> Result<()> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && !core.has_in_progress_creation(&key) {
@@ -311,12 +313,12 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "source already exists or in progress creation".to_string(),
+                "source already exists or in creating procedure".to_string(),
             )))
         }
     }
 
-    pub async fn finish_create_source_process(&self, source: &Source) -> Result<CatalogVersion> {
+    pub async fn finish_create_source_procedure(&self, source: &Source) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
@@ -333,12 +335,12 @@ where
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
 
-    pub async fn cancel_create_source_process(&self, source: &Source) -> Result<()> {
+    pub async fn cancel_create_source_procedure(&self, source: &Source) -> Result<()> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
@@ -346,7 +348,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -402,6 +404,169 @@ where
             Err(RwError::from(InternalError(
                 "source doesn't exist".to_string(),
             )))
+        }
+    }
+
+    pub async fn start_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && !core.has_in_progress_creation(&source_key)
+            && !core.has_in_progress_creation(&mview_key)
+        {
+            core.mark_creating(&source_key);
+            core.mark_creating(&mview_key);
+            ensure!(mview.dependent_relations.is_empty());
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source or table already exist".to_string(),
+            )))
+        }
+    }
+
+    pub async fn finish_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && core.has_in_progress_creation(&source_key)
+            && core.has_in_progress_creation(&mview_key)
+        {
+            core.unmark_creating(&source_key);
+            core.unmark_creating(&mview_key);
+
+            let mut transaction = Transaction::default();
+            source.upsert_in_transaction(&mut transaction)?;
+            mview.upsert_in_transaction(&mut transaction)?;
+            core.meta_store_ref.txn(transaction).await?;
+            core.add_source(source);
+            core.add_table(mview);
+
+            self.nm
+                .notify_frontend(Operation::Add, &Info::TableV2(mview.to_owned()))
+                .await;
+            // Currently frontend uses source's version
+            let version = self
+                .nm
+                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
+                .await
+                .into_inner();
+            Ok(version)
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn cancel_create_materialized_source_procedure(
+        &self,
+        source: &Source,
+        mview: &Table,
+    ) -> Result<()> {
+        let mut core = self.core.lock().await;
+        let source_key = (source.database_id, source.schema_id, source.name.clone());
+        let mview_key = (mview.database_id, mview.schema_id, mview.name.clone());
+        if !core.has_source(source)
+            && !core.has_table(mview)
+            && core.has_in_progress_creation(&source_key)
+            && core.has_in_progress_creation(&mview_key)
+        {
+            core.unmark_creating(&source_key);
+            core.unmark_creating(&mview_key);
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(
+                "source already exist or not in creating procedure".to_string(),
+            )))
+        }
+    }
+
+    pub async fn drop_materialized_source(
+        &self,
+        source_id: SourceId,
+        mview_id: TableId,
+    ) -> Result<CatalogVersion> {
+        let mut core = self.core.lock().await;
+        let mview = Table::select(&*self.meta_store_ref, &mview_id).await?;
+        let source = Source::select(&*self.meta_store_ref, &source_id).await?;
+        match (mview, source) {
+            (Some(mview), Some(source)) => {
+                // decrease associated source's ref count first to avoid deadlock
+                if let Some(OptionalAssociatedSourceId::AssociatedSourceId(associated_source_id)) =
+                    mview.optional_associated_source_id
+                {
+                    if associated_source_id != source_id {
+                        return Err(RwError::from(InternalError(
+                            "mview's associated source id doesn't match source id".to_string(),
+                        )));
+                    }
+                } else {
+                    return Err(RwError::from(InternalError(
+                        "mview do not have associated source id".to_string(),
+                    )));
+                }
+                // check ref count
+                if let Some(ref_count) = core.get_ref_count(mview_id) {
+                    return Err(CatalogError(
+                        anyhow!(
+                            "Fail to delete table {} because {} other table(s) depends on it.",
+                            mview_id,
+                            ref_count
+                        )
+                        .into(),
+                    )
+                    .into());
+                }
+                if let Some(ref_count) = core.get_ref_count(source_id) {
+                    return Err(CatalogError(
+                        anyhow!(
+                            "Fail to delete source {} because {} other table(s) depends on it.",
+                            mview_id,
+                            ref_count
+                        )
+                        .into(),
+                    )
+                    .into());
+                }
+
+                // now is safe to delete both mview and source
+                let mut transaction = Transaction::default();
+                Table::delete_in_transaction(mview_id, &mut transaction)?;
+                Source::delete_in_transaction(source_id, &mut transaction)?;
+                core.meta_store_ref.txn(transaction).await?;
+                core.drop_table(&mview);
+                core.drop_source(&source);
+                for &dependent_relation_id in &mview.dependent_relations {
+                    core.decrease_ref_count(dependent_relation_id);
+                }
+
+                self.nm
+                    .notify_frontend(Operation::Delete, &Info::TableV2(mview))
+                    .await;
+                let version = self
+                    .nm
+                    .notify_frontend(Operation::Delete, &Info::Source(source))
+                    .await
+                    .into_inner();
+                Ok(version)
+            }
+
+            _ => Err(RwError::from(InternalError(
+                "table or source doesn't exist".to_string(),
+            ))),
         }
     }
 }

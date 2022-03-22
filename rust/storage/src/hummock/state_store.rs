@@ -20,6 +20,7 @@ use risingwave_common::error::Result;
 
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
+use crate::storage_value::StorageValue;
 use crate::{StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
@@ -42,13 +43,18 @@ impl HummockStateStore {
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
         let value = self.storage.get(key, epoch).await?;
         let value = value.map(Bytes::from);
-        Ok(value)
+        let storage_value = value.map(StorageValue::from);
+        Ok(storage_value)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        epoch: u64,
+    ) -> Result<()> {
         self.storage
             .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
             .await?;
@@ -89,7 +95,7 @@ impl StateStore for HummockStateStore {
 
     async fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
     ) -> Result<()> {
         self.storage
@@ -112,7 +118,7 @@ impl<'a> HummockStateStoreIter<'a> {
 #[async_trait]
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (Bytes, Bytes);
+    type Item = (Bytes, StorageValue);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         let iter = &mut self.inner;
@@ -120,7 +126,7 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
         if iter.is_valid() {
             let kv = (
                 Bytes::copy_from_slice(iter.key()),
-                Bytes::copy_from_slice(iter.value()),
+                StorageValue::from(Bytes::copy_from_slice(iter.value())),
             );
             iter.next().await?;
             Ok(Some(kv))
