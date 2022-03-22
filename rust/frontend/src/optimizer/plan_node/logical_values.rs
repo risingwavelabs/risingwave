@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::fmt;
+use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
@@ -37,7 +37,7 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self { rows, base }
     }
 
