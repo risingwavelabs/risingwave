@@ -35,8 +35,12 @@ impl StreamSource {
     pub fn new(logical: LogicalScan, source_type: SourceType) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
-
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            vec![0], // TODO
+            Distribution::any().clone(),
+        );
         Self {
             logical,
             base,

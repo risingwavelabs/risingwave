@@ -3738,6 +3738,7 @@ dependencies = [
  "prost",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_connector",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
