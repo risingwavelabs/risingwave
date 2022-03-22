@@ -30,7 +30,7 @@ pub struct StreamSimpleAgg {
 impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = (0..logical.schema().len()).collect();
+        let pk_indices = logical.base.pk_indices.to_vec();
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),

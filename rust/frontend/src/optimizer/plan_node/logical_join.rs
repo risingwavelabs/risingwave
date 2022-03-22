@@ -168,13 +168,6 @@ impl LogicalJoin {
             .chain(right_pk.iter().map(|index| r2o.map(*index)))
             .collect()
     }
-    pub fn pk_indices(&self) -> Vec<usize> {
-        Self::derive_pk(
-            self.left.pk_indices(),
-            self.right.pk_indices(),
-            self.join_type,
-        )
-    }
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on

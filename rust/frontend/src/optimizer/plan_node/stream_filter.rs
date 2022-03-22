@@ -34,7 +34,7 @@ impl StreamFilter {
     pub fn new(logical: LogicalFilter) -> Self {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
-        let pk_indices = input.pk_indices().to_vec();
+        let pk_indices = logical.base.pk_indices.to_vec();
         let dist = input.distribution().clone();
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
         StreamFilter { logical, base }

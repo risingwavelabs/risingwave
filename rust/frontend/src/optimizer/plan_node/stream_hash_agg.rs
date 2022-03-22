@@ -32,7 +32,7 @@ pub struct StreamHashAgg {
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let pk_indices = logical.group_keys().to_vec();
+        let pk_indices = logical.base.pk_indices.to_vec();
         let input_dist = logical.input().distribution().clone();
         assert_eq!(input_dist, Distribution::Single);
         let base = PlanBase::new_stream(

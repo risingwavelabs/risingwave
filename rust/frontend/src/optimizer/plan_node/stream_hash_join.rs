@@ -40,7 +40,7 @@ impl StreamHashJoin {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            logical.pk_indices(),
+            logical.base.pk_indices.to_vec(),
             Distribution::any().clone(),
         );
 

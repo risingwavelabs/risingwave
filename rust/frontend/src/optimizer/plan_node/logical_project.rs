@@ -137,14 +137,6 @@ impl LogicalProject {
             .collect();
         Schema { fields }
     }
-    pub fn pk_indices(&self) -> Vec<usize> {
-        Self::derive_pk(
-            self.input.schema(),
-            self.input.pk_indices(),
-            self.schema(),
-            self.exprs(),
-        )
-    }
 
     fn derive_pk(
         input_schema: &Schema,
