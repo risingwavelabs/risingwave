@@ -22,7 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::*;
-use risingwave_common::util::ordered::{serialize_cell, deserialize_cell};
+use risingwave_common::util::value_encoding::{serialize_cell, deserialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -293,7 +293,7 @@ where
                 .await?;
 
             for (raw_key, raw_value) in all_data {
-                let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
+                let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
                 let value = deserialize_cell(&mut deserializer, &self.data_type)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
@@ -384,7 +384,7 @@ where
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
-            let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
+            let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
             let value = deserialize_cell(&mut deserializer, &self.data_type)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;

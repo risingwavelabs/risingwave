@@ -17,7 +17,7 @@ use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::{deserialize_cell, serialize_cell};
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -53,7 +53,7 @@ impl<S: StateStore> ManagedValueState<S> {
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
-                let mut deserializer = memcomparable::Deserializer::new(&raw_data[..]);
+                let mut deserializer = value_encoding::Deserializer::new(raw_data.to_bytes());
                 Some(deserialize_cell(&mut deserializer, &agg_call.return_type)?)
             } else {
                 None
