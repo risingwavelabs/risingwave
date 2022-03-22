@@ -65,7 +65,6 @@ impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
         let name = tb.name.clone();
-        // let columns = tb.columns;
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();

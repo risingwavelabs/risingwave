@@ -64,7 +64,6 @@ pub(super) async fn handle_create_source(
         ),
     };
     let catalog_writer = session.env().catalog_writer();
-
     catalog_writer
         .create_source(ProstSource {
             id: 0,

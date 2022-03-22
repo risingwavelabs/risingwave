@@ -74,6 +74,7 @@ impl ColumnDesc {
         }
     }
 
+    // Get all column descs under field_descs
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
         for desc in &self.field_descs {
@@ -112,6 +113,8 @@ impl ColumnDesc {
 }
 
 impl From<ProstColumnDesc> for ColumnDesc {
+    // Since the prost DataType struct doesn't have field, so it need to be reinit when into
+    // ColumnDesc
     fn from(prost: ProstColumnDesc) -> Self {
         if let DataType::Struct { .. } = DataType::from(prost.column_type.as_ref().unwrap()) {
             let descs: Vec<ColumnDesc> = prost
