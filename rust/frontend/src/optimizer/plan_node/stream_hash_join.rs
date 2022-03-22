@@ -15,6 +15,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::optimizer::plan_node::EqJoinPredicate;
@@ -92,4 +94,23 @@ impl WithSchema for StreamHashJoin {
     }
 }
 
-impl ToStreamProst for StreamHashJoin {}
+impl ToStreamProst for StreamHashJoin {
+    fn to_stream_prost_body(&self) -> Node {
+        Node::HashJoinNode(HashJoinNode {
+            join_type: self.logical.join_type() as i32,
+            left_key: self
+                .eq_join_predicate
+                .left_eq_indexes()
+                .iter()
+                .map(|v| *v as i32)
+                .collect(),
+            right_key: self
+                .eq_join_predicate
+                .right_eq_indexes()
+                .iter()
+                .map(|v| *v as i32)
+                .collect(),
+            condition: Some(self.eq_join_predicate.other_cond().as_expr().to_protobuf()),
+        })
+    }
+}
