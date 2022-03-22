@@ -77,7 +77,7 @@ impl LogicalProject {
                 _ => None,
             }
         }
-        ColIndexMapping::with_target_upper(map, input_len)
+        ColIndexMapping::with_target_upper(map, ColIndexMapping::range_size_to_upper(input_len))
     }
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
@@ -103,7 +103,7 @@ impl LogicalProject {
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
         assert_eq!(
             input.schema().fields().len(),
-            mapping.source_upper() + 1,
+            ColIndexMapping::upper_to_range_size(mapping.source_upper()),
             "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
             input,
             mapping

@@ -39,13 +39,14 @@ impl ColIndexMapping {
         Self { map, target_upper }
     }
 
-    pub fn with_target_upper(map: Vec<Option<usize>>, target_upper: usize) -> Self {
-        let max_target = map
-            .iter()
-            .filter_map(|x| *x)
-            .max_by_key(|x| *x)
-            .unwrap_or(0);
-        assert!(max_target <= target_upper);
+    pub fn with_target_upper(map: Vec<Option<usize>>, target_upper: Option<usize>) -> Self {
+        let max_target = map.iter().filter_map(|x| *x).max_by_key(|x| *x);
+        match (target_upper, max_target) {
+            (None, None) => {}
+            (Some(_), None) => {}
+            (None, Some(_)) => panic!(),
+            (Some(target_upper), Some(max_target)) => assert!(max_target <= target_upper),
+        }
         Self { map, target_upper }
     }
 
@@ -154,7 +155,11 @@ impl ColIndexMapping {
     /// it inverse mapping's target
     #[must_use]
     pub fn inverse(&self) -> Self {
-        let mut map = vec![None; self.target_upper() + 1];
+        let source_num = match self.target_upper() {
+            Some(target_upper) => target_upper + 1,
+            None => 0,
+        };
+        let mut map = vec![None; source_num];
         for (src, dst) in self.mapping_pairs() {
             map[dst] = Some(src);
         }
@@ -184,8 +189,21 @@ impl ColIndexMapping {
         self.target_upper
     }
 
-    pub fn source_upper(&self) -> usize {
-        self.map.len() - 1
+    pub fn source_upper(&self) -> Option<usize> {
+        Self::range_size_to_upper(self.map.len())
+    }
+
+    pub fn upper_to_range_size(upper: Option<usize>) -> usize {
+        match upper {
+            Some(upper) => upper + 1,
+            None => 0,
+        }
+    }
+    pub fn range_size_to_upper(size: usize) -> Option<usize> {
+        match size {
+            0 => None,
+            x => Some(x - 1),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -203,7 +221,7 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping(source_upper:{}, target_upper:{}, mapping:{})",
+            "ColIndexMapping(source_upper:{:?}, target_upper:{:?}, mapping:{})",
             self.source_upper(),
             self.target_upper(),
             self.mapping_pairs()
