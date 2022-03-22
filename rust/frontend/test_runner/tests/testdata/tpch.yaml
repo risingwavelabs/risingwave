@@ -1,0 +1,84 @@
+- id: create_tables
+  sql: |
+    CREATE TABLE lineitem (
+      l_orderkey BIGINT NOT NULL,
+      l_partkey INTEGER NOT NULL,
+      l_suppkey INTEGER NOT NULL,
+      l_linenumber INTEGER NOT NULL,
+      l_quantity NUMERIC NOT NULL,
+      l_extendedprice NUMERIC NOT NULL,
+      l_discount NUMERIC NOT NULL,
+      l_tax NUMERIC NOT NULL,
+      l_returnflag CHAR(1) NOT NULL,
+      l_linestatus CHAR(1) NOT NULL,
+      l_shipdate DATE NOT NULL,
+      l_commitdate DATE NOT NULL,
+      l_receiptdate DATE NOT NULL,
+      l_shipinstruct CHAR(25) NOT NULL,
+      l_shipmode CHAR(10) NOT NULL,
+      l_comment VARCHAR(44) NOT NULL
+    );
+    CREATE TABLE customer (
+      c_custkey INTEGER NOT NULL,
+      c_name VARCHAR(25) NOT NULL,
+      c_address VARCHAR(40) NOT NULL,
+      c_nationkey INTEGER NOT NULL,
+      c_phone CHAR(15) NOT NULL,
+      c_acctbal NUMERIC NOT NULL,
+      c_mktsegment CHAR(10) NOT NULL,
+      c_comment VARCHAR(117) NOT NULL
+    );
+    CREATE TABLE orders (
+      o_orderkey BIGINT NOT NULL,
+      o_custkey INTEGER NOT NULL,
+      o_orderstatus CHAR(1) NOT NULL,
+      o_totalprice NUMERIC NOT NULL,
+      o_orderdate DATE NOT NULL,
+      o_orderpriority CHAR(15) NOT NULL,
+      o_clerk CHAR(15) NOT NULL,
+      o_shippriority INTEGER NOT NULL,
+      o_comment VARCHAR(79) NOT NULL
+    );
+- id: tpch_q6
+  before:
+    - create_tables
+  sql: |
+    select
+      l_returnflag,
+      l_linestatus,
+      sum(l_quantity) as sum_qty,
+      sum(l_extendedprice) as sum_base_price,
+      sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
+      sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
+      avg(l_quantity) as avg_qty,
+      avg(l_extendedprice) as avg_price,
+      avg(l_discount) as avg_disc /* ,
+      count(*) as count_order */
+    from
+      lineitem
+    /*
+    where
+      l_shipdate <= date '1998-12-01' - interval '71 days'
+    */
+    group by
+      l_returnflag,
+      l_linestatus
+    order by
+      l_returnflag,
+      l_linestatus;
+  batch_plan: |
+    BatchExchange { order: [$0 ASC, $1 ASC], dist: Single }
+      BatchSort { order: [$0 ASC, $1 ASC] }
+        BatchProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
+          BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
+            BatchExchange { order: [], dist: HashShard([0, 1]) }
+              BatchProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
+                BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }
+  stream_plan: |
+    StreamMaterialize { table_id: 0 }
+      StreamProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
+        StreamExchange { dist: Single }
+          StreamHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
+            StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
+              StreamExchange { dist: HashShard([0, 1]) }
+                StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }

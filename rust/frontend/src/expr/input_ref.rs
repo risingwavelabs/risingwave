@@ -30,6 +30,13 @@ pub struct InputRef {
 #[derive(Clone, Copy)]
 pub struct InputRefDisplay(pub usize);
 
+#[derive(Clone, Copy)]
+pub struct AliasDisplay<'a>(Option<&'a str>);
+
+pub fn as_alias_display(x: &Option<impl AsRef<str>>) -> AliasDisplay<'_> {
+    AliasDisplay(x.as_ref().map(|x| x.as_ref()))
+}
+
 pub fn column_idx_to_inputref_proto(column_idx: usize) -> InputRefExpr {
     InputRefExpr {
         column_idx: column_idx as i32,
@@ -53,6 +60,21 @@ impl fmt::Debug for InputRefDisplay {
 }
 
 impl fmt::Display for InputRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", InputRefDisplay(self.index))
+    }
+}
+
+impl<'a> fmt::Debug for AliasDisplay<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Some(x) => write!(f, "{}", x),
+            None => write!(f, " "),
+        }
+    }
+}
+
+impl<'a> fmt::Display for AliasDisplay<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }

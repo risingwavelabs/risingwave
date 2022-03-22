@@ -32,7 +32,8 @@ pub struct StreamExchange {
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let base = PlanBase::new_stream(ctx, input.schema().clone(), dist);
+        let pk_indices = input.pk_indices().to_vec();
+        let base = PlanBase::new_stream(ctx, input.schema().clone(), pk_indices, dist);
         StreamExchange { input, base }
     }
 }

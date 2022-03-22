@@ -21,6 +21,7 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::{StateStore, StateStoreIter};
+use crate::storage_value::StorageValue;
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {}
@@ -35,13 +36,13 @@ impl RocksDBStateStore {
 impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
 
-    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<StorageValue>> {
         unimplemented!()
     }
 
     async fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
@@ -57,7 +58,7 @@ impl StateStore for RocksDBStateStore {
 
     async fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
@@ -90,7 +91,7 @@ impl RocksDBStateStoreIter {
 
 #[async_trait]
 impl StateStoreIter for RocksDBStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = (Bytes, StorageValue);
 
     async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unimplemented!()

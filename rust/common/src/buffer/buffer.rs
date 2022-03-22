@@ -13,7 +13,7 @@
 // limitations under the License.
 //
 use std::mem::{size_of, transmute};
-use std::ops::{BitAnd, BitOr, Not};
+use std::ops::{BitAnd, BitOr};
 use std::ptr::NonNull;
 use std::slice::{from_raw_parts, from_raw_parts_mut};
 
@@ -61,10 +61,6 @@ impl Buffer {
 
         Ok(buffer)
     }
-    // TODO: We should remove this, a buffer should be immutable
-    pub fn as_slice_mut(&mut self) -> &mut [u8] {
-        unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len) }
-    }
 
     pub fn typed_data<T: NativeType>(&self) -> &[T] {
         unsafe {
@@ -95,9 +91,7 @@ impl Buffer {
     }
 
     pub fn try_from<T: AsRef<[u8]>>(src: T) -> Result<Self> {
-        let mut buffer = Buffer::new_with_default(src.as_ref().len())?;
-        let to_slice = buffer.as_slice_mut();
-        to_slice.copy_from_slice(src.as_ref());
+        let buffer = Buffer::from_slice(src)?;
         Ok(buffer)
     }
 
@@ -113,15 +107,6 @@ impl Buffer {
             .collect();
 
         Buffer::try_from(ret)
-    }
-
-    fn unary_op<F>(mut self, op: F) -> Buffer
-    where
-        F: Fn(u8) -> u8,
-    {
-        self.as_slice_mut().iter_mut().for_each(|b| *b = op(*b));
-
-        self
     }
 }
 
@@ -155,14 +140,6 @@ impl<'a, 'b> BitOr<&'b Buffer> for &'a Buffer {
         }
 
         Buffer::buffer_bin_op(self, rhs, |a, b| a | b)
-    }
-}
-
-impl Not for Buffer {
-    type Output = Buffer;
-
-    fn not(self) -> Buffer {
-        self.unary_op(|a| !a)
     }
 }
 

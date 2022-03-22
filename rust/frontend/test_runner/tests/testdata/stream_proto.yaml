@@ -252,13 +252,31 @@
                         {
                           "input": [
                             {
-                              "mergeNode": {}
-                            },
-                            {
+                              "input": [
+                                {
+                                  "mergeNode": {}
+                                },
+                                {
+                                  "chainNode": {}
+                                }
+                              ],
                               "chainNode": {}
                             }
                           ],
-                          "chainNode": {}
+                          "exchangeNode": {
+                            "fields": [
+                              {
+                                "dataType": {
+                                  "typeName": "INT32",
+                                  "isNullable": true
+                                },
+                                "name": "v1"
+                              }
+                            ],
+                            "strategy": {
+                              "type": "SIMPLE"
+                            }
+                          }
                         }
                       ],
                       "projectNode": {
@@ -347,13 +365,41 @@
                         {
                           "input": [
                             {
-                              "mergeNode": {}
-                            },
-                            {
+                              "input": [
+                                {
+                                  "mergeNode": {}
+                                },
+                                {
+                                  "chainNode": {}
+                                }
+                              ],
                               "chainNode": {}
                             }
                           ],
-                          "chainNode": {}
+                          "exchangeNode": {
+                            "fields": [
+                              {
+                                "dataType": {
+                                  "typeName": "INT32",
+                                  "isNullable": true
+                                },
+                                "name": "v1"
+                              },
+                              {
+                                "dataType": {
+                                  "typeName": "INT32",
+                                  "isNullable": true
+                                },
+                                "name": "v2"
+                              }
+                            ],
+                            "strategy": {
+                              "type": "HASH",
+                              "columnIndices": [
+                                0
+                              ]
+                            }
+                          }
                         }
                       ],
                       "projectNode": {

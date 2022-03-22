@@ -33,6 +33,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -121,8 +122,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .unwrap();
         let column_id = column.column_id.get_id() as usize;
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row =
-            cell_based_row_deserializer.deserialize(&key, &state_store_get_res.unwrap())?;
+        let pk_and_row = cell_based_row_deserializer
+            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
         match pk_and_row {
             Some(pk_row) => {
                 return Ok(Some(pk_row.1.index(column_id).clone()));
@@ -141,8 +142,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .await
             .unwrap();
         let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
-        let pk_and_row =
-            cell_based_row_deserializer.deserialize(&key, &state_store_get_res.unwrap())?;
+        let pk_and_row = cell_based_row_deserializer
+            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
         Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
     }
 
@@ -274,7 +275,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            let mut de = value_encoding::Deserializer::new(buf);
+            let mut de = value_encoding::Deserializer::new(buf.to_bytes());
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
             Ok(Some(cell))
         } else {
@@ -308,7 +309,7 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
 pub struct CellBasedTableRowIter<S: StateStore> {
     keyspace: Keyspace<S>,
     /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, Bytes)>,
+    buf: Vec<(Bytes, StorageValue)>,
     /// The idx into `buf` for the next item
     next_idx: usize,
     /// A bool to indicate whether there are more data to fetch from state store
@@ -434,7 +435,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 target: "events::storage::CellBasedTable::scan",
                 "CellBasedTable scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
-                bytes::Bytes::copy_from_slice(value)
+                value.as_bytes()
             );
 
             // there is no need to deserialize pk in cell-based table
@@ -442,7 +443,9 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
+            let pk_and_row = self
+                .cell_based_row_deserializer
+                .deserialize(key, value.as_bytes())?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),

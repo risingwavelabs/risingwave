@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,29 +13,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::iter;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, RowFormatType, StreamSourceInfo};
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
-use crate::handler::create_table::ROWID_NAME;
 use crate::session::QueryContext;
 
-fn create_protobuf_table_schema(
+fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
-) -> Result<(StreamSourceInfo, Vec<ColumnDesc>)> {
+) -> Result<(StreamSourceInfo, Vec<ProstColumnDesc>)> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
-        append_only: true,
+        // append_only: true,
         row_format: RowFormatType::Protobuf as i32,
         row_schema_location: schema.row_schema_location.0.clone(),
         ..Default::default()
@@ -55,43 +52,27 @@ pub(super) async fn handle_create_source(
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), schema_name, &source_name)?;
-    let (_source, columns) = match &stmt.source_schema {
-        SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
-        SourceSchema::Json => todo!(),
+    let (source, _columns) = match &stmt.source_schema {
+        SourceSchema::Protobuf(protobuf_schema) => extract_protobuf_table_schema(protobuf_schema)?,
+        SourceSchema::Json => (
+            StreamSourceInfo {
+                properties: HashMap::from(stmt.with_properties),
+                row_format: RowFormatType::Json as i32,
+                ..Default::default()
+            },
+            vec![],
+        ),
     };
-    let column_catalogs = iter::once(Ok(ColumnCatalog {
-        column_desc: Some(ColumnDesc {
-            column_id: 0,
-            name: ROWID_NAME.to_string(),
-            column_type: Some(DataType::Int32.to_protobuf()),
-            ..Default::default()
-        }),
-        is_hidden: true,
-    }))
-    .chain(columns.into_iter().map(|col| {
-        Ok(ColumnCatalog {
-            column_desc: Some(col),
-            is_hidden: false,
-        })
-    }))
-    .collect::<Result<_>>()?;
-
-    let table = ProstTable {
-        id: 0,
-        schema_id,
-        database_id,
-        name: source_name,
-        columns: column_catalogs,
-        pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
-        dependent_relations: vec![],
-        optional_associated_source_id: None,
-    };
-
     let catalog_writer = session.env().catalog_writer();
-    // FIX ME
+
     catalog_writer
-        .create_materialized_table_source_workaround(table)
+        .create_source(ProstSource {
+            id: 0,
+            schema_id,
+            database_id,
+            name: source_name.clone(),
+            info: Some(Info::StreamSource(source)),
+        })
         .await?;
 
     Ok(PgResponse::new(

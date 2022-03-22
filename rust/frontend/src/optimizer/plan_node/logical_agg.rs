@@ -29,7 +29,7 @@ use super::{
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::WithSchema;
+use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
@@ -207,7 +207,13 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
-        let base = PlanBase::new_logical(ctx, schema);
+        let pk_indices = match group_keys.is_empty() {
+            // simple agg
+            true => (0..schema.len()).collect(),
+            // group agg
+            false => group_keys.clone(),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
             agg_calls,
             group_keys,
@@ -379,7 +385,6 @@ impl ColPrunable for LogicalAgg {
                 agg.into(),
                 ColIndexMapping::with_remaining_columns(&required_cols_new),
             )
-            .into()
         }
     }
 }
@@ -398,12 +403,21 @@ impl ToBatch for LogicalAgg {
 
 impl ToStream for LogicalAgg {
     fn to_stream(&self) -> PlanRef {
-        let new_input = self.input().to_stream();
-        let new_logical = self.clone_with_input(new_input);
         if self.group_keys().is_empty() {
-            StreamSimpleAgg::new(new_logical).into()
+            StreamSimpleAgg::new(
+                self.clone_with_input(
+                    self.input()
+                        .to_stream_with_dist_required(&Distribution::Single),
+                ),
+            )
+            .into()
         } else {
-            StreamHashAgg::new(new_logical).into()
+            StreamHashAgg::new(
+                self.clone_with_input(self.input().to_stream_with_dist_required(
+                    &Distribution::HashShard(self.group_keys().to_vec()),
+                )),
+            )
+            .into()
         }
     }
 }
