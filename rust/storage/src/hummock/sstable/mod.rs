@@ -34,8 +34,8 @@ pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
 mod utils;
-
 use risingwave_pb::hummock::SstableMeta;
+pub use utils::CompressionAlgorithm;
 
 use super::{HummockError, HummockResult};
 

@@ -65,7 +65,12 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
+criterion = "0.3"
 
 [features]
 rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]
+
+[[bench]]
+name = "bench_block_iter"
+harness = false
