@@ -33,7 +33,6 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::connector_source::ConnectorStreamSource;
 use risingwave_source::*;
-use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
@@ -89,7 +88,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     fn new_boxed_executor(
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
-        _store: impl StateStore,
+        store: impl StateStore,
         stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
@@ -120,10 +119,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             ));
         }
         let schema = Schema::new(fields);
+        let keyspace = Keyspace::executor_root(store, params.executor_id);
 
         Ok(Box::new(SourceExecutor::new(
             source_id,
             source_desc,
+            keyspace,
             column_ids,
             schema,
             params.pk_indices,
@@ -138,9 +139,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
 
 impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub fn new<S: StateStore>(
         source_id: TableId,
         source_desc: SourceDesc,
+        keyspace: Keyspace<S>,
         column_ids: Vec<ColumnId>,
         schema: Schema,
         pk_indices: PkIndices,
@@ -162,16 +164,10 @@ impl SourceExecutor {
             SourceImpl::TableV2(s) => {
                 Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
             }
-            SourceImpl::Connector(s) => {
-                let mem_state_store = MemoryStateStore::new();
-                Box::new(ConnectorStreamSource {
-                    source_reader: s.clone(),
-                    state_store: state::SourceStateHandler::new(Keyspace::executor_root(
-                        mem_state_store,
-                        executor_id.clone(),
-                    )),
-                })
-            }
+            SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
+                source_reader: s.clone(),
+                state_store: state::SourceStateHandler::new(keyspace),
+            }),
         };
 
         Ok(Self {
@@ -344,6 +340,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_source::*;
+    use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::*;
@@ -417,10 +414,12 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
+        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
 
         let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
+            keyspace,
             column_ids,
             schema,
             pk_indices,
@@ -547,9 +546,11 @@ mod tests {
         let pk_indices = vec![0];
 
         let (barrier_sender, barrier_receiver) = unbounded_channel();
+        let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
         let mut source_executor = SourceExecutor::new(
             table_id,
             source_desc,
+            keyspace,
             column_ids,
             schema,
             pk_indices,

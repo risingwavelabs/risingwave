@@ -106,12 +106,12 @@ impl AwsConfigInfo {
         let stream_name =
             properties
                 .get(KINESIS_STREAM_NAME)
-                .ok_or(RwError::from(ProtocolError(
+                .ok_or_else(|| RwError::from(ProtocolError(
                     "Kinesis stream name should be provided.".into(),
                 )))?;
         let region = properties
             .get(KINESIS_STREAM_REGION)
-            .ok_or(RwError::from(ProtocolError(
+            .ok_or_else(|| RwError::from(ProtocolError(
                 "Kinesis region should be provided.".into(),
             )))?;
 

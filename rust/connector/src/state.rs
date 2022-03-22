@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
-use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::{Keyspace, StateStore};
 
 /// `SourceState` Represents an abstraction of state,
@@ -36,7 +35,7 @@ pub struct SourceStateHandler<S: StateStore> {
     keyspace: Keyspace<S>,
 }
 
-impl Debug for SourceStateHandler<MemoryStateStore> {
+impl<S: StateStore> Debug for SourceStateHandler<S> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SourceStateHandler").finish()
     }

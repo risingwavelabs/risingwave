@@ -9,12 +9,15 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::state;
-use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
 use crate::common::SourceChunkBuilder;
 use crate::{SourceColumnDesc, SourceParser, StreamSourceReader};
 
+/// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
+/// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReader`] simply
+/// loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<dyn SourceParser + Send + Sync>,
@@ -71,12 +74,12 @@ impl ConnectorSource {
                     }
                 }
 
-                let mut ops = vec![];
-                let mut rows = vec![];
+                let mut ops = Vec::with_capacity(events.iter().map(|e| e.ops.len()).sum());
+                let mut rows = Vec::with_capacity(events.iter().map(|e| e.rows.len()).sum());
 
-                for mut event in events {
-                    rows.append(&mut event.rows);
-                    ops.append(&mut event.ops);
+                for event in events {
+                    rows.extend(event.rows);
+                    ops.extend(event.ops);
                 }
                 Ok(StreamChunk::new(
                     ops,
@@ -89,13 +92,13 @@ impl ConnectorSource {
 }
 
 #[derive(Debug)]
-pub struct ConnectorStreamSource {
+pub struct ConnectorStreamSource<S: StateStore> {
     pub source_reader: ConnectorSource,
-    pub state_store: state::SourceStateHandler<MemoryStateStore>,
+    pub state_store: state::SourceStateHandler<S>,
 }
 
 #[async_trait]
-impl StreamSourceReader for ConnectorStreamSource {
+impl<S: StateStore> StreamSourceReader for ConnectorStreamSource<S> {
     async fn open(&mut self) -> Result<()> {
         Ok(())
     }
