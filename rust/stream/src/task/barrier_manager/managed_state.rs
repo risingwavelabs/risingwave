@@ -50,8 +50,10 @@ pub(super) enum ManagedBarrierState {
 }
 
 impl ManagedBarrierState {
-    /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
-    fn may_notify(&mut self) {
+    /// Take the notifier back if we have collected barriers from all actor ids.
+    /// The state must be `Issued`.
+    #[must_use]
+    fn may_finish_collecting(&mut self) -> Option<BarrierCollectTx> {
         let (epoch, to_notify) = match self {
             ManagedBarrierState::Issued {
                 epoch,
@@ -73,23 +75,24 @@ impl ManagedBarrierState {
             match state {
                 ManagedBarrierState::Issued {
                     collect_notifier, ..
-                } => {
-                    // Notify about barrier finishing.
-                    if collect_notifier
-                        .send(BarrierCollectResult { finished: vec![] })
-                        .is_err()
-                    {
-                        warn!("failed to notify barrier collection with epoch {}", epoch)
-                    }
-                }
+                } => Some(collect_notifier),
 
                 _ => unreachable!(),
             }
+        } else {
+            None
         }
     }
 
     /// Collect a `barrier` from the actor with `actor_id`.
-    pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
+    ///
+    /// Returns the notifier if we've finished collecting.
+    #[must_use]
+    pub(super) fn collect(
+        &mut self,
+        actor_id: ActorId,
+        barrier: &Barrier,
+    ) -> Option<BarrierCollectTx> {
         tracing::trace!(
             target: "events::stream::barrier::collect_barrier",
             "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
@@ -103,11 +106,12 @@ impl ManagedBarrierState {
                 if let Some(last_epoch) = *last_epoch {
                     assert_eq!(barrier.epoch.prev, last_epoch)
                 }
-
                 *self = Self::Stashed {
                     epoch: barrier.current_epoch(),
                     collected_actors: once(actor_id).collect(),
-                }
+                };
+
+                None
             }
 
             ManagedBarrierState::Stashed {
@@ -115,9 +119,10 @@ impl ManagedBarrierState {
                 collected_actors,
             } => {
                 assert_eq!(barrier.current_epoch(), *epoch);
-
                 let new = collected_actors.insert(actor_id);
                 assert!(new);
+
+                None
             }
 
             ManagedBarrierState::Issued {
@@ -126,22 +131,25 @@ impl ManagedBarrierState {
                 ..
             } => {
                 assert_eq!(barrier.current_epoch(), *epoch);
-
                 let exist = remaining_actors.remove(&actor_id);
                 assert!(exist);
-                self.may_notify();
+
+                self.may_finish_collecting()
             }
         }
     }
 
     /// When the meta service issues a `send_barrier` request, call this function to transform to
     /// `Issued` and start to collect or to notify.
+    ///
+    /// Returns the notifier if we've finished collecting.
+    #[must_use]
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         collect_notifier: BarrierCollectTx,
-    ) {
+    ) -> Option<BarrierCollectTx> {
         match self {
             ManagedBarrierState::Pending { .. } => {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
@@ -151,7 +159,8 @@ impl ManagedBarrierState {
                     remaining_actors,
                     collect_notifier,
                 };
-                self.may_notify();
+
+                self.may_finish_collecting()
             }
 
             ManagedBarrierState::Stashed {
@@ -170,7 +179,8 @@ impl ManagedBarrierState {
                     remaining_actors,
                     collect_notifier,
                 };
-                self.may_notify();
+
+                self.may_finish_collecting()
             }
 
             ManagedBarrierState::Issued { .. } => panic!("barrier state has already been `Issued`"),

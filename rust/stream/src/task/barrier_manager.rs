@@ -64,6 +64,8 @@ pub struct LocalBarrierManager {
 
     /// Current barrier collection state.
     state: BarrierState,
+
+    finished: Vec<Finished>,
 }
 
 impl Default for LocalBarrierManager {
@@ -75,9 +77,10 @@ impl Default for LocalBarrierManager {
 impl LocalBarrierManager {
     fn with_state(state: BarrierState) -> Self {
         Self {
-            senders: HashMap::new(),
+            senders: Default::default(),
             span: tracing::Span::none(),
             state,
+            finished: Default::default(),
         }
     }
 
@@ -128,7 +131,9 @@ impl LocalBarrierManager {
                 assert!(!to_collect.is_empty());
 
                 let (tx, rx) = oneshot::channel();
-                state.transform_to_issued(barrier, to_collect, tx);
+                if let Some(tx) = state.transform_to_issued(barrier, to_collect, tx) {
+                    self.notify(tx);
+                }
                 Some(rx)
             }
         };
@@ -160,11 +165,30 @@ impl LocalBarrierManager {
             BarrierState::Local => {}
 
             BarrierState::Managed(managed_state) => {
-                managed_state.collect(actor_id, barrier);
+                if let Some(tx) = managed_state.collect(actor_id, barrier) {
+                    self.notify(tx);
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Finish the command with given `epoch` for this `actor_id`.
+    pub fn finish(&mut self, epoch: u64, actor_id: ActorId) -> Result<()> {
+        self.finished.push(Finished { epoch, actor_id });
+        Ok(())
+    }
+
+    /// Notify about barrier collection finishing.
+    fn notify(&mut self, tx: BarrierCollectTx) {
+        let result = BarrierCollectResult {
+            finished: std::mem::take(&mut self.finished),
+        };
+
+        if tx.send(result).is_err() {
+            warn!("failed to notify barrier collection with epoch");
+        }
     }
 }
 
