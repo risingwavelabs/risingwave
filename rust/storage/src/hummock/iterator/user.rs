@@ -245,15 +245,12 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use itertools::Itertools;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::variants::FORWARD;
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::SSTableIterator;

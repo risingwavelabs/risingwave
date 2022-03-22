@@ -21,8 +21,6 @@ pub type MergeIterator<'a> = MergeIteratorInner<'a, FORWARD>;
 mod test {
     use std::sync::Arc;
 
-    use itertools::Itertools;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable, gen_iterator_test_sstable_base,

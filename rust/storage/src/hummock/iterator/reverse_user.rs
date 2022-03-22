@@ -260,7 +260,6 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use itertools::{Itertools, UniqueBy};
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
 
@@ -268,10 +267,9 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, iterator_test_key_of, iterator_test_key_of_epoch,
-        iterator_test_value_of, mock_sstable_store, test_key, TEST_KEYS_COUNT,
+        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::variants::BACKWARD;
-    use crate::hummock::iterator::{BoxedHummockIterator, UserIterator};
+    use crate::hummock::iterator::{BoxedHummockIterator};
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::{SSTableIterator, Sstable};
     use crate::hummock::test_utils::gen_test_sstable;
