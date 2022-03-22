@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +28,7 @@ use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
     TracedHummockError,
 };
-use crate::monitor::StateStoreMetrics;
+use crate::monitor::HummockMetrics;
 
 #[derive(Default)]
 pub struct RetryableError {}
@@ -55,12 +69,11 @@ pub trait HummockMetaClient: Send + Sync + 'static {
 pub struct RpcHummockMetaClient {
     meta_client: MetaClient,
 
-    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
-    stats: Arc<StateStoreMetrics>,
+    stats: Arc<HummockMetrics>,
 }
 
 impl RpcHummockMetaClient {
-    pub fn new(meta_client: MetaClient, stats: Arc<StateStoreMetrics>) -> RpcHummockMetaClient {
+    pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> RpcHummockMetaClient {
         RpcHummockMetaClient { meta_client, stats }
     }
 }

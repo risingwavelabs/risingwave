@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -355,10 +369,10 @@ impl StreamManagerCore {
         input: Box<dyn Executor>,
         dispatcher: &stream_plan::Dispatcher,
         actor_id: ActorId,
-        downstreams: &[ActorId],
     ) -> Result<Box<dyn StreamConsumer>> {
         // create downstream receivers
-        let outputs = downstreams
+        let outputs = dispatcher
+            .downstream_actor_id
             .iter()
             .map(|down_id| {
                 let host_addr = self.get_actor_info(down_id)?.get_host()?;
@@ -367,9 +381,7 @@ impl StreamManagerCore {
             })
             .collect::<Result<Vec<_>>>()?;
 
-        assert_eq!(downstreams.len(), outputs.len());
-
-        use stream_plan::dispatcher::DispatcherType::*;
+        use stream_plan::DispatcherType::*;
         let dispatcher: Box<dyn StreamConsumer> = match dispatcher.get_type()? {
             Hash => {
                 assert!(!outputs.is_empty());
@@ -378,9 +390,23 @@ impl StreamManagerCore {
                     .iter()
                     .map(|i| *i as usize)
                     .collect();
+                let hash_mapping = dispatcher
+                    .hash_mapping
+                    .clone()
+                    .ok_or_else(|| {
+                        RwError::from(ErrorCode::InternalError(
+                            "hash dispatcher doesn't have consistent hash mapping".to_string(),
+                        ))
+                    })?
+                    .hash_mapping;
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(downstreams.to_vec(), outputs, column_indices),
+                    HashDataDispatcher::new(
+                        dispatcher.downstream_actor_id.to_vec(),
+                        outputs,
+                        column_indices,
+                        hash_mapping,
+                    ),
                     actor_id,
                     self.context.clone(),
                 ))
@@ -666,12 +692,14 @@ impl StreamManagerCore {
             let actor = self.actors.remove(&actor_id).unwrap();
             let executor =
                 self.create_nodes(actor.fragment_id, actor_id, actor.get_nodes()?, env.clone())?;
-            let dispatcher = self.create_dispatcher(
-                executor,
-                actor.get_dispatcher()?,
-                actor_id,
-                actor.get_downstream_actor_id(),
-            )?;
+
+            let dispatchers = actor.get_dispatcher();
+            assert_eq!(
+                dispatchers.len(),
+                1,
+                "compute node currently only supports single dispatcher"
+            );
+            let dispatcher = self.create_dispatcher(executor, &dispatchers[0], actor_id)?;
 
             trace!("build actor: {:#?}", &dispatcher);
 
@@ -797,8 +825,9 @@ impl StreamManagerCore {
             // At this time, the graph might not be complete, so we do not check if downstream
             // has `current_id` as upstream.
             let down_id = actor
-                .get_downstream_actor_id()
+                .dispatcher
                 .iter()
+                .flat_map(|x| x.downstream_actor_id.iter())
                 .map(|id| (*current_id, *id))
                 .collect_vec();
             update_upstreams(&self.context, &down_id);

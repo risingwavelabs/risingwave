@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,12 +32,7 @@ pub(super) fn handle_explain(
 ) -> Result<PgResponse> {
     let context = Rc::new(RefCell::new(context));
     let session = context.borrow().session_ctx.clone();
-    let catalog_mgr = session.env().catalog_mgr();
-    let catalog = catalog_mgr
-        .get_database_snapshot(session.database())
-        .unwrap();
-
-    let mut binder = Binder::new(catalog);
+    // bind, plan, optimize, and serialize here
     let mut planner = Planner::new(context);
 
     let plan = match stmt {
@@ -33,12 +42,24 @@ pub(super) fn handle_explain(
             query,
             ..
         } => {
-            let bound = binder.bind_query(query.as_ref().clone())?;
+            let bound = {
+                let mut binder = Binder::new(
+                    session.env().catalog_reader().read_guard(),
+                    session.database().to_string(),
+                );
+                binder.bind_query(query.as_ref().clone())?
+            };
             let logical = planner.plan_query(bound)?;
             logical.gen_create_mv_plan()
         }
         stmt => {
-            let bound = binder.bind(stmt)?;
+            let bound = {
+                let mut binder = Binder::new(
+                    session.env().catalog_reader().read_guard(),
+                    session.database().to_string(),
+                );
+                binder.bind(stmt)?
+            };
             let logical = planner.plan(bound)?;
             logical.gen_batch_query_plan()
         }

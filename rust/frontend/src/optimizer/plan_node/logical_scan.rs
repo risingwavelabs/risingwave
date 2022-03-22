@@ -1,10 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, LogicalBase, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
@@ -13,8 +27,8 @@ use crate::session::QueryContextRef;
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
-    pub base: LogicalBase,
-    table_name: String,
+    pub base: PlanBase,
+    table_name: String, // explain-only
     table_id: TableId,
     columns: Vec<ColumnId>,
 }
@@ -28,11 +42,7 @@ impl LogicalScan {
         schema: Schema,
         ctx: QueryContextRef,
     ) -> Self {
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         Self {
             table_name,
             table_id,
@@ -52,19 +62,24 @@ impl LogicalScan {
         Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
     }
 
-    pub(super) fn fmt_fields(&self, f: &mut fmt::DebugStruct) {
-        let columns = self
-            .schema()
+    pub(super) fn column_names(&self) -> Vec<String> {
+        self.schema()
             .fields()
             .iter()
             .map(|f| f.name.clone())
-            .collect::<Vec<_>>();
-        f.field("table", &self.table_name)
-            .field("columns", &columns);
+            .collect()
     }
 
     pub fn table_id(&self) -> u32 {
         self.table_id.table_id
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn columns(&self) -> &[ColumnId] {
+        &self.columns
     }
 }
 
@@ -72,9 +87,12 @@ impl_plan_tree_node_for_leaf! {LogicalScan}
 
 impl fmt::Display for LogicalScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut s = f.debug_struct("LogicalScan");
-        self.fmt_fields(&mut s);
-        s.finish()
+        write!(
+            f,
+            "LogicalScan {{ table: {}, columns: [{}] }}",
+            self.table_name,
+            self.column_names().join(", ")
+        )
     }
 }
 

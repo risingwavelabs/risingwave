@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt::Debug;
 
 use itertools::Itertools;
@@ -7,7 +21,7 @@ use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
-use crate::binder::{Binder, TableRef};
+use crate::binder::{Binder, Relation};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
 #[derive(Debug)]
@@ -15,7 +29,7 @@ pub struct BoundSelect {
     pub distinct: bool,
     pub select_items: Vec<ExprImpl>,
     pub aliases: Vec<Option<String>>,
-    pub from: Option<TableRef>,
+    pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
 }

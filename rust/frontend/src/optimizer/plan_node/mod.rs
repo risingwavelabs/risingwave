@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 #![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
@@ -20,14 +34,11 @@ use std::rc::Rc;
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
 use paste::paste;
-use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{
-    Distribution, Order, WithConvention, WithDistribution, WithOrder, WithSchema,
-};
+use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -60,43 +71,6 @@ pub type PlanRef = Rc<dyn PlanNode>;
 #[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
 
-/// the common fields of logical nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct LogicalBase {
-    pub id: PlanNodeId,
-    pub schema: Schema,
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of batch nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-
-#[derive(Clone, Debug)]
-pub struct BatchBase {
-    pub id: PlanNodeId,
-    /// the order property of the PlanNode's output, store an `Order::any()` here will not affect
-    /// correctness, but insert unnecessary sort in plan
-    pub order: Order,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-
-    pub ctx: QueryContextRef,
-}
-
-/// the common fields of stream nodes, please make a field named `base` in
-/// every planNode and correctly valued it when construct the planNode.
-#[derive(Clone, Debug)]
-pub struct StreamBase {
-    pub id: PlanNodeId,
-    /// the distribution property of the PlanNode's output, store an `Distribution::any()` here
-    /// will not affect correctness, but insert unnecessary exchange in plan
-    pub dist: Distribution,
-    pub ctx: QueryContextRef, /* TODO: pk derive
-                               * pub pk_indices: Vec<u32> */
-}
-
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
     pub fn explain(&self, level: usize, f: &mut impl std::fmt::Write) -> std::fmt::Result {
@@ -117,16 +91,25 @@ impl dyn PlanNode {
 
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
+        self.to_batch_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto without the identity field
+    /// (for testing).
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_batch_prost())
+            .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         BatchPlanProst {
             children,
-            identity,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
             node_body,
         }
     }
@@ -136,6 +119,12 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
+        self.to_stream_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a stream plan proto without identity (for
+    /// testing).
+    pub fn to_stream_prost_identity(&self, identity: bool) -> StreamPlanProst {
         if let Some(stream_scan) = self.as_stream_table_scan() {
             return stream_scan.adhoc_to_stream_prost();
         }
@@ -144,13 +133,16 @@ impl dyn PlanNode {
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost())
+            .map(|plan| plan.to_stream_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
-            identity,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
             node,
             operator_id: 0,
             pk_indices: vec![],
@@ -158,6 +150,8 @@ impl dyn PlanNode {
     }
 }
 
+mod plan_base;
+pub use plan_base::*;
 #[macro_use]
 mod plan_tree_node;
 pub use plan_tree_node::*;
@@ -235,7 +229,6 @@ pub use stream_source_scan::StreamSourceScan;
 pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
-use crate::session::QueryContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]

@@ -1,18 +1,30 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::net::SocketAddr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{Database, Schema, Table};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
+use tokio::time;
 
-use crate::catalog::catalog_service::CatalogCache;
-use crate::catalog::{CatalogError, DatabaseId, SchemaId};
+use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
@@ -21,7 +33,7 @@ use crate::scheduler::schedule::WorkerNodeManagerRef;
 pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
     worker_node_manager: WorkerNodeManagerRef,
-    catalog_cache: Arc<RwLock<CatalogCache>>,
+    catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
 }
 
@@ -30,22 +42,22 @@ impl ObserverManager {
         client: MetaClient,
         addr: SocketAddr,
         worker_node_manager: WorkerNodeManagerRef,
-        catalog_cache: Arc<RwLock<CatalogCache>>,
+        catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
         let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
         Self {
             rx,
             worker_node_manager,
-            catalog_cache,
+            catalog,
             catalog_updated_tx,
         }
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// update frontend's data. `start` use `mut self` as parameter.
-    pub fn start(mut self) -> JoinHandle<()> {
-        tokio::spawn(async move {
+    pub async fn start(mut self) -> JoinHandle<()> {
+        let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
@@ -53,30 +65,94 @@ impl ObserverManager {
                         break;
                     }
                     let resp = resp.unwrap();
+                    let resp_clone = resp.clone();
                     let operation = resp.operation();
-
+                    let mut catalog_guard = self.catalog.write();
                     match resp.info {
-                        Some(Info::Database(database)) => {
-                            self.update_database(operation, database)
-                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
+                        Some(Info::Database(_)) => {
+                            panic!(
+                                "received a deprecated catalog notification from meta {:?}",
+                                resp_clone
+                            );
+                        }
+                        Some(Info::Schema(_)) => {
+                            panic!(
+                                "received a deprecated catalog notification from meta {:?}",
+                                resp_clone
+                            );
+                        }
+                        Some(Info::Table(_)) => {
+                            panic!(
+                                "received a deprecated catalog notification from meta {:?}",
+                                resp_clone
+                            );
                         }
                         Some(Info::Node(node)) => {
                             self.update_worker_node_manager(operation, node);
                         }
-                        Some(Info::Schema(schema)) => {
-                            self.update_schema(operation, schema)
-                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
+                        Some(Info::DatabaseV2(database)) => match operation {
+                            Operation::Add => catalog_guard.create_database(database),
+                            Operation::Delete => catalog_guard.drop_database(database.id),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
+                        },
+                        Some(Info::SchemaV2(schema)) => match operation {
+                            Operation::Add => catalog_guard.create_schema(schema),
+                            Operation::Delete => {
+                                catalog_guard.drop_schema(schema.database_id, schema.id)
+                            }
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
+                        },
+                        Some(Info::TableV2(table)) => match operation {
+                            Operation::Add => catalog_guard.create_table(&table),
+                            Operation::Delete => catalog_guard.drop_table(
+                                table.database_id,
+                                table.schema_id,
+                                table.id.into(),
+                            ),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
+                        },
+                        Some(Info::Source(source)) => match operation {
+                            Operation::Add => catalog_guard.create_source(source),
+                            Operation::Delete => catalog_guard.drop_source(
+                                source.database_id,
+                                source.schema_id,
+                                source.id,
+                            ),
+                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
+                        },
+                        Some(Info::FeSnapshot(snapshot)) => {
+                            for db in snapshot.database {
+                                catalog_guard.create_database(db)
+                            }
+                            for schema in snapshot.schema {
+                                catalog_guard.create_schema(schema)
+                            }
+                            for table in snapshot.table {
+                                catalog_guard.create_table(&table)
+                            }
+                            for source in snapshot.source {
+                                catalog_guard.create_source(source)
+                            }
+                            for node in snapshot.nodes {
+                                self.worker_node_manager.add_worker_node(node)
+                            }
                         }
-                        Some(Info::Table(table)) => {
-                            self.update_table(operation, table)
-                                .unwrap_or_else(|e| tracing::error!("{}", e.to_string()));
-                        }
-                        Some(_) => todo!(),
-                        None => (),
+                        None => panic!("receive an unsupported notify {:?}", resp),
                     }
+                    assert!(
+                        resp.version > catalog_guard.version(),
+                        "resp version={:?}, current version={:?}",
+                        resp.version,
+                        catalog_guard.version()
+                    );
+                    catalog_guard.set_version(resp.version);
+                    self.catalog_updated_tx.send(resp.version).unwrap();
                 }
             }
-        })
+        });
+        // FIXME: to wait the local catalog init
+        time::sleep(time::Duration::from_millis(50)).await;
+        handle
     }
 
     /// `update_worker_node_manager` is called in `start` method.
@@ -93,136 +169,5 @@ impl ObserverManager {
             Operation::Delete => self.worker_node_manager.remove_worker_node(node),
             _ => (),
         }
-    }
-
-    /// `update_database` is called in `start` method.
-    /// It calls `create_database` and `drop_database` of `CatalogCache`.
-    fn update_database(&self, operation: Operation, database: Database) -> Result<()> {
-        tracing::debug!(
-            "Update database, operation: {:?}, database: {:?}",
-            operation,
-            database
-        );
-        let db_name = database.get_database_name();
-        let db_id = database.get_database_ref_id()?.database_id as u64;
-        let version = database.get_version();
-
-        match operation {
-            Operation::Add => self
-                .catalog_cache
-                .write()
-                .unwrap()
-                .create_database(db_name, db_id)?,
-            Operation::Delete => self.catalog_cache.write().unwrap().drop_database(db_name)?,
-            _ => {
-                return Err(RwError::from(InternalError(
-                    "Unsupported operation.".to_string(),
-                )))
-            }
-        }
-
-        self.catalog_updated_tx
-            .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        self.catalog_cache.write().unwrap().set_version(version);
-        Ok(())
-    }
-
-    /// `update_schema` is called in `start` method.
-    /// It calls `create_schema` and `drop_schema` of `CatalogCache`.
-    fn update_schema(&self, operation: Operation, schema: Schema) -> Result<()> {
-        tracing::debug!(
-            "Update schema, operation: {:?}, schema: {:?}",
-            operation,
-            schema
-        );
-        let schema_ref_id = schema.get_schema_ref_id()?;
-        let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
-        let db_name = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database_name(db_id)
-            .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
-        let schema_name = schema.get_schema_name();
-        let schema_id = schema_ref_id.schema_id as SchemaId;
-        let version = schema.get_version();
-
-        match operation {
-            Operation::Add => self.catalog_cache.write().unwrap().create_schema(
-                &db_name,
-                schema_name,
-                schema_id,
-            )?,
-            Operation::Delete => self
-                .catalog_cache
-                .write()
-                .unwrap()
-                .drop_schema(&db_name, schema_name)?,
-            _ => {
-                return Err(RwError::from(InternalError(
-                    "Unsupported operation.".to_string(),
-                )))
-            }
-        }
-
-        self.catalog_updated_tx
-            .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        self.catalog_cache.write().unwrap().set_version(version);
-        Ok(())
-    }
-
-    /// `update_table` is called in `start` method.
-    /// It calls `create_table` and `drop_table` of `CatalogCache`.
-    fn update_table(&self, operation: Operation, table: Table) -> Result<()> {
-        tracing::debug!(
-            "Update table, operation: {:?}, table: {:?}",
-            operation,
-            table
-        );
-        let schema_ref_id = table.get_table_ref_id()?.get_schema_ref_id()?;
-        let db_id = schema_ref_id.get_database_ref_id()?.database_id as DatabaseId;
-        let db_name = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database_name(db_id)
-            .ok_or_else(|| CatalogError::NotFound("database id", db_id.to_string()))?;
-        let schema_id = schema_ref_id.schema_id as SchemaId;
-        let schema_name = self
-            .catalog_cache
-            .read()
-            .unwrap()
-            .get_database(&db_name)
-            .unwrap()
-            .get_schema_name(schema_id)
-            .ok_or_else(|| CatalogError::NotFound("schema id", schema_id.to_string()))?;
-        let version = table.get_version();
-
-        match operation {
-            Operation::Add => {
-                self.catalog_cache
-                    .write()
-                    .unwrap()
-                    .create_table(&db_name, &schema_name, &table)?
-            }
-            Operation::Delete => self.catalog_cache.write().unwrap().drop_table(
-                &db_name,
-                &schema_name,
-                &table.table_name,
-            )?,
-            _ => {
-                return Err(RwError::from(InternalError(
-                    "Unsupported operation.".to_string(),
-                )))
-            }
-        }
-
-        self.catalog_updated_tx
-            .send(version)
-            .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        self.catalog_cache.write().unwrap().set_version(version);
-        Ok(())
     }
 }

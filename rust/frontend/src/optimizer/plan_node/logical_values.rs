@@ -1,9 +1,23 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchValues, ColPrunable, LogicalBase, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
@@ -11,7 +25,7 @@ use crate::session::QueryContextRef;
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     rows: Vec<Vec<ExprImpl>>,
 }
 
@@ -23,11 +37,7 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         Self { rows, base }
     }
 

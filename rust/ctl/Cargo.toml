@@ -12,3 +12,4 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
 tracing = { version = "0.1", features = ["release_max_level_info"] }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }

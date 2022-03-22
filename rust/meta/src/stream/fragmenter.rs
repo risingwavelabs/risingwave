@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Range;
 use std::sync::Arc;
@@ -6,12 +20,10 @@ use async_recursion::async_recursion;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::common::HashMapping;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::Fragment;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, StreamNode};
+use risingwave_pb::stream_plan::{ActorMapping, Dispatcher, DispatcherType, StreamNode};
 
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
 use crate::cluster::ParallelUnitId;
@@ -142,7 +154,7 @@ where
                     );
 
                     let is_simple_dispatcher =
-                        exchange_node.get_dispatcher()?.get_type()? == DispatcherType::Simple;
+                        exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                     if is_simple_dispatcher {
                         current_fragment.set_singleton(true);
                     }
@@ -196,15 +208,23 @@ where
         let actor_ids = self.gen_actor_ids(parallel_degree).await?;
 
         let node = current_fragment.get_node();
-        let blackhole_dispatcher = Dispatcher {
-            r#type: DispatcherType::Broadcast as i32,
-            ..Default::default()
-        };
+
         let dispatcher = if current_fragment_id == root_fragment.get_fragment_id() {
-            &blackhole_dispatcher
+            Dispatcher {
+                r#type: DispatcherType::Broadcast as i32,
+                ..Default::default()
+            }
         } else {
             match node.get_node()? {
-                Node::ExchangeNode(exchange_node) => exchange_node.get_dispatcher()?,
+                Node::ExchangeNode(exchange_node) => {
+                    // TODO: support multiple dispatchers
+                    let strategy = exchange_node.get_strategy()?;
+                    Dispatcher {
+                        r#type: strategy.r#type,
+                        column_indices: strategy.column_indices.clone(),
+                        ..Default::default()
+                    }
+                }
                 _ => {
                     return Err(RwError::from(InternalError(format!(
                         "{:?} should not found.",
@@ -242,7 +262,7 @@ where
                 };
                 actor_builder.set_hash_dispatcher(
                     dispatcher.column_indices.clone(),
-                    HashMapping {
+                    ActorMapping {
                         hash_mapping: streaming_hash_mapping,
                     },
                 )

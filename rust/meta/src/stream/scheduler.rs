@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -159,13 +173,8 @@ mod test {
         let env = MetaSrvEnv::for_test().await;
         let notification_manager = Arc::new(NotificationManager::new());
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(
-                env.clone(),
-                None,
-                notification_manager,
-                Duration::from_secs(3600),
-            )
-            .await?,
+            StoredClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
+                .await?,
         );
 
         let node_count = 4;
@@ -194,8 +203,7 @@ mod test {
                         actor_id,
                         fragment_id: id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     }],
                 };
@@ -211,8 +219,7 @@ mod test {
                         actor_id: id,
                         fragment_id,
                         nodes: None,
-                        dispatcher: None,
-                        downstream_actor_id: vec![],
+                        dispatcher: vec![],
                         upstream_actor_id: vec![],
                     })
                     .collect_vec();

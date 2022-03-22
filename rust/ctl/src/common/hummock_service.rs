@@ -1,10 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::env;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
 use risingwave_storage::hummock::HummockStateStore;
-use risingwave_storage::monitor::{MonitoredStateStore, StateStoreMetrics};
+use risingwave_storage::monitor::{HummockMetrics, MonitoredStateStore, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 
 use super::MetaServiceOpts;
@@ -49,6 +63,7 @@ impl HummockServiceOpts {
             Arc::new(config),
             meta_client,
             Arc::new(StateStoreMetrics::unused()),
+            Arc::new(HummockMetrics::unused()),
         )
         .await?;
 

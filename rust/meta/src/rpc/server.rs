@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,6 +59,7 @@ pub async fn rpc_serve(
     dashboard_addr: Option<SocketAddr>,
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
+    ui_path: Option<String>,
 ) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
@@ -64,6 +79,7 @@ pub async fn rpc_serve(
                 dashboard_addr,
                 meta_store_ref,
                 max_heartbeat_interval,
+                ui_path,
             )
             .await
         }
@@ -75,6 +91,7 @@ pub async fn rpc_serve(
                 dashboard_addr,
                 meta_store_ref,
                 max_heartbeat_interval,
+                ui_path,
             )
             .await
         }
@@ -87,6 +104,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     dashboard_addr: Option<SocketAddr>,
     meta_store_ref: Arc<S>,
     max_heartbeat_interval: Duration,
+    ui_path: Option<String>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
     let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
@@ -105,7 +123,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
-            Some(hummock_manager.clone()),
             notification_manager.clone(),
             max_heartbeat_interval,
         )
@@ -122,7 +139,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         // TODO: join dashboard service back to local thread.
-        tokio::spawn(dashboard_service.serve());
+        tokio::spawn(dashboard_service.serve(ui_path));
     }
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
@@ -180,16 +197,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
-    let sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
-        hummock::start_compaction_trigger(hummock_manager, compactor_manager),
+    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         #[cfg(not(test))]
         StoredClusterManager::start_heartbeat_checker(
             cluster_manager.clone(),
             Duration::from_secs(1),
         )
         .await,
-        hummock::VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
     ];
+    sub_tasks.extend(hummock::start_hummock_workers(
+        hummock_manager,
+        compactor_manager,
+        vacuum_trigger_ref,
+    ));
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {

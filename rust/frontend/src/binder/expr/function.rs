@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -21,6 +35,7 @@ impl Binder {
                 "sum" => Some(AggKind::Sum),
                 "min" => Some(AggKind::Min),
                 "max" => Some(AggKind::Max),
+                "avg" => Some(AggKind::Avg),
                 _ => None,
             };
             if let Some(kind) = agg_kind {
@@ -29,6 +44,22 @@ impl Binder {
             }
             let function_type = match function_name.value.as_str() {
                 "substr" => ExprType::Substr,
+                "length" => ExprType::Length,
+                "like" => ExprType::Like,
+                "upper" => ExprType::Upper,
+                "lower" => ExprType::Lower,
+                "trim" => ExprType::Trim,
+                "replace" => ExprType::Replace,
+                "position" => ExprType::Position,
+                "ltrim" => ExprType::Ltrim,
+                "rtrim" => ExprType::Rtrim,
+                "case" => ExprType::Case,
+                "is true" => ExprType::IsTrue,
+                "is not true" => ExprType::IsNotTrue,
+                "is false" => ExprType::IsFalse,
+                "is not false" => ExprType::IsNotFalse,
+                "is null" => ExprType::IsNull,
+                "is not null" => ExprType::IsNotNull,
                 _ => {
                     return Err(ErrorCode::NotImplementedError(format!(
                         "unsupported function: {:?}",

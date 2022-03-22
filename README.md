@@ -1,13 +1,13 @@
 # RisingWave
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
-[![CI](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave-dev/actions/workflows/main.yml)
-[![codecov](https://codecov.io/gh/singularity-data/risingwave-dev/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave-dev)
+[![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
+[![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave)
 
 ## Download
 Run:
 ```shell
-git clone https://github.com/singularity-data/risingwave-dev.git
+git clone https://github.com/singularity-data/risingwave.git
 ```
 
 ## Environment
@@ -43,15 +43,15 @@ engine, storage engine and meta service.
 
 ### RiseDev
 
-RiseDev is the new tool for developing RisingWave. You'll need to install tmux (>= 3.2a) beforehand.
+RiseDev is the tool for developing RisingWave. Using RiseDev requires tmux.
 
-```
+```shell
 brew install tmux
 ```
 
 Then, in the root directory, simply run:
 
-```
+```shell
 ./risedev d # shortcut for ./risedev dev
 psql -h localhost -p 4567 -d dev
 ```
@@ -62,19 +62,25 @@ There are a lot of other running configurations, like `ci-1node`, `ci-3node`, `d
 
 To stop the playground,
 
-```
+```shell
 ./risedev k # shortcut for ./risedev kill
+```
+
+To view the logs,
+
+```shell
+./risedev l # shortcut for ./risedev logs
 ```
 
 And you can configure components for RiseDev.
 
-```
+```shell
 ./risedev configure
 ```
 
 For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
 
-```
+```shell
 ./risedev p
 ```
 
@@ -84,13 +90,17 @@ For more information, refer to `README.md` under `rust/risedevtool`.
 
 To preview the web page, install Node.js, and
 
-```
+```shell
 cd rust/meta/src/dashboard && npx reload -b
 ```
 
+### Dashboard v2
+
+The developement instructions for dashboard v2 is in [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+
 ## Contributing
 
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave-dev/blob/main/CONTRIBUTING.md).
+Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
 
 ## Toolchain
 

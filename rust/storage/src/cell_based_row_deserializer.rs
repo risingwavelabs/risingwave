@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::HashMap;
 
 use bytes::Bytes;
@@ -5,9 +19,8 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::{
-    deserialize_cell, deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID,
-};
+use risingwave_common::util::ordered::{deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID};
+use risingwave_common::util::value_encoding::deserialize_cell;
 
 #[derive(Clone)]
 pub struct CellBasedRowDeserializer {
@@ -61,7 +74,8 @@ impl CellBasedRowDeserializer {
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
             // do nothing
         } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
-            if let Some(datum) = deserialize_cell(cell, &column_desc.data_type)? {
+            let mut de = value_encoding::Deserializer::new(cell.clone());
+            if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
                 assert!(old.is_none());
             }

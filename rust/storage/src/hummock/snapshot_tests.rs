@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 #[cfg(test)]
 use std::sync::Arc;
 
@@ -29,7 +43,11 @@ async fn gen_and_upload_table(
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
     // get remote table
-    let sstable_store = Arc::new(SstableStore::new(object_store, remote_dir.to_string()));
+    let sstable_store = Arc::new(SstableStore::new(
+        object_store,
+        remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
+    ));
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
         table_id,
@@ -143,6 +161,7 @@ async fn test_snapshot() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -219,6 +238,7 @@ async fn test_snapshot_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -274,6 +294,7 @@ async fn test_snapshot_reverse_range_scan() {
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
+        Arc::new(StateStoreMetrics::unused()),
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

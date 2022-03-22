@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 //! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_pb::expr::expr_node::Type as ProstType;
@@ -387,7 +401,7 @@ mod tests {
                 children: vec![make_input_ref(0, TypeName::Int16)],
             })),
         };
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -427,7 +441,7 @@ mod tests {
                 children: vec![make_input_ref(0, TypeName::Int32)],
             })),
         };
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -473,7 +487,7 @@ mod tests {
                 children: vec![make_input_ref(0, TypeName::Char)],
             })),
         };
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -511,7 +525,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -547,7 +561,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1]).build();
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

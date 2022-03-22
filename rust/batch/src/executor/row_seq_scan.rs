@@ -1,9 +1,24 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
+use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
+// use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -11,9 +26,9 @@ use crate::executor::{Executor, ExecutorBuilder};
 
 /// Executor that scans data from row table
 pub struct RowSeqScanExecutor<S: StateStore> {
-    table: MViewTable<S>,
+    table: CellBasedTable<S>,
     /// An iterator to scan StateStore.
-    iter: Option<MViewTableIter<S>>,
+    iter: Option<CellBasedTableRowIter<S>>,
     primary: bool,
 
     chunk_size: usize,
@@ -25,7 +40,7 @@ pub struct RowSeqScanExecutor<S: StateStore> {
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
     pub fn new(
-        table: MViewTable<S>,
+        table: CellBasedTable<S>,
         chunk_size: usize,
         primary: bool,
         identity: String,
@@ -76,7 +91,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .collect_vec();
         dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
             let keyspace = Keyspace::table_root(state_store, &table_id);
-            let table = MViewTable::new_adhoc(keyspace, column_descs);
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs);
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,

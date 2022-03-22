@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
@@ -28,6 +42,7 @@ enum DataTypeName {
     Timestampz,
     Interval,
     Struct,
+    List,
 }
 
 fn name_of(ty: &DataType) -> DataTypeName {
@@ -47,6 +62,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Decimal => DataTypeName::Decimal,
         DataType::Interval => DataTypeName::Interval,
         DataType::Struct { .. } => DataTypeName::Struct,
+        DataType::List { .. } => DataTypeName::List,
     }
 }
 
@@ -73,6 +89,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct => DataType::Struct {
             fields: Arc::new([]),
+        },
+        DataTypeName::List => DataType::List {
+            datatype: Box::new(DataType::Int32),
         },
     })
 }
@@ -135,94 +154,141 @@ fn arithmetic_type_derive(t1: DataTypeName, t2: DataTypeName) -> DataTypeName {
         t1
     }
 }
+fn build_unary_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    arg1: &[DataTypeName],
+    ret: DataTypeName,
+) {
+    for (expr, a1) in iproduct!(exprs, arg1) {
+        map.insert(FuncSign::new_unary(*expr, *a1), ret);
+    }
+}
+fn build_binary_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    arg1: &[DataTypeName],
+    arg2: &[DataTypeName],
+    ret: DataTypeName,
+) {
+    for (expr, a1, a2) in iproduct!(exprs, arg1, arg2) {
+        map.insert(FuncSign::new_binary(*expr, *a1, *a2), ret);
+    }
+}
+fn build_ternary_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    arg1: &[DataTypeName],
+    arg2: &[DataTypeName],
+    arg3: &[DataTypeName],
+    ret: DataTypeName,
+) {
+    for (expr, a1, a2, a3) in iproduct!(exprs, arg1, arg2, arg3) {
+        map.insert(FuncSign::new_ternary(*expr, *a1, *a2, *a3), ret);
+    }
+}
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
+    use {DataTypeName as T, ExprType as E};
     let mut map = HashMap::new();
     let num_types = vec![
-        DataTypeName::Int16,
-        DataTypeName::Int32,
-        DataTypeName::Int64,
-        DataTypeName::Float32,
-        DataTypeName::Float64,
-        DataTypeName::Decimal,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Float32,
+        T::Float64,
+        T::Decimal,
     ];
     let all_types = vec![
-        DataTypeName::Int16,
-        DataTypeName::Int32,
-        DataTypeName::Int64,
-        DataTypeName::Float32,
-        DataTypeName::Float64,
-        DataTypeName::Boolean,
-        DataTypeName::Char,
-        DataTypeName::Varchar,
-        DataTypeName::Decimal,
-        DataTypeName::Time,
-        DataTypeName::Timestamp,
-        DataTypeName::Interval,
-        DataTypeName::Date,
-        DataTypeName::Timestampz,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Float32,
+        T::Float64,
+        T::Boolean,
+        T::Char,
+        T::Varchar,
+        T::Decimal,
+        T::Time,
+        T::Timestamp,
+        T::Interval,
+        T::Date,
+        T::Timestampz,
     ];
-    let atm_exprs = vec![
-        ExprType::Add,
-        ExprType::Subtract,
-        ExprType::Multiply,
-        ExprType::Divide,
-        ExprType::Modulus,
-    ];
-
+    let str_types = vec![T::Char, T::Varchar];
+    let atm_exprs = vec![E::Add, E::Subtract, E::Multiply, E::Divide, E::Modulus];
     let cmp_exprs = vec![
-        ExprType::Equal,
-        ExprType::NotEqual,
-        ExprType::LessThan,
-        ExprType::LessThanOrEqual,
-        ExprType::GreaterThan,
-        ExprType::GreaterThanOrEqual,
+        E::Equal,
+        E::NotEqual,
+        E::LessThan,
+        E::LessThanOrEqual,
+        E::GreaterThan,
+        E::GreaterThanOrEqual,
     ];
-    // Exprs that accept two bools and return a bool.
-    let bool_binary_exprs = vec![ExprType::And, ExprType::Or];
-    // Exprs that accept one bool and return a bool.
-    let bool_unary_exprs = vec![
-        ExprType::IsTrue,
-        ExprType::IsNotTrue,
-        ExprType::IsFalse,
-        ExprType::IsNotFalse,
-        ExprType::Not,
-    ];
-    let null_check_exprs = vec![
-        ExprType::IsNull,
-        ExprType::IsNotNull,
-        ExprType::StreamNullByRowCount,
-    ];
-
     for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
         map.insert(
             FuncSign::new_binary(expr, t1, t2),
             arithmetic_type_derive(t1, t2),
         );
     }
-    for (expr, t1, t2) in iproduct!(cmp_exprs.clone(), num_types.clone(), num_types) {
-        map.insert(FuncSign::new_binary(expr, t1, t2), DataTypeName::Boolean);
-    }
-    for expr in cmp_exprs {
-        map.insert(
-            FuncSign::new_binary(expr, DataTypeName::Boolean, DataTypeName::Boolean),
-            DataTypeName::Boolean,
-        );
-    }
-    for expr in bool_binary_exprs {
-        map.insert(
-            FuncSign::new_binary(expr, DataTypeName::Boolean, DataTypeName::Boolean),
-            DataTypeName::Boolean,
-        );
-    }
-    for expr in bool_unary_exprs {
-        map.insert(
-            FuncSign::new_unary(expr, DataTypeName::Boolean),
-            DataTypeName::Boolean,
-        );
-    }
-    for (expr, t) in iproduct!(null_check_exprs, all_types) {
-        map.insert(FuncSign::new_unary(expr, t), DataTypeName::Boolean);
-    }
+    build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
+    build_binary_funcs(
+        &mut map,
+        &cmp_exprs,
+        &[T::Boolean],
+        &[T::Boolean],
+        T::Boolean,
+    );
+    build_binary_funcs(
+        &mut map,
+        &[E::And, E::Or],
+        &[T::Boolean],
+        &[T::Boolean],
+        T::Boolean,
+    );
+    build_unary_funcs(
+        &mut map,
+        &[E::IsTrue, E::IsNotTrue, E::IsFalse, E::IsNotFalse, E::Not],
+        &[T::Boolean],
+        T::Boolean,
+    );
+    build_unary_funcs(
+        &mut map,
+        &[E::IsNull, E::IsNotNull, E::StreamNullByRowCount],
+        &all_types,
+        T::Boolean,
+    );
+    build_binary_funcs(&mut map, &[E::Substr], &str_types, &num_types, T::Varchar);
+    build_ternary_funcs(
+        &mut map,
+        &[E::Substr],
+        &str_types,
+        &num_types,
+        &num_types,
+        T::Varchar,
+    );
+    build_unary_funcs(&mut map, &[E::Length], &str_types, T::Int32);
+    build_unary_funcs(
+        &mut map,
+        &[E::Trim, E::Ltrim, E::Rtrim, E::Lower, E::Upper],
+        &str_types,
+        T::Varchar,
+    );
+    build_binary_funcs(
+        &mut map,
+        &[E::Trim, E::Ltrim, E::Rtrim, E::Position],
+        &str_types,
+        &str_types,
+        T::Varchar,
+    );
+    build_binary_funcs(&mut map, &[E::Like], &str_types, &str_types, T::Boolean);
+    build_ternary_funcs(
+        &mut map,
+        &[E::Replace],
+        &str_types,
+        &str_types,
+        &str_types,
+        T::Varchar,
+    );
 
     map
 }

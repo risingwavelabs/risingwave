@@ -22,7 +22,7 @@ dashborad/
 TODO: Find a suitable testing framework
 
 ## Development
-Start the system (run the following script at ./risingwave-dev)
+Start the system (run the following script at ./risingwave)
 ```bash
 ./risedev d
 sqllogictest -p 4567 -d dev './e2e_test/streaming/tpch/tpch.slt'
@@ -36,12 +36,19 @@ The website will be served at port 3000.
 npm run dev
 ```
 
+## Test with risingwave meta node
+To replace the built static files in risingwave with your newest code, 
+run the following scripts in the root directory:
+```
+./risedev export-dashboard-v2
+```
+
+
 ## Deployment
 #### Static HTML files
 Build static files for standalone deployment without node.js. The built files are generated at `./out`
 Check more details at [Static HTML Export](https://nextjs.org/docs/advanced-features/static-html-export).
 ```bash
-npm run build
 npm run build-static
 ```
 

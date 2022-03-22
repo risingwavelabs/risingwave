@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use bytes::Buf;
 use serde::de::{
     self, DeserializeSeed, EnumAccess, IntoDeserializer, SeqAccess, VariantAccess, Visitor,
@@ -113,6 +127,22 @@ impl<B: Buf> Deserializer<B> {
         loop {
             let byte = self.input.get_u8();
             if byte == 0 {
+                break;
+            }
+            byte_array.push(byte);
+        }
+        Ok(byte_array)
+    }
+
+    /// Read u8 from Bytes input in decimal form (Do not include null tag). Used by value encoding
+    /// ([`serialize_cell`]). TODO: It is a temporal solution For value encoding. Will moved to
+    /// value encoding serializer in future.
+    pub fn read_decimal_v2(&mut self) -> Result<Vec<u8>> {
+        let flag = self.input.get_u8();
+        let mut byte_array = vec![flag];
+        loop {
+            let byte = self.input.get_u8();
+            if byte == 100 {
                 break;
             }
             byte_array.push(byte);

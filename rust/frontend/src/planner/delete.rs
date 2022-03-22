@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
@@ -9,16 +23,19 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
-        let scan = self.plan_base_table_ref(delete.table.clone())?;
+        let table_name = delete.table.name.clone();
+        let table_id = delete.table.table_id;
+        let scan = self.plan_base_table(delete.table)?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create(scan, expr)?
         } else {
             scan
         };
-        let plan: PlanRef = LogicalDelete::create(input, delete.table)?.into();
+        let plan: PlanRef = LogicalDelete::create(input, table_name, table_id)?.into();
 
         let order = Order::any().clone();
-        let dist = Distribution::Single;
+        // For delete, frontend will only schedule one task so do not need this to be single.
+        let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
 

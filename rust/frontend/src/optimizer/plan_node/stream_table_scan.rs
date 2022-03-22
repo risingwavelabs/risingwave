@@ -1,10 +1,25 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, StreamBase, ToStreamProst};
+use super::{LogicalScan, PlanBase, ToStreamProst};
+use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -12,7 +27,7 @@ use crate::optimizer::property::{Distribution, WithSchema};
 /// creation request.
 #[derive(Debug, Clone)]
 pub struct StreamTableScan {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalScan,
 }
 
@@ -20,12 +35,20 @@ impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         Self { logical, base }
+    }
+
+    pub fn table_id(&self) -> u32 {
+        self.logical.table_id()
+    }
+
+    pub fn table_name(&self) -> &str {
+        self.logical.table_name()
+    }
+
+    pub fn columns(&self) -> &[ColumnId] {
+        self.logical.columns()
     }
 }
 
@@ -39,7 +62,12 @@ impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "StreamTableScan {{ logical: {} }}", self.logical)
+        write!(
+            f,
+            "StreamTableScan {{ table: {}, columns: [{}] }}",
+            self.logical.table_name(),
+            self.logical.column_names().join(", ")
+        )
     }
 }
 

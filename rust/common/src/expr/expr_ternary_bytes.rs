@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 //! For expression that accept 3 arguments + 1 bytes writer as input.
 
 use crate::array::{I32Array, Utf8Array};
@@ -107,7 +121,7 @@ mod tests {
 
         for (start, len, expected) in cases {
             let is_negative_len = matches!(len, Some(ScalarImpl::Int32(len_i32)) if len_i32 < 0);
-            let mut expr = new_substr_start_end(
+            let expr = new_substr_start_end(
                 Box::new(LiteralExpression::new(
                     DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),
@@ -143,7 +157,7 @@ mod tests {
         ];
 
         for (text, pattern, replacement, expected) in cases {
-            let mut expr = new_replace_expr(
+            let expr = new_replace_expr(
                 Box::new(LiteralExpression::new(
                     DataType::Char,
                     Some(ScalarImpl::from(String::from(text))),

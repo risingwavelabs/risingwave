@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use risingwave_pb::expr::expr_node::Type;
 
 use crate::array::{
@@ -441,7 +455,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -489,7 +503,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -540,7 +554,7 @@ mod tests {
         );
         let data_chunk = DataChunk::builder().columns(vec![col1, col2]).build();
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
-        let mut vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&expr).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

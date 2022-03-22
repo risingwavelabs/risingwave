@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -5,10 +19,12 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
+    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Substitute};
@@ -16,7 +32,7 @@ use crate::utils::{ColIndexMapping, Substitute};
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
 pub struct LogicalProject {
-    pub base: LogicalBase,
+    pub base: PlanBase,
     exprs: Vec<ExprImpl>,
     expr_alias: Vec<Option<String>>,
     input: PlanRef,
@@ -42,11 +58,7 @@ impl LogicalProject {
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = LogicalBase {
-            schema,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_logical(ctx, schema);
         LogicalProject {
             input,
             base,
@@ -120,7 +132,14 @@ impl LogicalProject {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
             .field("exprs", self.exprs())
-            .field("expr_alias", &self.expr_alias())
+            .field(
+                "expr_alias",
+                &self
+                    .expr_alias()
+                    .iter()
+                    .map(as_alias_display)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::net::SocketAddr;
@@ -8,6 +22,7 @@ use futures::channel::mpsc::Sender;
 use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::hash::VIRTUAL_KEY_COUNT;
 use risingwave_common::util::addr::is_local_address;
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
@@ -308,6 +323,9 @@ pub struct HashDataDispatcher {
     fragment_ids: Vec<u32>,
     outputs: Vec<BoxedOutput>,
     keys: Vec<usize>,
+    /// Mapping from virtual key to actor id, used for hash data dispatcher to dispatch tasks to
+    /// different downstream actors.
+    hash_mapping: Vec<ActorId>,
 }
 
 impl Debug for HashDataDispatcher {
@@ -320,11 +338,17 @@ impl Debug for HashDataDispatcher {
 }
 
 impl HashDataDispatcher {
-    pub fn new(fragment_ids: Vec<u32>, outputs: Vec<BoxedOutput>, keys: Vec<usize>) -> Self {
+    pub fn new(
+        fragment_ids: Vec<u32>,
+        outputs: Vec<BoxedOutput>,
+        keys: Vec<usize>,
+        hash_mapping: Vec<ActorId>,
+    ) -> Self {
         Self {
             fragment_ids,
             outputs,
             keys,
+            hash_mapping,
         }
     }
 }
@@ -359,7 +383,7 @@ impl Dispatcher for HashDataDispatcher {
             .get_hash_values(&self.keys, hash_builder)
             .unwrap()
             .iter()
-            .map(|hash| *hash as usize % num_outputs)
+            .map(|hash| *hash as usize % VIRTUAL_KEY_COUNT)
             .collect::<Vec<_>>();
 
         let (ops, columns, visibility) = chunk.into_inner();
@@ -372,7 +396,8 @@ impl Dispatcher for HashDataDispatcher {
                 hash_values.iter().zip_eq(ops).for_each(|(hash, op)| {
                     // get visibility map for every output chunk
                     for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                        vis_map.push(*hash == output_idx);
+                        vis_map
+                            .push(self.hash_mapping[*hash] == self.outputs[output_idx].actor_id());
                     }
                     // The 'update' message, noted by an UpdateDelete and a successive UpdateInsert,
                     // need to be rewritten to common Delete and Insert if they were dispatched to
@@ -399,7 +424,11 @@ impl Dispatcher for HashDataDispatcher {
                     .zip_eq(ops)
                     .for_each(|((hash, visible), op)| {
                         for (output_idx, vis_map) in vis_maps.iter_mut().enumerate() {
-                            vis_map.push(visible && *hash == output_idx);
+                            vis_map.push(
+                                visible
+                                    && self.hash_mapping[*hash]
+                                        == self.outputs[output_idx].actor_id(),
+                            );
                         }
                         if !visible {
                             new_ops.push(op);
@@ -607,6 +636,7 @@ mod tests {
     use risingwave_common::buffer::Bitmap;
     use risingwave_common::catalog::Schema;
     use risingwave_common::column_nonnull;
+    use risingwave_common::hash::VIRTUAL_KEY_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
@@ -615,12 +645,13 @@ mod tests {
 
     #[derive(Debug)]
     pub struct MockOutput {
+        actor_id: ActorId,
         data: Arc<Mutex<Vec<Message>>>,
     }
 
     impl MockOutput {
-        pub fn new(data: Arc<Mutex<Vec<Message>>>) -> Self {
-            Self { data }
+        pub fn new(actor_id: ActorId, data: Arc<Mutex<Vec<Message>>>) -> Self {
+            Self { actor_id, data }
         }
     }
 
@@ -632,7 +663,7 @@ mod tests {
         }
 
         fn actor_id(&self) -> ActorId {
-            0
+            self.actor_id
         }
     }
 
@@ -642,23 +673,33 @@ mod tests {
     }
 
     async fn test_hash_dispatcher_complex_inner() {
-        let num_outputs = 2;
+        let num_outputs = 2; // actor id ranges from 1 to 2
         let key_indices = &[0, 2];
         let output_data_vecs = (0..num_outputs)
             .map(|_| Arc::new(Mutex::new(Vec::new())))
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
+            .enumerate()
+            .map(|(actor_id, data)| {
+                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
+            })
             .collect::<Vec<_>>();
+        let mut hash_mapping = (1..num_outputs + 1)
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
+            .collect_vec();
+        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
             key_indices.to_vec(),
+            hash_mapping,
         );
 
         let chunk = StreamChunk::new(
             vec![
+                Op::Insert,
+                Op::Insert,
                 Op::Insert,
                 Op::Delete,
                 Op::UpdateDelete,
@@ -667,11 +708,11 @@ mod tests {
                 Op::UpdateInsert,
             ],
             vec![
-                column_nonnull! { I64Array, [0, 1, 2, 2, 3, 3] },
-                column_nonnull! { I64Array, [0, 1, 0, 0, 3, 3] },
-                column_nonnull! { I64Array, [0, 1, 2, 2, 2, 4] },
+                column_nonnull! { I64Array, [4, 5, 0, 1, 2, 2, 3, 3] },
+                column_nonnull! { I64Array, [6, 7, 0, 1, 0, 0, 3, 3] },
+                column_nonnull! { I64Array, [8, 9, 0, 1, 2, 2, 2, 4] },
             ],
-            Some(Bitmap::try_from(vec![true, false, true, true, true, true]).unwrap()),
+            Some(Bitmap::try_from(vec![true, true, true, false, true, true, true, true]).unwrap()),
         );
 
         hash_dispatcher.dispatch_data(chunk).await.unwrap();
@@ -680,11 +721,11 @@ mod tests {
             let guard = output_data_vecs[0].lock().unwrap();
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 1);
+                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
+                    assert_eq!(chunk1.cardinality(), 5);
                     assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
                     assert_eq!(
-                        chunk1.ops()[4],
+                        chunk1.ops()[6],
                         Op::Delete,
                         "Should rewrite UpdateDelete to Delete"
                     );
@@ -696,27 +737,27 @@ mod tests {
             let guard = output_data_vecs[1].lock().unwrap();
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
-                    assert_eq!(chunk1.capacity(), 6, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 4);
+                    assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
+                    assert_eq!(chunk1.cardinality(), 2);
                     assert!(
-                        !chunk1.visibility().as_ref().unwrap().is_set(1).unwrap(),
+                        !chunk1.visibility().as_ref().unwrap().is_set(3).unwrap(),
                         "Should keep original invisible mark"
                     );
-                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
+                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
 
                     assert_eq!(
-                        chunk1.ops()[2],
+                        chunk1.ops()[4],
                         Op::UpdateDelete,
                         "Should keep UpdateDelete"
                     );
                     assert_eq!(
-                        chunk1.ops()[3],
+                        chunk1.ops()[5],
                         Op::UpdateInsert,
                         "Should keep UpdateInsert"
                     );
 
                     assert_eq!(
-                        chunk1.ops()[5],
+                        chunk1.ops()[7],
                         Op::Insert,
                         "Should rewrite UpdateInsert to Insert"
                     );
@@ -771,8 +812,8 @@ mod tests {
             "ReceiverExecutor".to_string(),
         ));
         let data_sink = Arc::new(Mutex::new(vec![]));
-        let output = Box::new(MockOutput::new(data_sink));
         let actor_id = 233;
+        let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
         let mut executor = Box::new(DispatchExecutor::new(
@@ -837,7 +878,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatcher() {
-        let num_outputs = 5;
+        let num_outputs = 5; // actor id ranges from 1 to 5
         let cardinality = 10;
         let dimension = 4;
         let key_indices = &[0, 2];
@@ -846,12 +887,20 @@ mod tests {
             .collect::<Vec<_>>();
         let outputs = output_data_vecs
             .iter()
-            .map(|data| Box::new(MockOutput::new(data.clone())) as BoxedOutput)
+            .enumerate()
+            .map(|(actor_id, data)| {
+                Box::new(MockOutput::new(1 + actor_id as u32, data.clone())) as BoxedOutput
+            })
             .collect::<Vec<_>>();
+        let mut hash_mapping = (1..num_outputs + 1)
+            .flat_map(|id| vec![id as ActorId; VIRTUAL_KEY_COUNT / num_outputs])
+            .collect_vec();
+        hash_mapping.resize(VIRTUAL_KEY_COUNT, num_outputs as u32);
         let mut hash_dispatcher = HashDataDispatcher::new(
             (0..outputs.len() as u32).collect(),
             outputs,
             key_indices.to_vec(),
+            hash_mapping.clone(),
         );
 
         let mut ops = Vec::new();
@@ -878,7 +927,8 @@ mod tests {
                 let bytes = val.to_le_bytes();
                 hasher.update(&bytes);
             }
-            let output_idx = hasher.finish() as usize % num_outputs;
+            let output_idx =
+                hash_mapping[hasher.finish() as usize % VIRTUAL_KEY_COUNT] as usize - 1;
             for (builder, val) in builders.iter_mut().zip_eq(one_row.iter()) {
                 builder.append(Some(*val)).unwrap();
             }
@@ -905,7 +955,7 @@ mod tests {
             // It is possible that there is no chunks, as a key doesn't belong to any hash bucket.
             assert!(guard.len() <= 1);
             if guard.is_empty() {
-                assert!(output_cols[output_idx].iter().all(|x| x.is_empty()));
+                assert!(output_cols[output_idx].iter().all(|x| { x.is_empty() }));
             } else {
                 let message = guard.get(0).unwrap();
                 let real_chunk = match message {

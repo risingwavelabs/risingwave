@@ -1,46 +1,45 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, ExchangeNode};
+use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
-use crate::optimizer::property::order::WithOrder;
+use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
 #[derive(Debug, Clone)]
 pub struct StreamExchange {
-    pub base: StreamBase,
+    pub base: PlanBase,
     input: PlanRef,
-    schema: Schema,
 }
 
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let schema = input.schema().clone();
-        let base = StreamBase {
-            dist,
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
-        StreamExchange {
-            input,
-            schema,
-            base,
-        }
+        let base = PlanBase::new_stream(ctx, input.schema().clone(), dist);
+        StreamExchange { input, base }
     }
 }
 
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("StreamExchange")
-            .field("order", self.order())
-            .field("dist", self.distribution())
-            .finish()
+        write!(f, "StreamExchange {{ dist: {:?} }}", self.base.dist)
     }
 }
 
@@ -56,15 +55,15 @@ impl_plan_tree_node_for_unary! {StreamExchange}
 
 impl WithSchema for StreamExchange {
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.base.schema
     }
 }
 
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
-            fields: self.schema.to_prost(),
-            dispatcher: Some(Dispatcher {
+            fields: self.schema().to_prost(),
+            strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
                     Distribution::Single => DispatcherType::Simple,
@@ -75,8 +74,6 @@ impl ToStreamProst for StreamExchange {
                     Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
                     _ => vec![],
                 },
-                // Frontend does not have the info of hash mapping, which is set by meta.
-                hash_mapping: None,
             }),
         })
     }

@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+//
 mod compaction;
 mod compactor_manager;
 mod hummock_manager;
@@ -24,6 +38,20 @@ use tokio::task::JoinHandle;
 pub use vacuum::*;
 
 use crate::storage::MetaStore;
+
+pub fn start_hummock_workers<S>(
+    hummock_manager_ref: Arc<HummockManager<S>>,
+    compactor_manager_ref: Arc<CompactorManager>,
+    vacuum_trigger_ref: Arc<VacuumTrigger<S>>,
+) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
+where
+    S: MetaStore,
+{
+    vec![
+        start_compaction_trigger(hummock_manager_ref, compactor_manager_ref),
+        VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
+    ]
+}
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
