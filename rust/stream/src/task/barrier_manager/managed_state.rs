@@ -15,8 +15,7 @@
 use std::collections::HashSet;
 use std::iter::once;
 
-use tokio::sync::oneshot;
-
+use super::{BarrierCollectResult, BarrierCollectTx};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -46,7 +45,7 @@ pub(super) enum ManagedBarrierState {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: BarrierCollectTx,
     },
 }
 
@@ -76,7 +75,10 @@ impl ManagedBarrierState {
                     collect_notifier, ..
                 } => {
                     // Notify about barrier finishing.
-                    if collect_notifier.send(()).is_err() {
+                    if collect_notifier
+                        .send(BarrierCollectResult { finished: vec![] })
+                        .is_err()
+                    {
                         warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
                 }
@@ -138,7 +140,7 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: BarrierCollectTx,
     ) {
         match self {
             ManagedBarrierState::Pending { .. } => {

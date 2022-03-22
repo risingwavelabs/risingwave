@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::error::Result;
+use risingwave_pb::stream_service::inject_barrier_response::Finished;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -29,6 +30,15 @@ mod tests;
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
+
+#[derive(Debug)]
+pub struct BarrierCollectResult {
+    /// Finished commands during this epoch.
+    pub finished: Vec<Finished>,
+}
+
+pub type BarrierCollectTx = oneshot::Sender<BarrierCollectResult>;
+pub type BarrierCollectRx = oneshot::Receiver<BarrierCollectResult>;
 
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
@@ -92,7 +102,7 @@ impl LocalBarrierManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<Option<BarrierCollectRx>> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {

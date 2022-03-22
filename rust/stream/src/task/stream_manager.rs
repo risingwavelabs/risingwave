@@ -31,10 +31,9 @@ use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
-use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::ComputeClientPool;
+use super::{BarrierCollectResult, BarrierCollectRx, ComputeClientPool};
 use crate::executor::*;
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -148,7 +147,7 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<oneshot::Receiver<()>> {
+    ) -> Result<BarrierCollectRx> {
         let core = self.core.lock().unwrap();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
@@ -163,11 +162,11 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<()> {
+    ) -> Result<BarrierCollectResult> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
         // Wait for all actors finishing this barrier.
-        rx.await.unwrap();
+        let collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
@@ -182,7 +181,7 @@ impl StreamManager {
             }
         });
 
-        Ok(())
+        Ok(collect_result)
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when

@@ -121,19 +121,16 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
-        self.mgr
+        let collect_result = self
+            .mgr
             .send_and_collect_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        // TODO: currently the mutations carried by all barriers are finished in the single epoch,
-        // while in multiple epochs for MV creation in the future.
-        let finished = vec![];
-
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             status: None,
-            finished,
+            finished: collect_result.finished,
         }))
     }
 
