@@ -89,12 +89,14 @@ impl LogicalProject {
             input,
             mapping
         );
-        if mapping.is_empty() {
+        let mut input_refs;
+        if let Some(target_upper) = mapping.target_upper() {
+            input_refs = vec![None; target_upper + 1];
+        } else {
             // The parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
             return input;
         }
-        let mut input_refs = vec![None; mapping.target_upper() + 1];
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
             input_refs[tar] = Some(src);
