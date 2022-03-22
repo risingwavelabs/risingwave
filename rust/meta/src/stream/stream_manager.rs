@@ -51,6 +51,7 @@ pub struct CreateMaterializedViewContext {
 }
 
 /// Stream Manager
+
 pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
@@ -308,7 +309,10 @@ mod tests {
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
-    use risingwave_pb::stream_service::*;
+    use risingwave_pb::stream_service::{
+        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
+    };
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
@@ -448,11 +452,11 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager = Arc::new(NotificationManager::new());
+            let notification_manager =
+                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),
-                    None,
                     notification_manager,
                     Duration::from_secs(3600),
                 )

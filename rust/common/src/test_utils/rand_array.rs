@@ -25,7 +25,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,
@@ -106,6 +106,12 @@ impl RandValue for bool {
 impl RandValue for StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
         StructValue::new(vec![])
+    }
+}
+
+impl RandValue for ListValue {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        ListValue::new(vec![])
     }
 }
 

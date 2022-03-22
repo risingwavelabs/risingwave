@@ -25,7 +25,7 @@ use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 ///
 /// It is used in optimizer for transformation of column index.
 pub struct ColIndexMapping {
-    target_upper: usize,
+    target_upper: Option<usize>,
     /// The source column index is the subscript.
     map: Vec<Option<usize>>,
 }
@@ -34,11 +34,7 @@ impl ColIndexMapping {
     /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
     /// corresponding element.
     pub fn new(map: Vec<Option<usize>>) -> Self {
-        let target_upper = map
-            .iter()
-            .filter_map(|x| *x)
-            .max_by_key(|x| *x)
-            .unwrap_or(0);
+        let target_upper = map.iter().filter_map(|x| *x).max_by_key(|x| *x);
         Self { map, target_upper }
     }
 
@@ -160,12 +156,18 @@ impl ColIndexMapping {
         self.try_map(index).unwrap()
     }
 
-    pub fn target_upper(&self) -> usize {
+    /// Returns the maximum index in the target space.
+    /// `None` means the mapping is empty.
+    pub fn target_upper(&self) -> Option<usize> {
         self.target_upper
     }
 
     pub fn source_upper(&self) -> usize {
         self.map.len() - 1
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.target_upper().is_none()
     }
 }
 
@@ -179,10 +181,12 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping({})",
+            "ColIndexMapping{{ map:({}), source_upper:{}, target_upper:{:?} }}",
             self.mapping_pairs()
                 .map(|(src, dst)| format!("{}->{}", src, dst))
-                .join(",")
+                .join(","),
+            self.source_upper(),
+            self.target_upper(),
         )
     }
 }

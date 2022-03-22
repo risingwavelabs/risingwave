@@ -75,7 +75,7 @@ where
 
             // Notify frontends to create database.
             self.nm
-                .notify_fe(Operation::Add, &Info::Database(database))
+                .notify_frontend(Operation::Add, &Info::Database(database))
                 .await;
 
             Ok(version)
@@ -97,7 +97,7 @@ where
 
             // Notify frontends to delete database.
             self.nm
-                .notify_fe(Operation::Delete, &Info::Database(database))
+                .notify_frontend(Operation::Delete, &Info::Database(database))
                 .await;
 
             Ok(version)
@@ -123,7 +123,7 @@ where
 
             // Notify frontends to create schema.
             self.nm
-                .notify_fe(Operation::Add, &Info::Schema(schema))
+                .notify_frontend(Operation::Add, &Info::Schema(schema))
                 .await;
 
             Ok(version)
@@ -146,7 +146,7 @@ where
 
             // Notify frontends to delete schema.
             self.nm
-                .notify_fe(Operation::Delete, &Info::Schema(schema))
+                .notify_frontend(Operation::Delete, &Info::Schema(schema))
                 .await;
 
             Ok(version)
@@ -178,7 +178,9 @@ where
             }
 
             // Notify frontends to create table.
-            self.nm.notify_fe(Operation::Add, &Info::Table(table)).await;
+            self.nm
+                .notify_frontend(Operation::Add, &Info::Table(table))
+                .await;
 
             Ok(version)
         } else {
@@ -227,7 +229,7 @@ where
 
                     // Notify frontends to delete table.
                     self.nm
-                        .notify_fe(Operation::Delete, &Info::Table(table))
+                        .notify_frontend(Operation::Delete, &Info::Table(table))
                         .await;
 
                     Ok(version)

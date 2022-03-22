@@ -10,7 +10,7 @@ ETCD_DOWNLOAD_PATH_OTHER = "${PREFIX_TMP}/etcd.zip"
 ETCD_RELEASE = "etcd-${ETCD_VER}-${ETCD_SYSTEM}"
 
 [tasks.download-etcd]
-category = "Etcd"
+category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_ETCD" ] }
 description = "Download and extract Etcd"

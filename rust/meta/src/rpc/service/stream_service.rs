@@ -22,7 +22,7 @@ use crate::cluster::StoredClusterManagerRef;
 use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -49,6 +49,7 @@ where
         sm: StreamManagerRef<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         cluster_manager: StoredClusterManagerRef<S>,
+        _source_manager_ref: SourceManagerRef<S>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
@@ -76,7 +77,7 @@ where
         let req = request.into_inner();
 
         tracing::debug!(
-            plan = serde_json::to_string_pretty(&req).unwrap().as_str(),
+            plan = serde_json::to_string(&req).unwrap().as_str(),
             "create materialized view"
         );
 

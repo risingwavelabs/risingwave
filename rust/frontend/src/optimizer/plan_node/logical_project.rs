@@ -22,7 +22,9 @@ use super::{
     BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Substitute};
@@ -79,7 +81,7 @@ impl LogicalProject {
     ///
     /// This is useful in column pruning when we want to add a project to ensure the output schema
     /// is correct.
-    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> Self {
+    pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
         assert_eq!(
             input.schema().fields().len(),
             mapping.source_upper() + 1,
@@ -87,7 +89,13 @@ impl LogicalProject {
             input,
             mapping
         );
-        let mut input_refs = vec![None; mapping.target_upper() + 1];
+        let mut input_refs = if let Some(target_upper) = mapping.target_upper() {
+            vec![None; target_upper + 1]
+        } else {
+            // The mapping is empty, so the parent actually doesn't need the output of the input.
+            // This can happen when the parent node only selects constant expressions.
+            return input;
+        };
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
             input_refs[tar] = Some(src);
@@ -100,7 +108,7 @@ impl LogicalProject {
             .collect();
 
         let alias = vec![None; exprs.len()];
-        LogicalProject::new(input, exprs, alias)
+        LogicalProject::new(input, exprs, alias).into()
     }
 
     fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
@@ -130,7 +138,14 @@ impl LogicalProject {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
             .field("exprs", self.exprs())
-            .field("expr_alias", &self.expr_alias())
+            .field(
+                "expr_alias",
+                &self
+                    .expr_alias()
+                    .iter()
+                    .map(as_alias_display)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

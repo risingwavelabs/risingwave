@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+
+//! Data-driven tests.
 #![feature(let_chains)]
 
-// Data-driven tests.
-
+mod resolve_id;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
+pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::{create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
@@ -32,9 +34,19 @@ use risingwave_sqlparser::parser::Parser;
 use serde::{Deserialize, Serialize};
 
 #[serde_with::skip_serializing_none]
-#[derive(Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct TestCase {
+    /// Id of the test case, used in before.
+    pub id: Option<String>,
+
+    /// Before running the SQL statements, the test runner will execute the specified test cases
+    pub before: Option<Vec<String>>,
+
+    /// The resolved statements of the before ids
+    #[serde(skip_serializing)]
+    before_statements: Option<Vec<String>>,
+
     /// The SQL statements
     pub sql: String,
 
@@ -100,9 +112,12 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, sql: &str) -> TestCase {
+    pub fn as_test_case(self, original_test_case: &TestCase) -> TestCase {
         TestCase {
-            sql: sql.to_string(),
+            id: original_test_case.id.clone(),
+            before: original_test_case.before.clone(),
+            sql: original_test_case.sql.to_string(),
+            before_statements: original_test_case.before_statements.clone(),
             logical_plan: self.logical_plan,
             optimized_logical_plan: self.optimized_logical_plan,
             batch_plan: self.batch_plan,
@@ -121,34 +136,46 @@ impl TestCase {
     pub async fn run(&self, do_check_result: bool) -> Result<TestCaseResult> {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
-        let statements = Parser::parse_sql(&self.sql).unwrap();
 
         let mut result = None;
 
-        for stmt in statements {
-            let context = QueryContext::new(session.clone());
-            match stmt.clone() {
-                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
-                    if result.is_some() {
-                        panic!("two queries in one test case");
+        let placeholder_empty_vec = vec![];
+
+        for sql in self
+            .before_statements
+            .as_ref()
+            .unwrap_or(&placeholder_empty_vec)
+            .iter()
+            .chain(std::iter::once(&self.sql))
+        {
+            let statements = Parser::parse_sql(sql).unwrap();
+
+            for stmt in statements {
+                let context = QueryContext::new(session.clone());
+                match stmt.clone() {
+                    Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+                        if result.is_some() {
+                            panic!("two queries in one test case");
+                        }
+                        let ret = self.apply_query(&stmt, Rc::new(RefCell::new(context)))?;
+                        if do_check_result {
+                            check_result(self, &ret)?;
+                        }
+                        result = Some(ret);
                     }
-                    let ret = self.apply_query(&stmt, Rc::new(RefCell::new(context)))?;
-                    if do_check_result {
-                        check_result(self, &ret)?;
+                    Statement::CreateTable { name, columns, .. } => {
+                        create_table::handle_create_table(context, name, columns).await?;
                     }
-                    result = Some(ret);
+                    Statement::Drop(drop_statement) => {
+                        let table_object_name = ObjectName(vec![drop_statement.name]);
+                        drop_table::handle_drop_table(context, table_object_name).await?;
+                    }
+                    _ => return Err(anyhow!("Unsupported statement type")),
                 }
-                Statement::CreateTable { name, columns, .. } => {
-                    create_table::handle_create_table(context, name, columns).await?;
-                }
-                Statement::Drop(drop_statement) => {
-                    let table_object_name = ObjectName(vec![drop_statement.name]);
-                    drop_table::handle_drop_table(context, table_object_name).await?;
-                }
-                _ => return Err(anyhow!("Unsupported statement type")),
             }
         }
-        Ok(result.expect("no queries in this test case"))
+
+        Ok(result.unwrap_or_default())
     }
 
     fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
@@ -268,7 +295,7 @@ fn check_option_plan_eq(
         (None, None) => Ok(()),
         (None, Some(_)) => Ok(()),
         (Some(expected_plan), None) => Err(anyhow!(
-            "Expected {}:\n{},\nbut failure occurred.",
+            "Expected {}:\n{},\nbut failure occurred or no statement executed.",
             ctx,
             *expected_plan
         )),
@@ -294,7 +321,11 @@ fn check_err(ctx: &str, expected_err: &Option<String>, actual_err: &Option<Strin
     match (expected_err, actual_err) {
         (None, None) => Ok(()),
         (None, Some(e)) => Err(anyhow!("unexpected {} error: {}", ctx, e)),
-        (Some(e), None) => Err(anyhow!("expected {} error: {}", ctx, e)),
+        (Some(e), None) => Err(anyhow!(
+            "expected {} error: {}, but there's no error during execution",
+            ctx,
+            e
+        )),
         (Some(l), Some(r)) => {
             let expected_err = l.trim().to_string();
             let actual_err = r.trim().to_string();
@@ -317,6 +348,8 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
 
     let mut failed_num = 0;
     let cases: Vec<TestCase> = serde_yaml::from_str(file_content).unwrap();
+    let cases = resolve_testcase_id(cases).expect("failed to resolve");
+
     for c in cases {
         if let Err(e) = c.run(true).await {
             println!("\nTest case failed, the input SQL:\n{}\n{}", c.sql, e);

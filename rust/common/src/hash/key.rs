@@ -21,7 +21,9 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, Row, StructRef};
+use crate::array::{
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, ListRef, Row, StructRef,
+};
 use crate::error::Result;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -387,6 +389,20 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
 }
 
 impl<'a> HashKeySerDe<'a> for StructRef<'a> {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        todo!()
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        todo!()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for ListRef<'a> {
     type S = Vec<u8>;
 
     /// This should never be called
