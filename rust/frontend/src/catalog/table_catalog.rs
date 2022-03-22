@@ -67,12 +67,7 @@ impl From<ProstTable> for TableCatalog {
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
-        let columns: Vec<ColumnCatalog> = tb
-            .columns
-            .clone()
-            .into_iter()
-            .map(ColumnCatalog::from)
-            .collect();
+        let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for col in columns.clone() {
             for col_desc in col.get_column_descs() {
                 let col_name = col_desc.name.clone();
@@ -164,7 +159,7 @@ mod tests {
                             name: ROWID_NAME.to_string(),
                         },
                         is_hidden: true,
-                        catalogs: vec![],
+                        field_catalogs: vec![],
                         type_name: String::new()
                     },
                     build_catalog()

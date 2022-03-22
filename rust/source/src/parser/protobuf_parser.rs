@@ -166,7 +166,7 @@ impl ProtobufParser {
                     column_type: Some(data_type.to_protobuf()),
                 }),
                 is_hidden: false,
-                catalogs: column_vec,
+                field_catalogs: column_vec,
                 type_name: m.name().to_string(),
             })
         } else {
@@ -480,6 +480,41 @@ mod tests {
         ))))
     }
 
+    fn new_atomic_catalog(data_type: DataType, name: &str, column_id: i32) -> ColumnCatalog {
+        ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id,
+                name: name.to_string(),
+            }),
+            is_hidden: false,
+            ..Default::default()
+        }
+    }
+
+    fn new_struct_catalog(
+        name: &str,
+        column_id: i32,
+        type_name: &str,
+        fields: Vec<ColumnCatalog>,
+    ) -> ColumnCatalog {
+        ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(
+                    DataType::Struct {
+                        fields: vec![].into(),
+                    }
+                    .to_protobuf(),
+                ),
+                column_id,
+                name: name.to_string(),
+            }),
+            is_hidden: false,
+            type_name: type_name.to_string(),
+            field_catalogs: fields,
+        }
+    }
+
     #[test]
     fn test_map_to_columns() {
         use risingwave_common::types::*;
@@ -487,112 +522,21 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.city.address".to_string(),
-                    column_id: 3,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
-            ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.city.zipcode".to_string(),
-                    column_id: 4,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
+            new_atomic_catalog(DataType::Varchar, "country.city.address", 3),
+            new_atomic_catalog(DataType::Varchar, "country.city.zipcode", 4),
         ];
         let country = vec![
-            ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.address".to_string(),
-                    column_id: 2,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
-            ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_type: Some(
-                        DataType::Struct {
-                            fields: vec![].into(),
-                        }
-                        .to_protobuf(),
-                    ),
-                    name: "country.city".to_string(),
-                    column_id: 5,
-                }),
-                is_hidden: false,
-                catalogs: city,
-                type_name: ".test.City".to_string(),
-            },
-            ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.zipcode".to_string(),
-                    column_id: 6,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
+            new_atomic_catalog(DataType::Varchar, "country.address", 2),
+            new_struct_catalog("country.city", 5, ".test.City", city),
+            new_atomic_catalog(DataType::Varchar, "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
-                ColumnCatalog {
-                    column_desc: Some(ColumnDesc {
-                        column_type: Some(DataType::Int32.to_protobuf()),
-                        name: "id".to_string(),
-                        column_id: 1,
-                    }),
-                    is_hidden: false,
-                    catalogs: vec![],
-                    ..Default::default()
-                },
-                ColumnCatalog {
-                    column_desc: Some(ColumnDesc {
-                        column_type: Some(
-                            DataType::Struct {
-                                fields: vec![].into()
-                            }
-                            .to_protobuf()
-                        ),
-                        name: "country".to_string(),
-                        column_id: 7,
-                    }),
-                    is_hidden: false,
-                    catalogs: country,
-                    type_name: ".test.Country".to_string(),
-                },
-                ColumnCatalog {
-                    column_desc: Some(ColumnDesc {
-                        column_type: Some(DataType::Int64.to_protobuf()),
-                        name: "zipcode".to_string(),
-                        column_id: 8,
-                    }),
-                    is_hidden: false,
-                    catalogs: vec![],
-                    ..Default::default()
-                },
-                ColumnCatalog {
-                    column_desc: Some(ColumnDesc {
-                        column_type: Some(DataType::Float32.to_protobuf()),
-                        name: "rate".to_string(),
-                        column_id: 9,
-                    }),
-                    is_hidden: false,
-                    catalogs: vec![],
-                    ..Default::default()
-                },
+                new_atomic_catalog(DataType::Int32, "id", 1),
+                new_struct_catalog("country", 7, ".test.Country", country),
+                new_atomic_catalog(DataType::Int64, "zipcode", 8),
+                new_atomic_catalog(DataType::Float32, "rate", 9),
             ]
         );
     }

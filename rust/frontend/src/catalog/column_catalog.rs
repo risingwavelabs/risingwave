@@ -22,7 +22,7 @@ use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
-    pub catalogs: Vec<ColumnCatalog>,
+    pub field_catalogs: Vec<ColumnCatalog>,
     pub type_name: String,
 }
 
@@ -50,10 +50,44 @@ impl ColumnCatalog {
     // Get all column descs by recursion
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.column_desc.clone()];
-        for catalog in &self.catalogs {
+        for catalog in &self.field_catalogs {
             descs.append(&mut catalog.get_column_descs());
         }
         descs
+    }
+
+    #[cfg(test)]
+    pub fn new_atomic_catalog(data_type: DataType, name: &str, column_id: i32) -> Self {
+        Self {
+            column_desc: ColumnDesc {
+                data_type,
+                column_id: ColumnId::new(column_id),
+                name: name.to_string(),
+            },
+            is_hidden: false,
+            field_catalogs: vec![],
+            type_name: String::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_struct_catalog(
+        data_type: DataType,
+        name: &str,
+        column_id: i32,
+        type_name: &str,
+        fields: Vec<ColumnCatalog>,
+    ) -> Self {
+        Self {
+            column_desc: ColumnDesc {
+                data_type,
+                column_id: ColumnId::new(column_id),
+                name: name.to_string(),
+            },
+            is_hidden: false,
+            field_catalogs: fields,
+            type_name: type_name.to_string(),
+        }
     }
 }
 
@@ -64,7 +98,7 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
         let mut column_desc: ColumnDesc = prost.column_desc.unwrap().into();
         if let DataType::Struct { .. } = column_desc.data_type {
             let catalogs: Vec<ColumnCatalog> = prost
-                .catalogs
+                .field_catalogs
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect();
@@ -79,14 +113,14 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
             Self {
                 column_desc,
                 is_hidden: prost.is_hidden,
-                catalogs,
+                field_catalogs: catalogs,
                 type_name: prost.type_name,
             }
         } else {
             Self {
                 column_desc,
                 is_hidden: prost.is_hidden,
-                catalogs: vec![],
+                field_catalogs: vec![],
                 type_name: prost.type_name,
             }
         }
@@ -95,61 +129,33 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::types::*;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
     use crate::catalog::column_catalog::ColumnCatalog;
-    pub fn build_prost_catalog() -> ProstColumnCatalog {
-        let city = vec![
-            ProstColumnCatalog {
-                column_desc: Some(ProstColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.city.address".to_string(),
-                    column_id: 2,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
-            ProstColumnCatalog {
-                column_desc: Some(ProstColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.city.zipcode".to_string(),
-                    column_id: 3,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
-        ];
-        let country = vec![
-            ProstColumnCatalog {
-                column_desc: Some(ProstColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf()),
-                    name: "country.address".to_string(),
-                    column_id: 1,
-                }),
-                is_hidden: false,
-                catalogs: vec![],
-                ..Default::default()
-            },
-            ProstColumnCatalog {
-                column_desc: Some(ProstColumnDesc {
-                    column_type: Some(
-                        DataType::Struct {
-                            fields: vec![].into(),
-                        }
-                        .to_protobuf(),
-                    ),
-                    name: "country.city".to_string(),
-                    column_id: 4,
-                }),
-                is_hidden: false,
-                catalogs: city,
-                type_name: ".test.City".to_string(),
-            },
-        ];
+
+    fn new_atomic_prost_catalog(
+        data_type: DataType,
+        name: &str,
+        column_id: i32,
+    ) -> ProstColumnCatalog {
+        ProstColumnCatalog {
+            column_desc: Some(ProstColumnDesc {
+                column_type: Some(data_type.to_protobuf()),
+                column_id,
+                name: name.to_string(),
+            }),
+            is_hidden: false,
+            ..Default::default()
+        }
+    }
+
+    fn new_struct_prost_catalog(
+        name: &str,
+        column_id: i32,
+        type_name: &str,
+        fields: Vec<ProstColumnCatalog>,
+    ) -> ProstColumnCatalog {
         ProstColumnCatalog {
             column_desc: Some(ProstColumnDesc {
                 column_type: Some(
@@ -158,82 +164,60 @@ pub mod tests {
                     }
                     .to_protobuf(),
                 ),
-                name: "country".to_string(),
-                column_id: 5,
+                column_id,
+                name: name.to_string(),
             }),
             is_hidden: false,
-            catalogs: country,
-            type_name: ".test.Country".to_string(),
+            type_name: type_name.to_string(),
+            field_catalogs: fields,
         }
+    }
+
+    pub fn build_prost_catalog() -> ProstColumnCatalog {
+        let city = vec![
+            new_atomic_prost_catalog(DataType::Varchar, "country.city.address", 2),
+            new_atomic_prost_catalog(DataType::Varchar, "country.city.zipcode", 3),
+        ];
+        let country = vec![
+            new_atomic_prost_catalog(DataType::Varchar, "country.address", 1),
+            new_struct_prost_catalog("country.city", 4, ".test.City", city),
+        ];
+        new_struct_prost_catalog("country", 5, ".test.Country", country)
     }
 
     pub fn build_catalog() -> ColumnCatalog {
         let city = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: DataType::Varchar,
-                    name: "country.city.address".to_string(),
-                    column_id: ColumnId::new(2),
-                },
-                is_hidden: false,
-                catalogs: vec![],
-                type_name: String::new(),
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: DataType::Varchar,
-                    name: "country.city.zipcode".to_string(),
-                    column_id: ColumnId::new(3),
-                },
-                is_hidden: false,
-                catalogs: vec![],
-                type_name: String::new(),
-            },
+            ColumnCatalog::new_atomic_catalog(DataType::Varchar, "country.city.address", 2),
+            ColumnCatalog::new_atomic_catalog(DataType::Varchar, "country.city.zipcode", 3),
         ];
         let data_type = vec![DataType::Varchar, DataType::Varchar];
         let country = vec![
-            ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: DataType::Varchar,
-                    name: "country.address".to_string(),
-                    column_id: ColumnId::new(1),
+            ColumnCatalog::new_atomic_catalog(DataType::Varchar, "country.address", 1),
+            ColumnCatalog::new_struct_catalog(
+                DataType::Struct {
+                    fields: data_type.clone().into(),
                 },
-                is_hidden: false,
-                catalogs: vec![],
-                type_name: String::new(),
-            },
-            ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: DataType::Struct {
-                        fields: data_type.clone().into(),
-                    },
-                    name: "country.city".to_string(),
-                    column_id: ColumnId::new(4),
-                },
-                is_hidden: false,
-                catalogs: city,
-                type_name: ".test.City".to_string(),
-            },
+                "country.city",
+                4,
+                ".test.City",
+                city,
+            ),
         ];
-
-        ColumnCatalog {
-            column_desc: ColumnDesc {
-                data_type: DataType::Struct {
-                    fields: vec![
-                        DataType::Varchar,
-                        DataType::Struct {
-                            fields: data_type.into(),
-                        },
-                    ]
-                    .into(),
-                },
-                column_id: ColumnId::new(5),
-                name: "country".to_string(),
+        ColumnCatalog::new_struct_catalog(
+            DataType::Struct {
+                fields: vec![
+                    DataType::Varchar,
+                    DataType::Struct {
+                        fields: data_type.into(),
+                    },
+                ]
+                .into(),
             },
-            is_hidden: false,
-            catalogs: country,
-            type_name: ".test.Country".to_string(),
-        }
+            "country",
+            5,
+            ".test.Country",
+            country,
+        )
     }
     #[test]
     fn test_into_column_catalog() {

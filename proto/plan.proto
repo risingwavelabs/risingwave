@@ -46,7 +46,7 @@ message ColumnCatalog {
   ColumnDesc column_desc = 1;
   bool is_hidden = 2;
   // For STRUCT type.
-  repeated ColumnCatalog catalogs = 3;
+  repeated ColumnCatalog field_catalogs = 3;
   // The user-defined type's name. Empty if the column type is a builtin type.
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
