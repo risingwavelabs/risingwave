@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+//
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,6 +24,7 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
+use risingwave_pb::stream_service::inject_barrier_response::Finished;
 use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
 use tokio::sync::{oneshot, watch, RwLock};
@@ -34,6 +36,7 @@ use self::info::BarrierActorInfo;
 use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
 use crate::hummock::HummockManager;
 use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
+use crate::model::ActorId;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -86,32 +89,37 @@ impl Notifier {
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
 #[derive(Default)]
-struct UnfinishedNotifiers(HashMap<u64, (usize, Vec<Notifier>)>);
+struct UnfinishedNotifiers(HashMap<u64, (HashSet<ActorId>, Vec<Notifier>)>);
 
 impl UnfinishedNotifiers {
     fn add(
         &mut self,
         epoch: u64,
-        worker_count: usize,
+        actor_ids: impl IntoIterator<Item = ActorId>,
         notifiers: impl IntoIterator<Item = Notifier>,
     ) {
-        if worker_count == 0 {
+        let actor_ids: HashSet<_> = actor_ids.into_iter().collect();
+
+        if actor_ids.is_empty() {
             notifiers.into_iter().for_each(Notifier::notify_finished);
         } else {
             let old = self
                 .0
-                .insert(epoch, (worker_count, notifiers.into_iter().collect()));
+                .insert(epoch, (actor_ids, notifiers.into_iter().collect()));
             assert!(old.is_none());
         }
     }
 
-    fn finish_one(&mut self, epoch: u64) {
-        tracing::debug!("finish one for epoch {}", epoch);
+    fn finish_actors(&mut self, epoch: u64, actors: impl IntoIterator<Item = ActorId>) {
+        tracing::debug!("finish actors for epoch {}", epoch);
 
         match self.0.entry(epoch) {
             Entry::Occupied(mut o) => {
-                o.get_mut().0 -= 1;
-                if o.get().0 == 0 {
+                actors.into_iter().for_each(|a| {
+                    o.get_mut().0.remove(&a);
+                });
+
+                if o.get().0.is_empty() {
                     tracing::debug!("finish all for epoch {}", epoch);
                     let notifiers = o.remove().1;
                     notifiers.into_iter().for_each(Notifier::notify_finished);
@@ -289,11 +297,13 @@ where
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
                     // Add notifiers for this epoch to unfinished notifiers.
-                    unfinished.add(new_epoch, responses.len(), notifiers);
+                    unfinished.add(new_epoch, command_context.actors_to_finish()?, notifiers);
 
                     // For those finished epochs, notify about finished.
-                    for epoch in responses.into_iter().flat_map(|r| r.finished_epochs) {
-                        unfinished.finish_one(epoch);
+                    for Finished { epoch, actor_id } in
+                        responses.into_iter().flat_map(|r| r.finished)
+                    {
+                        unfinished.finish_actors(epoch, once(actor_id));
                     }
 
                     // Update the current epoch.

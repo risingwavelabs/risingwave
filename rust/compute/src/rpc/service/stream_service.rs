@@ -128,12 +128,12 @@ impl StreamService for StreamServiceImpl {
 
         // TODO: currently the mutations carried by all barriers are finished in the single epoch,
         // while in multiple epochs for MV creation in the future.
-        let finished_epochs = vec![barrier.current_epoch()];
+        let finished = vec![];
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
             status: None,
-            finished_epochs,
+            finished,
         }))
     }
 
