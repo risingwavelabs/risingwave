@@ -448,7 +448,7 @@ where
             use risingwave_common::catalog::TableId;
             let mut source_count = 0;
             if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
-                 // TODO: refactor using source id.
+                // TODO: refactor using source id.
                 source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
                 source_count += 1;
             }
