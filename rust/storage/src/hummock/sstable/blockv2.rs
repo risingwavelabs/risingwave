@@ -96,11 +96,6 @@ impl BlockV2 {
     pub fn data(&self) -> &Bytes {
         &self.data
     }
-
-    #[cfg(test)]
-    pub fn raw(&self) -> Bytes {
-        self.data.clone()
-    }
 }
 
 /// [`KeyPrefix`] contains info for prefix compression.
