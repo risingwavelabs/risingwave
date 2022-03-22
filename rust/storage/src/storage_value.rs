@@ -25,6 +25,11 @@ impl StorageValue {
         self.user_value.len()
     }
 
+    /// Returns whether user value is null
+    pub fn is_empty(&self) -> bool {
+        self.user_value.is_empty()
+    }
+
     /// Consumes the value and returns a Bytes instance containing identical bytes
     pub fn to_bytes(self) -> Bytes {
         self.user_value
