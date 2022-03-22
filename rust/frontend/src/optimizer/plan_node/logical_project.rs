@@ -93,7 +93,7 @@ impl LogicalProject {
         if let Some(target_upper) = mapping.target_upper() {
             input_refs = vec![None; target_upper + 1];
         } else {
-            // The parent actually doesn't need the output of the input.
+            // The mapping is empty, so the parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
             return input;
         }
