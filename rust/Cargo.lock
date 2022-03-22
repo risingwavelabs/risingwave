@@ -3929,6 +3929,7 @@ dependencies = [
  "anyhow",
  "console",
  "futures 0.3.21",
+ "itertools",
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
@@ -4223,6 +4224,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "value-encoding",
  "workspace-hack",
 ]
 

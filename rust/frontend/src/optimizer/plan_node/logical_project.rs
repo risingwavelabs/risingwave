@@ -22,7 +22,9 @@ use super::{
     BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
     ToStream,
 };
-use crate::expr::{assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
+use crate::expr::{
+    as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
+};
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::{ColIndexMapping, Substitute};
@@ -130,7 +132,14 @@ impl LogicalProject {
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
             .field("exprs", self.exprs())
-            .field("expr_alias", &self.expr_alias())
+            .field(
+                "expr_alias",
+                &self
+                    .expr_alias()
+                    .iter()
+                    .map(as_alias_display)
+                    .collect::<Vec<_>>(),
+            )
             .finish()
     }
 }

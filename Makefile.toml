@@ -38,21 +38,16 @@ rm -rf "${PREFIX_CONFIG}"
 
 
 [tasks.l]
-category = "Misc"
-description = "Open logs with VSCode"
-script = '''
-#!/bin/bash
-set -xe
-
-code "${PREFIX_LOG}"
-'''
+alias = "logs"
 
 [tasks.logs]
 category = "Misc"
-description = "Dump logs in a folder"
+description = "Open logs with VSCode and dump in console"
 script = '''
 #!/bin/bash
 set -e
+
+code "${PREFIX_LOG}" || true
 
 for out_file in ${PREFIX_LOG}/*.log
 do
@@ -83,7 +78,7 @@ done
 '''
 
 [tasks.link-standalone-binaries]
-category = "RisingWave"
+category = "RiseDev - Build"
 description = "Link standalone cmds to RiseDev bin"
 script = '''
 #!@shell
@@ -97,7 +92,7 @@ ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend
 '''
 
 [tasks.link-all-in-one-binaries]
-category = "RisingWave"
+category = "RiseDev - Build"
 description = "Link all-in-one cmds to RiseDev bin"
 condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
 script = '''
@@ -114,7 +109,7 @@ ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwav
 '''
 
 [tasks.link-user-bin]
-category = "RisingWave"
+category = "RiseDev - Build"
 description = "Link all binaries to .bin"
 condition = { env_set = [ "ENABLE_ALL_IN_ONE" ] }
 script = '''
@@ -131,17 +126,17 @@ ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playg
 '''
 
 [tasks.post-build-risingwave]
-category = "RisingWave"
-description = "Copy RisingWave binaries to bin"
+category = "RiseDev - Build"
+description = "Copy RisngWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
 
 [tasks.extract-dashboard-artifact]
-category = "RisingWave"
+category = "RiseDev - Build"
 description = "Extract dashboard artifact"
 condition = { env_not_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
 script = '''
-#!/bin/bash
+#!@shell
 
 # we allow this script to fail
 
@@ -153,10 +148,11 @@ git worktree add "${PREFIX_UI}" origin/dashboard-artifact
 '''
 
 [tasks.export-dashboard-v2]
-category = "RisingWave"
+category = "RiseDev - Build"
+description = "Build dashboard v2"
 condition = { env_set = [ "ENABLE_BUILD_DASHBOARD_V2" ] }
 script = """
-#!/bin/bash
+#!@shell
 set -e
 
 rm -rf "${PREFIX_UI}"
@@ -165,33 +161,46 @@ cd .. && ln -s "$(pwd)/dashboard/out" "${PREFIX_UI}"
 """
 
 [tasks.build-risingwave]
-category = "RisingWave"
-description = "Build RisingWave compute-node and meta-node"
+category = "RiseDev - Build"
+description = "Build Rust components"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
-#!/bin/bash
+
 set -e
 echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
 cd rust && cargo build -p risingwave_cmd -p risedev --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CARGO_BUILD_FLAGS}
 '''
 
+[tasks.build-docs]
+category = "RiseDev - Build"
+description = "Build Rust docs"
+condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+script = '''
+#!@shell
+
+set -e
+
+cd rust && cargo doc --workspace --no-deps --document-private-items
+'''
+
 [tasks.build-frontend]
-category = "RisingWave"
-description = "Build RisingWave frontend"
+category = "RiseDev - Build"
+description = "Build RisingWave SQL frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!/bin/bash
+#!@shell
+
 set -e
 cd java && ./gradlew build -x test
 '''
 
 [tasks.post-build-frontend]
-category = "RisingWave"
-description = "Post build RisingWave frontend"
+category = "RiseDev - Build"
+description = "Post build RisingWave SQL frontend"
 condition = { env_set = [ "ENABLE_BUILD_FRONTEND" ] }
 script = '''
-#!/bin/bash
+#!@shell
 
 set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
@@ -202,7 +211,7 @@ ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN
 category = "RiseDev - Prepare"
 description = "Copy necessary configuration files to RiseDev"
 script = '''
-#!/bin/bash
+#!@shell
 
 set -e
 
@@ -238,9 +247,9 @@ alias = "playground"
 
 [tasks.playground]
 category = "RiseDev - Start"
-description = "Start single-binary playground"
+description = "Start a lite RisingWave playground using risingwave all-in-one binary"
 script = '''
-#!/bin/bash
+#!@shell
 
 set -e
 
@@ -259,13 +268,14 @@ dependencies = [
 ]
 command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
-description = "Start a RisingWave playground"
+description = "Start a full RisingWave dev cluster using risedev-playground"
 
 [tasks.kill-risedev]
 category = "RiseDev - Stop"
-description = "kill playground"
+description = "Kill RisingWave dev cluster"
 script = '''
-#!/bin/bash
+#!@shell
+
 set -e
 tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
 tmux kill-session -t risedev
@@ -321,7 +331,8 @@ exit 1
 [tasks.install-tools]
 category = "RiseDev - Check"
 script = """
-#!/bin/bash
+#!@shell
+
 set -e
 
 for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort
@@ -364,7 +375,7 @@ echo "If any command is not found, run $(tput setaf 4)./risedev install-tools$(t
 """
 
 [tasks.test-cov]
-category = "RiseDev - Check"
+category = "RiseDev - Test"
 dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
@@ -377,7 +388,7 @@ cargo llvm-cov nextest --html
 description = "Run unit tests and report coverage"
 
 [tasks.test]
-category = "RiseDev - Check"
+category = "RiseDev - Test"
 dependencies = ["warn-on-missing-tools"]
 script = """
 #!/bin/bash
@@ -388,34 +399,63 @@ cargo nextest run
 """
 description = "Run unit tests"
 
-[tasks.check]
+[tasks.check-hakari]
 category = "RiseDev - Check"
-dependencies = ["warn-on-missing-tools"]
+description = "Run cargo hakari check and attempt to fix"
 script = """
-#!/bin/bash
+#!@shell
 
 cd rust
-
-echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks"
+echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 cargo hakari generate
 test $? -eq 0 || exit 1
+"""
 
-echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks"
-# We only check instead of format here beacuse everytime cargo sort rewrites all files, the crates will be rebuilt.
-# Therefore, users shoud run cargo sort themselves when new deps are added.
-cargo sort -w -c
+[tasks.check-dep-sort]
+category = "RiseDev - Check"
+description = "Run cargo sort check and attempt to fix"
+script = """
+#!@shell
+
+cd rust
+echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
+
+# Rewriting Cargo.toml will cause a full rebuild of all crates, so we always check before fix.
+(cargo sort -w -c > /dev/null) || cargo sort -w
 test $? -eq 0 || { echo "cargo sort check failed. You may run $(tput setaf 4)cargo sort -w$(tput sgr0) to fix it."; exit 1; }
+"""
 
-echo "Running $(tput setaf 4)cargo fmt$(tput sgr0) checks"
+[tasks.check-fmt]
+category = "RiseDev - Check"
+description = "Run cargo fmt check and attempt to fix"
+script = """
+#!@shell
+
+cd rust
+echo "Running $(tput setaf 4)cargo fmt$(tput sgr0) checks and attempting to fix"
 cargo fmt --all
 test $? -eq 0 || exit 1
+"""
 
+[tasks.check-clippy]
+category = "RiseDev - Check"
+description = "Run cargo clippy check"
+script = """
+#!@shell
+
+cd rust
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --workspace --all-targets
-echo "If cargo clippy check failed or generates warning. You may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
+echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
+"""
 
-echo
-echo "Done! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
+[tasks.check]
+category = "RiseDev - Check"
+dependencies = ["warn-on-missing-tools", "check-hakari", "check-dep-sort", "check-fmt", "check-clippy"]
+script = """
+#!@shell
+
+echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
 
@@ -423,3 +463,26 @@ description = "Perform pre-CI checks and automatically fix cargo sort, cargo hak
 category = "RiseDev - Check"
 command = ".github/workflow-template/generate.sh"
 description = "Update CI workflow by applying templates"
+
+[tasks.c]
+alias = "check"
+
+[tasks.install]
+category = "RiseDev - Prepare"
+description = "Install RiseDev to user local"
+script = """
+#!/bin/bash
+set -e
+
+DIR="$(pwd)"
+INSTALL_PATH="$CARGO_HOME/bin/risedev"
+
+cat <<EOF > "${INSTALL_PATH}"
+#!/bin/bash
+set -e
+cd "$DIR"
+./risedev "\\$@"
+EOF
+chmod +x "${INSTALL_PATH}"
+echo RiseDev installed to $(tput setaf 4)${INSTALL_PATH}$(tput sgr0)
+"""
