@@ -146,13 +146,13 @@ impl PlanRoot {
 
     /// optimize and generate a create materialize view plan
     pub fn gen_create_mv_plan(&self) -> PlanRef {
-        let mut plan = self.gen_optimized_logical_plan();
+        let plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
-        plan = plan.to_stream_with_dist_required(&self.required_dist);
+        let plan = plan.to_stream_with_dist_required(&self.required_dist);
 
         // TODO: get the correct table id
-        plan = StreamMaterialize::new(self.logical_plan.ctx(), plan, TableId::new(0)).into();
+        let plan = StreamMaterialize::new(self.logical_plan.ctx(), plan, TableId::new(0)).into();
 
         // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
         // result.

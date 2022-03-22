@@ -15,48 +15,67 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::TableRefId;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
+use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalScan, PlanBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
-/// `StreamSourceScan` represents a scan from source.
+/// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
-pub struct StreamSourceScan {
+pub struct StreamSource {
     pub base: PlanBase,
     logical: LogicalScan,
+    source_type: SourceType,
 }
 
-impl StreamSourceScan {
-    pub fn new(logical: LogicalScan) -> Self {
+impl StreamSource {
+    pub fn new(logical: LogicalScan, source_type: SourceType) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
-        Self { logical, base }
+
+        Self {
+            logical,
+            base,
+            source_type,
+        }
     }
 }
 
-impl WithSchema for StreamSourceScan {
+impl WithSchema for StreamSource {
     fn schema(&self) -> &Schema {
         self.logical.schema()
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamSourceScan }
+impl_plan_tree_node_for_leaf! { StreamSource }
 
-impl fmt::Display for StreamSourceScan {
+impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamSourceScan {{ table: {}, columns: [{}] }}",
+            "StreamSource {{ source: {}, type: {:?}, columns: [{}] }}",
             self.logical.table_name(),
+            self.source_type,
             self.logical.column_names().join(", ")
         )
     }
 }
 
-impl ToStreamProst for StreamSourceScan {
+impl ToStreamProst for StreamSource {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
-        ProstStreamNode::MergeNode(Default::default())
+        ProstStreamNode::SourceNode(SourceNode {
+            // TODO: Refactor this id
+            table_ref_id: TableRefId {
+                table_id: self.logical.table_id() as i32,
+                ..Default::default()
+            }
+            .into(),
+            column_ids: self.logical.columns().iter().map(|c| c.get_id()).collect(),
+            source_type: self.source_type as i32,
+        })
     }
 }

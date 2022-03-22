@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::session::QueryContext;
+
 pub const ROWID_NAME: &str = "_row_id";
 
 pub async fn handle_create_table(
