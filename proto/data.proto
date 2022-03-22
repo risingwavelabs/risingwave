@@ -164,7 +164,7 @@ message Barrier {
     UpdateMutation update = 4;
     AddMutation add = 5;
   }
-  bytes span = 7;
+  bytes span = 6;
 }
 
 message Terminate {}

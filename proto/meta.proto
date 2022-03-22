@@ -208,7 +208,6 @@ service StreamManagerService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   // will be deprecated and replaced by catalog.DropMaterializedSource and catalog.DropMaterializedView
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
-
   rpc Flush(FlushRequest) returns (FlushResponse);
 }
 

@@ -120,7 +120,7 @@ where
         }
     }
 
-    #[cfg(not(tarpaulin_include))]
+    #[cfg_attr(coverage, no_coverage)]
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();
 

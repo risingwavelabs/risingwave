@@ -24,18 +24,6 @@ message SourceNode {
   SourceType source_type = 3;
 }
 
-message ConnectorSplit {
-}
-
-message ConnectorSourceNode {
-  map<string, string> properties = 1; // { "kafka.host": "localhost:9092,sdsd"}
-  repeated ConnectorSplit splits = 2;
-  repeated plan.ColumnDesc column_descs = 3;
-}
-
-// connector-node -> mv_sink -> xxxxx
-// connector-node -> xxxxx
-
 message ProjectNode {
   repeated expr.ExprNode select_list = 1;
 }
@@ -119,7 +107,6 @@ message BatchPlanNode {
 message StreamNode {
   oneof node {
     SourceNode source_node = 4;
-    ConnectorSourceNode connector_source_node = 20;
     ProjectNode project_node = 5;
     FilterNode filter_node = 6;
     MaterializeNode materialize_node = 7;
