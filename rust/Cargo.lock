@@ -4224,6 +4224,7 @@ dependencies = [
  "tracing-futures",
  "twox-hash",
  "url",
+ "value-encoding",
  "workspace-hack",
 ]
 

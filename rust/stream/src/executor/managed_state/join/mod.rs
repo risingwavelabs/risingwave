@@ -21,8 +21,8 @@ pub use join_entry_state::JoinEntryState;
 use risingwave_common::array::Row;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RWResult;
-use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, DataType, Datum};
-use risingwave_common::util::ordered::{deserialize_cell, serialize_cell};
+use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use serde::{Deserialize, Serialize};
@@ -98,11 +98,11 @@ impl JoinRowDeserializer {
     pub fn deserialize(&self, data: &[u8]) -> RWResult<JoinRow> {
         let mut values = vec![];
         values.reserve(self.data_types.len());
-        let mut deserializer = memcomparable::Deserializer::new(data);
+        let mut deserializer = value_encoding::Deserializer::new(data);
         for ty in &self.data_types {
-            values.push(deserialize_cell(data, ty)?);
+            values.push(deserialize_cell(&mut deserializer, ty)?);
         }
-        let degree = u64::deserialize(&mut deserializer)?;
+        let degree = u64::deserialize(deserializer.memcom_de())?;
         Ok(JoinRow {
             row: Row(values),
             degree,
