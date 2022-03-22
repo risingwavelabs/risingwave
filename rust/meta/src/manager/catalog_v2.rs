@@ -201,7 +201,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "table already exists or in progress creation".to_string(),
+                "table already exists or in creating procedure".to_string(),
             )))
         }
     }
@@ -223,7 +223,7 @@ where
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
-                "table already exist or not in progress creation".to_string(),
+                "table already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -239,7 +239,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "table already exist or not in progress creation".to_string(),
+                "table already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -312,7 +312,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "source already exists or in progress creation".to_string(),
+                "source already exists or in creating procedure".to_string(),
             )))
         }
     }
@@ -334,7 +334,7 @@ where
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -347,7 +347,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -469,7 +469,7 @@ where
             Ok(version)
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
@@ -497,7 +497,7 @@ where
             Ok(())
         } else {
             Err(RwError::from(InternalError(
-                "source already exist or not in progress creation".to_string(),
+                "source already exist or not in creating procedure".to_string(),
             )))
         }
     }
