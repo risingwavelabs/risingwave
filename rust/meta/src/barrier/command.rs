@@ -31,7 +31,7 @@ use crate::cluster::NodeId;
 use crate::manager::StreamClientsRef;
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef};
+use crate::stream::FragmentManagerRef;
 
 /// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
 /// barriers to send, and may do different stuffs after the barrier is collected.
@@ -203,20 +203,21 @@ where
             Command::StopActors(actor_maps) => {
                 // Tell compute nodes to drop actors.
                 let futures = actor_maps.iter().map(|(node_id, actors)| {
-                    let node = self.info.node_map.get(node_id).unwrap();
-                    let request_id = Uuid::new_v4().to_string();
-
                     async move {
-                        let mut client = self.clients.get(node).await?;
+                        let client = self
+                            .clients
+                            .get_by_node_id(node_id)
+                            .expect("client not exists");
 
-                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
+                        let request_id = Uuid::new_v4().to_string();
+                        tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "drop actors");
                         // TODO: remove table_ref_id in DropActorsRequest.
                         let request = DropActorsRequest {
                             request_id,
                             table_ref_id: None,
                             actor_ids: actors.to_owned(),
                         };
-                        client.drop_actors(request).await.to_rw_result()?;
+                        client.to_owned().drop_actors(request).await.to_rw_result()?;
 
                         Ok::<_, RwError>(())
                     }

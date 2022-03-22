@@ -189,9 +189,11 @@ where
         // different WorkerNodes. Such that each WorkerNode knows the overall actor
         // allocation, but not actually builds it. We initialize all channels in this stage.
         for (node_id, actors) in &node_actors {
-            let node = locations.node_locations.get(node_id).unwrap();
+            let client = self
+                .clients
+                .get_by_node_id(node_id)
+                .expect("client not exists");
 
-            let client = self.clients.get(node).await?;
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -224,6 +226,7 @@ where
                 .get_by_node_id(&node_id)
                 .expect("client not exists");
             let request_id = Uuid::new_v4().to_string();
+
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -238,9 +241,11 @@ where
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (node_id, actors) in node_actors {
-            let node = locations.node_locations.get(&node_id).unwrap();
+            let client = self
+                .clients
+                .get_by_node_id(&node_id)
+                .expect("client not exists");
 
-            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client

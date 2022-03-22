@@ -189,10 +189,13 @@ where
         }
     }
 
-    pub fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    pub fn all_node_actors(
+        &self,
+        include_inactive: bool,
+    ) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
         for entry in &self.table_fragments {
-            for (node_id, actor_ids) in &entry.value().node_actors() {
+            for (node_id, actor_ids) in &entry.value().node_actors(include_inactive) {
                 let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
                 node_actor_ids.extend_from_slice(actor_ids);
             }

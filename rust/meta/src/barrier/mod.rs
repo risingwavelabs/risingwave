@@ -23,9 +23,11 @@ use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ActorInfo, HostAddress, WorkerType};
+use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::InjectBarrierRequest;
+use risingwave_pb::stream_service::{
+    BroadcastActorInfoTableRequest, BuildActorsRequest, InjectBarrierRequest, UpdateActorsRequest,
+};
 use smallvec::SmallVec;
 use tokio::sync::{oneshot, watch, RwLock};
 use uuid::Uuid;
@@ -342,6 +344,77 @@ where
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 
+    async fn update_actors(&self, info: &BarrierActorInfo) -> Result<()> {
+        let mut actor_infos = vec![];
+        for (node_id, actors) in &info.actor_map {
+            info.node_map
+                .get(node_id)
+                .map(|worker_node| {
+                    actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
+                        actor_id,
+                        host: worker_node.host.clone(),
+                    }))
+                })
+                .ok_or_else(|| {
+                    RwError::from(ErrorCode::InternalError(
+                        "worker evicted, wait for online.".to_string(),
+                    ))
+                })?;
+        }
+
+        let node_actors = self.fragment_manager.all_node_actors(false)?;
+        for (node_id, actors) in &info.actor_map {
+            let client = self
+                .clients
+                .get_by_node_id(node_id)
+                .expect("client not exists");
+
+            client
+                .to_owned()
+                .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
+                    info: actor_infos.clone(),
+                })
+                .await
+                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+
+            let request_id = Uuid::new_v4().to_string();
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
+            client
+                .to_owned()
+                .update_actors(UpdateActorsRequest {
+                    request_id,
+                    actors: node_actors.get(node_id).cloned().unwrap_or_default(),
+                    ..Default::default()
+                })
+                .await
+                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+        }
+
+        Ok(())
+    }
+
+    async fn build_actors(&self, info: &BarrierActorInfo) -> Result<()> {
+        for (node_id, actors) in &info.actor_map {
+            let client = self
+                .clients
+                .get_by_node_id(node_id)
+                .expect("client not exists");
+
+            let request_id = Uuid::new_v4().to_string();
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
+            client
+                .to_owned()
+                .build_actors(BuildActorsRequest {
+                    request_id,
+                    actor_id: actors.to_owned(),
+                })
+                .await
+                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+        }
+
+        Ok(())
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     async fn recovery(&self, prev_epoch: u64) {
         let new_epoch = self.epoch_generator.generate().into_inner();
@@ -352,28 +425,6 @@ where
             tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
 
             let info = self.resolve_actor_info(None).await;
-            let mut actor_infos = vec![];
-            let mut healthy = true;
-            for (node_id, actors) in &info.actor_map {
-                if info
-                    .node_map
-                    .get(node_id)
-                    .map(|worker_node| {
-                        actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
-                            actor_id,
-                            host: worker_node.host.clone(),
-                        }))
-                    })
-                    .is_none()
-                {
-                    // worker loss, wait for online.
-                    healthy = false;
-                    break;
-                }
-            }
-            if !healthy {
-                continue;
-            }
 
             // stop and drop all actors.
             let command_ctx = CommandContext::new(
@@ -391,7 +442,9 @@ where
             }
 
             // update and build all actors.
-            // TODO: call broadcast and build actors.
+            if self.update_actors(&info).await.is_err() || self.build_actors(&info).await.is_err() {
+                continue;
+            }
 
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
