@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::io::{Read, Write};
-use std::ops::{Range, RangeBounds};
+use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
@@ -93,8 +93,8 @@ impl BlockV2 {
             .unwrap_or_else(|x| x.saturating_sub(1))
     }
 
-    pub fn slice(&self, range: impl RangeBounds<usize>) -> Bytes {
-        self.data.slice(range)
+    pub fn data(&self) -> &Bytes {
+        &self.data
     }
 
     #[cfg(test)]

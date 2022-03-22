@@ -74,3 +74,4 @@ tikv = ["tikv-client"]
 [[bench]]
 name = "bench_block_iter"
 harness = false
+debug = true
