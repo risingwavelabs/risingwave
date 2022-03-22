@@ -3,7 +3,7 @@
 use std::net::{AddrParseError, SocketAddr};
 
 use crate::data::DataType;
-use crate::plan::{ColumnCatalog, ColumnDesc};
+use crate::plan::ColumnDesc;
 
 impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
@@ -51,17 +51,15 @@ impl crate::catalog::Source {
     }
 }
 
-impl crate::plan::ColumnCatalog {
+impl crate::plan::ColumnDesc {
     // Used for test
     pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(data_type),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
-            ..Default::default()
+        Self {
+            column_type: Some(data_type),
+            column_id,
+            name: name.to_string(),
+            field_descs: vec![],
+            type_name: String::new(),
         }
     }
 
@@ -71,17 +69,14 @@ impl crate::plan::ColumnCatalog {
         name: &str,
         column_id: i32,
         type_name: &str,
-        fields: Vec<ColumnCatalog>,
+        fields: Vec<ColumnDesc>,
     ) -> Self {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(data_type),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
+        Self {
+            column_type: Some(data_type),
+            column_id,
+            name: name.to_string(),
             type_name: type_name.to_string(),
-            field_catalogs: fields,
+            field_descs: fields,
         }
     }
 }

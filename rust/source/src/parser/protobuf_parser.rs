@@ -23,7 +23,7 @@ use risingwave_common::error::ErrorCode::{
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_common::vector_op::cast::str_to_date;
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
+use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
@@ -118,7 +118,7 @@ impl ProtobufParser {
     }
 
     /// Maps the protobuf schema to relational schema.
-    pub fn map_to_columns(&self) -> Result<Vec<ColumnCatalog>> {
+    pub fn map_to_columns(&self) -> Result<Vec<ColumnDesc>> {
         let msg = match self.descriptors.message_by_name(self.message_name.as_str()) {
             Some(msg) => msg,
             None => {
@@ -133,7 +133,7 @@ impl ProtobufParser {
             .map(|f| {
                 Self::pb_field_to_col_catalogs(f, &self.descriptors, "".to_string(), &mut index)
             })
-            .collect::<Result<Vec<ColumnCatalog>>>()
+            .collect::<Result<Vec<ColumnDesc>>>()
     }
 
     // Use pb field to create column_catalog, use index to create increment column_id
@@ -142,7 +142,7 @@ impl ProtobufParser {
         descriptors: &Descriptors,
         lastname: String,
         index: &mut i32,
-    ) -> Result<ColumnCatalog> {
+    ) -> Result<ColumnDesc> {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
         if let FieldType::Message(m) = field_type {
@@ -159,25 +159,19 @@ impl ProtobufParser {
                 })
                 .collect::<Result<Vec<_>>>()?;
             *index += 1;
-            Ok(ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_id: *index, // need increment
-                    name: lastname + field_descriptor.name(),
-                    column_type: Some(data_type.to_protobuf()),
-                }),
-                is_hidden: false,
-                field_catalogs: column_vec,
+            Ok(ColumnDesc {
+                column_id: *index, // need increment
+                name: lastname + field_descriptor.name(),
+                column_type: Some(data_type.to_protobuf()),
+                field_descs: column_vec,
                 type_name: m.name().to_string(),
             })
         } else {
             *index += 1;
-            Ok(ColumnCatalog {
-                column_desc: Some(ColumnDesc {
-                    column_id: *index, // need increment
-                    name: lastname + field_descriptor.name(),
-                    column_type: Some(data_type.to_protobuf()),
-                }),
-                is_hidden: false,
+            Ok(ColumnDesc {
+                column_id: *index, // need increment
+                name: lastname + field_descriptor.name(),
+                column_type: Some(data_type.to_protobuf()),
                 ..Default::default()
             })
         }
@@ -299,7 +293,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
-    use risingwave_pb::plan::ColumnCatalog;
+    use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -487,12 +481,12 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
-            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
         ];
         let country = vec![
-            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
-            ColumnCatalog::new_struct(
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
+            ColumnDesc::new_struct(
                 DataType::Struct {
                     fields: vec![].into(),
                 }
@@ -502,13 +496,13 @@ mod tests {
                 ".test.City",
                 city,
             ),
-            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
-                ColumnCatalog::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
-                ColumnCatalog::new_struct(
+                ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
+                ColumnDesc::new_struct(
                     DataType::Struct {
                         fields: vec![].into()
                     }
@@ -518,8 +512,8 @@ mod tests {
                     ".test.Country",
                     country
                 ),
-                ColumnCatalog::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
-                ColumnCatalog::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
+                ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
+                ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]
         );
     }

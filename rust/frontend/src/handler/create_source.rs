@@ -29,9 +29,9 @@ use crate::session::QueryContext;
 
 fn create_protobuf_table_schema(
     schema: &ProtobufSchema,
-) -> Result<(StreamSourceInfo, Vec<ColumnCatalog>)> {
+) -> Result<(StreamSourceInfo, Vec<ColumnDesc>)> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
-    let column_catalogs = parser.map_to_columns()?;
+    let column_descs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
         append_only: true,
         row_format: RowFormatType::Protobuf as i32,
@@ -39,7 +39,7 @@ fn create_protobuf_table_schema(
         ..Default::default()
     };
 
-    Ok((info, column_catalogs))
+    Ok((info, column_descs))
 }
 
 pub(super) async fn handle_create_source(
@@ -64,11 +64,16 @@ pub(super) async fn handle_create_source(
             column_id: 0,
             name: ROWID_NAME.to_string(),
             column_type: Some(DataType::Int32.to_protobuf()),
+            ..Default::default()
         }),
         is_hidden: true,
-        ..Default::default()
     }))
-    .chain(columns.into_iter().map(Ok))
+    .chain(columns.into_iter().map(|col| {
+        Ok(ColumnCatalog {
+            column_desc: Some(col),
+            is_hidden: false,
+        })
+    }))
     .collect::<Result<_>>()?;
 
     let table = ProstTable {
