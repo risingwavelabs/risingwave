@@ -409,7 +409,6 @@ impl HummockStorage {
     }
 
     fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        // TODO: use different option values (especially table_size) for compaction
         SSTableBuilder::new(SSTableBuilderOptions {
             table_capacity: options.sstable_size,
             block_size: options.block_size,

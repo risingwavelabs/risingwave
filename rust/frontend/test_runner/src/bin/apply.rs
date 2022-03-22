@@ -18,7 +18,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use console::style;
 use futures::StreamExt;
-use risingwave_frontend_test_runner::TestCase;
+use risingwave_frontend_test_runner::{resolve_testcase_id, TestCase};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -61,11 +61,12 @@ async fn main() -> Result<()> {
                 let func = async {
                     let file_content = tokio::fs::read_to_string(&path).await?;
                     let cases: Vec<TestCase> = serde_yaml::from_str(&file_content)?;
+                    let cases = resolve_testcase_id(cases)?;
                     let mut updated_cases = vec![];
 
                     for case in cases {
                         let result = case.run(false).await?;
-                        let updated_case = result.as_test_case(&case.sql);
+                        let updated_case = result.as_test_case(&case);
                         updated_cases.push(updated_case);
                     }
 
