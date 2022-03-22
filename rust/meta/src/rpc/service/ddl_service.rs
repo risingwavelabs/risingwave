@@ -180,7 +180,7 @@ where
             .await
             .map_err(tonic_err)?;
 
-        if let Err(e) = self.create_source_inner(&source).await {
+        if let Err(e) = self.create_source_on_compute_node(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
                 .await
@@ -215,7 +215,9 @@ where
             .map_err(tonic_err)?;
 
         // 2. Drop source on compute nodes.
-        self.drop_source_inner(source_id).await.map_err(tonic_err)?;
+        self.drop_source_on_compute_node(source_id)
+            .await
+            .map_err(tonic_err)?;
 
         Ok(Response::new(DropSourceResponse {
             status: None,
@@ -244,7 +246,7 @@ where
             .map_err(tonic_err)?;
 
         // 2. Create mview in stream manager
-        if let Err(e) = self.create_materialized_view_inner(&stream_node, id).await {
+        if let Err(e) = self.create_mview_on_compute_node(&stream_node, id).await {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
                 .await
@@ -277,7 +279,7 @@ where
             .map_err(tonic_err)?;
 
         // 2. drop mv in stream manager
-        self.drop_materialized_view_inner(table_id)
+        self.drop_mview_on_compute_node(table_id)
             .await
             .map_err(tonic_err)?;
 
@@ -350,7 +352,7 @@ where
         Ok(all_stream_clients)
     }
 
-    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
+    async fn create_source_on_compute_node(&self, source: &Source) -> RwResult<()> {
         // Create source on compute nodes.
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
@@ -368,7 +370,7 @@ where
         Ok(())
     }
 
-    async fn drop_source_inner(&self, source_id: SourceId) -> RwResult<()> {
+    async fn drop_source_on_compute_node(&self, source_id: SourceId) -> RwResult<()> {
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
             .all_stream_clients()
@@ -383,7 +385,7 @@ where
         Ok(())
     }
 
-    async fn create_materialized_view_inner(
+    async fn create_mview_on_compute_node(
         &self,
         stream_node: &StreamNode,
         id: TableId,
@@ -407,7 +409,7 @@ where
         Ok(())
     }
 
-    async fn drop_materialized_view_inner(&self, table_id: u32) -> RwResult<()> {
+    async fn drop_mview_on_compute_node(&self, table_id: u32) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
         // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
         self.stream_manager
@@ -434,7 +436,7 @@ where
             .await?;
 
         // Create source
-        if let Err(e) = self.create_source_inner(&source).await {
+        if let Err(e) = self.create_source_on_compute_node(&source).await {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
@@ -446,7 +448,8 @@ where
             use risingwave_common::catalog::TableId;
             let mut source_count = 0;
             if let Node::SourceNode(source_node) = stream_node.node.as_mut().unwrap() {
-                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into(); // TODO: refactor using source id.
+                 // TODO: refactor using source id.
+                source_node.table_ref_id = TableRefId::from(&TableId::new(source_id)).into();
                 source_count += 1;
             }
             for input in &mut stream_node.input {
@@ -472,14 +475,14 @@ where
             .await? as u32;
 
         if let Err(e) = self
-            .create_materialized_view_inner(&stream_node, mview_id)
+            .create_mview_on_compute_node(&stream_node, mview_id)
             .await
         {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
             // drop previously created source
-            self.drop_source_inner(source_id).await?;
+            self.drop_source_on_compute_node(source_id).await?;
             return Err(e);
         }
         mview.id = mview_id;
@@ -506,8 +509,8 @@ where
             .await?;
 
         // 2. Drop source and mv separately.
-        self.drop_source_inner(source_id).await?;
-        self.drop_materialized_view_inner(table_id).await?;
+        self.drop_source_on_compute_node(source_id).await?;
+        self.drop_mview_on_compute_node(table_id).await?;
 
         Ok(version)
     }
