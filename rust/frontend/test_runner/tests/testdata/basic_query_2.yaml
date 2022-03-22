@@ -117,7 +117,8 @@
         StreamExchange { dist: Single }
           StreamHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($3)] }
             StreamProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
-              StreamTableScan { table: t, columns: [v1, v2, v3] }
+              StreamExchange { dist: HashShard([0]) }
+                StreamTableScan { table: t, columns: [v1, v2, v3] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) from t;
@@ -134,7 +135,8 @@
         StreamExchange { dist: Single }
           StreamSimpleAgg { aggs: [min($0), max($1), count($2)] }
             StreamProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
-              StreamTableScan { table: t, columns: [v1, v2, v3] }
+              StreamExchange { dist: Single }
+                StreamTableScan { table: t, columns: [v1, v2, v3] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -155,4 +157,5 @@
         StreamExchange { dist: Single }
           StreamHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
             StreamProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
-              StreamTableScan { table: t, columns: [v1, v2, v3] }
+              StreamExchange { dist: HashShard([0]) }
+                StreamTableScan { table: t, columns: [v1, v2, v3] }
