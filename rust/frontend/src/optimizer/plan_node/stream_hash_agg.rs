@@ -14,10 +14,13 @@
 //
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -43,7 +46,15 @@ impl StreamHashAgg {
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("StreamHashAgg")
-            .field("group_keys", &self.group_keys())
+            .field(
+                "group_keys",
+                &self
+                    .group_keys()
+                    .iter()
+                    .copied()
+                    .map(InputRefDisplay)
+                    .collect_vec(),
+            )
             .field("aggs", &self.agg_calls())
             .finish()
     }
@@ -66,4 +77,21 @@ impl WithSchema for StreamHashAgg {
     }
 }
 
-impl ToStreamProst for StreamHashAgg {}
+impl ToStreamProst for StreamHashAgg {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        use risingwave_pb::stream_plan::*;
+
+        ProstStreamNode::HashAggNode(HashAggNode {
+            group_keys: self
+                .group_keys()
+                .iter()
+                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .collect_vec(),
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect_vec(),
+        })
+    }
+}

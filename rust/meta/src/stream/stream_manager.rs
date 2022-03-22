@@ -448,11 +448,11 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager = Arc::new(NotificationManager::new());
+            let notification_manager =
+                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),
-                    None,
                     notification_manager,
                     Duration::from_secs(3600),
                 )

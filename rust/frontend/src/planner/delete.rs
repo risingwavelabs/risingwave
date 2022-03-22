@@ -34,7 +34,8 @@ impl Planner {
         let plan: PlanRef = LogicalDelete::create(input, table_name, table_id)?.into();
 
         let order = Order::any().clone();
-        let dist = Distribution::Single;
+        // For delete, frontend will only schedule one task so do not need this to be single.
+        let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
 

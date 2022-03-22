@@ -4,7 +4,7 @@
   batch_plan: |
     BatchExchange { order: [$1 DESC], dist: Single }
       BatchSort { order: [$1 DESC] }
-        BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+        BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
           BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -12,7 +12,7 @@
   batch_plan: |
     BatchExchange { order: [$1 ASC], dist: Single }
       BatchSort { order: [$1 ASC] }
-        BatchProject { exprs: [$0, $1, $2], expr_alias: [Some("_row_id"), Some("v1"), Some("v2")] }
+        BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
           BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -20,7 +20,7 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchProject { exprs: [$0, ($0 + 1:Int32)], expr_alias: [Some("v1"), None] }
+        BatchProject { exprs: [$0, ($0 + 1:Int32)], expr_alias: [v1,  ] }
           BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -28,7 +28,7 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchProject { exprs: [$0], expr_alias: [Some("v1")] }
+        BatchProject { exprs: [$0], expr_alias: [v1] }
           BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -36,15 +36,13 @@
   batch_plan: |
     BatchExchange { order: [$0 ASC], dist: Single }
       BatchSort { order: [$0 ASC] }
-        BatchProject { exprs: [$0], expr_alias: [Some("a1")] }
+        BatchProject { exprs: [$0], expr_alias: [a1] }
           BatchScan { table: t, columns: [v1] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;
-  binder_error: |-
-    Feature is not yet implemented: ORDER BY BinaryOp { left: Value(Number("1", false)), op: Plus, right: Value(Number("1", false)) }
+  binder_error: 'Feature is not yet implemented: ORDER BY BinaryOp { left: Value(Number("1", false)), op: Plus, right: Value(Number("1", false)) }'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;
-  binder_error: |-
-    Item not found: output column "v"
+  binder_error: 'Item not found: output column "v"'

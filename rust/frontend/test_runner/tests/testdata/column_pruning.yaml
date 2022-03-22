@@ -2,21 +2,21 @@
     create table t (v1 bigint, v2 double precision);
     select v1 from t
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+    LogicalProject { exprs: [$1], expr_alias: [v1] }
       LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0], expr_alias: [Some("v1")] }
+    LogicalProject { exprs: [$0], expr_alias: [v1] }
       LogicalScan { table: t, columns: [v1] }
 - sql: |
     /* filter */
     create table t (v1 bigint, v2 double precision, v3 int);
     select v1 from t where v2 > 2
   logical_plan: |
-    LogicalProject { exprs: [$1], expr_alias: [Some("v1")] }
+    LogicalProject { exprs: [$1], expr_alias: [v1] }
       LogicalFilter { predicate: ($2 > 2:Int32) }
         LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0], expr_alias: [Some("v1")] }
+    LogicalProject { exprs: [$0], expr_alias: [v1] }
       LogicalFilter { predicate: ($1 > 2:Int32) }
         LogicalScan { table: t, columns: [v1, v2] }
 - sql: |
@@ -25,12 +25,12 @@
     create table t2 (v1 int not null, v2 int not null, v3 int);
     select t1.v1, t2.v1 from t1 join t2 on t1.v2 = t2.v2;
   logical_plan: |
-    LogicalProject { exprs: [$1, $5], expr_alias: [Some("v1"), Some("v1")] }
+    LogicalProject { exprs: [$1, $5], expr_alias: [v1, v1] }
       LogicalJoin { type: Inner, on: ($2 = $6) }
         LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
         LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $2], expr_alias: [Some("v1"), Some("v1")] }
+    LogicalProject { exprs: [$0, $2], expr_alias: [v1, v1] }
       LogicalJoin { type: Inner, on: ($1 = $3) }
         LogicalScan { table: t1, columns: [v1, v2] }
         LogicalScan { table: t2, columns: [v1, v2] }
@@ -39,14 +39,14 @@
     create table t (v1 bigint, v2 double precision, v3 int);
     select count(v1) from t where v2 > 2
   logical_plan: |
-    LogicalProject { exprs: [$0], expr_alias: [None] }
-      LogicalAgg { group_keys: [], agg_calls: [Count(0)] }
-        LogicalProject { exprs: [$1], expr_alias: [None] }
+    LogicalProject { exprs: [$0], expr_alias: [ ] }
+      LogicalAgg { group_keys: [], agg_calls: [count($0)] }
+        LogicalProject { exprs: [$1], expr_alias: [ ] }
           LogicalFilter { predicate: ($2 > 2:Int32) }
             LogicalScan { table: t, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0], expr_alias: [None] }
-      LogicalAgg { group_keys: [], agg_calls: [Count(0)] }
-        LogicalProject { exprs: [$0], expr_alias: [None] }
+    LogicalProject { exprs: [$0], expr_alias: [ ] }
+      LogicalAgg { group_keys: [], agg_calls: [count($0)] }
+        LogicalProject { exprs: [$0], expr_alias: [ ] }
           LogicalFilter { predicate: ($1 > 2:Int32) }
             LogicalScan { table: t, columns: [v1, v2] }

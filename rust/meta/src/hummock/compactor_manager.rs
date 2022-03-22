@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::ops::Add;
-use std::time::{Duration, Instant};
 
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
@@ -22,18 +20,10 @@ use tokio::sync::RwLock;
 use tracing::warn;
 
 const STREAM_BUFFER_SIZE: usize = 4;
-const COMPACT_TASK_TIMEOUT: Duration = Duration::from_secs(60);
 
 struct CompactorManagerInner {
     /// Senders of stream to available compactors
     compactors: Vec<Sender<Result<SubscribeCompactTasksResponse>>>,
-
-    // Although we can find all ongoing compact tasks in CompactStatus, this field can help in
-    // tracking compact tasks. We don't persist this field because all assigned tasks would be
-    // cancelled at HummockManager initialization. TODO #546: start a worker to handle expired
-    // tasks.
-    /// Ongoing compact tasks with instant to expire.
-    assigned_tasks: Vec<(CompactTask, Instant)>,
 
     /// We use round-robin approach to assign tasks to compactors.
     /// This field indexes the compactor which the next task should be assigned to.
@@ -44,7 +34,6 @@ impl CompactorManagerInner {
     pub fn new() -> Self {
         Self {
             compactors: vec![],
-            assigned_tasks: vec![],
             next_compactor: 0,
         }
     }
@@ -99,12 +88,6 @@ impl CompactorManager {
             break;
         }
         guard.next_compactor += 1;
-        if let Some(compact_task) = compact_task {
-            // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be avoided.
-            guard
-                .assigned_tasks
-                .push((compact_task, Instant::now().add(COMPACT_TASK_TIMEOUT)));
-        }
 
         true
     }

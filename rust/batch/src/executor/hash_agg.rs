@@ -25,6 +25,7 @@ use risingwave_common::hash::{
     calc_hash_key_kind, HashKey, HashKeyDispatcher, PrecomputedBuildHasher,
 };
 use risingwave_common::types::DataType;
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
@@ -46,6 +47,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
         Box::new(HashAggExecutor::<K>::new(input))
     }
 }
+
 pub(super) struct HashAggExecutorBuilder {
     agg_factories: Vec<AggStateFactory>,
     group_key_columns: Vec<usize>,
@@ -124,6 +126,7 @@ impl BoxedExecutorBuilder for HashAggExecutorBuilder {
         Self::deserialize(hash_agg_node, child, source.task_id.clone(), identity)
     }
 }
+
 /// `HashAggExecutor` implements the hash aggregate algorithm.
 pub(super) struct HashAggExecutor<K> {
     /// factories to construct aggregator for each groups
@@ -135,7 +138,7 @@ pub(super) struct HashAggExecutor<K> {
     /// hash map for each agg groups
     groups: AggHashMap<K>,
     /// the aggregated result set
-    result: Option<DataChunk>,
+    result: Option<<AggHashMap<K> as IntoIterator>::IntoIter>,
     /// the data types of key columns
     group_key_types: Vec<DataType>,
     schema: Schema,
@@ -177,58 +180,65 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
                         })
                 });
                 err_flag?;
+
                 // TODO: currently not a vectorized implementation
                 states
                     .iter_mut()
                     .for_each(|state| state.update_with_row(&chunk, row_id).unwrap());
             }
         }
-        let cardinality = self.groups.len();
 
-        let mut group_builders = self
-            .group_key_types
-            .iter()
-            .map(|datatype| datatype.create_array_builder(cardinality))
-            .collect::<Result<Vec<_>>>()?;
-
-        let mut agg_builders = self
-            .agg_factories
-            .iter()
-            .map(|agg_factory| {
-                agg_factory
-                    .get_return_type()
-                    .create_array_builder(cardinality)
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        for (key, states) in mem::take(&mut self.groups) {
-            key.deserialize_to_builders(&mut group_builders[..])?;
-            states
-                .into_iter()
-                .zip_eq(&mut agg_builders)
-                .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
-        }
-
-        let columns = group_builders
-            .into_iter()
-            .chain(agg_builders)
-            .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
-            .collect::<Result<Vec<_>>>()?;
-
-        let ret = DataChunk::builder().columns(columns).build();
         assert!(self.result.is_none());
-        self.result = Some(ret);
+        self.result = Some(mem::take(&mut self.groups).into_iter());
 
-        self.child.close().await
+        Ok(())
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        if self.result.is_none() {
-            return Ok(None);
+        if let Some(res) = self.result.as_mut() {
+            let cardinality = DEFAULT_CHUNK_BUFFER_SIZE;
+            let mut group_builders = self
+                .group_key_types
+                .iter()
+                .map(|datatype| datatype.create_array_builder(cardinality))
+                .collect::<Result<Vec<_>>>()?;
+
+            let mut agg_builders = self
+                .agg_factories
+                .iter()
+                .map(|agg_factory| {
+                    agg_factory
+                        .get_return_type()
+                        .create_array_builder(cardinality)
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let mut has_next = false;
+            for (key, states) in res.take(cardinality) {
+                has_next = true;
+                key.deserialize_to_builders(&mut group_builders[..])?;
+                states
+                    .into_iter()
+                    .zip_eq(&mut agg_builders)
+                    .try_for_each(|(aggregator, builder)| aggregator.output(builder))?;
+            }
+            if !has_next {
+                self.result = None;
+                return Ok(None);
+            }
+
+            let columns = group_builders
+                .into_iter()
+                .chain(agg_builders)
+                .map(|b| Ok(Column::new(Arc::new(b.finish()?))))
+                .collect::<Result<Vec<_>>>()?;
+
+            let ret = DataChunk::builder().columns(columns).build();
+
+            return Ok(Some(ret));
         }
 
-        let ret = self.result.take().unwrap();
-        Ok(Some(ret))
+        Ok(None)
     }
 
     async fn close(&mut self) -> Result<()> {

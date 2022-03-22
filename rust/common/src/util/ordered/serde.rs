@@ -14,21 +14,19 @@
 //
 use std::cmp::Reverse;
 
-use bytes::Buf;
 use itertools::Itertools;
 use memcomparable::from_slice;
-use serde::Deserialize;
 
 use super::OrderedDatum::{NormalOrder, ReversedOrder};
 use super::OrderedRow;
 use crate::array::{ArrayImpl, Row, RowRef};
 use crate::catalog::ColumnId;
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::Result;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
-    Decimal, ScalarImpl,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
+use crate::util::value_encoding::serialize_cell;
 
 /// The special `cell_id` reserved for a whole null row is `i32::MIN`.
 pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
@@ -196,85 +194,10 @@ pub fn serialize_column_id(column_id: &ColumnId) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
-pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
-    let mut serializer = memcomparable::Serializer::new(vec![]);
-    if let Some(ScalarImpl::Decimal(decimal)) = cell {
-        return serialize_decimal(decimal);
-    }
-    serialize_datum_into(cell, &mut serializer)?;
-    Ok(serializer.into_inner())
-}
-
-fn serialize_decimal(decimal: &Decimal) -> Result<Vec<u8>> {
-    let (mut mantissa, mut scale) = decimal.mantissa_scale_for_serialization();
-    if mantissa < 0 {
-        mantissa = -mantissa;
-        // We use the most significant bit of `scale` to denote whether decimal is negative or not.
-        scale += 1 << 7;
-    }
-    let mut byte_array = vec![1, scale];
-    while mantissa != 0 {
-        let byte = (mantissa % 100) as u8;
-        byte_array.push(byte);
-        mantissa /= 100;
-    }
-    // Add 100 marker for the end of decimal (cuz `byte` always can not be 100 in above loop).
-    byte_array.push(100);
-    Ok(byte_array)
-}
-
-/// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
-pub fn deserialize_cell(
-    deserializer: &mut memcomparable::Deserializer<impl Buf>,
-    ty: &DataType,
-) -> Result<Datum> {
-    match ty {
-        &DataType::Decimal => deserialize_decimal(deserializer),
-        _ => Ok(deserialize_datum_from(ty, deserializer)?),
-    }
-}
-
 pub fn deserialize_column_id(bytes: &[u8]) -> Result<ColumnId> {
     assert_eq!(bytes.len(), 4);
     let column_id = from_slice::<i32>(bytes)?;
     Ok(column_id.into())
-}
-
-fn deserialize_decimal(deserializer: &mut memcomparable::Deserializer<impl Buf>) -> Result<Datum> {
-    // None denotes NULL which is a valid value while Err means invalid encoding.
-    let null_tag = u8::deserialize(&mut *deserializer)?;
-    match null_tag {
-        0 => {
-            return Ok(None);
-        }
-        1 => {}
-        _ => {
-            return Err(RwError::from(ErrorCode::InternalError(format!(
-                "Invalid null tag: {}",
-                null_tag
-            ))));
-        }
-    }
-    let bytes = deserializer.read_decimal_v2()?;
-    let mut scale = bytes[0];
-    let neg = if (scale & 1 << 7) > 0 {
-        scale &= !(1 << 7);
-        true
-    } else {
-        false
-    };
-    let mut mantissa: i128 = 0;
-    for (exp, byte) in bytes.iter().skip(1).enumerate() {
-        mantissa += (*byte as i128) * 100i128.pow(exp as u32);
-    }
-    if neg {
-        mantissa = -mantissa;
-    }
-    Ok(Some(ScalarImpl::Decimal(Decimal::from_i128_with_scale(
-        mantissa,
-        scale as u32,
-    ))))
 }
 
 #[cfg(test)]
