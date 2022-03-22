@@ -89,14 +89,12 @@
     create table t (v1 int, v2 int);
     insert into t values (22, 33), (44, 55);
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchInsert { table_name: "t", columns: [] }
-        BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
+    BatchInsert { table_name: "t", columns: [] }
+      BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchDelete { table_name: "t" }
-        BatchFilter { predicate: ($1 = 1:Int32) }
-          BatchScan { table: t, columns: [_row_id, v1, v2] }
+    BatchDelete { table_name: "t" }
+      BatchFilter { predicate: ($1 = 1:Int32) }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }
