@@ -35,13 +35,13 @@ pub struct PlanBase {
     pub dist: Distribution,
 }
 impl PlanBase {
-    pub fn new_logical(ctx: QueryContextRef, schema: Schema) -> Self {
+    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
         let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,
             schema,
-            pk_indices: vec![],
+            pk_indices,
             dist: Distribution::any().clone(),
             order: Order::any().clone(),
         }

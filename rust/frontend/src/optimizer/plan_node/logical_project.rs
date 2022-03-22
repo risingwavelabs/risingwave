@@ -53,11 +53,11 @@ impl LogicalProject {
         }
 
         let schema = Self::derive_schema(&exprs, &expr_alias);
-        let _pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &schema, &exprs);
+        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &schema, &exprs);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
             input,
             base,
@@ -78,7 +78,8 @@ impl LogicalProject {
         ColIndexMapping::with_target_upper(map, input.len())
     }
 
-    /// get the Mapping of columnIndex from output column index to input column index
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
     pub fn i2o_col_mapping(input: &Schema, output: &Schema, exprs: &[ExprImpl]) -> ColIndexMapping {
         Self::o2i_col_mapping(input, output, exprs).inverse()
     }

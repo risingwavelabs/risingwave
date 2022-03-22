@@ -37,7 +37,7 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self { rows, base }
     }
 

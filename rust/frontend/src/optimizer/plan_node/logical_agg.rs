@@ -207,7 +207,13 @@ impl LogicalAgg {
                 .collect(),
             &agg_call_alias,
         );
-        let base = PlanBase::new_logical(ctx, schema);
+        let pk_indices = match group_keys.is_empty() {
+            // simple agg
+            true => (0..schema.len()).collect(),
+            // group agg
+            false => group_keys.clone(),
+        };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
             agg_calls,
             group_keys,
