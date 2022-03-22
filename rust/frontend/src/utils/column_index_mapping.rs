@@ -158,7 +158,7 @@ impl ColIndexMapping {
     /// it inverse mapping's target
     #[must_use]
     pub fn inverse(&self) -> Self {
-        let mut map = vec![None; self.target_upper()];
+        let mut map = vec![None; self.target_upper() + 1];
         for (src, dst) in self.mapping_pairs() {
             map[dst] = Some(src);
         }
@@ -201,7 +201,9 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping({})",
+            "ColIndexMapping(source_upper:{}, target_upper:{}, mapping:{})",
+            self.source_upper(),
+            self.target_upper(),
             self.mapping_pairs()
                 .map(|(src, dst)| format!("{}->{}", src, dst))
                 .join(",")

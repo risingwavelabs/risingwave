@@ -38,7 +38,7 @@ impl StreamTableScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            vec![], // TODO
+            vec![0], // TODO
             Distribution::any().clone(),
         );
         Self { logical, base }

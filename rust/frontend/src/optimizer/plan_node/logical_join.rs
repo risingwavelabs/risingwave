@@ -59,7 +59,13 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let pk_indices = Self::derive_pk(left.pk_indices(), right.pk_indices(), join_type);
+        let pk_indices = Self::derive_pk(
+            left.schema().len(),
+            right.schema().len(),
+            left.pk_indices(),
+            right.pk_indices(),
+            join_type,
+        );
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalJoin {
             left,
@@ -157,9 +163,13 @@ impl LogicalJoin {
         Schema { fields }
     }
 
-    fn derive_pk(left_pk: &[usize], right_pk: &[usize], join_type: JoinType) -> Vec<usize> {
-        let left_len = left_pk.len();
-        let right_len = right_pk.len();
+    fn derive_pk(
+        left_len: usize,
+        right_len: usize,
+        left_pk: &[usize],
+        right_pk: &[usize],
+        join_type: JoinType,
+    ) -> Vec<usize> {
         let l2o = Self::l2o_col_mapping(left_len, right_len, join_type);
         let r2o = Self::r2o_col_mapping(left_len, right_len, join_type);
         left_pk
