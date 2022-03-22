@@ -167,6 +167,10 @@ impl ColIndexMapping {
     pub fn source_upper(&self) -> usize {
         self.map.len() - 1
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.map.iter().all(|x| x.is_none())
+    }
 }
 
 impl ExprRewriter for ColIndexMapping {
@@ -179,10 +183,12 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping({})",
+            "ColIndexMapping{{ map:({}), source_upper:{}, target_upper:{} }}",
             self.mapping_pairs()
                 .map(|(src, dst)| format!("{}->{}", src, dst))
-                .join(",")
+                .join(","),
+            self.source_upper(),
+            self.target_upper(),
         )
     }
 }
