@@ -19,14 +19,14 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::plan_node::StreamBase;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::plan_node::PlanBase;
+use crate::optimizer::property::{WithDistribution, WithSchema};
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
 #[derive(Debug, Clone)]
 pub struct StreamFilter {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalFilter,
 }
 
@@ -34,11 +34,11 @@ impl StreamFilter {
     pub fn new(logical: LogicalFilter) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.distribution().clone(),
+        );
         StreamFilter { logical, base }
     }
 

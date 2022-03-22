@@ -54,7 +54,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// # Arguments
     ///
     /// * `input` - input data of the Project Executor
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef>;
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 }
 
 pub type BoxedExpression = Box<dyn Expression>;

@@ -15,22 +15,22 @@
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
-use crate::binder::{BaseTableRef, BoundJoin, TableRef};
+use crate::binder::{BoundBaseTable, BoundJoin, Relation};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalScan, PlanRef};
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_table_ref(&mut self, table_ref: TableRef) -> Result<PlanRef> {
-        match table_ref {
-            TableRef::BaseTable(t) => self.plan_base_table_ref(*t),
+    pub(super) fn plan_relation(&mut self, relation: Relation) -> Result<PlanRef> {
+        match relation {
+            Relation::BaseTable(t) => self.plan_base_table(*t),
             // TODO: order is ignored in the subquery
-            TableRef::SubQuery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
-            TableRef::Join(join) => self.plan_join(*join),
+            Relation::Subquery(q) => Ok(self.plan_query(q.query)?.as_subplan()),
+            Relation::Join(join) => self.plan_join(*join),
         }
     }
 
-    pub(super) fn plan_base_table_ref(&mut self, table_ref: BaseTableRef) -> Result<PlanRef> {
-        let (column_ids, fields) = table_ref
+    pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+        let (column_ids, fields) = base_table
             .columns
             .iter()
             .map(|c| {
@@ -42,8 +42,8 @@ impl Planner {
             .unzip();
         let schema = Schema::new(fields);
         LogicalScan::create(
-            table_ref.name,
-            table_ref.table_id,
+            base_table.name,
+            base_table.table_id,
             column_ids,
             schema,
             self.ctx(),
@@ -51,8 +51,8 @@ impl Planner {
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
-        let left = self.plan_table_ref(join.left)?;
-        let right = self.plan_table_ref(join.right)?;
+        let left = self.plan_relation(join.left)?;
+        let right = self.plan_relation(join.right)?;
         // TODO: Support more join types.
         let join_type = risingwave_pb::plan::JoinType::Inner;
         let on_clause = join.cond;

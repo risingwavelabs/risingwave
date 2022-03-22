@@ -18,14 +18,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
 
-use super::{BatchBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalScan,
 }
 
@@ -39,12 +39,12 @@ impl BatchSeqScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = BatchBase {
-            id: ctx.borrow_mut().get_id(),
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
 
         Self { logical, base }
     }

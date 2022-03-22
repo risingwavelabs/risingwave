@@ -19,8 +19,9 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::Keyspace;
-use risingwave_stream::executor::{MViewTable, ManagedMViewState};
+use risingwave_stream::executor::ManagedMViewState;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
@@ -43,7 +44,7 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
     ];
 
-    let table = MViewTable::new_adhoc(keyspace, column_descs);
+    let table = CellBasedTable::new_adhoc(keyspace, column_descs);
 
     let mut executor =
         RowSeqScanExecutor::new(table, 1, true, "RowSeqScanExecutor".to_string(), u64::MAX);

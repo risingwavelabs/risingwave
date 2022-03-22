@@ -15,11 +15,11 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use crate::binder::{BaseTableRef, Binder, BoundQuery};
+use crate::binder::{Binder, BoundBaseTable, BoundQuery};
 
 #[derive(Debug)]
 pub struct BoundInsert {
-    pub table: BaseTableRef,
+    pub table: BoundBaseTable,
     pub source: BoundQuery,
 }
 

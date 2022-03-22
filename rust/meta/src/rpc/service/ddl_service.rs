@@ -16,11 +16,12 @@
 use futures::future::try_join_all;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
-use risingwave_pb::catalog::catalog_service_server::CatalogService;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::ddl_service::ddl_service_server::DdlService;
+use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
@@ -40,7 +41,7 @@ use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
 
 #[derive(Clone)]
-pub struct CatalogServiceImpl<S> {
+pub struct DdlServiceImpl<S> {
     id_gen_manager: IdGeneratorManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: StreamManagerRef<S>,
@@ -51,7 +52,7 @@ pub struct CatalogServiceImpl<S> {
     stream_clients: StreamClientsRef,
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -74,7 +75,7 @@ where
 }
 
 #[async_trait::async_trait]
-impl<S> CatalogService for CatalogServiceImpl<S>
+impl<S> DdlService for DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -166,12 +167,36 @@ where
         &self,
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
-        let source = request.into_inner().source.unwrap();
-        let (source_id, version) = self.create_source_inner(source).await.map_err(tonic_err)?;
+        let mut source = request.into_inner().source.unwrap();
 
+        let id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Table }>()
+            .await
+            .map_err(tonic_err)? as u32;
+
+        self.catalog_manager
+            .start_create_source_process(&source)
+            .await
+            .map_err(tonic_err)?;
+
+        if let Err(e) = self.create_source_inner(&source).await {
+            self.catalog_manager
+                .cancel_create_source_process(&source)
+                .await
+                .map_err(tonic_err)?;
+            return Err(e.to_grpc_status());
+        }
+
+        source.id = id;
+        let version = self
+            .catalog_manager
+            .finish_create_source_process(&source)
+            .await
+            .map_err(tonic_err)?;
         Ok(Response::new(CreateSourceResponse {
             status: None,
-            source_id,
+            source_id: id,
             version,
         }))
     }
@@ -210,29 +235,24 @@ where
             .map_err(tonic_err)?;
 
         // 2. Create mview in stream manager
-        match self.create_materialized_view_inner(&stream_node, id).await {
-            Ok(_) => {
-                // Insert mview into the catalog only if step 2 succeeded.
-                mview.id = id;
-                let version = self
-                    .catalog_manager
-                    .finish_create_table_process(&mview)
-                    .await
-                    .map_err(tonic_err)?;
-                Ok(Response::new(CreateMaterializedViewResponse {
-                    status: None,
-                    table_id: id,
-                    version,
-                }))
-            }
-            Err(e) => {
-                self.catalog_manager
-                    .cancel_create_table_process(&mview)
-                    .await
-                    .map_err(tonic_err)?;
-                Err(e.to_grpc_status())
-            }
+        if let Err(e) = self.create_materialized_view_inner(&stream_node, id).await {
+            self.catalog_manager
+                .cancel_create_table_process(&mview)
+                .await
+                .map_err(tonic_err)?;
+            return Err(e.to_grpc_status());
         }
+        mview.id = id;
+        let version = self
+            .catalog_manager
+            .finish_create_table_process(&mview)
+            .await
+            .map_err(tonic_err)?;
+        Ok(Response::new(CreateMaterializedViewResponse {
+            status: None,
+            table_id: id,
+            version,
+        }))
     }
 
     async fn drop_materialized_view(
@@ -293,7 +313,7 @@ where
     }
 }
 
-impl<S> CatalogServiceImpl<S>
+impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
@@ -314,21 +334,8 @@ where
         Ok(all_stream_clients)
     }
 
-    async fn create_source_inner(
-        &self,
-        mut source: Source,
-    ) -> RwResult<(SourceId, CatalogVersion)> {
-        // 0. Generate source id.
-        let source = {
-            let id = self
-                .id_gen_manager
-                .generate::<{ IdCategory::Table }>() // TODO: use a separated catagory for source ids
-                .await? as SourceId;
-            source.id = id;
-            source
-        };
-
-        // 1. Create source on compute nodes.
+    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
+        // Create source on compute nodes.
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
             .all_stream_clients()
@@ -342,10 +349,7 @@ where
             });
         let _responses: Vec<_> = try_join_all(futures).await?;
 
-        // 2. Update the source catalog.
-        let version = self.catalog_manager.create_source(&source).await?;
-
-        Ok((source.id, version))
+        Ok(())
     }
 
     async fn drop_source_inner(&self, source_id: SourceId) -> RwResult<CatalogVersion> {
@@ -408,12 +412,31 @@ where
     // TODO: transactional creation of source and mview
     async fn create_materialized_source_inner(
         &self,
-        source: Source,
+        mut source: Source,
         mut mview: Table,
         mut stream_node: StreamNode,
     ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
         // 1. Create source.
-        let (source_id, _version_1) = self.create_source_inner(source).await?;
+        let source_id = self
+            .id_gen_manager
+            .generate::<{ IdCategory::Table }>()
+            .await? as u32;
+
+        self.catalog_manager
+            .start_create_source_process(&source)
+            .await?;
+
+        if let Err(e) = self.create_source_inner(&source).await {
+            self.catalog_manager
+                .cancel_create_source_process(&source)
+                .await?;
+            return Err(e);
+        }
+        source.id = source_id;
+        let _version_1 = self
+            .catalog_manager
+            .finish_create_source_process(&source)
+            .await?;
 
         // 2. Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
@@ -449,25 +472,23 @@ where
             .start_create_table_process(&mview)
             .await?;
 
-        match self
+        if let Err(e) = self
             .create_materialized_view_inner(&stream_node, mview_id)
             .await
         {
-            Ok(_) => {
-                mview.id = mview_id;
-                let version = self
-                    .catalog_manager
-                    .finish_create_table_process(&mview)
-                    .await?;
-                Ok((source_id, mview_id, version))
-            }
-            Err(e) => {
-                self.catalog_manager
-                    .cancel_create_table_process(&mview)
-                    .await?;
-                Err(e)
-            }
+            self.catalog_manager
+                .cancel_create_table_process(&mview)
+                .await?;
+            // drop source
+            self.drop_source_inner(source_id).await?;
+            return Err(e);
         }
+        mview.id = mview_id;
+        let version_2 = self
+            .catalog_manager
+            .finish_create_table_process(&mview)
+            .await?;
+        Ok((source_id, mview_id, version_2))
     }
 
     async fn drop_materialized_source_inner(

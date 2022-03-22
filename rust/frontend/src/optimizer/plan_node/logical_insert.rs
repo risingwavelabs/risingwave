@@ -19,9 +19,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::{BatchInsert, ColPrunable, LogicalBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::binder::BaseTableRef;
-use crate::catalog::ColumnId;
+use super::{BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use crate::catalog::{ColumnId, TableId};
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -29,22 +28,27 @@ use crate::catalog::ColumnId;
 /// statements, the input relation would be [`super::LogicalValues`].
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
-    pub base: LogicalBase,
-    table: BaseTableRef,
+    pub base: PlanBase,
+    table_name: String, // explain-only
+    table_id: TableId,
     columns: Vec<ColumnId>,
     input: PlanRef,
 }
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Self {
+    pub fn new(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+    ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let id = ctx.borrow_mut().get_id();
-        let base = LogicalBase { id, schema, ctx };
-
+        let base = PlanBase::new_logical(ctx, schema);
         Self {
-            table,
+            table_name,
+            table_id,
             columns,
             input,
             base,
@@ -52,13 +56,18 @@ impl LogicalInsert {
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
-    pub fn create(input: PlanRef, table: BaseTableRef, columns: Vec<ColumnId>) -> Result<Self> {
-        Ok(Self::new(input, table, columns))
+    pub fn create(
+        input: PlanRef,
+        table_name: String,
+        table_id: TableId,
+        columns: Vec<ColumnId>,
+    ) -> Result<Self> {
+        Ok(Self::new(input, table_name, table_id, columns))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
         f.debug_struct(name)
-            .field("table_name", &self.table.name)
+            .field("table_name", &self.table_name)
             .field("columns", &self.columns)
             .finish()
     }
@@ -69,7 +78,12 @@ impl PlanTreeNodeUnary for LogicalInsert {
         self.input.clone()
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table.clone(), self.columns.clone())
+        Self::new(
+            input,
+            self.table_name.clone(),
+            self.table_id,
+            self.columns.clone(),
+        )
     }
 }
 impl_plan_tree_node_for_unary! {LogicalInsert}

@@ -31,6 +31,7 @@ done
 
 echo "If you want to apply the planner test data, run: $(tput setaf 2)./risedev do-apply-planner-test$(tput sgr 0)"
 '''
+category = "RiseDev - Test"
 
 [tasks.do-apply-planner-test]
 description = "Apply planner test data"
@@ -44,8 +45,12 @@ cd rust/frontend/test_runner/tests/testdata/
 
 for f in *.apply.yaml
 do
-  cp "$f" "$(basename "$f" .apply.yaml).yaml"
+  SOURCE="$(basename $f .apply.yaml).yaml"
+  if [ -f "$SOURCE" ]; then
+    cp "$f" "$SOURCE"
+  fi
 done
 
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 '''
+category = "RiseDev - Test"

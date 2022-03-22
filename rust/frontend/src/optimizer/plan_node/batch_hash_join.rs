@@ -19,7 +19,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashJoinNode;
 
 use super::{
-    BatchBase, EqJoinPredicate, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};
@@ -29,7 +29,7 @@ use crate::optimizer::property::{Distribution, Order, WithSchema};
 /// get output rows.
 #[derive(Debug, Clone)]
 pub struct BatchHashJoin {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalJoin,
 
     /// The join condition must be equivalent to `logical.on`, but seperated into equal and
@@ -41,12 +41,12 @@ impl BatchHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
 
         Self {
             base,

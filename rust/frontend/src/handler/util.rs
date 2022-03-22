@@ -79,6 +79,7 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Decimal => TypeOid::Decimal,
         DataType::Interval => TypeOid::Varchar,
         DataType::Struct { .. } => TypeOid::Varchar,
+        DataType::List { .. } => TypeOid::Varchar,
     }
 }
 

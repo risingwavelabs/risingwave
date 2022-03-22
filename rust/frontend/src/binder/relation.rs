@@ -27,22 +27,24 @@ use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
+/// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
+/// It is usually part of the `from` clause.
 #[derive(Debug)]
-pub enum TableRef {
-    BaseTable(Box<BaseTableRef>),
-    SubQuery(Box<SubQuery>),
+pub enum Relation {
+    BaseTable(Box<BoundBaseTable>),
+    Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
 }
 
 #[derive(Debug)]
 pub struct BoundJoin {
-    pub left: TableRef,
-    pub right: TableRef,
+    pub left: Relation,
+    pub right: Relation,
     pub cond: ExprImpl,
 }
 
-#[derive(Debug, Clone)]
-pub struct BaseTableRef {
+#[derive(Debug)]
+pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
     pub cell_based_desc: CellBasedTableDesc,
@@ -50,7 +52,7 @@ pub struct BaseTableRef {
 }
 
 #[derive(Debug)]
-pub struct SubQuery {
+pub struct BoundSubquery {
     pub query: BoundQuery,
 }
 
@@ -58,7 +60,7 @@ impl Binder {
     pub(super) fn bind_vec_table_with_joins(
         &mut self,
         from: Vec<TableWithJoins>,
-    ) -> Result<Option<TableRef>> {
+    ) -> Result<Option<Relation>> {
         let mut from_iter = from.into_iter();
         let first = match from_iter.next() {
             Some(t) => t,
@@ -67,7 +69,7 @@ impl Binder {
         let mut root = self.bind_table_with_joins(first)?;
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
-            root = TableRef::Join(Box::new(BoundJoin {
+            root = Relation::Join(Box::new(BoundJoin {
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
@@ -76,7 +78,7 @@ impl Binder {
         Ok(Some(root))
     }
 
-    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<TableRef> {
+    fn bind_table_with_joins(&mut self, table: TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
@@ -88,7 +90,7 @@ impl Binder {
                         right,
                         cond,
                     };
-                    root = TableRef::Join(Box::new(join));
+                    root = Relation::Join(Box::new(join));
                 }
                 _ => return Err(ErrorCode::NotImplementedError("Non inner-join".into()).into()),
             }
@@ -120,10 +122,10 @@ impl Binder {
         })
     }
 
-    pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<TableRef> {
+    pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, .. } => {
-                Ok(TableRef::BaseTable(Box::new(self.bind_table(name)?)))
+                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
             }
             TableFactor::Derived {
                 lateral, subquery, ..
@@ -131,7 +133,7 @@ impl Binder {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(TableRef::SubQuery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -157,7 +159,7 @@ impl Binder {
 
         Ok((schema_name, table_name))
     }
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BaseTableRef> {
+    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let table_catalog = {
             let schema_catalog = self
@@ -182,7 +184,7 @@ impl Binder {
             table_name.clone(),
         )?;
 
-        Ok(BaseTableRef {
+        Ok(BoundBaseTable {
             name: table_name,
             cell_based_desc,
             table_id,
@@ -232,7 +234,7 @@ impl Binder {
     ///
     /// After finishing binding, we pop the previous context from the stack. And
     /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<SubQuery> {
+    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
         self.push_context();
         let query = self.bind_query(query)?;
         self.pop_context();
@@ -240,6 +242,6 @@ impl Binder {
             itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
             UNNAMED_SUBQUERY.to_string(),
         )?;
-        Ok(SubQuery { query })
+        Ok(BoundSubquery { query })
     }
 }

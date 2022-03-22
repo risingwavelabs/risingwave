@@ -20,7 +20,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ProjectNode;
 
 use super::{
-    BatchBase, LogicalProject, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
@@ -29,7 +29,7 @@ use crate::optimizer::property::{Distribution, Order, WithSchema};
 /// rows
 #[derive(Debug, Clone)]
 pub struct BatchProject {
-    pub base: BatchBase,
+    pub base: PlanBase,
     logical: LogicalProject,
 }
 
@@ -37,12 +37,12 @@ impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = BatchBase {
-            order: Order::any().clone(),
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_batch(
+            ctx,
+            logical.schema().clone(),
+            Distribution::any().clone(),
+            Order::any().clone(),
+        );
         BatchProject { logical, base }
     }
 }

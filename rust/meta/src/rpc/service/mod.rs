@@ -13,8 +13,8 @@
 // limitations under the License.
 //
 pub mod catalog_service;
-pub mod catalog_service_v2;
 pub mod cluster_service;
+pub mod ddl_service;
 pub mod epoch_service;
 pub mod heartbeat_service;
 pub mod hummock_service;

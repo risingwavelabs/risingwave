@@ -15,25 +15,22 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
-use super::{LogicalAgg, PlanRef, PlanTreeNodeUnary, StreamBase, ToStreamProst};
+use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamSimpleAgg {
-    pub base: StreamBase,
+    pub base: PlanBase,
     logical: LogicalAgg,
 }
 
 impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = StreamBase {
-            dist: Distribution::any().clone(),
-            id: ctx.borrow_mut().get_id(),
-            ctx: ctx.clone(),
-        };
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
         StreamSimpleAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -66,4 +63,17 @@ impl WithSchema for StreamSimpleAgg {
     }
 }
 
-impl ToStreamProst for StreamSimpleAgg {}
+impl ToStreamProst for StreamSimpleAgg {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        use risingwave_pb::stream_plan::*;
+
+        // TODO: local or global simple agg?
+        ProstStreamNode::GlobalSimpleAggNode(SimpleAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+        })
+    }
+}
