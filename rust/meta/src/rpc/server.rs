@@ -49,7 +49,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, StreamManager};
+use crate::stream::{FragmentManager, SourceManager, StreamManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -163,7 +163,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         StreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager_ref,
+            barrier_manager_ref.clone(),
             cluster_manager.clone(),
         )
         .await
@@ -189,6 +189,19 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
+    let source_manager_ref = Arc::new(
+        SourceManager::new(meta_store_ref, barrier_manager_ref.clone())
+            .await
+            .unwrap(),
+    );
+
+    {
+        let source_manager_ref = source_manager_ref.clone();
+        tokio::spawn(async move {
+            source_manager_ref.run().await.unwrap();
+        });
+    }
+
     let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
     let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
@@ -204,6 +217,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         stream_manager_ref,
         fragment_manager.clone(),
         cluster_manager.clone(),
+        source_manager_ref,
         env,
     );
     let hummock_srv = HummockServiceImpl::new(
@@ -224,11 +238,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
         #[cfg(not(test))]
-        StoredClusterManager::start_heartbeat_checker(
-            cluster_manager.clone(),
-            Duration::from_secs(1),
-        )
-        .await,
+        StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
+            .await,
     ];
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager,

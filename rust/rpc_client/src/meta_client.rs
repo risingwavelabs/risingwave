@@ -29,7 +29,8 @@ use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
+    CreateSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -175,6 +176,15 @@ impl MetaClient {
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
     }
 
     pub async fn create_materialized_source(
@@ -352,6 +362,10 @@ pub trait MetaClientInner: Send + Sync {
     }
 
     async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
+        unimplemented!()
+    }
+
+    async fn create_source(&self, _req: CreateSourceRequest) -> Result<CreateSourceResponse> {
         unimplemented!()
     }
 

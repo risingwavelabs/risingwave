@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,23 +13,24 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType, StreamSourceInfo};
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use crate::session::QueryContext;
 
-fn create_protobuf_table_schema(
+fn extract_protobuf_table_schema(
     schema: &ProtobufSchema,
 ) -> Result<(StreamSourceInfo, Vec<ProstColumnDesc>)> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
     let info = StreamSourceInfo {
-        append_only: true,
+        // append_only: true,
         row_format: RowFormatType::Protobuf as i32,
         row_schema_location: schema.row_schema_location.0.clone(),
         ..Default::default()
@@ -44,17 +47,34 @@ pub(super) async fn handle_create_source(
     // fix: there is no schema name?
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
-    let (_db_id, _schema_id) = session
+    let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name(session.database(), schema_name, &source_name)?;
-    let (_source, _columns) = match &stmt.source_schema {
-        SourceSchema::Protobuf(protobuf_schema) => create_protobuf_table_schema(protobuf_schema)?,
-        SourceSchema::Json => todo!(),
+
+    let (source, _columns) = match &stmt.source_schema {
+        SourceSchema::Protobuf(protobuf_schema) => extract_protobuf_table_schema(protobuf_schema)?,
+        SourceSchema::Json => (
+            StreamSourceInfo {
+                properties: HashMap::from(stmt.with_properties),
+                row_format: RowFormatType::Json as i32,
+                ..Default::default()
+            },
+            vec![],
+        ),
     };
-    let _catalog_writer = session.env().catalog_writer();
-    // TODO catalog writer to create source
+    let catalog_writer = session.env().catalog_writer();
+
+    catalog_writer
+        .create_source(ProstSource {
+            id: 0,
+            schema_id,
+            database_id,
+            name: source_name.clone(),
+            info: Some(Info::StreamSource(source)),
+        })
+        .await?;
 
     Ok(PgResponse::new(
         StatementType::CREATE_SOURCE,
