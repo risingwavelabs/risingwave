@@ -188,7 +188,7 @@ mod tests {
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar,DataType::Varchar].into()
+                                fields: vec![DataType::Varchar, DataType::Varchar].into()
                             },
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
