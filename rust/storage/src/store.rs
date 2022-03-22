@@ -20,15 +20,16 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
+use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
 #[async_trait]
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter<'a>: StateStoreIter<Item = (Bytes, Bytes)>;
+    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)>;
 
     /// Point get a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>>;
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>>;
 
     /// Scan `limit` number of keys from a key range. If `limit` is `None`, scan all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
@@ -42,7 +43,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -55,7 +56,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -72,12 +73,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
     ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
     ///   per-key modification history (e.g. in compaction), not across different keys.
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()>;
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<StorageValue>)>, epoch: u64) -> Result<()>;
 
     /// Functions the same as `ingest_batch`, except that data won't be persisted.
     async fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
     ) -> Result<()>;
 

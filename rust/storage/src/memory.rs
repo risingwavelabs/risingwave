@@ -24,6 +24,7 @@ use lazy_static::lazy_static;
 use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
+use crate::storage_value::StorageValue;
 use crate::{StateStore, StateStoreIter};
 
 type KeyWithEpoch = (Bytes, Reverse<u64>);
@@ -80,12 +81,12 @@ impl MemoryStateStore {
 
     async fn ingest_batch_inner(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
     ) -> Result<()> {
         let mut inner = self.inner.lock().await;
         for (key, value) in kv_pairs {
-            inner.insert((key, Reverse(epoch)), value);
+            inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes() ));
         }
         Ok(())
     }
@@ -95,7 +96,7 @@ impl MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -113,7 +114,7 @@ impl MemoryStateStore {
             }
             if Some(key) != last_key.as_ref() {
                 if let Some(value) = value {
-                    data.push((key.clone(), value.clone()));
+                    data.push((key.clone(), StorageValue::from(value.clone())));
                 }
                 last_key = Some(key.clone());
             }
@@ -128,7 +129,7 @@ impl MemoryStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -141,8 +142,9 @@ impl MemoryStateStore {
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
         let res = self.scan_inner(key..=key, Some(1), epoch).await?;
+        
         Ok(match res.as_slice() {
             [] => None,
             [(_, value)] => Some(value.clone()),
@@ -155,7 +157,7 @@ impl StateStore for MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -168,7 +170,7 @@ impl StateStore for MemoryStateStore {
         key_range: R,
         limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -176,7 +178,7 @@ impl StateStore for MemoryStateStore {
         self.reverse_scan_inner(key_range, limit).await
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<StorageValue>)>, epoch: u64) -> Result<()> {
         self.ingest_batch_inner(kv_pairs, epoch).await
     }
 
@@ -195,7 +197,7 @@ impl StateStore for MemoryStateStore {
 
     async fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
@@ -221,18 +223,18 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: std::vec::IntoIter<(Bytes, Bytes)>,
+    inner: std::vec::IntoIter<(Bytes, StorageValue)>,
 }
 
 impl MemoryStateStoreIter {
-    fn new(iter: std::vec::IntoIter<(Bytes, Bytes)>) -> Self {
+    fn new(iter: std::vec::IntoIter<(Bytes, StorageValue)>) -> Self {
         Self { inner: iter }
     }
 }
 
 #[async_trait]
 impl StateStoreIter for MemoryStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = (Bytes, StorageValue);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         Ok(self.inner.next())

@@ -26,6 +26,7 @@ use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
+use crate::storage_value::StorageValue;
 use crate::table::TableIter;
 use crate::{Keyspace, StateStore};
 
@@ -148,7 +149,7 @@ impl<S: StateStore> MViewTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            let mut de = memcomparable::Deserializer::new(buf);
+            let mut de = memcomparable::Deserializer::new(buf.to_bytes());
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
             Ok(Some(cell))
         } else {
@@ -165,7 +166,7 @@ pub struct MViewTableIter<S: StateStore> {
     keyspace: Keyspace<S>,
 
     /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, Bytes)>,
+    buf: Vec<(Bytes, StorageValue)>,
     /// The idx into `buf` for the next item
     next_idx: usize,
     /// A bool to indicate whether there are more data to fetch from state store
@@ -294,7 +295,7 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 target: "events::stream::mview::scan",
                 "mview scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
-                bytes::Bytes::copy_from_slice(value)
+                value.as_bytes()
             );
 
             // there is no need to deserialize pk in mview
@@ -302,7 +303,7 @@ impl<S: StateStore> TableIter for MViewTableIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value.as_bytes())?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),

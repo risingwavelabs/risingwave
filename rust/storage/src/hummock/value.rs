@@ -14,6 +14,8 @@
 //
 use bytes::{Buf, BufMut, Bytes};
 
+use crate::storage_value::StorageValue;
+
 use super::{HummockError, HummockResult};
 
 pub const VALUE_DELETE: u8 = 1 << 0;
@@ -169,6 +171,15 @@ impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
         match data {
             HummockValue::Put(x) => HummockValue::Put(x.into()),
             HummockValue::Delete => HummockValue::Delete,
+        }
+    }
+}
+
+impl From<Option<StorageValue>> for HummockValue<Bytes> {
+    fn from(data: Option<StorageValue>) -> Self {
+        match data {
+            Some(data) => HummockValue::Put(data.to_bytes()),
+            None => HummockValue::Delete,
         }
     }
 }
