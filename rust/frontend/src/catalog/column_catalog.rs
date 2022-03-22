@@ -130,61 +130,50 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
 #[cfg(test)]
 pub mod tests {
     use risingwave_common::types::*;
-    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+    use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
     use crate::catalog::column_catalog::ColumnCatalog;
 
-    fn new_atomic_prost_catalog(
-        data_type: DataType,
-        name: &str,
-        column_id: i32,
-    ) -> ProstColumnCatalog {
-        ProstColumnCatalog {
-            column_desc: Some(ProstColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
-            ..Default::default()
-        }
-    }
-
-    fn new_struct_prost_catalog(
-        name: &str,
-        column_id: i32,
-        type_name: &str,
-        fields: Vec<ProstColumnCatalog>,
-    ) -> ProstColumnCatalog {
-        ProstColumnCatalog {
-            column_desc: Some(ProstColumnDesc {
-                column_type: Some(
-                    DataType::Struct {
-                        fields: vec![].into(),
-                    }
-                    .to_protobuf(),
-                ),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
-            type_name: type_name.to_string(),
-            field_catalogs: fields,
-        }
-    }
-
+    #[cfg(test)]
     pub fn build_prost_catalog() -> ProstColumnCatalog {
         let city = vec![
-            new_atomic_prost_catalog(DataType::Varchar, "country.city.address", 2),
-            new_atomic_prost_catalog(DataType::Varchar, "country.city.zipcode", 3),
+            ProstColumnCatalog::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.address",
+                2,
+            ),
+            ProstColumnCatalog::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.zipcode",
+                3,
+            ),
         ];
         let country = vec![
-            new_atomic_prost_catalog(DataType::Varchar, "country.address", 1),
-            new_struct_prost_catalog("country.city", 4, ".test.City", city),
+            ProstColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
+            ProstColumnCatalog::new_struct(
+                DataType::Struct {
+                    fields: vec![].into(),
+                }
+                .to_protobuf(),
+                "country.city",
+                4,
+                ".test.City",
+                city,
+            ),
         ];
-        new_struct_prost_catalog("country", 5, ".test.Country", country)
+        ProstColumnCatalog::new_struct(
+            DataType::Struct {
+                fields: vec![].into(),
+            }
+            .to_protobuf(),
+            "country",
+            5,
+            ".test.Country",
+            country,
+        )
     }
 
+    #[cfg(test)]
     pub fn build_catalog() -> ColumnCatalog {
         let city = vec![
             ColumnCatalog::new_atomic_catalog(DataType::Varchar, "country.city.address", 2),
@@ -219,7 +208,8 @@ pub mod tests {
             country,
         )
     }
-    #[test]
+
+    #[cfg(test)]
     fn test_into_column_catalog() {
         let catalog: ColumnCatalog = build_prost_catalog().into();
         assert_eq!(catalog, build_catalog());

@@ -299,7 +299,7 @@ mod tests {
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::vector_op::cast::str_to_date;
-    use risingwave_pb::plan::{ColumnCatalog, ColumnDesc};
+    use risingwave_pb::plan::ColumnCatalog;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -480,63 +480,46 @@ mod tests {
         ))))
     }
 
-    fn new_atomic_catalog(data_type: DataType, name: &str, column_id: i32) -> ColumnCatalog {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(data_type.to_protobuf()),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
-            ..Default::default()
-        }
-    }
-
-    fn new_struct_catalog(
-        name: &str,
-        column_id: i32,
-        type_name: &str,
-        fields: Vec<ColumnCatalog>,
-    ) -> ColumnCatalog {
-        ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_type: Some(
-                    DataType::Struct {
-                        fields: vec![].into(),
-                    }
-                    .to_protobuf(),
-                ),
-                column_id,
-                name: name.to_string(),
-            }),
-            is_hidden: false,
-            type_name: type_name.to_string(),
-            field_catalogs: fields,
-        }
-    }
-
-    #[test]
+    #[cfg(test)]
     fn test_map_to_columns() {
         use risingwave_common::types::*;
 
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            new_atomic_catalog(DataType::Varchar, "country.city.address", 3),
-            new_atomic_catalog(DataType::Varchar, "country.city.zipcode", 4),
+            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
+            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
         ];
         let country = vec![
-            new_atomic_catalog(DataType::Varchar, "country.address", 2),
-            new_struct_catalog("country.city", 5, ".test.City", city),
-            new_atomic_catalog(DataType::Varchar, "country.zipcode", 6),
+            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
+            ColumnCatalog::new_struct(
+                DataType::Struct {
+                    fields: vec![].into(),
+                }
+                .to_protobuf(),
+                "country.city",
+                5,
+                ".test.City",
+                city,
+            ),
+            ColumnCatalog::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
-                new_atomic_catalog(DataType::Int32, "id", 1),
-                new_struct_catalog("country", 7, ".test.Country", country),
-                new_atomic_catalog(DataType::Int64, "zipcode", 8),
-                new_atomic_catalog(DataType::Float32, "rate", 9),
+                ColumnCatalog::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
+                ColumnCatalog::new_struct(
+                    DataType::Struct {
+                        fields: vec![].into()
+                    }
+                    .to_protobuf(),
+                    "country",
+                    7,
+                    ".test.Country",
+                    country
+                ),
+                ColumnCatalog::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
+                ColumnCatalog::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]
         );
     }
