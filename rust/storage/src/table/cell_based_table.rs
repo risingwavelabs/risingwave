@@ -130,6 +130,32 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(Row::new(row))
     }
 
+    pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Row> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("...");
+        let column_ids = generate_column_id(&self.column_descs);
+        let mut row = Vec::with_capacity(column_ids.len());
+        let start_key = &serialize_pk(pk, pk_serializer)?;
+
+        let state_store_range_scan_res = self
+            .keyspace
+            .scan_with_start_key(self.keyspace.prefixed_key(start_key), None, epoch)
+            .await?;
+
+        for (index, column_id) in column_ids.iter().enumerate() {
+            let column_index = self
+                .column_id_to_column_index
+                .get(column_id)
+                .expect("column id not found");
+            let mut de = value_encoding::Deserializer::new(
+                state_store_range_scan_res[index].1.clone().to_bytes(),
+            );
+            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+            row.push(cell);
+        }
+
+        Ok(Row::new(row))
+    }
+
     pub async fn insert_row(
         &mut self,
         pk: &Row,

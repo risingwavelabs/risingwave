@@ -394,7 +394,7 @@ async fn test_cell_based_write() {
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
+        .get_row_by_scan(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
