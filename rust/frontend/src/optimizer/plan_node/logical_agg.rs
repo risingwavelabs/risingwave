@@ -538,16 +538,25 @@ mod tests {
             (exprs.clone(), agg_calls, group_keys)
         };
 
+        let gen_internal_value_no_project = |select_exprs: Vec<ExprImpl>,
+                                             group_exprs|
+         -> (Vec<PlanAggCall>, Vec<usize>) {
+            let select_alias = vec![None; select_exprs.len()];
+            let plan =
+                LogicalAgg::create(select_exprs, select_alias, group_exprs, input.clone()).unwrap();
+            let logical_agg = plan.as_logical_agg().unwrap();
+            let agg_calls = logical_agg.agg_calls().to_vec();
+            let group_keys = logical_agg.group_keys().to_vec();
+
+            (agg_calls, group_keys)
+        };
+
         // Test case: select v1 from test group by v1;
         {
             let select_exprs = vec![input_ref_1.clone().into()];
             let group_exprs = vec![input_ref_1.clone().into()];
 
-            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
-
-            assert_eq!(exprs.len(), 1);
-            assert_eq_input_ref!(&exprs[0], 0);
-
+            let (agg_calls, group_keys) = gen_internal_value_no_project(select_exprs, group_exprs);
             assert_eq!(agg_calls.len(), 0);
             assert_eq!(group_keys, vec![0]);
         }
@@ -558,11 +567,7 @@ mod tests {
             let select_exprs = vec![input_ref_1.clone().into(), min_v2.into()];
             let group_exprs = vec![input_ref_1.clone().into()];
 
-            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
-
-            assert_eq!(exprs.len(), 2);
-            assert_eq_input_ref!(&exprs[0], 0);
-            assert_eq_input_ref!(&exprs[1], 1);
+            let (agg_calls, group_keys) = gen_internal_value_no_project(select_exprs, group_exprs);
 
             assert_eq!(agg_calls.len(), 1);
             assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
@@ -610,10 +615,7 @@ mod tests {
             let select_exprs = vec![input_ref_2.clone().into(), agg_call.into()];
             let group_exprs = vec![input_ref_2.into()];
 
-            let (exprs, agg_calls, group_keys) = gen_internal_value(select_exprs, group_exprs);
-
-            assert_eq_input_ref!(&exprs[0], 0);
-            assert_eq_input_ref!(&exprs[1], 1);
+            let (agg_calls, group_keys) = gen_internal_value_no_project(select_exprs, group_exprs);
 
             assert_eq!(agg_calls.len(), 1);
             assert_eq!(agg_calls[0].agg_kind, AggKind::Min);
