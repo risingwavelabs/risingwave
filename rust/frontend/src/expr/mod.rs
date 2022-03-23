@@ -56,7 +56,6 @@ pub enum ExprImpl {
 impl ExprImpl {
     /// A literal int value.
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn literal_int(v: i32) -> Self {
         Self::Literal(Box::new(Literal::new(
             Some(v.to_scalar_value()),

@@ -77,15 +77,12 @@ impl Transaction {
 
 pub enum Operation {
     /// `put` key value pairs.
-    /// If `WithVersion` is not specified, a default global version is used.
     Put {
         cf: ColumnFamily,
         key: Key,
         value: Value,
     },
     /// `delete` key value pairs.
-    /// If `WithVersion` is not specified, all versions of this `Key` are matched and deleted.
-    /// Otherwise, only specific version of this `Key` is deleted.
     Delete { cf: ColumnFamily, key: Key },
 }
 
