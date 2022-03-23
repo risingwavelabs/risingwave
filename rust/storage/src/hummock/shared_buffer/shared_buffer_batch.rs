@@ -31,7 +31,6 @@ pub struct SharedBufferBatch {
     pub(super) epoch: u64,
 }
 
-#[allow(dead_code)]
 impl SharedBufferBatch {
     pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
         Self {
@@ -60,10 +59,12 @@ impl SharedBufferBatch {
         SharedBufferBatchIterator::<BACKWARD>::new(self.inner.clone())
     }
 
+    #[allow(dead_code)]
     pub fn start_key(&self) -> &[u8] {
         &self.inner.first().unwrap().0
     }
 
+    #[allow(dead_code)]
     pub fn end_key(&self) -> &[u8] {
         &self.inner.last().unwrap().0
     }

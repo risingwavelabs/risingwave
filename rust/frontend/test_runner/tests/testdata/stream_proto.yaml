@@ -17,7 +17,28 @@
                           "mergeNode": {}
                         },
                         {
-                          "chainNode": {}
+                          "batchPlanNode": {
+                            "tableRefId": {
+                              "tableId": 5
+                            },
+                            "columnDescs": [
+                              {
+                                "columnType": {
+                                  "typeName": "INT64",
+                                  "isNullable": true
+                                },
+                                "name": "_row_id"
+                              },
+                              {
+                                "columnType": {
+                                  "typeName": "INT32",
+                                  "isNullable": true
+                                },
+                                "columnId": 1,
+                                "name": "v1"
+                              }
+                            ]
+                          }
                         }
                       ],
                       "chainNode": {}
@@ -62,7 +83,7 @@
                 "fields": [
                   {
                     "dataType": {
-                      "typeName": "INT32",
+                      "typeName": "INT64",
                       "isNullable": true
                     },
                     "name": "_row_id"
@@ -86,7 +107,7 @@
               {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32",
+                  "typeName": "INT64",
                   "isNullable": true
                 },
                 "inputRef": {}
@@ -124,7 +145,28 @@
                       "mergeNode": {}
                     },
                     {
-                      "chainNode": {}
+                      "batchPlanNode": {
+                        "tableRefId": {
+                          "tableId": 5
+                        },
+                        "columnDescs": [
+                          {
+                            "columnType": {
+                              "typeName": "INT64",
+                              "isNullable": true
+                            },
+                            "name": "_row_id"
+                          },
+                          {
+                            "columnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "columnId": 1,
+                            "name": "v1"
+                          }
+                        ]
+                      }
                     }
                   ],
                   "chainNode": {}
@@ -134,7 +176,7 @@
                 "fields": [
                   {
                     "dataType": {
-                      "typeName": "INT32",
+                      "typeName": "INT64",
                       "isNullable": true
                     },
                     "name": "_row_id"
@@ -158,7 +200,7 @@
               {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32",
+                  "typeName": "INT64",
                   "isNullable": true
                 },
                 "inputRef": {}
@@ -196,7 +238,21 @@
                       "mergeNode": {}
                     },
                     {
-                      "chainNode": {}
+                      "batchPlanNode": {
+                        "tableRefId": {
+                          "tableId": 5
+                        },
+                        "columnDescs": [
+                          {
+                            "columnType": {
+                              "typeName": "INT32",
+                              "isNullable": true
+                            },
+                            "columnId": 1,
+                            "name": "v1"
+                          }
+                        ]
+                      }
                     }
                   ],
                   "chainNode": {}
@@ -257,7 +313,21 @@
                                   "mergeNode": {}
                                 },
                                 {
-                                  "chainNode": {}
+                                  "batchPlanNode": {
+                                    "tableRefId": {
+                                      "tableId": 5
+                                    },
+                                    "columnDescs": [
+                                      {
+                                        "columnType": {
+                                          "typeName": "INT32",
+                                          "isNullable": true
+                                        },
+                                        "columnId": 1,
+                                        "name": "v1"
+                                      }
+                                    ]
+                                  }
                                 }
                               ],
                               "chainNode": {}
@@ -370,7 +440,29 @@
                                   "mergeNode": {}
                                 },
                                 {
-                                  "chainNode": {}
+                                  "batchPlanNode": {
+                                    "tableRefId": {
+                                      "tableId": 5
+                                    },
+                                    "columnDescs": [
+                                      {
+                                        "columnType": {
+                                          "typeName": "INT32",
+                                          "isNullable": true
+                                        },
+                                        "columnId": 1,
+                                        "name": "v1"
+                                      },
+                                      {
+                                        "columnType": {
+                                          "typeName": "INT32",
+                                          "isNullable": true
+                                        },
+                                        "columnId": 2,
+                                        "name": "v2"
+                                      }
+                                    ]
+                                  }
                                 }
                               ],
                               "chainNode": {}

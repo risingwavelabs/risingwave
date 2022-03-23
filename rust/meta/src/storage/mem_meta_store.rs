@@ -16,12 +16,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use parking_lot::lock_api::ArcRwLockReadGuard;
-use parking_lot::{RawRwLock, RwLock};
+use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
 use super::{ColumnFamily, Error, Key, MetaStore, Result, Snapshot, Transaction, Value};
 
-pub struct MemSnapshot(ArcRwLockReadGuard<RawRwLock, MemStoreInner>);
+pub struct MemSnapshot(OwnedRwLockReadGuard<MemStoreInner>);
 
 /// [`MetaStore`] implemented in memory.
 ///
@@ -70,19 +69,19 @@ impl Snapshot for MemSnapshot {
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;
 
-    fn snapshot(&self) -> Self::Snapshot {
-        let guard = self.inner.read_arc();
+    async fn snapshot(&self) -> Self::Snapshot {
+        let guard = self.inner.clone().read_owned().await;
         MemSnapshot(guard)
     }
 
     async fn put_cf(&self, cf: &str, key: Key, value: Value) -> Result<()> {
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.write().await;
         inner.cf_mut(cf).insert(key, value);
         Ok(())
     }
 
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()> {
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.write().await;
         inner.cf_mut(cf).remove(key);
         Ok(())
     }
@@ -91,7 +90,7 @@ impl MetaStore for MemStore {
         use super::Operation::*;
         use super::Precondition::*;
 
-        let mut inner = self.inner.write();
+        let mut inner = self.inner.write().await;
         let (conds, ops) = txn.into_parts();
 
         for cond in conds {

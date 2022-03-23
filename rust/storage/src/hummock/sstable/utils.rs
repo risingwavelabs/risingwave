@@ -20,6 +20,7 @@ use std::ptr;
 
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
 use risingwave_pb::hummock::Checksum;
+use serde::Deserialize;
 
 use super::{HummockError, HummockResult};
 
@@ -63,10 +64,19 @@ fn crc32_checksum(data: &[u8]) -> u64 {
 }
 
 /// Calculate the ``XxHash`` of the given data.
-fn xxhash64_checksum(data: &[u8]) -> u64 {
+pub fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
     hasher.finish() as u64
+}
+
+/// Verify the checksum of the data equals the given checksum with xxhash64.
+pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
+    let data_checksum = xxhash64_checksum(data);
+    if data_checksum != checksum {
+        return Err(HummockError::checksum_mismatch(checksum, data_checksum));
+    }
+    Ok(())
 }
 
 /// Calculate the checksum of the given `data` using `algo`.
@@ -95,4 +105,156 @@ pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
         ));
     }
     Ok(())
+}
+
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+
+const MASK: u32 = 128;
+
+pub fn var_u32_len(n: u32) -> usize {
+    if n < (1 << 7) {
+        1
+    } else if n < (1 << 14) {
+        2
+    } else if n < (1 << 21) {
+        3
+    } else if n < (1 << 28) {
+        4
+    } else {
+        5
+    }
+}
+
+pub trait BufMutExt: BufMut {
+    fn put_var_u32(&mut self, n: u32) {
+        if n < (1 << 7) {
+            self.put_u8(n as u8);
+        } else if n < (1 << 14) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8((n >> 7) as u8);
+        } else if n < (1 << 21) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8((n >> 14) as u8);
+        } else if n < (1 << 28) {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8(((n >> 14) | MASK) as u8);
+            self.put_u8((n >> 21) as u8);
+        } else {
+            self.put_u8((n | MASK) as u8);
+            self.put_u8(((n >> 7) | MASK) as u8);
+            self.put_u8(((n >> 14) | MASK) as u8);
+            self.put_u8(((n >> 21) | MASK) as u8);
+            self.put_u8((n >> 28) as u8);
+        }
+    }
+}
+
+pub trait BufExt: Buf {
+    fn get_var_u32(&mut self) -> u32 {
+        let mut n = 0u32;
+        let mut shift = 0;
+        loop {
+            let v = self.get_u8() as u32;
+            if v & MASK != 0 {
+                n |= (v & (MASK - 1)) << shift;
+            } else {
+                n |= v << shift;
+                break;
+            }
+            shift += 7;
+        }
+        n
+    }
+}
+
+impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
+
+impl<T: Buf + ?Sized> BufExt for &mut T {}
+
+#[derive(Deserialize, Clone, Copy, Debug)]
+pub enum CompressionAlgorithm {
+    None,
+    Lz4,
+}
+
+impl CompressionAlgorithm {
+    pub fn encode(&self, buf: &mut impl BufMut) {
+        let v = match self {
+            Self::None => 0,
+            Self::Lz4 => 1,
+        };
+        buf.put_u8(v);
+    }
+
+    pub fn decode(buf: &mut impl Buf) -> HummockResult<Self> {
+        match buf.get_u8() {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Lz4),
+            _ => {
+                Err(HummockError::DecodeError("not valid compression algorithm".to_string()).into())
+            }
+        }
+    }
+}
+
+impl From<CompressionAlgorithm> for u8 {
+    fn from(ca: CompressionAlgorithm) -> Self {
+        match ca {
+            CompressionAlgorithm::None => 0,
+            CompressionAlgorithm::Lz4 => 1,
+        }
+    }
+}
+
+impl From<CompressionAlgorithm> for u64 {
+    fn from(ca: CompressionAlgorithm) -> Self {
+        match ca {
+            CompressionAlgorithm::None => 0,
+            CompressionAlgorithm::Lz4 => 1,
+        }
+    }
+}
+
+impl TryFrom<u8> for CompressionAlgorithm {
+    type Error = HummockError;
+    fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Lz4),
+            _ => Err(HummockError::DecodeError(
+                "not valid compression algorithm".to_string(),
+            )),
+        }
+    }
+}
+
+/// Key categories:
+///
+/// A full key value pair looks like:
+///
+/// ```plain
+/// | user key | epoch (8B) | value |
+///
+/// |<------- full key ------->|
+/// ```
+#[allow(dead_code)]
+pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+    let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+    buf.put_slice(user_key);
+    buf.put_u64(!epoch);
+    buf.freeze()
+}
+
+/// Get user key in full key.
+#[allow(dead_code)]
+pub fn user_key(full_key: &[u8]) -> &[u8] {
+    &full_key[..full_key.len() - 8]
+}
+
+/// Get epoch in full key.
+#[allow(dead_code)]
+pub fn epoch(full_key: &[u8]) -> u64 {
+    !(&full_key[full_key.len() - 8..]).get_u64()
 }

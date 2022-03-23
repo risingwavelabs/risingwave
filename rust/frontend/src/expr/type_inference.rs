@@ -231,6 +231,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         );
     }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
+    build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
     build_binary_funcs(
         &mut map,
         &cmp_exprs,
