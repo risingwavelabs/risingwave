@@ -1,3 +1,4 @@
+use std::collections::hash_map::Entry;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,12 +12,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -24,16 +22,21 @@ use risingwave_common::try_match_expand;
 use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
+use tokio::sync::RwLock;
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
+struct FragmentManagerCore {
+    table_fragments: HashMap<TableId, TableFragments>,
+}
+
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S> {
     meta_store_ref: Arc<S>,
 
-    table_fragments: DashMap<TableId, TableFragments>,
+    core: RwLock<FragmentManagerCore>,
 }
 
 pub struct ActorInfos {
@@ -56,19 +59,22 @@ where
             Ok,
             "TableFragments::list fail"
         )?;
-        let fragment_map = DashMap::new();
-        for table_fragment in table_fragments {
-            fragment_map.insert(table_fragment.table_id(), table_fragment);
-        }
+
+        let table_fragments = table_fragments
+            .into_iter()
+            .map(|tf| (tf.table_id(), tf))
+            .collect();
 
         Ok(Self {
             meta_store_ref,
-            table_fragments: fragment_map,
+            core: RwLock::new(FragmentManagerCore { table_fragments }),
         })
     }
 
     pub async fn add_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
-        match self.table_fragments.entry(table_fragment.table_id()) {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(table_fragment.table_id()) {
             Entry::Occupied(_) => Err(RwError::from(InternalError(
                 "table_fragment already exist!".to_string(),
             ))),
@@ -80,16 +86,16 @@ where
         }
     }
 
-    pub fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
-        Ok(self
-            .table_fragments
-            .iter()
-            .map(|f| f.value().clone())
-            .collect())
+    pub async fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
+        let map = &self.core.read().await.table_fragments;
+
+        Ok(map.values().cloned().collect())
     }
 
     pub async fn update_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
-        match self.table_fragments.entry(table_fragment.table_id()) {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
                 table_fragment.insert(&*self.meta_store_ref).await?;
                 entry.insert(table_fragment);
@@ -108,7 +114,9 @@ where
         table_id: &TableId,
         extra_downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
     ) -> Result<()> {
-        match self.table_fragments.entry(*table_id) {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(*table_id) {
             Entry::Occupied(mut entry) => {
                 let table_fragment = entry.get_mut();
                 for fragment in table_fragment.fragments.values_mut() {
@@ -133,7 +141,9 @@ where
     }
 
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
-        match self.table_fragments.entry(*table_id) {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(*table_id) {
             Entry::Occupied(entry) => {
                 TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
                 entry.remove();
@@ -147,14 +157,13 @@ where
     }
 
     /// Used in [`crate::barrier::BarrierManager`]
-    pub fn load_all_actors(&self, creating_table_id: Option<TableId>) -> ActorInfos {
+    pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
-        for entry in &self.table_fragments {
-            // TODO: when swallow barrier available while blocking creating MV or MV on MV, refactor
-            //  the filter logic.
-            let fragments = entry.value();
-            let include_inactive = creating_table_id.contains(&fragments.table_id());
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            let include_inactive = with_creating_table.contains(&fragments.table_id());
             let check_state = |s: ActorState| {
                 s == ActorState::Running || include_inactive && s == ActorState::Inactive
             };
@@ -189,19 +198,26 @@ where
         }
     }
 
-    pub fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    pub async fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
-        for entry in &self.table_fragments {
-            for (node_id, actor_ids) in &entry.value().node_actors() {
-                let node_actor_ids = actor_maps.entry(*node_id).or_insert_with(Vec::new);
-                node_actor_ids.extend_from_slice(actor_ids);
+
+        let map = &self.core.read().await.table_fragments;
+        for fragments in map.values() {
+            for (node_id, actor_ids) in fragments.node_actors() {
+                let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
+                node_actor_ids.extend(actor_ids);
             }
         }
+
         Ok(actor_maps)
     }
 
-    pub fn table_node_actors(&self, table_id: &TableId) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
-        match self.table_fragments.get(table_id) {
+    pub async fn table_node_actors(
+        &self,
+        table_id: &TableId,
+    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+        let map = &self.core.read().await.table_fragments;
+        match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
             None => Err(RwError::from(InternalError(
                 "table_fragment not exist!".to_string(),
@@ -209,8 +225,9 @@ where
         }
     }
 
-    pub fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
-        match self.table_fragments.get(table_id) {
+    pub async fn get_table_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+        let map = &self.core.read().await.table_fragments;
+        match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
             None => Err(RwError::from(InternalError(
                 "table_fragment not exist!".to_string(),
@@ -218,12 +235,42 @@ where
         }
     }
 
-    pub fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
-        match self.table_fragments.get(table_id) {
+    pub async fn get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+        let map = &self.core.read().await.table_fragments;
+        match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
             None => Err(RwError::from(InternalError(
                 "table_fragment not exist!".to_string(),
             ))),
         }
+    }
+
+    // TODO(bugen): remove this.
+    pub fn blocking_table_node_actors(
+        &self,
+        table_id: &TableId,
+    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+        tokio::task::block_in_place(|| {
+            let map = &self.core.blocking_read().table_fragments;
+            match map.get(table_id) {
+                Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
+                None => Err(RwError::from(InternalError(
+                    "table_fragment not exist!".to_string(),
+                ))),
+            }
+        })
+    }
+
+    // TODO(bugen): remove this.
+    pub fn blocking_get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
+        tokio::task::block_in_place(|| {
+            let map = &self.core.blocking_read().table_fragments;
+            match map.get(table_id) {
+                Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
+                None => Err(RwError::from(InternalError(
+                    "table_fragment not exist!".to_string(),
+                ))),
+            }
+        })
     }
 }

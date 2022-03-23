@@ -14,9 +14,9 @@
 //
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_storage::StateStoreImpl;
 
@@ -105,11 +105,11 @@ impl SharedContext {
 
     #[inline]
     fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_map.lock().unwrap()
+        self.channel_map.lock()
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
-        self.barrier_manager.lock().unwrap()
+        self.barrier_manager.lock()
     }
 
     #[inline]
