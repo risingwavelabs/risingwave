@@ -18,7 +18,7 @@ use std::collections::HashSet;
 
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
