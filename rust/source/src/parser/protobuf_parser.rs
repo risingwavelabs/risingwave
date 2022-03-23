@@ -130,14 +130,12 @@ impl ProtobufParser {
         let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| {
-                Self::pb_field_to_col_catalogs(f, &self.descriptors, "".to_string(), &mut index)
-            })
+            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 
-    // Use pb field to create column_catalog, use index to create increment column_id
-    pub fn pb_field_to_col_catalogs(
+    // Use pb field to create column_desc, use index to create increment column_id
+    pub fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
         lastname: String,
@@ -150,7 +148,7 @@ impl ProtobufParser {
                 .fields()
                 .iter()
                 .map(|f| {
-                    Self::pb_field_to_col_catalogs(
+                    Self::pb_field_to_col_desc(
                         f,
                         descriptors,
                         lastname.clone() + field_descriptor.name() + ".",
