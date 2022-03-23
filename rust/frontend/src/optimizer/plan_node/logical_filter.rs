@@ -79,7 +79,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
         mut input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let predicate = self.predicate().clone().rewrite_expr(&mut input_col_change);
-        (Self::new(input, predicate).into(), input_col_change)
+        (Self::new(input, predicate), input_col_change)
     }
 }
 impl_plan_tree_node_for_unary! {LogicalFilter}

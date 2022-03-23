@@ -24,7 +24,7 @@ use super::{
     ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
@@ -244,8 +244,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let new_on = {
-            let (mut left_map, _) = left_col_change.clone().into_parts();
-            let (mut right_map, _) = right_col_change.clone().into_parts();
+            let (mut left_map, _) = left_col_change.into_parts();
+            let (mut right_map, _) = right_col_change.into_parts();
             left_map.append(&mut right_map);
             self.on()
                 .clone()
@@ -261,7 +261,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
         let out_col_change = old_o2l
             .composite(&new_l2o)
             .union(&old_o2r.composite(&new_r2o));
-        (join.into(), out_col_change)
+        (join, out_col_change)
     }
 }
 

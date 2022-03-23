@@ -57,7 +57,7 @@ impl ColIndexMapping {
     }
 
     pub fn identical_map(target_size: usize) -> Self {
-        let map = (0..target_size).into_iter().map(|x| Some(x)).collect();
+        let map = (0..target_size).into_iter().map(Some).collect();
         Self::new(map)
     }
     /// Create a partial mapping which maps range `(0..source_num)` to range
@@ -228,7 +228,7 @@ impl ColIndexMapping {
         order
     }
 
-    pub fn rewrite_distribution(&mut self, mut dist: Distribution) -> Distribution {
+    pub fn rewrite_distribution(&mut self, dist: Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(mut col_idxes) => {
                 for idx in col_idxes.iter_mut() {

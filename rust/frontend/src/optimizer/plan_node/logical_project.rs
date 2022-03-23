@@ -264,6 +264,7 @@ impl ToStream for LogicalProject {
         // TODO: add row_count() aggCall for StreamAgg here
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+        #[allow(clippy::drop_ref)]
         drop(self); // prevent mistakes using self
         let input_pk = input.pk_indices();
         assert!(!input_pk.is_empty());

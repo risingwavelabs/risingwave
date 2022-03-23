@@ -68,8 +68,8 @@ pub trait PlanTreeNodeUnary {
     #[must_use]
     fn rewrite_with_input(
         &self,
-        input: PlanRef,
-        input_col_change: ColIndexMapping,
+        _input: PlanRef,
+        _input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping)
     where
         Self: Sized,
@@ -99,10 +99,10 @@ pub trait PlanTreeNodeBinary {
     #[must_use]
     fn rewrite_with_left_right(
         &self,
-        left: PlanRef,
-        left_col_change: ColIndexMapping,
-        right: PlanRef,
-        right_col_change: ColIndexMapping,
+        _left: PlanRef,
+        _left_col_change: ColIndexMapping,
+        _right: PlanRef,
+        _right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping)
     where
         Self: Sized,
