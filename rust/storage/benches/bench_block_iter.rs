@@ -76,6 +76,31 @@ fn bench_block_iter(c: &mut Criterion) {
             b.iter(|| block_v2_iter_prev(block.clone()));
         },
     );
+
+    let mut iter = BlockIterator::new(block);
+    iter.seek_to_first();
+    for t in 1..=10 {
+        for i in 1..=100000 {
+            assert_eq!(iter.key().unwrap(), key(t, i).to_vec());
+            assert_eq!(
+                HummockValue::Put(value(i).to_vec()),
+                HummockValue::decode(&mut iter.value().unwrap()).unwrap()
+            );
+            iter.next();
+        }
+    }
+    assert!(!iter.is_valid());
+
+    let mut iter = BlockIteratorV2::new(blockv2);
+    iter.seek_to_first();
+    for t in 1..=10 {
+        for i in 1..=100000 {
+            assert_eq!(iter.key(), key(t, i).to_vec());
+            assert_eq!(iter.value(), value(i).to_vec());
+            iter.next();
+        }
+    }
+    assert!(!iter.is_valid());
 }
 
 criterion_group!(benches, bench_block_iter);
