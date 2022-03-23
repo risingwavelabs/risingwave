@@ -5,7 +5,7 @@ statement ok
 explain select v1 from t;
 
 
-statement err
+statement error
 create table t (v2 int not null);
 
 statement ok
