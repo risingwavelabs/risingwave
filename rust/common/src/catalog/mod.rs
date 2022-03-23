@@ -68,7 +68,7 @@ impl TableId {
         TableId { table_id }
     }
 
-    /// Sometimes the id field is filled later, we use this value for better debug.
+    /// Sometimes the id field is filled later, we use this value for better debugging.
     pub const fn placeholder() -> Self {
         TableId {
             table_id: u32::MAX - 1,

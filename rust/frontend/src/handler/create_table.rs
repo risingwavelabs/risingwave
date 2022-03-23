@@ -113,7 +113,7 @@ pub async fn handle_create_table(
     };
 
     let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::info!("name={}, plan=\n{}", table_name, json_plan);
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let columns = column_descs
         .into_iter()
