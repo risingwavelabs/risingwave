@@ -473,11 +473,7 @@ async fn test_cell_based_get_row() {
     let epoch = u64::MAX;
 
     let get_row_res = table
-        .get_row(
-            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -519,17 +515,13 @@ async fn test_cell_based_write() {
     ]);
 
     // cell_based insert row
-    table.insert_row(pk1, Some(value1), epoch).await.unwrap();
-    table.insert_row(pk2, Some(value2), epoch).await.unwrap();
+    table.insert_row(&pk1, Some(value1), epoch).await.unwrap();
+    table.insert_row(&pk2, Some(value2), epoch).await.unwrap();
 
     let epoch = u64::MAX;
 
     let get_row1_res = table
-        .get_row(
-            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -542,11 +534,7 @@ async fn test_cell_based_write() {
     );
 
     let get_row2_res = table
-        .get_row(
-            Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -560,7 +548,7 @@ async fn test_cell_based_write() {
 
     // cell_based delete row
     let delete_pk = Row(vec![Some(2_i32.into()), Some(22_i32.into())]);
-    table.delete_row(delete_pk, epoch).await.unwrap();
+    table.delete_row(&delete_pk, epoch).await.unwrap();
 
     // cell_based update row
     let update_pk = Row(vec![Some(1_i32.into()), Some(11_i32.into())]);
@@ -570,16 +558,12 @@ async fn test_cell_based_write() {
         Some(333_i32.into()),
     ]);
     table
-        .update_row(update_pk, Some(update_value), epoch)
+        .update_row(&update_pk, Some(update_value), epoch)
         .await
         .unwrap();
 
     let get_update_row_res = table
-        .get_row(
-            Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -613,11 +597,7 @@ async fn test_cell_based_write() {
     table.batch_insert_row(batch, epoch).await.unwrap();
 
     let get_row4_res = table
-        .get_row(
-            Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(4_i32.into()), Some(44_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
@@ -630,11 +610,7 @@ async fn test_cell_based_write() {
     );
 
     let get_row5_res = table
-        .get_row(
-            Row(vec![Some(5_i32.into()), Some(55_i32.into())]),
-            vec![0, 1, 2],
-            epoch,
-        )
+        .get_row(&Row(vec![Some(5_i32.into()), Some(55_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(

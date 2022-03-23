@@ -104,23 +104,22 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-
-    pub async fn get_row(&self, pk: Row, column_ids: Vec<i32>, epoch: u64) -> Result<Row> {
+    // TODO: multi-get. We can optimize get_row to parallelize I/O.
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Row> {
         let pk_serializer = self.pk_serializer.as_ref().expect("...");
+        let column_ids = generate_column_id(&self.column_descs);
         let mut row = Vec::with_capacity(column_ids.len());
         for column_id in column_ids {
-            let get_column_id = ColumnId::new(column_id);
             let key = &[
-                &serialize_pk(&pk, pk_serializer)?[..],
-                &serialize_column_id(&get_column_id)?,
+                &serialize_pk(pk, pk_serializer)?[..],
+                &serialize_column_id(&column_id)?,
             ]
             .concat();
-            let state_store_get_res = self
-                .keyspace
-                .get(&key.clone(), epoch)
-                .await
-                .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
-            let column_index = self.column_id_to_column_index.get(&get_column_id).unwrap();
+            let state_store_get_res = self.keyspace.get(&key.clone(), epoch).await?;
+            let column_index = self
+                .column_id_to_column_index
+                .get(&column_id)
+                .expect("column id not found");
             if let Some(state_store_get_res) = state_store_get_res {
                 let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
                 let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
@@ -132,10 +131,15 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(Row::new(row))
     }
 
-    pub async fn insert_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
+    pub async fn insert_row(
+        &mut self,
+        pk: &Row,
+        cell_value: Option<Row>,
+        epoch: u64,
+    ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
+        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
         let column_ids = generate_column_id(&self.column_descs);
         let bytes =
             self.cell_based_row_serializer
@@ -150,10 +154,10 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(())
     }
 
-    pub async fn delete_row(&mut self, pk: Row, epoch: u64) -> Result<()> {
+    pub async fn delete_row(&mut self, pk: &Row, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
+        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
         let column_ids = generate_column_id(&self.column_descs);
         let cell_value = None;
         let bytes =
@@ -166,16 +170,21 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(())
     }
 
-    pub async fn update_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
+    pub async fn update_row(
+        &mut self,
+        pk: &Row,
+        cell_value: Option<Row>,
+        epoch: u64,
+    ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
+        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
         let column_ids = generate_column_id(&self.column_descs);
         let bytes =
             self.cell_based_row_serializer
                 .serialize(&arrange_key_buf, cell_value, column_ids)?;
         // delete original kv_pairs in state_store
-        for (key, _value) in bytes.clone() {
+        for (key, _value) in &bytes {
             local.delete(key);
         }
         batch.ingest(epoch).await?;
@@ -231,7 +240,10 @@ impl<S: StateStore> CellBasedTable<S> {
 
         let column_id = ColumnId::new(column_id);
 
-        let column_index = self.column_id_to_column_index.get(&column_id).unwrap();
+        let column_index = self
+            .column_id_to_column_index
+            .get(&column_id)
+            .expect("column id not found");
         // TODO(MrCroxx): More efficient encoding is needed.
         let buf = self
             .keyspace
@@ -294,8 +306,6 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
     async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
-        keyspace.state_store().wait_epoch(epoch).await?;
-
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         let iter = Self {
