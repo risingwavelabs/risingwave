@@ -1,0 +1,26 @@
+statement ok
+create table t (v1 int not null);
+
+statement ok
+explain select v1 from t;
+
+
+statement err
+create table t (v2 int not null);
+
+statement ok
+drop table t;
+
+statement error
+drop table t;
+
+
+statement ok
+create table t (v2 int not null);
+
+statement ok
+explain select v2 from t;
+
+
+statement ok
+drop table t;
