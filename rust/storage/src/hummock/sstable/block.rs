@@ -155,28 +155,28 @@ mod tests {
         let mut iter = BlockIterator::new(Arc::new(block0));
 
         iter.seek_to_first();
-        let k0 = iter.key().unwrap();
-        let v0 = iter.value().unwrap();
+        let k0 = iter.key();
+        let v0 = iter.value();
         assert_bytes_eq!(k0, key(0));
         assert_bytes_eq!(v0, put_value_bytes(0));
 
         iter.next();
-        let k1 = iter.key().unwrap();
-        let v1 = iter.value().unwrap();
+        let k1 = iter.key();
+        let v1 = iter.value();
         assert_bytes_eq!(k1, key(1));
         assert_bytes_eq!(v1, put_value_bytes(1));
 
         iter.set_block(Arc::new(block1));
 
         iter.seek_to_first();
-        let k2 = iter.key().unwrap();
-        let v2 = iter.value().unwrap();
+        let k2 = iter.key();
+        let v2 = iter.value();
         assert_bytes_eq!(k2, key(2));
         assert_bytes_eq!(v2, put_value_bytes(2));
 
         iter.next();
-        let k3 = iter.key().unwrap();
-        let v3 = iter.value().unwrap();
+        let k3 = iter.key();
+        let v3 = iter.value();
         assert_bytes_eq!(k3, key(3));
         assert_bytes_eq!(v3, put_value_bytes(3));
     }

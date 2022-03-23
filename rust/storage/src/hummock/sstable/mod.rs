@@ -15,19 +15,26 @@
 //! Hummock state store's SST builder, format and iterator
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
-
+#[cfg(not(feature = "blockv2"))]
 mod block;
+#[cfg(not(feature = "blockv2"))]
 pub use block::*;
-mod blockv2;
-pub use blockv2::*;
-mod block_iterator_v2;
-pub use block_iterator_v2::*;
+#[cfg(not(feature = "blockv2"))]
 mod block_iterator;
+#[cfg(not(feature = "blockv2"))]
+pub use block_iterator::*;
+#[cfg(feature = "blockv2")]
+mod blockv2;
+#[cfg(feature = "blockv2")]
+pub use blockv2::*;
+#[cfg(feature = "blockv2")]
+mod block_iterator_v2;
+#[cfg(feature = "blockv2")]
+pub use block_iterator_v2::*;
 mod bloom;
 use bloom::Bloom;
 pub mod builder;
 pub mod multi_builder;
-pub use block_iterator::*;
 pub use builder::*;
 mod sstable_iterator;
 pub use sstable_iterator::*;

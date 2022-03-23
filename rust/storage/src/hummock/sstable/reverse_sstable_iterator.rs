@@ -22,7 +22,7 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
-    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, SeekPos, Sstable,
+    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, Sstable,
     SstableStoreRef,
 };
 
@@ -61,7 +61,7 @@ impl ReverseSSTableIterator {
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
-                block_iter.seek_le(key, SeekPos::Origin);
+                block_iter.seek_le(key);
             } else {
                 block_iter.seek_to_last();
             }
@@ -89,20 +89,11 @@ impl HummockIterator for ReverseSSTableIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.block_iter
-            .as_ref()
-            .expect("no block iter")
-            .key()
-            .expect("invalid iter")
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self
-            .block_iter
-            .as_ref()
-            .expect("no block iter")
-            .value()
-            .expect("invalid iter");
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
 
         HummockValue::from_slice(raw_value).expect("decode error")
     }

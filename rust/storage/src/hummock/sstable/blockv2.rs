@@ -15,14 +15,14 @@ const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 const DEFAULT_RESTART_INTERVAL: usize = 16;
 const DEFAULT_ENTRY_SIZE: usize = 16;
 
-pub struct BlockV2 {
+pub struct Block {
     /// Uncompressed entries data.
     data: Bytes,
     /// Restart points.
     restart_points: Vec<u32>,
 }
 
-impl BlockV2 {
+impl Block {
     pub fn decode(buf: Bytes) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
@@ -54,7 +54,7 @@ impl BlockV2 {
             restart_points.push(restart_points_buf.get_u32_le());
         }
 
-        Ok(BlockV2 {
+        Ok(Block {
             data: buf.slice(..data_len),
             restart_points,
         })
@@ -306,7 +306,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::sstable::utils::full_key;
-    use crate::hummock::BlockIteratorV2;
+    use crate::hummock::BlockIterator;
 
     #[test]
     fn test_block_enc_dec() {
@@ -317,8 +317,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(BlockV2::decode(buf).unwrap());
-        let mut bi = BlockIteratorV2::new(block);
+        let block = Arc::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(block);
 
         bi.seek_to_first();
         assert!(bi.is_valid());
@@ -356,8 +356,8 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let buf = builder.build();
-        let block = Arc::new(BlockV2::decode(buf).unwrap());
-        let mut bi = BlockIteratorV2::new(block);
+        let block = Arc::new(Block::decode(buf).unwrap());
+        let mut bi = BlockIterator::new(block);
 
         bi.seek_to_first();
         assert!(bi.is_valid());
