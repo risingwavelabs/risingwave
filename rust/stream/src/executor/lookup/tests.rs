@@ -32,15 +32,13 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
             data_type: DataType::Int32,
             column_id: ColumnId::new(1),
             name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
+            ..Default::default()
         },
         ColumnDesc {
             data_type: DataType::Int32,
             column_id: ColumnId::new(2),
             name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
+            ..Default::default()
         },
     ]
 }
@@ -145,15 +143,13 @@ async fn create_source() -> Box<dyn Executor + Send> {
             data_type: DataType::Int32,
             column_id: ColumnId::new(1),
             name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
+            ..Default::default()
         },
         ColumnDesc {
             data_type: DataType::Int32,
             column_id: ColumnId::new(2),
             name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
+            ..Default::default()
         },
     ];
 

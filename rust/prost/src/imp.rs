@@ -2,6 +2,7 @@
 
 use std::net::{AddrParseError, SocketAddr};
 
+use crate::data::data_type::TypeName;
 use crate::data::DataType;
 use crate::plan::ColumnDesc;
 
@@ -58,21 +59,22 @@ impl crate::plan::ColumnDesc {
             column_type: Some(data_type),
             column_id,
             name: name.to_string(),
-            field_descs: vec![],
-            type_name: String::new(),
+            ..Default::default()
         }
     }
 
     // Used for test
     pub fn new_struct(
-        data_type: DataType,
         name: &str,
         column_id: i32,
         type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
         Self {
-            column_type: Some(data_type),
+            column_type: Some(DataType {
+                type_name: TypeName::Struct as i32,
+                ..Default::default()
+            }),
             column_id,
             name: name.to_string(),
             type_name: type_name.to_string(),

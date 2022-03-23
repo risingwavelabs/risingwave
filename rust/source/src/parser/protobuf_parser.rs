@@ -474,7 +474,7 @@ mod tests {
         ))))
     }
 
-    #[cfg(test)]
+    #[test]
     fn test_map_to_columns() {
         use risingwave_common::types::*;
 

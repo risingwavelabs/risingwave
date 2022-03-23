@@ -182,8 +182,7 @@ mod tests {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             })
             .collect();
 

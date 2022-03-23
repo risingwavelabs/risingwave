@@ -1,4 +1,3 @@
-use itertools::Itertools;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +11,7 @@ use itertools::Itertools;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use itertools::Itertools;
 use risingwave_pb::plan::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
@@ -96,12 +96,14 @@ impl ColumnDesc {
 
     #[cfg(test)]
     pub fn new_struct(
-        data_type: DataType,
         name: &str,
         column_id: i32,
         type_name: &str,
         fields: Vec<ColumnDesc>,
     ) -> Self {
+        let data_type = DataType::Struct {
+            fields: fields.iter().map(|f| f.data_type).collect_vec().into(),
+        };
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
@@ -171,7 +173,6 @@ pub mod tests {
     use crate::catalog::ColumnDesc;
     use crate::types::DataType;
 
-    #[cfg(test)]
     pub fn build_prost_desc() -> ProstColumnDesc {
         let city = vec![
             ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
@@ -179,30 +180,11 @@ pub mod tests {
         ];
         let country = vec![
             ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            ProstColumnDesc::new_struct(
-                DataType::Struct {
-                    fields: vec![].into(),
-                }
-                .to_protobuf(),
-                "country.city",
-                4,
-                ".test.City",
-                city,
-            ),
+            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        ProstColumnDesc::new_struct(
-            DataType::Struct {
-                fields: vec![].into(),
-            }
-            .to_protobuf(),
-            "country",
-            5,
-            ".test.Country",
-            country,
-        )
+        ProstColumnDesc::new_struct("country", 5, ".test.Country", country)
     }
 
-    #[cfg(test)]
     pub fn build_desc() -> ColumnDesc {
         let city = vec![
             ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2),
@@ -211,34 +193,12 @@ pub mod tests {
         let data_type = vec![DataType::Varchar, DataType::Varchar];
         let country = vec![
             ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
-            ColumnDesc::new_struct(
-                DataType::Struct {
-                    fields: data_type.clone().into(),
-                },
-                "country.city",
-                4,
-                ".test.City",
-                city,
-            ),
+            ColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        ColumnDesc::new_struct(
-            DataType::Struct {
-                fields: vec![
-                    DataType::Varchar,
-                    DataType::Struct {
-                        fields: data_type.into(),
-                    },
-                ]
-                .into(),
-            },
-            "country",
-            5,
-            ".test.Country",
-            country,
-        )
+        ColumnDesc::new_struct("country", 5, ".test.Country", country)
     }
 
-    #[cfg(test)]
+    #[test]
     fn test_into_column_catalog() {
         let desc: ColumnDesc = build_prost_desc().into();
         assert_eq!(desc, build_desc());

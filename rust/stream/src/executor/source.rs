@@ -349,22 +349,19 @@ mod tests {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
             ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
             ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
         ];
         let source_manager = MemSourceManager::new();
@@ -497,22 +494,19 @@ mod tests {
                 column_id: ColumnId::from(0),
                 data_type: rowid_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
             ColumnDesc {
                 column_id: ColumnId::from(1),
                 data_type: col1_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
             ColumnDesc {
                 column_id: ColumnId::from(2),
                 data_type: col2_type.clone(),
                 name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
+                ..Default::default()
             },
         ];
         let source_manager = MemSourceManager::new();
