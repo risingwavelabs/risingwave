@@ -769,7 +769,8 @@ mod tests {
         assert!(!ui.is_valid());
     }
 
-    // TODO: Temporarily disable chaos test. Some case breaks key asc order asserts in block builder.
+    // TODO: Temporarily disable chaos test. Some case breaks key asc order asserts in block
+    // builder.
 
     // fn key_from_num(num: usize) -> Vec<u8> {
     //     let width = 20;
