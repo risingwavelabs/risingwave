@@ -73,6 +73,7 @@ impl crate::plan::ColumnDesc {
         Self {
             column_type: Some(DataType {
                 type_name: TypeName::Struct as i32,
+                is_nullable: true,
                 ..Default::default()
             }),
             column_id,
