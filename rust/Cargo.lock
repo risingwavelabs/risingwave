@@ -3439,7 +3439,6 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tempfile",
- "workspace-hack",
  "yaml-rust",
 ]
 
@@ -3787,6 +3786,7 @@ dependencies = [
  "chrono",
  "clap 3.1.6",
  "crc32fast",
+ "dashmap",
  "either",
  "etcd-client",
  "futures 0.3.21",
