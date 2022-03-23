@@ -1233,11 +1233,10 @@ impl Parser {
             .is_some();
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_create_table(or_replace, temporary)
-        // } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::VIEW)
-        // {     self.prev_token();
-        // self.parse_create_view(or_replace)
-        } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::SOURCE) {
+        } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::VIEW) {
             self.prev_token();
+            self.parse_create_view(or_replace)
+        } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_create_source(or_replace)
         } else if or_replace {
             self.expected(
@@ -1289,6 +1288,7 @@ impl Parser {
     // SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
+    // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?

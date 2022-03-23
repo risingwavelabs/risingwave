@@ -54,8 +54,6 @@ pub(super) async fn handle_create_source(
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
 
-    let _materialized = stmt.materialized;
-
     let columns = stmt.columns;
 
     let column_catalogs = iter::once(Ok(ColumnCatalog {

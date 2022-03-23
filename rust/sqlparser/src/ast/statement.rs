@@ -70,11 +70,9 @@ macro_rules! impl_fmt_display {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSourceStatement {
-    pub materialized: bool,
     pub if_not_exists: bool,
     pub columns: Vec<ColumnDef>,
     pub constraints: Vec<TableConstraint>,
-    // Source name.
     pub source_name: Ident,
     pub with_properties: WithProperties,
     pub source_schema: SourceSchema,
@@ -152,9 +150,6 @@ impl fmt::Display for ProtobufSchema {
 
 impl ParseTo for CreateSourceStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        let materialized = p.parse_keyword(Keyword::MATERIALIZED);
-        p.expect_keyword(Keyword::SOURCE)?;
-
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(source_name: Ident, p);
 
@@ -165,7 +160,6 @@ impl ParseTo for CreateSourceStatement {
         impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
         impl_parse_to!(source_schema: SourceSchema, p);
         Ok(Self {
-            materialized,
             if_not_exists,
             columns,
             constraints,
