@@ -12,141 +12,6 @@
                 {
                   "input": [
                     {
-                      "input": [
-                        {
-                          "mergeNode": {}
-                        },
-                        {
-                          "batchPlanNode": {
-                            "tableRefId": {
-                              "tableId": 5
-                            },
-                            "columnDescs": [
-                              {
-                                "columnType": {
-                                  "typeName": "INT64",
-                                  "isNullable": true
-                                },
-                                "name": "_row_id"
-                              },
-                              {
-                                "columnType": {
-                                  "typeName": "INT32",
-                                  "isNullable": true
-                                },
-                                "columnId": 1,
-                                "name": "v1"
-                              }
-                            ]
-                          }
-                        }
-                      ],
-                      "chainNode": {}
-                    }
-                  ],
-                  "filterNode": {
-                    "searchCondition": {
-                      "exprType": "LESS_THAN",
-                      "returnType": {
-                        "typeName": "BOOLEAN",
-                        "isNullable": true
-                      },
-                      "funcCall": {
-                        "children": [
-                          {
-                            "exprType": "INPUT_REF",
-                            "returnType": {
-                              "typeName": "INT32",
-                              "isNullable": true
-                            },
-                            "inputRef": {
-                              "columnIdx": 1
-                            }
-                          },
-                          {
-                            "exprType": "CONSTANT_VALUE",
-                            "returnType": {
-                              "typeName": "INT32",
-                              "isNullable": true
-                            },
-                            "constant": {
-                              "body": "AAAAAQ=="
-                            }
-                          }
-                        ]
-                      }
-                    }
-                  }
-                }
-              ],
-              "exchangeNode": {
-                "fields": [
-                  {
-                    "dataType": {
-                      "typeName": "INT64",
-                      "isNullable": true
-                    },
-                    "name": "_row_id"
-                  },
-                  {
-                    "dataType": {
-                      "typeName": "INT32",
-                      "isNullable": true
-                    },
-                    "name": "v1"
-                  }
-                ],
-                "strategy": {
-                  "type": "SIMPLE"
-                }
-              }
-            }
-          ],
-          "projectNode": {
-            "selectList": [
-              {
-                "exprType": "INPUT_REF",
-                "returnType": {
-                  "typeName": "INT64",
-                  "isNullable": true
-                },
-                "inputRef": {}
-              },
-              {
-                "exprType": "INPUT_REF",
-                "returnType": {
-                  "typeName": "INT32",
-                  "isNullable": true
-                },
-                "inputRef": {
-                  "columnIdx": 1
-                }
-              }
-            ]
-          }
-        }
-      ],
-      "materializeNode": {
-        "columnIds": [
-          0,
-          1
-        ]
-      }
-    }
-- sql: |
-    /* test projection */
-    create table t (v1 int);
-    select * from t;
-  stream_plan_proto: |-
-    {
-      "input": [
-        {
-          "input": [
-            {
-              "input": [
-                {
-                  "input": [
-                    {
                       "mergeNode": {}
                     },
                     {
@@ -177,25 +42,37 @@
                   "chainNode": {}
                 }
               ],
-              "exchangeNode": {
-                "fields": [
-                  {
-                    "dataType": {
-                      "typeName": "INT64",
-                      "isNullable": true
-                    },
-                    "name": "_row_id"
+              "filterNode": {
+                "searchCondition": {
+                  "exprType": "LESS_THAN",
+                  "returnType": {
+                    "typeName": "BOOLEAN",
+                    "isNullable": true
                   },
-                  {
-                    "dataType": {
-                      "typeName": "INT32",
-                      "isNullable": true
-                    },
-                    "name": "v1"
+                  "funcCall": {
+                    "children": [
+                      {
+                        "exprType": "INPUT_REF",
+                        "returnType": {
+                          "typeName": "INT32",
+                          "isNullable": true
+                        },
+                        "inputRef": {
+                          "columnIdx": 1
+                        }
+                      },
+                      {
+                        "exprType": "CONSTANT_VALUE",
+                        "returnType": {
+                          "typeName": "INT32",
+                          "isNullable": true
+                        },
+                        "constant": {
+                          "body": "AAAAAQ=="
+                        }
+                      }
+                    ]
                   }
-                ],
-                "strategy": {
-                  "type": "SIMPLE"
                 }
               }
             }
@@ -225,6 +102,99 @@
         }
       ],
       "materializeNode": {
+        "columnOrders": [
+          {
+            "orderType": "ASCENDING",
+            "inputRef": {},
+            "returnType": {
+              "typeName": "INT64",
+              "isNullable": true
+            }
+          }
+        ],
+        "columnIds": [
+          0,
+          1
+        ]
+      }
+    }
+- sql: |
+    /* test projection */
+    create table t (v1 int);
+    select * from t;
+  stream_plan_proto: |-
+    {
+      "input": [
+        {
+          "input": [
+            {
+              "input": [
+                {
+                  "mergeNode": {}
+                },
+                {
+                  "batchPlanNode": {
+                    "tableRefId": {
+                      "tableId": 5
+                    },
+                    "columnDescs": [
+                      {
+                        "columnType": {
+                          "typeName": "INT64",
+                          "isNullable": true
+                        },
+                        "name": "_row_id"
+                      },
+                      {
+                        "columnType": {
+                          "typeName": "INT32",
+                          "isNullable": true
+                        },
+                        "columnId": 1,
+                        "name": "v1"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "chainNode": {}
+            }
+          ],
+          "projectNode": {
+            "selectList": [
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT64",
+                  "isNullable": true
+                },
+                "inputRef": {}
+              },
+              {
+                "exprType": "INPUT_REF",
+                "returnType": {
+                  "typeName": "INT32",
+                  "isNullable": true
+                },
+                "inputRef": {
+                  "columnIdx": 1
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "materializeNode": {
+        "columnOrders": [
+          {
+            "orderType": "ASCENDING",
+            "inputRef": {},
+            "returnType": {
+              "typeName": "INT64",
+              "isNullable": true
+            }
+          }
+        ],
         "columnIds": [
           0,
           1
@@ -243,45 +213,27 @@
             {
               "input": [
                 {
-                  "input": [
-                    {
-                      "mergeNode": {}
+                  "mergeNode": {}
+                },
+                {
+                  "batchPlanNode": {
+                    "tableRefId": {
+                      "tableId": 5
                     },
-                    {
-                      "batchPlanNode": {
-                        "tableRefId": {
-                          "tableId": 5
+                    "columnDescs": [
+                      {
+                        "columnType": {
+                          "typeName": "INT32",
+                          "isNullable": true
                         },
-                        "columnDescs": [
-                          {
-                            "columnType": {
-                              "typeName": "INT32",
-                              "isNullable": true
-                            },
-                            "columnId": 1,
-                            "name": "v1"
-                          }
-                        ]
+                        "columnId": 1,
+                        "name": "v1"
                       }
-                    }
-                  ],
-                  "chainNode": {}
+                    ]
+                  }
                 }
               ],
-              "exchangeNode": {
-                "fields": [
-                  {
-                    "dataType": {
-                      "typeName": "INT32",
-                      "isNullable": true
-                    },
-                    "name": "v1"
-                  }
-                ],
-                "strategy": {
-                  "type": "SIMPLE"
-                }
-              }
+              "chainNode": {}
             }
           ],
           "projectNode": {
@@ -299,6 +251,16 @@
         }
       ],
       "materializeNode": {
+        "columnOrders": [
+          {
+            "orderType": "ASCENDING",
+            "inputRef": {},
+            "returnType": {
+              "typeName": "INT32",
+              "isNullable": true
+            }
+          }
+        ],
         "columnIds": [
           0
         ]
@@ -322,45 +284,27 @@
                         {
                           "input": [
                             {
-                              "input": [
-                                {
-                                  "mergeNode": {}
+                              "mergeNode": {}
+                            },
+                            {
+                              "batchPlanNode": {
+                                "tableRefId": {
+                                  "tableId": 5
                                 },
-                                {
-                                  "batchPlanNode": {
-                                    "tableRefId": {
-                                      "tableId": 5
+                                "columnDescs": [
+                                  {
+                                    "columnType": {
+                                      "typeName": "INT32",
+                                      "isNullable": true
                                     },
-                                    "columnDescs": [
-                                      {
-                                        "columnType": {
-                                          "typeName": "INT32",
-                                          "isNullable": true
-                                        },
-                                        "columnId": 1,
-                                        "name": "v1"
-                                      }
-                                    ]
+                                    "columnId": 1,
+                                    "name": "v1"
                                   }
-                                }
-                              ],
-                              "chainNode": {}
+                                ]
+                              }
                             }
                           ],
-                          "exchangeNode": {
-                            "fields": [
-                              {
-                                "dataType": {
-                                  "typeName": "INT32",
-                                  "isNullable": true
-                                },
-                                "name": "v1"
-                              }
-                            ],
-                            "strategy": {
-                              "type": "SIMPLE"
-                            }
-                          }
+                          "chainNode": {}
                         }
                       ],
                       "projectNode": {
@@ -430,6 +374,16 @@
         }
       ],
       "materializeNode": {
+        "columnOrders": [
+          {
+            "orderType": "ASCENDING",
+            "inputRef": {},
+            "returnType": {
+              "typeName": "INT64",
+              "isNullable": true
+            }
+          }
+        ],
         "columnIds": [
           0
         ]
