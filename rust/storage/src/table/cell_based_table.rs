@@ -22,7 +22,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
@@ -230,40 +229,6 @@ impl<S: StateStore> CellBasedTable<S> {
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> Result<CellBasedTableRowIter<S>> {
         CellBasedTableRowIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
-    }
-
-    pub async fn get_for_test(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
-        assert!(
-            self.pk_serializer.is_some(),
-            "this table is adhoc and there's no sort key serializer"
-        );
-
-        let column_id = ColumnId::new(column_id);
-
-        let column_index = self
-            .column_id_to_column_index
-            .get(&column_id)
-            .expect("column id not found");
-        // TODO(MrCroxx): More efficient encoding is needed.
-        let buf = self
-            .keyspace
-            .get(
-                &[
-                    &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
-                    &serialize_column_id(&column_id)?,
-                ]
-                .concat(),
-                epoch,
-            )
-            .await
-            .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
-        if let Some(buf) = buf {
-            let mut de = value_encoding::Deserializer::new(buf.to_bytes());
-            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-            Ok(Some(cell))
-        } else {
-            Ok(None)
-        }
     }
 
     pub fn schema(&self) -> &Schema {
