@@ -22,7 +22,6 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_mv::gen_create_mv_plan;
-use super::create_table::gen_create_table_associated_mv_plan;
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
@@ -45,9 +44,7 @@ pub(super) fn handle_explain(
             ..
         } => gen_create_mv_plan(&session, &mut planner, query.as_ref().clone())?,
 
-        Statement::CreateTable { .. } => {
-            gen_create_table_associated_mv_plan(&session, &mut planner, todo!())?
-        }
+        Statement::CreateTable { .. } => todo!(),
 
         stmt => {
             let bound = {
