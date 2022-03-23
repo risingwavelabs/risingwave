@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 use std::cell::RefCell;
+use std::error::Error;
 use std::fmt::Formatter;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -23,7 +24,7 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -216,10 +217,14 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    type Error = RwError;
-
-    fn connect(&self, database: &str) -> Result<Arc<dyn Session>> {
-        Ok(Arc::new(SessionImpl::new(self.env.clone(), database.to_string())))
+    fn connect(
+        &self,
+        database: &str,
+    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
+        Ok(Arc::new(SessionImpl::new(
+            self.env.clone(),
+            database.to_string(),
+        )))
     }
 }
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::io::Result;
+use std::io::{Error as IoError, Result};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -103,7 +103,7 @@ where
 
     fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
         // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
-        self.session = Some(self.session_mgr.connect(DEFAULT_DATABASE_NAME)?);
+        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::Encoding("utf8"),
