@@ -3,7 +3,7 @@
     BatchExchange { order: [], dist: Single }
       BatchValues { rows: [[11:Int32, 22:Int32], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32]] }
 - sql: select * from t
-  binder_error: 'Item not found: relation "t"'
+  binder_error: 'Catalog error: table not found: t'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;

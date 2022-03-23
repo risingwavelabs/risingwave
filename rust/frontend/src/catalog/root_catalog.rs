@@ -125,7 +125,7 @@ impl Catalog {
     pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Result<&SchemaCatalog> {
         self.get_database_by_name(db_name)?
             .get_schema_by_name(schema_name)
-            .ok_or_else(|| CatalogError::NotFound("schema", db_name.to_string()).into())
+            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
     pub fn get_table_by_name(
@@ -136,7 +136,7 @@ impl Catalog {
     ) -> Result<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
-            .ok_or_else(|| CatalogError::NotFound("table", db_name.to_string()).into())
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
     pub fn get_source_by_name(
@@ -147,7 +147,7 @@ impl Catalog {
     ) -> Result<&ProstSource> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
-            .ok_or_else(|| CatalogError::NotFound("source", db_name.to_string()).into())
+            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.
@@ -163,22 +163,19 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            return match source.info.as_ref().unwrap() {
+            match source.info.as_ref().unwrap() {
                 source::Info::TableSource(_) => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
                 }
                 source::Info::StreamSource(_) => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
-            };
+            }
+        } else if let Some(_table) = schema.get_table_by_name(relation_name) {
+            Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
+        } else {
+            Ok((db.id(), schema.id()))
         }
-
-        if let Some(_table) = schema.get_table_by_name(relation_name) {
-            return Err(
-                CatalogError::Duplicated("materialized view", schema_name.to_string()).into(),
-            );
-        }
-        Ok((db.id(), schema.id()))
     }
 
     /// Get the catalog cache's catalog version.
