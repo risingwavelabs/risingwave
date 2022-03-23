@@ -35,9 +35,12 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(serializer.into_inner())
 }
 
-/// Serialize datum cannot be null into cell bytes
+/// Serialize datum cannot be null into cell bytes.
 pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
     let mut serializer = value_encoding::Serializer::new(vec![]);
+    if let Some(ScalarImpl::Decimal(decimal)) = cell {
+        return serialize_decimal(decimal);
+    }
     serialize_datum_not_null_into(cell, serializer.memcom_ser())?;
     Ok(serializer.into_inner())
 }
@@ -53,6 +56,7 @@ pub fn deserialize_cell(
     }
 }
 
+/// Deserialize cell bytes which cannot be null into datum.
 pub fn deserialize_cell_not_null(
     deserializer: &mut value_encoding::Deserializer<impl Buf>,
     ty: DataType,
