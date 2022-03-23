@@ -148,7 +148,7 @@ impl PlanRoot {
     pub fn gen_create_mv_plan(&mut self) -> PlanRef {
         let mut plan = self.gen_optimized_logical_plan();
         plan = {
-            let (mut plan, mut out_col_change) = plan.logical_rewrite_for_stream();
+            let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
             self.required_dist = out_col_change.rewrite_distribution(self.required_dist.clone());
             self.required_order = out_col_change.rewrite_order(self.required_order.clone());
             self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
