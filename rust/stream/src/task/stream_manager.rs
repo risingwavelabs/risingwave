@@ -320,7 +320,7 @@ impl StreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone());
+        let context = SharedContext::new(addr);
         Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
