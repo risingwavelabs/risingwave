@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![feature(map_try_insert)]
 #![feature(let_chains)]
 
@@ -29,6 +29,7 @@ pub mod utils;
 extern crate log;
 mod meta;
 pub mod test_utils;
+extern crate risingwave_common;
 
 use std::ffi::OsString;
 use std::iter;

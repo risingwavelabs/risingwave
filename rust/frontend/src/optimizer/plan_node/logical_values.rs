@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
@@ -89,6 +89,10 @@ impl ToBatch for LogicalValues {
 
 impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
         unimplemented!("Stream values executor is unimplemented!")
     }
 }
