@@ -28,6 +28,15 @@ pub struct Condition {
     pub conjunctions: Vec<ExprImpl>,
 }
 
+impl IntoIterator for Condition {
+    type Item = ExprImpl;
+    type IntoIter = std::vec::IntoIter<ExprImpl>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.conjunctions.into_iter()
+    }
+}
+
 impl fmt::Display for Condition {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut conjunctions = self.conjunctions.iter();
@@ -102,11 +111,7 @@ impl Condition {
 
     #[must_use]
     /// Split the condition expressions into 3 groups: left, right and others
-    pub fn split(
-        self,
-        left_col_num: usize,
-        right_col_num: usize,
-    ) -> (Vec<ExprImpl>, Vec<ExprImpl>, Vec<ExprImpl>) {
+    pub fn split(self, left_col_num: usize, right_col_num: usize) -> (Self, Self, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
@@ -122,7 +127,39 @@ impl Condition {
             }
         });
 
-        (left, right, others)
+        (
+            Condition { conjunctions: left },
+            Condition {
+                conjunctions: right,
+            },
+            Condition {
+                conjunctions: others,
+            },
+        )
+    }
+
+    #[must_use]
+    /// Split the condition expressions into 2 groups: those referencing `columns` and others which
+    /// are disjoint with columns.
+    pub fn split_disjoint(self, columns: &FixedBitSet, capacity: usize) -> (Self, Self) {
+        let (mut referencing, mut disjoint) = (vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = CollectInputRef::collect(&expr, capacity);
+            if input_bits.is_disjoint(columns) {
+                disjoint.push(expr)
+            } else {
+                referencing.push(expr)
+            }
+        });
+
+        (
+            Condition {
+                conjunctions: referencing,
+            },
+            Condition {
+                conjunctions: disjoint,
+            },
+        )
     }
 
     #[must_use]
@@ -202,8 +239,8 @@ mod tests {
             .and(Condition::with_expr(right.clone()))
             .and(Condition::with_expr(left.clone()));
         let res = cond.split(left_col_num, right_col_num);
-        assert_eq!(res.0, vec![left]);
-        assert_eq!(res.1, vec![right]);
-        assert_eq!(res.2, vec![other]);
+        assert_eq!(res.0.conjunctions, vec![left]);
+        assert_eq!(res.1.conjunctions, vec![right]);
+        assert_eq!(res.2.conjunctions, vec![other]);
     }
 }

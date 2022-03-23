@@ -109,7 +109,11 @@ impl PlanRoot {
 
         // Predicate Push-down
         plan = {
-            let rules = vec![FilterJoinRule::create(), FilterProjectRule::create()];
+            let rules = vec![
+                FilterJoinRule::create(),
+                FilterProjectRule::create(),
+                FilterAggRule::create(),
+            ];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
