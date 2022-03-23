@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 mod join_entry_state;
 use std::ops::{Deref, DerefMut, Index};
 use std::sync::Arc;

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
