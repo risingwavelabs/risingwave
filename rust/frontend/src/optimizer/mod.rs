@@ -145,9 +145,16 @@ impl PlanRoot {
     }
 
     /// optimize and generate a create materialize view plan
-    pub fn gen_create_mv_plan(&self) -> PlanRef {
-        let plan = self.gen_optimized_logical_plan();
-        let (mut plan, out_col_change) = plan.logical_rewrite_for_stream();
+    pub fn gen_create_mv_plan(&mut self) -> PlanRef {
+        let mut plan = self.gen_optimized_logical_plan();
+        plan = {
+            let (mut plan, mut out_col_change) = plan.logical_rewrite_for_stream();
+            self.required_dist = out_col_change.rewrite_distribution(self.required_dist.clone());
+            self.required_order = out_col_change.rewrite_order(self.required_order.clone());
+            self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
+            self.schema = plan.schema().clone();
+            plan
+        };
         // Convert to physical plan node
         plan = plan.to_stream_with_dist_required(&self.required_dist);
 
