@@ -11,9 +11,9 @@ use super::utils::{
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
 
-const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
-const DEFAULT_RESTART_INTERVAL: usize = 16;
-const DEFAULT_ENTRY_SIZE: usize = 16;
+pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
+pub const DEFAULT_RESTART_INTERVAL: usize = 16;
+pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
 pub struct Block {
     /// Uncompressed entries data.
@@ -155,7 +155,7 @@ impl KeyPrefix {
     }
 }
 
-pub struct BlockV2BuilderOptions {
+pub struct BlockBuilderOptions {
     /// Reserved bytes size when creating buffer to avoid frequent allocating.
     pub capacity: usize,
     /// Compression algorithm.
@@ -164,7 +164,7 @@ pub struct BlockV2BuilderOptions {
     pub restart_interval: usize,
 }
 
-impl Default for BlockV2BuilderOptions {
+impl Default for BlockBuilderOptions {
     fn default() -> Self {
         Self {
             capacity: DEFAULT_BLOCK_SIZE,
@@ -175,7 +175,7 @@ impl Default for BlockV2BuilderOptions {
 }
 
 /// [`BlockV2Writer`] encode and append block to a buffer.
-pub struct BlockV2Builder {
+pub struct BlockBuilder {
     /// Write buffer.
     buf: BytesMut,
     /// Entry interval between restart points.
@@ -190,8 +190,8 @@ pub struct BlockV2Builder {
     compression_algorithm: CompressionAlgorithm,
 }
 
-impl BlockV2Builder {
-    pub fn new(options: BlockV2BuilderOptions) -> Self {
+impl BlockBuilder {
+    pub fn new(options: BlockBuilderOptions) -> Self {
         Self {
             buf: BytesMut::with_capacity(options.capacity),
             restart_count: options.restart_interval,
@@ -219,14 +219,6 @@ impl BlockV2Builder {
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
-            // TODO: Remove me.
-            // if self.last_key >= key {
-            //     println!(
-            //         "last key: {:?}\n     key: {:?}",
-            //         Bytes::from(self.last_key.clone()),
-            //         Bytes::copy_from_slice(key)
-            //     );
-            // }
             assert!(self.last_key < key);
         }
         // Update restart point if needed and calculate diff key.
@@ -310,8 +302,8 @@ mod tests {
 
     #[test]
     fn test_block_enc_dec() {
-        let options = BlockV2BuilderOptions::default();
-        let mut builder = BlockV2Builder::new(options);
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k1", 1), b"v01");
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
@@ -346,11 +338,11 @@ mod tests {
 
     #[test]
     fn test_compressed_block_enc_dec() {
-        let options = BlockV2BuilderOptions {
+        let options = BlockBuilderOptions {
             compression_algorithm: CompressionAlgorithm::Lz4,
             ..Default::default()
         };
-        let mut builder = BlockV2Builder::new(options);
+        let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k1", 1), b"v01");
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");

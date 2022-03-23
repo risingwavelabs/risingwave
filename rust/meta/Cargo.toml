@@ -60,3 +60,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 assert_matches = "1"
 rand = "0.8"
 tempfile = "3"
+
+[features]
+default = ["blockv2"]
+blockv2 = ["risingwave_storage/blockv2"]

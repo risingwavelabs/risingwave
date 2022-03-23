@@ -188,11 +188,11 @@ impl BlockIterator {
 mod tests {
     use super::*;
     use crate::hummock::sstable::utils::full_key;
-    use crate::hummock::{BlockV2Builder, BlockV2BuilderOptions};
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
-        let options = BlockV2BuilderOptions::default();
-        let mut builder = BlockV2Builder::new(options);
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k01", 1), b"v01");
         builder.add(&full_key(b"k02", 2), b"v02");
         builder.add(&full_key(b"k04", 4), b"v04");
