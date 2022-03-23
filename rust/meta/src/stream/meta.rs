@@ -245,6 +245,7 @@ where
         }
     }
 
+    // TODO(bugen): remove this.
     pub fn blocking_table_node_actors(
         &self,
         table_id: &TableId,
@@ -260,6 +261,7 @@ where
         })
     }
 
+    // TODO(bugen): remove this.
     pub fn blocking_get_table_sink_actor_ids(&self, table_id: &TableId) -> Result<Vec<ActorId>> {
         tokio::task::block_in_place(|| {
             let map = &self.core.blocking_read().table_fragments;
