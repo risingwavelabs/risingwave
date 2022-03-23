@@ -94,11 +94,9 @@ pub async fn handle_create_table(
             { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
 
         let materialize_node =
-            { StreamMaterialize::new(context.clone(), exchange_node.into(), TableId::default()) };
+            { StreamMaterialize::new(context, exchange_node.into(), TableId::default()) };
 
-        let plan = (Rc::new(materialize_node) as PlanRef).to_stream_prost();
-
-        plan
+        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
     };
 
     let json_plan = serde_json::to_string(&plan).unwrap();
