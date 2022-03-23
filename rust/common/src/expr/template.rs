@@ -214,7 +214,6 @@ macro_rules! eval_nullable {
     }
 }
 
-#[allow(dead_code, unused_macros)]
 macro_rules! gen_expr_nullable {
     ($ty_name:ident, { $($arg:ident),* }, { $($lt:lifetime),* }) => {
         paste! {
