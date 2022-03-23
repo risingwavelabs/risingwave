@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::WithSchema;
+use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -41,8 +41,21 @@ impl StreamProject {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let dist = input.distribution().clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
+        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
+        let distribution = match input.distribution() {
+            Distribution::HashShard(dists) => {
+                let new_dists = dists
+                    .iter()
+                    .map(|hash_col| i2o.try_map(*hash_col))
+                    .collect::<Option<Vec<_>>>();
+                match new_dists {
+                    Some(new_dists) => Distribution::HashShard(new_dists),
+                    None => Distribution::AnyShard,
+                }
+            }
+            dist => dist.clone(),
+        };
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, distribution);
         StreamProject { logical, base }
     }
 }
