@@ -14,6 +14,7 @@
 //
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
@@ -84,14 +85,37 @@ impl ToStreamProst for StreamTableScan {
 
 impl StreamTableScan {
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
+        use risingwave_pb::plan::*;
+        use risingwave_pb::stream_plan::*;
+
+        let batch_plan_node = BatchPlanNode {
+            table_ref_id: Some(TableRefId {
+                table_id: self.logical.table_id() as i32,
+                schema_ref_id: Default::default(),
+            }),
+            column_descs: self
+                .schema()
+                .fields()
+                .iter()
+                .zip_eq(self.logical.columns().iter())
+                .zip_eq(self.logical.column_names().iter())
+                .map(|((field, column_id), column_name)| ColumnDesc {
+                    column_type: Some(field.data_type().to_protobuf()),
+                    column_id: column_id.get_id(),
+                    name: column_name.clone(),
+                })
+                .collect(),
+        };
+
         ProstStreamPlan {
             input: vec![
+                // The merge node should be empty
                 ProstStreamPlan {
                     node: Some(ProstStreamNode::MergeNode(Default::default())),
                     ..Default::default()
                 },
                 ProstStreamPlan {
-                    node: Some(ProstStreamNode::ChainNode(Default::default())),
+                    node: Some(ProstStreamNode::BatchPlanNode(batch_plan_node)),
                     ..Default::default()
                 },
             ],

@@ -91,7 +91,6 @@ message ChainNode {
   plan.TableRefId table_ref_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
-  repeated int32 pk_indices = 3;
   repeated int32 column_ids = 4;
 }
 
@@ -100,7 +99,6 @@ message ChainNode {
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
-  repeated int32 pk_indices = 2;
   repeated plan.ColumnDesc column_descs = 3;
 }
 
