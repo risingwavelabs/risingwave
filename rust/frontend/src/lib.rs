@@ -28,6 +28,7 @@ pub mod session;
 pub mod utils;
 extern crate log;
 pub mod test_utils;
+extern crate risingwave_common;
 
 use std::ffi::OsString;
 use std::iter;

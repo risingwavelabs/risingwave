@@ -15,18 +15,19 @@
 use std::error::Error;
 use std::io;
 use std::sync::Arc;
+use std::result::Result;
 
 use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::pg_protocol::PgProtocol;
 use crate::pg_response::PgResponse;
-use risingwave_common::error::Result;
 
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
-    fn connect(&self, database: &str) -> Result<Arc<dyn Session>>;
+    type Error: Error + Send + Sync + 'static;
+    fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Self::Error>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -99,6 +100,8 @@ mod tests {
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
+        type Error = RwError;
+
         fn connect(&self, database: &str) -> Result<Arc<dyn super::Session>> {
             Ok(Arc::new(TestSession {}))
         }
