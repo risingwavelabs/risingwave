@@ -184,6 +184,22 @@ impl PlanTreeNodeUnary for LogicalProject {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
     }
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        mut input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let exprs = self
+            .exprs
+            .clone()
+            .into_iter()
+            .map(|expr| input_col_change.rewrite_expr(expr))
+            .collect();
+        let proj = Self::new(input, exprs, self.expr_alias().to_vec());
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identical_map(proj.schema().len());
+        (proj, out_col_change)
+    }
 }
 
 impl_plan_tree_node_for_unary! {LogicalProject}
@@ -242,6 +258,33 @@ impl ToStream for LogicalProject {
     }
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        // TODO: add row_count() aggCall for StreamAgg here
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+        let input_pk = input.pk_indices();
+        assert!(!input_pk.is_empty());
+        let i2o = Self::i2o_col_mapping(input.schema().len(), proj.exprs());
+        let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
+        let input_schema = input.schema();
+        let (exprs, expr_alias) = proj
+            .exprs()
+            .iter()
+            .cloned()
+            .zip_eq(self.expr_alias().iter().cloned())
+            .map(|(a, b)| (a, b))
+            .chain(col_need_to_add.map(|idx| {
+                (
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into(),
+                    None,
+                )
+            }))
+            .unzip();
+        let proj = Self::new(input, exprs, expr_alias);
+        // the added columns is at the end, so it will not change the exists column index
+        (proj.into(), out_col_change)
     }
 }
 #[cfg(test)]

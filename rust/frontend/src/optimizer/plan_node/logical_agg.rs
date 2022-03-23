@@ -223,6 +223,24 @@ impl LogicalAgg {
         }
     }
 
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        let mut map = vec![None; exprs.len()];
+        for (i, expr) in exprs.iter().enumerate() {
+            map[i] = match expr {
+                ExprImpl::InputRef(input) => Some(input.index()),
+                _ => None,
+            }
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        Self::o2i_col_mapping(input_len, exprs).inverse()
+    }
+
     fn derive_schema(
         input: &Schema,
         group_keys: &[usize],
@@ -322,6 +340,34 @@ impl PlanTreeNodeUnary for LogicalAgg {
             input,
         )
     }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let agg_calls = self
+            .agg_calls
+            .iter()
+            .cloned()
+            .map(|mut agg_call| {
+                agg_call.inputs.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                agg_call
+            })
+            .collect();
+        let group_keys = self
+            .group_keys
+            .iter()
+            .cloned()
+            .map(|key| input_col_change.map(key))
+            .collect();
+        let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identical_map(agg.schema().len());
+        (agg, out_col_change)
+    }
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
 
@@ -419,6 +465,13 @@ impl ToStream for LogicalAgg {
             )
             .into()
         }
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        // TODO: add row_count() aggCall for StreamAgg here
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        (agg.into(), out_col_change)
     }
 }
 

@@ -55,11 +55,6 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
         BatchScan { table: t, columns: [] }
-  stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
-      StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
-        StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [] }
 - sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;

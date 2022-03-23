@@ -91,6 +91,10 @@ impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
         unimplemented!("Stream values executor is unimplemented!")
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
 }
 
 #[cfg(test)]
