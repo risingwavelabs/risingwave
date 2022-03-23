@@ -16,6 +16,7 @@ use smallvec::SmallVec;
 
 use super::PlanRef;
 use crate::optimizer::property::{Distribution, Order};
+use crate::utils::ColIndexMapping;
 
 /// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
 /// framework. every plan node should impl it.
@@ -63,6 +64,19 @@ pub trait PlanTreeNodeUnary {
     fn input(&self) -> PlanRef;
     #[must_use]
     fn clone_with_input(&self, input: PlanRef) -> Self;
+
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping)
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
     fn input_dist_required(&self) -> &Distribution {
         Distribution::any()
     }

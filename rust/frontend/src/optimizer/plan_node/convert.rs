@@ -16,6 +16,7 @@ use paste::paste;
 
 use super::*;
 use crate::optimizer::property::{Distribution, Order};
+use crate::utils::ColIndexMapping;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 /// `ToStream` converts a logical plan node to streaming physical node
@@ -29,6 +30,12 @@ use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes}
 ///   `to_stream_with_dist_required(Distribution::any())`. you can see
 ///   (`LogicalProject`)[LogicalProject] as an example.
 pub trait ToStream {
+    /// `logical_rewrite_for_stream` will rewrite the logical node, and return (new_plan_node,
+    /// col_mapping), the col_mapping is for original columns have been changed into some other
+    /// position.
+    /// now it is used to 1. ensure every plan node's output having pk column
+    /// 2. (todo) add row_count() in every Agg
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping);
     /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
     fn to_stream(&self) -> PlanRef;
     /// convert the plan to streaming physical plan and satisfy the required distribution
