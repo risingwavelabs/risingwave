@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+use std::collections::HashSet;
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -47,10 +47,17 @@ impl StreamMaterialize {
         ctx: QueryContextRef,
         input: PlanRef,
         table_id: TableId,
-        column_orders: Vec<FieldOrder>,
+        mut column_orders: Vec<FieldOrder>,
         column_ids: Vec<ColumnId>,
     ) -> Self {
-        // TODO: add pk to `column_orders`
+        let pks = input.pk_indices();
+        let ordered_ids: HashSet<usize> = column_orders.iter().map(|x| x.index).collect();
+
+        for pk in pks {
+            if !ordered_ids.contains(pk) {
+                column_orders.push(FieldOrder::ascending(*pk));
+            }
+        }
 
         let base = PlanBase::new_stream(
             ctx,
@@ -73,8 +80,8 @@ impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamMaterialize {{ table_id: {}, column_order: {:?}, column_id: {:?} }}",
-            self.table_id, self.column_orders, self.column_ids
+            "StreamMaterialize {{ table_id: {}, column_order: {:?}, column_id: {:?}, pk_indices: {:?} }}",
+            self.table_id, self.column_orders, self.column_ids, self.base.pk_indices
         )
     }
 }

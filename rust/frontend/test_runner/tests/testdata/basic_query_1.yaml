@@ -12,10 +12,9 @@
       BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
         BatchScan { table: t, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1, #2] }
+    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1, #2], pk_indices: [0] }
       StreamProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-        StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [_row_id, v1, v2] }
+        StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -29,11 +28,10 @@
         BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
           BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
+    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0], pk_indices: [0] }
       StreamProject { exprs: [$0], expr_alias: [_row_id] }
-        StreamExchange { dist: Single }
-          StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
-            StreamTableScan { table: t, columns: [_row_id] }
+        StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
+          StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
@@ -43,11 +41,10 @@
         BatchFilter { predicate: ($1 < 1:Int32) }
           BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1] }
+    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
       StreamProject { exprs: [$0, $1], expr_alias: [_row_id, v1] }
-        StreamExchange { dist: Single }
-          StreamFilter { predicate: ($1 < 1:Int32) }
-            StreamTableScan { table: t, columns: [_row_id, v1] }
+        StreamFilter { predicate: ($1 < 1:Int32) }
+          StreamTableScan { table: t, columns: [_row_id, v1], pk_indices: [0] }
 - sql: |
     create table t ();
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;
@@ -55,6 +52,10 @@
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
         BatchScan { table: t, columns: [] }
+  stream_plan: |
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0], pk_indices: [] }
+      StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
+        StreamTableScan { table: t, columns: [], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
@@ -63,10 +64,9 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0], pk_indices: [] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
-        StreamExchange { dist: Single }
-          StreamTableScan { table: t, columns: [v1] }
+        StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
