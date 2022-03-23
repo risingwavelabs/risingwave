@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-#![allow(clippy::module_inception)]
 
 pub use env::*;
-pub use task::*;
+pub use task_::*;
 pub use task_manager::*;
 
 mod broadcast_channel;
@@ -23,7 +22,7 @@ mod channel;
 mod env;
 mod fifo_channel;
 mod hash_shuffle_channel;
-mod task;
+mod task_;
 mod task_manager;
 
 #[cfg(test)]
