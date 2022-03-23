@@ -138,9 +138,17 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
-        todo!()
+    pub async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
+        let (_, _, version) = self
+            .meta_client
+            .create_materialized_source(source, table, plan)
+            .await?;
+        self.wait_version(version).await
     }
 
     // TODO: maybe here to pass a materialize plan node

@@ -595,8 +595,12 @@ mod tests {
 
         let sink_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)?;
-        let actor_ids = services.fragment_manager.get_table_actor_ids(&table_id)?;
+            .get_table_sink_actor_ids(&table_id)
+            .await?;
+        let actor_ids = services
+            .fragment_manager
+            .get_table_actor_ids(&table_id)
+            .await?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
 

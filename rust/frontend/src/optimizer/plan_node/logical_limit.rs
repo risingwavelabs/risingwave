@@ -18,6 +18,7 @@ use fixedbitset::FixedBitSet;
 
 use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::property::WithSchema;
+use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone)]
@@ -63,6 +64,14 @@ impl PlanTreeNodeUnary for LogicalLimit {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.limit, self.offset)
     }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        (Self::new(input, self.limit, self.offset), input_col_change)
+    }
 }
 impl_plan_tree_node_for_unary! {LogicalLimit}
 impl fmt::Display for LogicalLimit {
@@ -91,5 +100,10 @@ impl ToBatch for LogicalLimit {
 impl ToStream for LogicalLimit {
     fn to_stream(&self) -> PlanRef {
         panic!("there is no limit stream operator");
+    }
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        (filter.into(), out_col_change)
     }
 }

@@ -22,8 +22,14 @@ use crate::util::sort_util::OrderType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
 /// column ID is not globally unique.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ColumnId(i32);
+
+impl std::fmt::Debug for ColumnId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.0)
+    }
+}
 
 impl ColumnId {
     pub const fn new(column_id: i32) -> Self {
@@ -102,7 +108,11 @@ impl ColumnDesc {
         fields: Vec<ColumnDesc>,
     ) -> Self {
         let data_type = DataType::Struct {
-            fields: fields.iter().map(|f| f.data_type).collect_vec().into(),
+            fields: fields
+                .iter()
+                .map(|f| f.data_type.clone())
+                .collect_vec()
+                .into(),
         };
         Self {
             data_type,
@@ -190,7 +200,6 @@ pub mod tests {
             ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2),
             ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 3),
         ];
-        let data_type = vec![DataType::Varchar, DataType::Varchar];
         let country = vec![
             ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
             ColumnDesc::new_struct("country.city", 4, ".test.City", city),

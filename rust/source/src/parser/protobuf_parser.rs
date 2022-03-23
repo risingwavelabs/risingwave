@@ -486,32 +486,14 @@ mod tests {
         ];
         let country = vec![
             ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
-            ColumnDesc::new_struct(
-                DataType::Struct {
-                    fields: vec![].into(),
-                }
-                .to_protobuf(),
-                "country.city",
-                5,
-                ".test.City",
-                city,
-            ),
+            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
             ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
                 ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
-                ColumnDesc::new_struct(
-                    DataType::Struct {
-                        fields: vec![].into()
-                    }
-                    .to_protobuf(),
-                    "country",
-                    7,
-                    ".test.Country",
-                    country
-                ),
+                ColumnDesc::new_struct("country", 7, ".test.Country", country),
                 ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
                 ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]

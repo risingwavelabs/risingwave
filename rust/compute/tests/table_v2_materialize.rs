@@ -198,7 +198,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             data_type: field.data_type,
             column_id,
             name: field.name,
-            ..Default::default()
+            field_descs: vec![],
+            type_name: "".to_string(),
         })
         .collect_vec();
 

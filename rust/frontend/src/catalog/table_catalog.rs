@@ -138,10 +138,6 @@ mod tests {
                 },
                 ProstColumnCatalog {
                     column_desc: Some(ProstColumnDesc::new_struct(
-                        DataType::Struct {
-                            fields: vec![].into(),
-                        }
-                        .to_protobuf(),
                         "country",
                         1,
                         ".test.Country",

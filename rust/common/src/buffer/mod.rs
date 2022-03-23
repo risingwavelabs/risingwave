@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-#![allow(clippy::module_inception)]
-mod buffer;
-pub use buffer::*;
+mod buffer_;
+pub use buffer_::*;
 mod bitmap;
 pub use bitmap::*;
