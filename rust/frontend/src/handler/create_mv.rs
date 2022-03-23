@@ -15,6 +15,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
@@ -31,16 +32,16 @@ use crate::session::{QueryContext, SessionImpl};
 impl BoundQuery {
     /// Generate create MV's column desc from query.
     pub fn gen_create_mv_column_desc(&self) -> Vec<ColumnDesc> {
-        let mut column_descs = vec![];
-        column_descs.push(ColumnDesc {
+        let mut column_descs = vec![ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
             name: ROWID_NAME.to_string(),
-        });
+        }];
+
         for (i, (data_type, name)) in self
             .data_types()
             .iter()
-            .zip(self.names().iter())
+            .zip_eq(self.names().iter())
             .enumerate()
         {
             column_descs.push(ColumnDesc {
@@ -71,10 +72,8 @@ pub fn gen_create_mv_plan(
 
     let logical = planner.plan_query(bound_query)?;
 
-    let plan = logical.gen_create_mv_plan(
-        order,
-        column_descs.iter().map(|x| x.column_id.clone()).collect(),
-    );
+    let plan =
+        logical.gen_create_mv_plan(order, column_descs.iter().map(|x| x.column_id).collect());
 
     Ok(plan)
 }

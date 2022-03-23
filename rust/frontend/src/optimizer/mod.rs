@@ -153,21 +153,20 @@ impl PlanRoot {
         let plan = plan.to_stream_with_dist_required(&self.required_dist);
 
         // TODO: get the correct table id
-        let plan = StreamMaterialize::new(
-            self.logical_plan.ctx(),
-            plan,
-            TableId::new(0),
-            order,
-            column_ids,
-        )
-        .into();
 
         // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
         // result.
         // TODO: do a final column pruning after add the streaming project, but now
         // the column pruning is not used in streaming node, need to think.
 
-        plan
+        StreamMaterialize::new(
+            self.logical_plan.ctx(),
+            plan,
+            TableId::new(0),
+            order,
+            column_ids,
+        )
+        .into()
     }
 }
 

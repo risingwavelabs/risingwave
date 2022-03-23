@@ -105,7 +105,7 @@ pub async fn handle_create_table(
                         direct: crate::optimizer::property::Direction::Asc,
                     },
                 ],
-                column_descs.iter().map(|x| x.column_id.clone()).collect(),
+                column_descs.iter().map(|x| x.column_id).collect(),
             )
         };
 
