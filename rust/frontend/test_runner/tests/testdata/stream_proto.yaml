@@ -24,7 +24,7 @@
                             "columnDescs": [
                               {
                                 "columnType": {
-                                  "typeName": "INT32",
+                                  "typeName": "INT64",
                                   "isNullable": true
                                 },
                                 "name": "_row_id"
@@ -83,7 +83,7 @@
                 "fields": [
                   {
                     "dataType": {
-                      "typeName": "INT32",
+                      "typeName": "INT64",
                       "isNullable": true
                     },
                     "name": "_row_id"
@@ -107,7 +107,7 @@
               {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32",
+                  "typeName": "INT64",
                   "isNullable": true
                 },
                 "inputRef": {}
@@ -126,7 +126,12 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0,
+          1
+        ]
+      }
     }
 - sql: |
     /* test projection */
@@ -152,7 +157,7 @@
                         "columnDescs": [
                           {
                             "columnType": {
-                              "typeName": "INT32",
+                              "typeName": "INT64",
                               "isNullable": true
                             },
                             "name": "_row_id"
@@ -176,7 +181,7 @@
                 "fields": [
                   {
                     "dataType": {
-                      "typeName": "INT32",
+                      "typeName": "INT64",
                       "isNullable": true
                     },
                     "name": "_row_id"
@@ -200,7 +205,7 @@
               {
                 "exprType": "INPUT_REF",
                 "returnType": {
-                  "typeName": "INT32",
+                  "typeName": "INT64",
                   "isNullable": true
                 },
                 "inputRef": {}
@@ -219,7 +224,12 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0,
+          1
+        ]
+      }
     }
 - sql: |
     /* test projection for single column */
@@ -288,7 +298,11 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
 - sql: |
     /* test simple agg */
@@ -415,7 +429,11 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
 - sql: |
     /* test simple agg */
@@ -584,5 +602,9 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
