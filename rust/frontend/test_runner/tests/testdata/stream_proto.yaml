@@ -126,7 +126,12 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0,
+          1
+        ]
+      }
     }
 - sql: |
     /* test projection */
@@ -219,7 +224,12 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0,
+          1
+        ]
+      }
     }
 - sql: |
     /* test projection for single column */
@@ -288,7 +298,11 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
 - sql: |
     /* test simple agg */
@@ -415,7 +429,11 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
 - sql: |
     /* test simple agg */
@@ -584,5 +602,9 @@
           }
         }
       ],
-      "materializeNode": {}
+      "materializeNode": {
+        "columnIds": [
+          0
+        ]
+      }
     }
