@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -42,10 +42,7 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             ..
-        } => gen_create_mv_plan(&session, &mut planner, query.as_ref().clone())?,
-
-        Statement::CreateTable { .. } => todo!(),
-
+        } => gen_create_mv_plan(&*session, &mut planner, *query)?,
         stmt => {
             let bound = {
                 let mut binder = Binder::new(

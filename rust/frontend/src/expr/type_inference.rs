@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
