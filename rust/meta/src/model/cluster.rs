@@ -24,7 +24,7 @@ pub const INVALID_EXPIRE_AT: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub struct Worker {
-    worker_node: WorkerNode,
+    pub worker_node: WorkerNode,
     expire_at: u64,
 }
 

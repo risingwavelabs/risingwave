@@ -158,25 +158,41 @@ where
         }
     }
 
+    pub async fn inactive_worker_node(&self, host_address: HostAddress) -> Result<()> {
+        let mut core = self.core.write().await;
+        match core.get_worker_by_host(host_address.clone()) {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Starting as i32 {
+                    return Ok(());
+                }
+                worker.worker_node.state = State::Starting as i32;
+                worker.insert(self.meta_store_ref.as_ref()).await?;
+
+                core.update_worker_node(worker);
+                Ok(())
+            }
+            None => Err(RwError::from(InternalError(
+                "Worker node does not exist!".to_string(),
+            ))),
+        }
+    }
+
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
-            Some(worker) => {
-                let mut worker_node = worker.to_protobuf();
-                if worker_node.state == State::Running as i32 {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Running as i32 {
                     return Ok(());
                 }
-                worker_node.state = State::Running as i32;
-                let worker = Worker::from_protobuf(worker_node.clone());
-
+                worker.worker_node.state = State::Running as i32;
                 worker.insert(self.meta_store_ref.as_ref()).await?;
 
-                core.activate_worker_node(worker);
+                core.update_worker_node(worker.clone());
 
                 // Notify frontends of new compute node.
-                if worker_node.r#type == WorkerType::ComputeNode as i32 {
+                if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Add, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
                         .await;
                 }
 
@@ -443,7 +459,7 @@ impl StoredClusterManagerCore {
             .insert(WorkerKey(worker_node.host.unwrap()), worker);
     }
 
-    fn activate_worker_node(&mut self, worker: Worker) {
+    fn update_worker_node(&mut self, worker: Worker) {
         self.workers
             .insert(WorkerKey(worker.to_protobuf().host.unwrap()), worker);
     }

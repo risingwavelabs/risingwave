@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,11 +22,9 @@ use itertools::Itertools;
 use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
-
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::data::Barrier;
-
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, InjectBarrierRequest,
     ShutdownRequest, UpdateActorsRequest,
@@ -270,7 +268,6 @@ where
         // Wait for all barriers collected
         let timer = self.metrics.barrier_latency.start_timer();
 
-        debug!("fuck, injecting!");
         let collect_result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch != INVALID_EPOCH {
@@ -290,7 +287,6 @@ where
             };
         }
         collect_result?;
-        debug!("fuck, injected!");
 
         timer.observe_duration();
         command_context.post_collect().await // do some post stuffs
@@ -453,14 +449,16 @@ where
     }
 
     /// Kill all compute nodes and wait for them to be online again.
-    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) {
-        debug!("fuck, start to stop!");
+    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<()> {
         for worker_node in info.node_map.values() {
             loop {
                 tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
                 match self.clients.get(worker_node).await {
                     Ok(client) => {
                         if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
+                            self.cluster_manager
+                                .inactive_worker_node(worker_node.host.clone().unwrap())
+                                .await?;
                             break;
                         }
                     }
@@ -471,10 +469,27 @@ where
                 }
             }
         }
-        debug!("fuck, wait for online!");
-        tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL * 20).await;
+        debug!("all compute nodes have been stopped, wait for online!");
+        loop {
+            tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
+            let all_nodes = self
+                .cluster_manager
+                .list_worker_node(WorkerType::ComputeNode, Some(Running))
+                .await
+                .iter()
+                .map(|worker_node| worker_node.id)
+                .collect::<HashSet<_>>();
+            if info
+                .node_map
+                .keys()
+                .all(|node_id| all_nodes.contains(node_id))
+            {
+                break;
+            }
+        }
 
-        debug!("kill all compute node success");
+        debug!("all compute nodes have been killed and restart.");
+        Ok(())
     }
 
     /// Recovery the whole cluster from the latest epoch.
@@ -483,17 +498,16 @@ where
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
-        debug!("fuck, start recovery!");
+        debug!("recovery start!");
         loop {
             tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
 
             let info = self.resolve_actor_info(None).await;
 
-            // kill all compute nodes and wait for online.
-            self.kill_and_wait_compute_nodes(&info).await;
-
-            // create sources.
-            if self.create_sources(&info).await.is_err() {
+            // kill all compute nodes and wait for online, and create all sources.
+            if self.kill_and_wait_compute_nodes(&info).await.is_err()
+                || self.create_sources(&info).await.is_err()
+            {
                 continue;
             }
 
