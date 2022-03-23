@@ -12,8 +12,27 @@ env_files = [
   "risedev-components.user.env"
 ]
 
+
+env_scripts = [
+'''
+#!@duckscript
+
+is_sanitizer_enabled = get_env ENABLE_SANITIZER
+
+if ${is_sanitizer_enabled}
+  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
+  set_env RISEDEV_BUILD_TARGET_DIR "${CARGO_MAKE_RUST_TARGET_TRIPLE}/"
+  set_env RISEDEV_RUSTFLAGS "-Zsanitizer=thread"
+else
+  set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS ""
+  set_env RISEDEV_BUILD_TARGET_DIR ""
+  set_env RISEDEV_RUSTFLAGS ""
+end
+'''
+]
+
 [env]
-RISEDEV_CARGO_BUILD_FLAGS = { value = "--features=all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
+RISEDEV_CARGO_BUILD_FEATURES = { value = "all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
 
 [config]
 skip_core_tasks = true
@@ -86,9 +105,9 @@ set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend-v2"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
 '''
 
 [tasks.link-all-in-one-binaries]
@@ -101,11 +120,11 @@ set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
 mkdir -p "${PREFIX_BIN}/risingwave"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
 '''
 
 [tasks.link-user-bin]
@@ -118,11 +137,11 @@ set -e
 
 rm -rf "${PREFIX_USR_BIN}"
 mkdir -p "${PREFIX_USR_BIN}"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
-ln -s "$(pwd)/rust/target/${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
+ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
 '''
 
 [tasks.post-build-risingwave]
@@ -169,7 +188,25 @@ script = '''
 
 set -e
 echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
-cd rust && cargo build -p risingwave_cmd -p risedev --profile "${RISINGWAVE_BUILD_PROFILE}" ${RISEDEV_CARGO_BUILD_FLAGS}
+cd rust
+
+export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="$RUSTFLAGS"
+set -xe
+cargo build -p risingwave_cmd -p risedev \
+            --profile "${RISINGWAVE_BUILD_PROFILE}" \
+            ${RISEDEV_CARGO_BUILD_EXTRA_ARGS} \
+            --features=${RISEDEV_CARGO_BUILD_FEATURES}
+'''
+
+[tasks.clean]
+category = "RiseDev - Build"
+description = "Clean Rust targets"
+condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
+script = '''
+#!@shell
+set -e
+cd rust && cargo clean
 '''
 
 [tasks.build-docs]
@@ -484,5 +521,26 @@ cd "$DIR"
 ./risedev "\\$@"
 EOF
 chmod +x "${INSTALL_PATH}"
+
 echo RiseDev installed to $(tput setaf 4)${INSTALL_PATH}$(tput sgr0)
+echo If you still feel this is not enough, you may copy $(tput setaf 4)risedev$(tput sgr0) to something like $(tput setaf 4)r+$(tput sgr0).
 """
+
+[tasks.ci-start]
+category = "RiseDev - CI"
+dependencies = [
+  "clean-data",
+  "pre-start-playground"
+]
+command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+args = ["${@}"]
+description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
+
+[tasks.ci-kill]
+category = "RiseDev - CI"
+dependencies = [
+  "k",
+  "l",
+  "check-logs",
+]
+description = "Kill cluster, dump logs and check logs"

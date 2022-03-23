@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::TableId;
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
 
 /// Materializes a stream.
@@ -35,7 +35,12 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     pub fn new(ctx: QueryContextRef, input: PlanRef, table_id: TableId) -> Self {
         // TODO: derive from input
-        let base = PlanBase::new_stream(ctx, input.schema().clone(), Distribution::any().clone());
+        let base = PlanBase::new_stream(
+            ctx,
+            input.schema().clone(),
+            input.pk_indices().to_vec(),
+            input.distribution().clone(),
+        );
         Self {
             base,
             schema: input.schema().clone(),

@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
+use crate::storage_value::StorageValue;
 use crate::{StateStore, StateStoreIter};
 
 /// A panic state store. If a workload is fully in-memory, we can use this state store, so as to
@@ -29,13 +30,13 @@ pub struct PanicStateStore;
 impl StateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter;
 
-    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<StorageValue>> {
         panic!("should not read from the state store!");
     }
 
     async fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         panic!("should not write the panic state store!");
@@ -51,7 +52,7 @@ impl StateStore for PanicStateStore {
 
     async fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         panic!("should not replicate batch from the panic state store!");
@@ -78,7 +79,7 @@ pub struct PanicStateStoreIter {}
 
 #[async_trait]
 impl StateStoreIter for PanicStateStoreIter {
-    type Item = (Bytes, Bytes);
+    type Item = (Bytes, StorageValue);
 
     async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unreachable!()

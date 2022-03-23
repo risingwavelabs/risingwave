@@ -39,7 +39,7 @@
       o_shippriority INTEGER NOT NULL,
       o_comment VARCHAR(79) NOT NULL
     );
-- id: tpch_q6
+- id: tpch_q1
   before:
     - create_tables
   sql: |
@@ -80,4 +80,73 @@
         StreamExchange { dist: Single }
           StreamHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
             StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
-              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }
+              StreamExchange { dist: HashShard([0, 1]) }
+                StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }
+- id: tpch_q3
+  before:
+    - create_tables
+  sql: |
+    select
+      l_orderkey,
+      sum(l_extendedprice * (1 - l_discount)) as revenue,
+      o_orderdate,
+      o_shippriority
+    from
+      customer,
+      orders,
+      lineitem
+    where
+      c_mktsegment = 'FURNITURE'
+      and c_custkey = o_custkey
+      and l_orderkey = o_orderkey
+    /*
+      and o_orderdate < date '1995-03-29'
+      and l_shipdate > date '1995-03-29'
+    */
+    group by
+      l_orderkey,
+      o_orderdate,
+      o_shippriority
+    order by
+      revenue desc,
+      o_orderdate
+  logical_plan: |
+    LogicalProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
+      LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
+        LogicalProject { exprs: [$20, $14, $17, ($25 * (1:Int32 - $26))], expr_alias: [ ,  ,  ,  ] }
+          LogicalFilter { predicate: ($7 = "FURNITURE":Varchar) AND ($1 = $11) AND ($20 = $10) }
+            LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: true:Boolean }
+                LogicalScan { table: customer, columns: [_row_id, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
+                LogicalScan { table: orders, columns: [_row_id, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
+              LogicalScan { table: lineitem, columns: [_row_id, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
+- id: tpch_q6
+  before:
+    - create_tables
+  sql: |
+    select
+      sum(l_extendedprice * l_discount) as revenue
+    from
+      lineitem
+    where
+      /* l_shipdate >= date '1994-01-01'
+      and l_shipdate < date '1994-01-01' + interval '1' year
+      and l_discount between 0.08 - 0.01 and 0.08 + 0.01
+      and */ l_quantity < 24;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [revenue] }
+        BatchSimpleAgg { aggs: [sum($0)] }
+          BatchExchange { order: [], dist: Single }
+            BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
+              BatchFilter { predicate: ($0 < 24:Int32) }
+                BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
+  stream_plan: |
+    StreamMaterialize { table_id: 0 }
+      StreamProject { exprs: [$0], expr_alias: [revenue] }
+        StreamExchange { dist: Single }
+          StreamSimpleAgg { aggs: [sum($0)] }
+            StreamProject { exprs: [($1 * $2)], expr_alias: [ ] }
+              StreamExchange { dist: Single }
+                StreamFilter { predicate: ($0 < 24:Int32) }
+                  StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }

@@ -21,6 +21,7 @@ use futures::Future;
 use risingwave_common::error::Result;
 
 use super::StateStoreMetrics;
+use crate::storage_value::StorageValue;
 use crate::{StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
@@ -72,7 +73,7 @@ where
 {
     type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>>;
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
         self.stats.get_counts.inc();
 
         let timer = self.stats.get_duration.start_timer();
@@ -92,7 +93,7 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -115,7 +116,7 @@ where
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -133,7 +134,11 @@ where
         Ok(result)
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, epoch: u64) -> Result<()> {
+    async fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        epoch: u64,
+    ) -> Result<()> {
         if kv_pairs.is_empty() {
             return Ok(());
         }
@@ -192,7 +197,7 @@ where
 
     async fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
     ) -> Result<()> {
         self.inner.replicate_batch(kv_pairs, epoch).await
@@ -209,7 +214,7 @@ pub struct MonitoredStateStoreIter<I> {
 #[async_trait]
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
 where
-    I: StateStoreIter<Item = (Bytes, Bytes)>,
+    I: StateStoreIter<Item = (Bytes, StorageValue)>,
 {
     type Item = I::Item;
 

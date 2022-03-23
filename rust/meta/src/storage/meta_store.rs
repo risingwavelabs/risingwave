@@ -33,7 +33,7 @@ pub trait Snapshot: Sync + Send + 'static {
 pub trait MetaStore: Clone + Sync + Send + 'static {
     type Snapshot: Snapshot;
 
-    fn snapshot(&self) -> Self::Snapshot;
+    async fn snapshot(&self) -> Self::Snapshot;
 
     async fn put_cf(&self, cf: &str, key: Key, value: Value) -> Result<()>;
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
@@ -44,11 +44,11 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     /// locally after fetching all versions of it from etcd, which may not meet our
     /// performance expectation.
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
-        self.snapshot().list_cf(cf).await
+        self.snapshot().await.list_cf(cf).await
     }
 
     async fn get_cf(&self, cf: &str, key: &[u8]) -> Result<Vec<u8>> {
-        self.snapshot().get_cf(cf, key).await
+        self.snapshot().await.get_cf(cf, key).await
     }
 }
 

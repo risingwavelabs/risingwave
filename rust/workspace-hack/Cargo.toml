@@ -14,7 +14,6 @@ publish = false
 ### BEGIN HAKARI SECTION
 [dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
-bit-vec = { version = "0.6", features = ["std"] }
 bytes = { version = "1", features = ["serde", "std"] }
 either = { version = "1", features = ["use_std"] }
 fixedbitset = { version = "0.4", features = ["std"] }
@@ -27,16 +26,15 @@ futures-task = { version = "0.3", default-features = false, features = ["alloc",
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "compat", "futures-channel", "futures-io", "futures-macro", "futures-sink", "futures_01", "io", "memchr", "sink", "slab", "std"] }
 hashbrown = { version = "0.11", features = ["ahash", "inline-more", "raw"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
-lalrpop-util = { version = "0.19", features = ["lexer", "regex", "std"] }
 libc = { version = "0.2", features = ["std"] }
 libz-sys = { version = "1", features = ["libc", "static", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 memchr = { version = "2", features = ["std", "use_std"] }
 num-integer = { version = "0.1", features = ["std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
-parking_lot = { version = "0.12", features = ["arc_lock", "send_guard"] }
-phf_shared = { version = "0.10", features = ["std"] }
+parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
+parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
@@ -54,10 +52,10 @@ tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "http
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
+url = { version = "2", default-features = false, features = ["serde"] }
 
 [build-dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
-bit-vec = { version = "0.6", features = ["std"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
 either = { version = "1", features = ["use_std"] }
@@ -71,16 +69,15 @@ futures-task = { version = "0.3", default-features = false, features = ["alloc",
 futures-util = { version = "0.3", features = ["alloc", "async-await", "async-await-macro", "channel", "compat", "futures-channel", "futures-io", "futures-macro", "futures-sink", "futures_01", "io", "memchr", "sink", "slab", "std"] }
 hashbrown = { version = "0.11", features = ["ahash", "inline-more", "raw"] }
 indexmap = { version = "1", default-features = false, features = ["std"] }
-lalrpop-util = { version = "0.19", features = ["lexer", "regex", "std"] }
 libc = { version = "0.2", features = ["std"] }
 libz-sys = { version = "1", features = ["libc", "static", "stock-zlib"] }
 lock_api = { version = "0.4", default-features = false, features = ["arc_lock"] }
-log = { version = "0.4", default-features = false, features = ["kv_unstable", "std", "value-bag"] }
+log = { version = "0.4", default-features = false, features = ["release_max_level_info", "std"] }
 memchr = { version = "2", features = ["std", "use_std"] }
 num-integer = { version = "0.1", features = ["std"] }
 num-traits = { version = "0.2", features = ["i128", "std"] }
-parking_lot = { version = "0.12", features = ["arc_lock", "send_guard"] }
-phf_shared = { version = "0.10", features = ["std"] }
+parking_lot = { version = "0.12", features = ["arc_lock", "deadlock_detection"] }
+parking_lot_core = { version = "0.9", default-features = false, features = ["backtrace", "deadlock_detection", "petgraph", "thread-id"] }
 rand = { version = "0.8", features = ["alloc", "getrandom", "libc", "rand_chacha", "small_rng", "std", "std_rng"] }
 regex = { version = "1", features = ["aho-corasick", "memchr", "perf", "perf-cache", "perf-dfa", "perf-inline", "perf-literal", "std", "unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
 regex-syntax = { version = "0.6", features = ["unicode", "unicode-age", "unicode-bool", "unicode-case", "unicode-gencat", "unicode-perl", "unicode-script", "unicode-segment"] }
@@ -99,5 +96,6 @@ tower-http = { version = "0.2", features = ["add-extension", "cors", "fs", "http
 tracing = { version = "0.1", features = ["attributes", "log", "release_max_level_info", "std", "tracing-attributes"] }
 tracing-core = { version = "0.1", features = ["lazy_static", "std"] }
 tracing-futures = { version = "0.2", features = ["pin-project", "std", "std-future"] }
+url = { version = "2", default-features = false, features = ["serde"] }
 
 ### END HAKARI SECTION

@@ -245,14 +245,11 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
-    use rand::distributions::{Alphanumeric, Standard, Uniform};
-    use rand::Rng;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{BoolArray, DataChunk, PrimitiveArray, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, OrderedF32, OrderedF64};
     use risingwave_common::util::sort_util::OrderType;
-    use test::Bencher;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -455,98 +452,100 @@ mod tests {
         }
     }
 
-    fn benchmark_1e4(b: &mut Bencher, enable_encoding: bool) {
-        // gen random vec for i16 float bool and str
-        let scale = 10000;
-        let width = 10;
-        let int_vec: Vec<Option<i16>> = rand::thread_rng()
-            .sample_iter(Standard)
-            .take(scale)
-            .map(Some)
-            .collect_vec();
-        let bool_vec: Vec<Option<bool>> = rand::thread_rng()
-            .sample_iter(Standard)
-            .take(scale)
-            .map(Some)
-            .collect_vec();
-        let float_vec: Vec<Option<f32>> = rand::thread_rng()
-            .sample_iter(Standard)
-            .take(scale)
-            .map(Some)
-            .collect_vec();
-        let mut str_vec = Vec::<Option<String>>::new();
-        for _ in 0..scale {
-            let len = rand::thread_rng().sample(Uniform::<usize>::new(1, width));
-            let s: String = rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(len)
-                .map(char::from)
-                .collect();
-            str_vec.push(Some(s));
-        }
-        b.iter(|| {
-            let col0 = create_column_i16(int_vec.as_slice()).unwrap();
-            let col1 = create_column_bool(bool_vec.as_slice()).unwrap();
-            let col2 = create_column_f32(float_vec.as_slice()).unwrap();
-            let col3 = create_column_string(str_vec.as_slice()).unwrap();
-            let data_chunk = DataChunk::builder()
-                .columns([col0, col1, col2, col3].to_vec())
-                .build();
-            let schema = Schema {
-                fields: vec![
-                    Field::unnamed(DataType::Int16),
-                    Field::unnamed(DataType::Boolean),
-                    Field::unnamed(DataType::Float32),
-                    Field::unnamed(DataType::Varchar),
-                ],
-            };
-            let mut mock_executor = MockExecutor::new(schema);
-            mock_executor.add(data_chunk);
-            let order_pairs = vec![
-                OrderPair {
-                    column_idx: 1,
-                    order_type: OrderType::Ascending,
-                },
-                OrderPair {
-                    column_idx: 0,
-                    order_type: OrderType::Descending,
-                },
-                OrderPair {
-                    column_idx: 3,
-                    order_type: OrderType::Descending,
-                },
-                OrderPair {
-                    column_idx: 2,
-                    order_type: OrderType::Ascending,
-                },
-            ];
-            let mut order_by_executor = OrderByExecutor {
-                order_pairs: Arc::new(order_pairs),
-                child: Box::new(mock_executor),
-                vis_indices: vec![],
-                chunks: vec![],
-                sorted_indices: vec![],
-                min_heap: BinaryHeap::new(),
-                encoded_keys: vec![],
-                encodable: false,
-                disable_encoding: !enable_encoding,
-                identity: "OrderByExecutor".to_string(),
-            };
-            let future = order_by_executor.open();
-            tokio_test::block_on(future).unwrap();
-            let future = order_by_executor.next();
-            let res = tokio_test::block_on(future).unwrap();
-            assert!(matches!(res, Some(_)));
-        });
-    }
+    // TODO: enable benches
 
-    #[bench]
-    fn benchmark_bsc_1e4(b: &mut Bencher) {
-        benchmark_1e4(b, true);
-    }
+    // fn benchmark_1e4(b: &mut Bencher, enable_encoding: bool) {
+    //     // gen random vec for i16 float bool and str
+    //     let scale = 10000;
+    //     let width = 10;
+    //     let int_vec: Vec<Option<i16>> = rand::thread_rng()
+    //         .sample_iter(Standard)
+    //         .take(scale)
+    //         .map(Some)
+    //         .collect_vec();
+    //     let bool_vec: Vec<Option<bool>> = rand::thread_rng()
+    //         .sample_iter(Standard)
+    //         .take(scale)
+    //         .map(Some)
+    //         .collect_vec();
+    //     let float_vec: Vec<Option<f32>> = rand::thread_rng()
+    //         .sample_iter(Standard)
+    //         .take(scale)
+    //         .map(Some)
+    //         .collect_vec();
+    //     let mut str_vec = Vec::<Option<String>>::new();
+    //     for _ in 0..scale {
+    //         let len = rand::thread_rng().sample(Uniform::<usize>::new(1, width));
+    //         let s: String = rand::thread_rng()
+    //             .sample_iter(&Alphanumeric)
+    //             .take(len)
+    //             .map(char::from)
+    //             .collect();
+    //         str_vec.push(Some(s));
+    //     }
+    //     b.iter(|| {
+    //         let col0 = create_column_i16(int_vec.as_slice()).unwrap();
+    //         let col1 = create_column_bool(bool_vec.as_slice()).unwrap();
+    //         let col2 = create_column_f32(float_vec.as_slice()).unwrap();
+    //         let col3 = create_column_string(str_vec.as_slice()).unwrap();
+    //         let data_chunk = DataChunk::builder()
+    //             .columns([col0, col1, col2, col3].to_vec())
+    //             .build();
+    //         let schema = Schema {
+    //             fields: vec![
+    //                 Field::unnamed(DataType::Int16),
+    //                 Field::unnamed(DataType::Boolean),
+    //                 Field::unnamed(DataType::Float32),
+    //                 Field::unnamed(DataType::Varchar),
+    //             ],
+    //         };
+    //         let mut mock_executor = MockExecutor::new(schema);
+    //         mock_executor.add(data_chunk);
+    //         let order_pairs = vec![
+    //             OrderPair {
+    //                 column_idx: 1,
+    //                 order_type: OrderType::Ascending,
+    //             },
+    //             OrderPair {
+    //                 column_idx: 0,
+    //                 order_type: OrderType::Descending,
+    //             },
+    //             OrderPair {
+    //                 column_idx: 3,
+    //                 order_type: OrderType::Descending,
+    //             },
+    //             OrderPair {
+    //                 column_idx: 2,
+    //                 order_type: OrderType::Ascending,
+    //             },
+    //         ];
+    //         let mut order_by_executor = OrderByExecutor {
+    //             order_pairs: Arc::new(order_pairs),
+    //             child: Box::new(mock_executor),
+    //             vis_indices: vec![],
+    //             chunks: vec![],
+    //             sorted_indices: vec![],
+    //             min_heap: BinaryHeap::new(),
+    //             encoded_keys: vec![],
+    //             encodable: false,
+    //             disable_encoding: !enable_encoding,
+    //             identity: "OrderByExecutor".to_string(),
+    //         };
+    //         let future = order_by_executor.open();
+    //         tokio_test::block_on(future).unwrap();
+    //         let future = order_by_executor.next();
+    //         let res = tokio_test::block_on(future).unwrap();
+    //         assert!(matches!(res, Some(_)));
+    //     });
+    // }
 
-    #[bench]
-    fn benchmark_baseline_1e4(b: &mut Bencher) {
-        benchmark_1e4(b, false);
-    }
+    // #[bench]
+    // fn benchmark_bsc_1e4(b: &mut Bencher) {
+    //     benchmark_1e4(b, true);
+    // }
+
+    // #[bench]
+    // fn benchmark_baseline_1e4(b: &mut Bencher) {
+    //     benchmark_1e4(b, false);
+    // }
 }
