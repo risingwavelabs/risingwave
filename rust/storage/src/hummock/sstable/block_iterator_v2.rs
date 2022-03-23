@@ -4,6 +4,7 @@ use std::sync::Arc;
 use bytes::{Bytes, BytesMut};
 
 use super::{Block, KeyPrefix};
+use crate::hummock::version_cmp::VersionedComparator;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
@@ -116,14 +117,18 @@ impl BlockIterator {
 
     /// Move forward until reach the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Less {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
+        {
             self.next_inner();
         }
     }
 
     /// Move backward until reach the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Greater {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
+        {
             self.prev_inner();
         }
     }
@@ -162,7 +167,7 @@ impl BlockIterator {
         self.block.search_restart_point_by(|probe| {
             let prefix = self.decode_prefix_at(*probe as usize);
             let probe_key = &self.block.data()[prefix.diff_key_range()];
-            (probe_key).cmp(key)
+            VersionedComparator::compare_key(probe_key, key)
         })
     }
 
@@ -186,8 +191,9 @@ impl BlockIterator {
 
 #[cfg(test)]
 mod tests {
+    use bytes::BufMut;
+
     use super::*;
-    use crate::hummock::sstable::utils::full_key;
     use crate::hummock::{BlockBuilder, BlockBuilderOptions};
 
     fn build_iterator_for_test() -> BlockIterator {
@@ -324,5 +330,12 @@ mod tests {
 
         it.next();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+    }
+
+    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+        buf.put_slice(user_key);
+        buf.put_u64(!epoch);
+        buf.freeze()
     }
 }

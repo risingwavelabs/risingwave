@@ -174,3 +174,71 @@ impl SSTableBuilder {
         self.approximate_len() >= self.options.capacity
     }
 }
+
+#[cfg(test)]
+pub(super) mod tests {
+    use super::*;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{
+        default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
+    };
+
+    #[test]
+    #[should_panic]
+    fn test_empty() {
+        let opt = SSTableBuilderOptions {
+            capacity: 0,
+            block_capacity: 4096,
+            restart_interval: 16,
+            bloom_false_positive: 0.1,
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+
+        let b = SSTableBuilder::new(opt);
+
+        b.finish();
+    }
+
+    #[test]
+    fn test_smallest_key_and_largest_key() {
+        let mut b = SSTableBuilder::new(default_builder_opt_for_test());
+
+        for i in 0..TEST_KEYS_COUNT {
+            b.add(&test_key_of(i), HummockValue::Put(&test_value_of(i)));
+        }
+
+        let (_, meta) = b.finish();
+
+        assert_eq!(test_key_of(0), meta.smallest_key);
+        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
+    }
+
+    async fn test_with_bloom_filter(with_blooms: bool) {
+        let key_count = 1000;
+
+        let opts = SSTableBuilderOptions {
+            capacity: 0,
+            block_capacity: 4096,
+            restart_interval: 16,
+            bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
+            compression_algorithm: CompressionAlgorithm::None,
+        };
+
+        // build remote table
+        let sstable_store = mock_sstable_store();
+        let table = gen_default_test_sstable(opts, 0, sstable_store).await;
+
+        assert_eq!(table.has_bloom_filter(), with_blooms);
+        for i in 0..key_count {
+            let full_key = test_key_of(i);
+            assert!(!table.surely_not_have_user_key(user_key(full_key.as_slice())));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_bloom_filter() {
+        test_with_bloom_filter(false).await;
+        test_with_bloom_filter(true).await;
+    }
+}

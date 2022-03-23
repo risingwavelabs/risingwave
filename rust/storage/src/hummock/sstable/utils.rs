@@ -113,7 +113,7 @@ pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
     Ok(())
 }
 
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut};
 
 #[cfg(feature = "blockv2")]
 const MASK: u32 = 128;
@@ -240,33 +240,4 @@ impl TryFrom<u8> for CompressionAlgorithm {
             )),
         }
     }
-}
-
-/// Key categories:
-///
-/// A full key value pair looks like:
-///
-/// ```plain
-/// | user key | epoch (8B) | value |
-///
-/// |<------- full key ------->|
-/// ```
-#[allow(dead_code)]
-pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
-    let mut buf = BytesMut::with_capacity(user_key.len() + 8);
-    buf.put_slice(user_key);
-    buf.put_u64(!epoch);
-    buf.freeze()
-}
-
-/// Get user key in full key.
-#[allow(dead_code)]
-pub fn user_key(full_key: &[u8]) -> &[u8] {
-    &full_key[..full_key.len() - 8]
-}
-
-/// Get epoch in full key.
-#[allow(dead_code)]
-pub fn epoch(full_key: &[u8]) -> u64 {
-    !(&full_key[full_key.len() - 8..]).get_u64()
 }

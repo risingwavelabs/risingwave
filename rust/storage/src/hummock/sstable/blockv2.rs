@@ -9,6 +9,7 @@ use super::utils::{
     bytes_diff, var_u32_len, xxhash64_verify, BufExt, BufMutExt, CompressionAlgorithm,
 };
 use crate::hummock::sstable::utils::xxhash64_checksum;
+use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{HummockError, HummockResult};
 
 pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
@@ -219,7 +220,10 @@ impl BlockBuilder {
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
-            assert!(self.last_key < key);
+            debug_assert_eq!(
+                VersionedComparator::compare_key(&self.last_key[..], key),
+                Ordering::Less
+            );
         }
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
@@ -297,7 +301,6 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::hummock::sstable::utils::full_key;
     use crate::hummock::BlockIterator;
 
     #[test]
@@ -373,5 +376,12 @@ mod tests {
 
         bi.next();
         assert!(!bi.is_valid());
+    }
+
+    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+        buf.put_slice(user_key);
+        buf.put_u64(!epoch);
+        buf.freeze()
     }
 }

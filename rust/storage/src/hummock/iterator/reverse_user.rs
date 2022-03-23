@@ -257,6 +257,7 @@ impl<'a> ReverseUserIterator<'a> {
 #[allow(unused)]
 #[cfg(test)]
 mod tests {
+    use std::cmp::Reverse;
     use std::collections::BTreeMap;
     use std::ops::Bound::*;
     use std::sync::Arc;
@@ -277,6 +278,7 @@ mod tests {
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
+    use crate::hummock::version_cmp::VersionedComparator;
     use crate::hummock::{ReverseSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
 
@@ -772,284 +774,259 @@ mod tests {
     // TODO: Temporarily disable chaos test. Some case breaks key asc order asserts in block
     // builder.
 
-    // fn key_from_num(num: usize) -> Vec<u8> {
-    //     let width = 20;
-    //     format!("{:0width$}", num, width = width)
-    //         .as_bytes()
-    //         .to_vec()
-    // }
+    fn key_from_num(num: usize) -> Vec<u8> {
+        let width = 20;
+        format!("{:0width$}", num, width = width)
+            .as_bytes()
+            .to_vec()
+    }
 
-    // async fn chaos_test_case(
-    //     table: Sstable,
-    //     start_bound: Bound<Vec<u8>>,
-    //     end_bound: Bound<Vec<u8>>,
-    //     truth: &BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>,
-    //     sstable_store: SstableStoreRef,
-    // ) {
-    //     let start_key = match &start_bound {
-    //         Bound::Included(b) => prev_key(&b.clone()),
-    //         Bound::Excluded(b) => b.clone(),
-    //         Unbounded => key_from_num(0),
-    //     };
-    //     let end_key = match &end_bound {
-    //         Bound::Included(b) => b.clone(),
-    //         Unbounded => key_from_num(999999999999),
-    //         _ => unimplemented!(),
-    //     };
-    //     let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
-    //         Arc::new(clone_sst(&table)),
-    //         sstable_store,
-    //     ))];
-    //     let rsi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
-    //     let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
-    //     let num_puts: usize = truth
-    //         .iter()
-    //         .map(|(key, inserts)| {
-    //             if *key > end_key || *key <= start_key {
-    //                 return 0;
-    //             }
-    //             match inserts.first_key_value().unwrap().1 {
-    //                 HummockValue::Put(_) => 1,
-    //                 HummockValue::Delete => 0,
-    //             }
-    //         })
-    //         .reduce(|accum, item| accum + item)
-    //         .unwrap();
-    //     println!("The total number of valid puts:{}", num_puts);
-    //     let mut num_kvs = 0;
-    //     ruki.rewind().await.unwrap();
-    //     for (key, value) in truth.iter().rev() {
-    //         if *key > end_key || *key <= start_key {
-    //             continue;
-    //         }
-    //         let (time, value) = value.first_key_value().unwrap();
-    //         if let HummockValue::Delete = value {
-    //             continue;
-    //         }
-    //         assert!(ruki.is_valid(), "num_kvs:{}", num_kvs);
-    //         let full_key = key_with_epoch(key.clone(), *time);
-    //         assert_eq!(ruki.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
-    //         if let HummockValue::Put(bytes) = &value {
-    //             assert_eq!(ruki.value(), &bytes[..], "num_kvs:{}", num_kvs);
-    //         }
-    //         ruki.next().await.unwrap();
-    //         num_kvs += 1;
-    //     }
-    //     assert!(!ruki.is_valid());
-    //     assert_eq!(num_kvs, num_puts);
-    // }
+    async fn chaos_test_case(
+        table: Sstable,
+        start_bound: Bound<Vec<u8>>,
+        end_bound: Bound<Vec<u8>>,
+        truth: &ChaosTestTruth,
+        sstable_store: SstableStoreRef,
+    ) {
+        let start_key = match &start_bound {
+            Bound::Included(b) => prev_key(&b.clone()),
+            Bound::Excluded(b) => b.clone(),
+            Unbounded => key_from_num(0),
+        };
+        let end_key = match &end_bound {
+            Bound::Included(b) => b.clone(),
+            Unbounded => key_from_num(999999999999),
+            _ => unimplemented!(),
+        };
+        let iters: Vec<BoxedHummockIterator> = vec![Box::new(ReverseSSTableIterator::new(
+            Arc::new(clone_sst(&table)),
+            sstable_store,
+        ))];
+        let rsi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
+        let mut ruki = ReverseUserIterator::new(rsi, (start_bound, end_bound));
+        let num_puts: usize = truth
+            .iter()
+            .map(|(key, inserts)| {
+                if *key > end_key || *key <= start_key {
+                    return 0;
+                }
+                match inserts.first_key_value().unwrap().1 {
+                    HummockValue::Put(_) => 1,
+                    HummockValue::Delete => 0,
+                }
+            })
+            .reduce(|accum, item| accum + item)
+            .unwrap();
+        let mut num_kvs = 0;
+        ruki.rewind().await.unwrap();
+        for (key, value) in truth.iter().rev() {
+            if *key > end_key || *key <= start_key {
+                continue;
+            }
+            let (time, value) = value.first_key_value().unwrap();
+            if let HummockValue::Delete = value {
+                continue;
+            }
+            assert!(ruki.is_valid(), "num_kvs:{}", num_kvs);
+            let full_key = key_with_epoch(key.clone(), time.0);
+            assert_eq!(ruki.key(), user_key(&full_key), "num_kvs:{}", num_kvs);
+            if let HummockValue::Put(bytes) = &value {
+                assert_eq!(ruki.value(), &bytes[..], "num_kvs:{}", num_kvs);
+            }
+            ruki.next().await.unwrap();
+            num_kvs += 1;
+        }
+        assert!(!ruki.is_valid());
+        assert_eq!(num_kvs, num_puts);
+    }
 
-    // type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>;
+    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Reverse<Epoch>, HummockValue<Vec<u8>>>>;
 
-    // async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
-    //     // We first generate the key value pairs.
-    //     let mut rng = thread_rng();
-    //     let mut truth: ChaosTestTruth = BTreeMap::new();
-    //     let mut prev_key_number: usize = 1;
-    //     let number_of_keys = 5000;
-    //     for _ in 0..number_of_keys {
-    //         let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
-    //         prev_key_number = key + 1;
-    //         let key_bytes = key_from_num(key);
-    //         let mut prev_time = 500;
-    //         let num_updates = rng.gen_range(1..10usize);
-    //         for _ in 0..num_updates {
-    //             let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
-    //             let is_delete = rng.gen_range(0..=1usize) < 1usize;
-    //             match is_delete {
-    //                 true => {
-    //                     truth
-    //                         .entry(key_bytes.clone())
-    //                         .or_default()
-    //                         .insert(time, HummockValue::Delete);
-    //                 }
-    //                 false => {
-    //                     let value_size = rng.gen_range(100..=200);
-    //                     let value: String = thread_rng()
-    //                         .sample_iter(&Alphanumeric)
-    //                         .take(value_size)
-    //                         .map(char::from)
-    //                         .collect();
-    //                     truth
-    //                         .entry(key_bytes.clone())
-    //                         .or_default()
-    //                         .insert(time, HummockValue::Put(value.into_bytes()));
-    //                 }
-    //             }
-    //             prev_time = time + 1;
-    //         }
-    //     }
-    //     let sstable_store = mock_sstable_store();
-    //     let sst = gen_test_sstable(
-    //         default_builder_opt_for_test(),
-    //         0,
-    //         truth.iter().flat_map(|(key, inserts)| {
-    //             inserts.iter().map(|(time, value)| {
-    //                 let full_key = key_with_epoch(key.clone(), *time);
-    //                 (full_key, value.clone())
-    //             })
-    //         }),
-    //         sstable_store.clone(),
-    //     )
-    //     .await;
+    async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
+        // We first generate the key value pairs.
+        let mut rng = thread_rng();
+        let mut truth: ChaosTestTruth = BTreeMap::new();
+        let mut prev_key_number: usize = 1;
+        let number_of_keys = 5000;
+        for _ in 0..number_of_keys {
+            let key: usize = rng.gen_range(prev_key_number..=(prev_key_number + 10));
+            prev_key_number = key + 1;
+            let key_bytes = key_from_num(key);
+            let mut prev_time = 500;
+            let num_updates = rng.gen_range(1..10usize);
+            for _ in 0..num_updates {
+                let time: Epoch = rng.gen_range(prev_time..=(prev_time + 1000));
+                let is_delete = rng.gen_range(0..=1usize) < 1usize;
+                match is_delete {
+                    true => {
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(Reverse(time), HummockValue::Delete);
+                    }
+                    false => {
+                        let value_size = rng.gen_range(100..=200);
+                        let value: String = thread_rng()
+                            .sample_iter(&Alphanumeric)
+                            .take(value_size)
+                            .map(char::from)
+                            .collect();
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(Reverse(time), HummockValue::Put(value.into_bytes()));
+                    }
+                }
+                prev_time = time + 1;
+            }
+        }
+        let sstable_store = mock_sstable_store();
+        let sst = gen_test_sstable(
+            default_builder_opt_for_test(),
+            0,
+            truth.iter().flat_map(|(key, inserts)| {
+                inserts.iter().map(|(time, value)| {
+                    let full_key = key_with_epoch(key.clone(), time.0);
+                    (full_key, value.clone())
+                })
+            }),
+            sstable_store.clone(),
+        )
+        .await;
 
-    //     (prev_key_number, sst, truth, sstable_store)
-    // }
+        (prev_key_number, sst, truth, sstable_store)
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_unbounded_unbounded() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Unbounded,
-    //             Unbounded,
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_unbounded_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Unbounded,
+                Unbounded,
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_unbounded_included() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Unbounded,
-    //             Included(end_key_bytes.clone()),
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_unbounded_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Unbounded,
+                Included(end_key_bytes.clone()),
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_included_unbounded() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Included(begin_key_bytes.clone()),
-    //             Unbounded,
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_included_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Included(begin_key_bytes.clone()),
+                Unbounded,
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_excluded_unbounded() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Excluded(begin_key_bytes.clone()),
-    //             Unbounded,
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_excluded_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Excluded(begin_key_bytes.clone()),
+                Unbounded,
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_included_included() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Included(begin_key_bytes.clone()),
-    //             Included(end_key_bytes.clone()),
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_included_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Included(begin_key_bytes.clone()),
+                Included(end_key_bytes.clone()),
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // #[tokio::test]
-    // async fn test_reverse_user_chaos_excluded_included() {
-    //     let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
-    //     let repeat = 20;
-    //     for _ in 0..repeat {
-    //         let mut rng = thread_rng();
-    //         let end_key: usize = rng.gen_range(2..=prev_key_number);
-    //         let end_key_bytes = key_from_num(end_key);
-    //         let begin_key: usize = rng.gen_range(1..=end_key);
-    //         let begin_key_bytes = key_from_num(begin_key);
-    //         println!(
-    //             "begin_key:{:?},end_key:{:?}",
-    //             begin_key_bytes, end_key_bytes
-    //         );
-    //         chaos_test_case(
-    //             clone_sst(&sst),
-    //             Excluded(begin_key_bytes),
-    //             Included(end_key_bytes),
-    //             &truth,
-    //             sstable_store.clone(),
-    //         )
-    //         .await;
-    //     }
-    // }
+    #[tokio::test]
+    async fn test_reverse_user_chaos_excluded_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            chaos_test_case(
+                clone_sst(&sst),
+                Excluded(begin_key_bytes),
+                Included(end_key_bytes),
+                &truth,
+                sstable_store.clone(),
+            )
+            .await;
+        }
+    }
 
-    // fn clone_sst(sst: &Sstable) -> Sstable {
-    //     Sstable {
-    //         id: sst.id,
-    //         meta: sst.meta.clone(),
-    //     }
-    // }
+    fn clone_sst(sst: &Sstable) -> Sstable {
+        Sstable {
+            id: sst.id,
+            meta: sst.meta.clone(),
+        }
+    }
 }
