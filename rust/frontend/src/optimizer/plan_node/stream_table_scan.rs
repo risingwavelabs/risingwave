@@ -26,6 +26,7 @@ use crate::optimizer::property::{Distribution, WithSchema};
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to MView
 /// creation request.
+// TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
 pub struct StreamTableScan {
     pub base: PlanBase,
