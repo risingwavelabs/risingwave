@@ -24,7 +24,6 @@ use super::Convention;
 use crate::optimizer::PlanRef;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
@@ -52,14 +51,33 @@ impl fmt::Display for Order {
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct FieldOrder {
     pub index: usize,
     pub direct: Direction,
 }
 
+impl std::fmt::Debug for FieldOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${} {}", self.index, self.direct)
+    }
+}
+
 impl FieldOrder {
+    pub fn ascending(index: usize) -> Self {
+        Self {
+            index,
+            direct: Direction::Asc,
+        }
+    }
+
+    pub fn descending(index: usize) -> Self {
+        Self {
+            index,
+            direct: Direction::Desc,
+        }
+    }
+
     pub fn to_protobuf(&self) -> (InputRefExpr, OrderType) {
         let input_ref_expr = InputRefExpr {
             column_idx: self.index as i32,
@@ -75,7 +93,6 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     Asc,
@@ -104,7 +121,6 @@ impl Direction {
     }
 }
 
-#[allow(dead_code)]
 impl Direction {
     pub fn satisfies(&self, other: &Direction) -> bool {
         match other {
@@ -113,6 +129,7 @@ impl Direction {
         }
     }
 }
+
 lazy_static::lazy_static! {
     static ref ANY_ORDER: Order = Order {
         field_order: vec![],

@@ -34,7 +34,7 @@ use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
-// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/44580) get completed.
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 type JoinTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
@@ -106,7 +106,6 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
 }
 
 impl<S: StateStore> JoinSide<S> {
-    #[allow(dead_code)]
     fn is_dirty(&self) -> bool {
         self.ht.values().any(|state| state.is_dirty())
     }

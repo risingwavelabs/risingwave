@@ -95,7 +95,7 @@ impl LogicalJoin {
     }
 
     /// get the Mapping of columnIndex from output column index to left column index
-    pub fn o2l_col_mapping(
+    fn o2l_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
@@ -115,7 +115,7 @@ impl LogicalJoin {
     }
 
     /// get the Mapping of columnIndex from output column index to right column index
-    pub fn o2r_col_mapping(
+    fn o2r_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
@@ -129,29 +129,58 @@ impl LogicalJoin {
     }
 
     /// get the Mapping of columnIndex from left column index to output column index
-    pub fn l2o_col_mapping(
+    fn l2o_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
     ) -> ColIndexMapping {
-        Self::o2l_col_mapping(left_len, right_len, join_type).inverse()
+        Self::o2l_col_mapping_inner(left_len, right_len, join_type).inverse()
     }
 
     /// get the Mapping of columnIndex from right column index to output column index
-    pub fn r2o_col_mapping(
+    fn r2o_col_mapping_inner(
         left_len: usize,
         right_len: usize,
         join_type: JoinType,
     ) -> ColIndexMapping {
-        Self::o2r_col_mapping(left_len, right_len, join_type).inverse()
+        Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
+    }
+
+    pub fn o2l_col_mapping(&self) -> ColIndexMapping {
+        Self::o2l_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn o2r_col_mapping(&self) -> ColIndexMapping {
+        Self::o2r_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn l2o_col_mapping(&self) -> ColIndexMapping {
+        Self::l2o_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn r2o_col_mapping(&self) -> ColIndexMapping {
+        Self::r2o_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
     }
 
     fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
         let out_column_num = Self::out_column_num(left_len, right_len, join_type);
-        let o2l = Self::o2l_col_mapping(left_len, right_len, join_type);
-        let o2r = Self::o2r_col_mapping(left_len, right_len, join_type);
+        let o2l = Self::o2l_col_mapping_inner(left_len, right_len, join_type);
+        let o2r = Self::o2r_col_mapping_inner(left_len, right_len, join_type);
         let fields = (0..out_column_num)
             .into_iter()
             .map(|i| match (o2l.try_map(i), o2r.try_map(i)) {
@@ -170,8 +199,8 @@ impl LogicalJoin {
         right_pk: &[usize],
         join_type: JoinType,
     ) -> Vec<usize> {
-        let l2o = Self::l2o_col_mapping(left_len, right_len, join_type);
-        let r2o = Self::r2o_col_mapping(left_len, right_len, join_type);
+        let l2o = Self::l2o_col_mapping_inner(left_len, right_len, join_type);
+        let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
         left_pk
             .iter()
             .map(|index| l2o.map(*index))
@@ -205,6 +234,37 @@ impl PlanTreeNodeBinary for LogicalJoin {
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
         Self::new(left, right, self.join_type, self.on.clone())
+    }
+    #[must_use]
+    fn rewrite_with_left_right(
+        &self,
+        left: PlanRef,
+        left_col_change: ColIndexMapping,
+        right: PlanRef,
+        right_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let new_on = {
+            let (mut left_map, _) = left_col_change.into_parts();
+            let (mut right_map, _) = right_col_change.into_parts();
+            for i in &mut right_map {
+                *i = Some(i.unwrap() + left.schema().len());
+            }
+            left_map.append(&mut right_map);
+            self.on()
+                .clone()
+                .rewrite_expr(&mut ColIndexMapping::new(left_map))
+        };
+        let join = Self::new(left, right, self.join_type, new_on);
+
+        let old_o2l = self.o2l_col_mapping();
+        let old_o2r = self.o2r_col_mapping();
+        let new_l2o = join.l2o_col_mapping();
+        let new_r2o = join.r2o_col_mapping();
+
+        let out_col_change = old_o2l
+            .composite(&new_l2o)
+            .union(&old_o2r.composite(&new_r2o));
+        (join, out_col_change)
     }
 }
 
@@ -325,6 +385,14 @@ impl ToStream for LogicalJoin {
             // Convert to Nested-loop Join for non-equal joins
             todo!("nested loop join")
         }
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (left, left_col_change) = self.left.logical_rewrite_for_stream();
+        let (right, right_col_change) = self.right.logical_rewrite_for_stream();
+        let (join, out_col_change) =
+            self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
+        (join.into(), out_col_change)
     }
 }
 

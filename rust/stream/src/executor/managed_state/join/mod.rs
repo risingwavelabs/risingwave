@@ -162,9 +162,9 @@ impl<S: StateStore> JoinHashMap<S> {
             .with_segment(Segment::VariantLength(key_encoded))
     }
 
-    #[allow(dead_code)]
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look
     /// up in remote storage and return, if still not exist, return None.
+    #[allow(dead_code)]
     pub async fn get(&mut self, key: &HashKeyType) -> Option<&HashValueType<S>> {
         let state = self.inner.get(key);
         // TODO: we should probably implement a entry function for `LruCache`
@@ -230,8 +230,8 @@ impl<S: StateStore> JoinHashMap<S> {
         }
     }
 
-    #[allow(dead_code)]
     /// Returns true if the key in the memory or remote storage, otherwise false.
+    #[allow(dead_code)]
     pub async fn contains(&mut self, key: &HashKeyType) -> bool {
         let contains = self.inner.contains(key);
         if contains {

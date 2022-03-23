@@ -34,14 +34,13 @@ pub enum Distribution {
 
 static ANY_DISTRIBUTION: Distribution = Distribution::Any;
 
-#[allow(dead_code)]
 impl Distribution {
     pub fn to_prost(&self, output_count: u32) -> ExchangeInfo {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
-                Distribution::HashShard(_keys) => DistributionMode::Hash,
+                Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: Should panic if AnyShard or Any
                 _ => DistributionMode::Hash,
             } as i32,

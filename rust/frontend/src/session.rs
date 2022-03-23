@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 use std::cell::RefCell;
+use std::error::Error;
 use std::fmt::Formatter;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -216,8 +217,14 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
-    fn connect(&self) -> Arc<dyn Session> {
-        Arc::new(SessionImpl::new(self.env.clone(), "dev".to_string()))
+    fn connect(
+        &self,
+        database: &str,
+    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
+        Ok(Arc::new(SessionImpl::new(
+            self.env.clone(),
+            database.to_string(),
+        )))
     }
 }
 

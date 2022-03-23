@@ -16,7 +16,8 @@ use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{deserialize_datum_from, serialize_datum_into, Datum};
+use risingwave_common::types::Datum;
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -52,11 +53,8 @@ impl<S: StateStore> ManagedValueState<S> {
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
-                let mut deserializer = memcomparable::Deserializer::new(raw_data.to_bytes());
-                Some(deserialize_datum_from(
-                    &agg_call.return_type,
-                    &mut deserializer,
-                )?)
+                let mut deserializer = value_encoding::Deserializer::new(raw_data.to_bytes());
+                Some(deserialize_cell(&mut deserializer, &agg_call.return_type)?)
             } else {
                 None
             }
@@ -110,9 +108,7 @@ impl<S: StateStore> ManagedValueState<S> {
 
         let mut local = write_batch.prefixify(&self.keyspace);
         let v = self.state.get_output()?;
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_into(&v, &mut serializer)?;
-        local.put_single(serializer.into_inner());
+        local.put_single(serialize_cell(&v)?);
         self.is_dirty = false;
         Ok(())
     }

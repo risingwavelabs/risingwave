@@ -23,6 +23,7 @@ use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
+use crate::utils::ColIndexMapping;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
@@ -43,7 +44,7 @@ impl LogicalScan {
         ctx: QueryContextRef,
     ) -> Self {
         // TODO: get pk
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        let base = PlanBase::new_logical(ctx, schema, vec![0] /* TODO get the pk */);
         Self {
             table_name,
             table_id,
@@ -126,5 +127,13 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
         StreamTableScan::new(self.clone()).into()
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        // TODO: add pk here
+        (
+            self.clone().into(),
+            ColIndexMapping::identical_map(self.schema().len()),
+        )
     }
 }

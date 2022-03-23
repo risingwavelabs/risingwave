@@ -341,11 +341,7 @@ where
             let chain_input = vec![
                 StreamNode {
                     input: vec![],
-                    pk_indices: chain_node
-                        .pk_indices
-                        .iter()
-                        .map(|x| *x as u32)
-                        .collect_vec(),
+                    pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
                         fields: chain_node.upstream_fields.clone(),

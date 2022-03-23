@@ -21,8 +21,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
 
 use crate::task::env::BatchEnvironment;
-use crate::task::task::{BatchTaskExecution, TaskId};
-use crate::task::TaskOutput;
+use crate::task::{BatchTaskExecution, TaskId, TaskOutput};
 
 /// `BatchManager` is responsible for managing all batch tasks.
 #[derive(Clone)]
