@@ -19,7 +19,7 @@
                         {
                           "batchPlanNode": {
                             "tableRefId": {
-                              "tableId": 5
+                              "tableId": 1
                             },
                             "columnDescs": [
                               {
@@ -147,7 +147,7 @@
                     {
                       "batchPlanNode": {
                         "tableRefId": {
-                          "tableId": 5
+                          "tableId": 1
                         },
                         "columnDescs": [
                           {
@@ -240,7 +240,7 @@
                     {
                       "batchPlanNode": {
                         "tableRefId": {
-                          "tableId": 5
+                          "tableId": 1
                         },
                         "columnDescs": [
                           {
@@ -315,7 +315,7 @@
                                 {
                                   "batchPlanNode": {
                                     "tableRefId": {
-                                      "tableId": 5
+                                      "tableId": 1
                                     },
                                     "columnDescs": [
                                       {
@@ -442,7 +442,7 @@
                                 {
                                   "batchPlanNode": {
                                     "tableRefId": {
-                                      "tableId": 5
+                                      "tableId": 1
                                     },
                                     "columnDescs": [
                                       {
