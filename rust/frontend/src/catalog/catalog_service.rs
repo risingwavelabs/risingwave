@@ -55,7 +55,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_materialized_view(&self, table: ProstTable) -> Result<()>;
 
-    async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()>;
+    async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()>;
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
 }
@@ -91,29 +96,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    /// for the `CREATE TABLE statement`
-    async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
-        let table_clone = table.clone();
-        let table_source = ProstSource {
-            id: 0,
-            schema_id: table_clone.schema_id,
-            database_id: table_clone.database_id,
-            name: table_clone.name,
-            info: Some(risingwave_pb::catalog::source::Info::TableSource(
-                TableSourceInfo {
-                    columns: table_clone.columns,
-                },
-            )),
-        };
+    async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
         let (_, _, version) = self
             .meta_client
-            .create_materialized_source(
-                table_source,
-                table,
-                StreamNode {
-                    ..Default::default()
-                },
-            )
+            .create_materialized_source(source, table, plan)
             .await?;
         self.wait_version(version).await
     }
