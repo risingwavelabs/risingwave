@@ -13,6 +13,7 @@
 // limitations under the License.
 //
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::error::Error;
 use std::mem;
 use std::rc::Rc;
@@ -23,12 +24,13 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
-use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
+use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema, Source, Table};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+    DropMaterializedSourceRequest, DropMaterializedSourceResponse,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
@@ -40,10 +42,11 @@ use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{FrontendEnv, QueryContext, SessionImpl};
@@ -129,8 +132,11 @@ impl LocalFrontend {
 pub struct FrontendMockMetaClient {
     // cluster_srv: ClusterServiceImpl<MemStore>,
     mock_catalog: Mutex<SingleFrontendMockNotifyService>,
+
     // TODO: now every thing use common id generator and may can't trigger some bug.
     mock_id: AtomicU32,
+
+    id_to_db_schema_id: RwLock<HashMap<u32, (DatabaseId, SchemaId)>>,
 }
 
 impl FrontendMockMetaClient {
@@ -159,6 +165,7 @@ impl FrontendMockMetaClient {
             // cluster_srv: ClusterServiceImpl::<MemStore>::new(cluster_manager),
             mock_catalog: Mutex::new(SingleFrontendMockNotifyService::new()),
             mock_id: AtomicU32::new(1),
+            id_to_db_schema_id: Default::default(),
         };
         let CreateDatabaseResponse {
             status: _,
@@ -292,27 +299,83 @@ impl MetaClientInner for FrontendMockMetaClient {
             materialized_view: mv,
             stream_node: _,
         } = req;
+
         let source_id = self.gen_id();
+        let source = Source {
+            id: source_id,
+            ..source.unwrap()
+        };
         let table_id = self.gen_id();
-        let mut source = source.unwrap();
-        let mut table = mv.unwrap();
-        source.id = source_id;
-        table.id = table_id;
+        let table = Table {
+            id: table_id,
+            ..mv.unwrap()
+        };
+
+        {
+            let mut map = self.id_to_db_schema_id.write().await;
+            map.insert(source_id, (source.database_id, source.schema_id));
+            map.insert(table_id, (table.database_id, table.schema_id));
+        }
+
         self.mock_catalog
             .lock()
             .await
-            .notify(Operation::Add, &Info::TableV2(table))
+            .notify(Operation::Add, &Info::Source(source))
             .await;
         let version = self
             .mock_catalog
             .lock()
             .await
-            .notify(Operation::Add, &Info::Source(source))
+            .notify(Operation::Add, &Info::TableV2(table))
             .await;
+
         Ok(CreateMaterializedSourceResponse {
             status: None,
             source_id,
             table_id,
+            version,
+        })
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        req: DropMaterializedSourceRequest,
+    ) -> Result<DropMaterializedSourceResponse> {
+        let mut catalog = self.mock_catalog.lock().await;
+
+        let (database_id, schema_id) = self
+            .id_to_db_schema_id
+            .read()
+            .await
+            .get(&req.source_id)
+            .cloned()
+            .expect("not found");
+
+        let _version = catalog
+            .notify(
+                Operation::Delete,
+                &Info::TableV2(Table {
+                    id: req.table_id,
+                    database_id,
+                    schema_id,
+                    ..Default::default()
+                }),
+            )
+            .await;
+        let version = catalog
+            .notify(
+                Operation::Delete,
+                &Info::Source(Source {
+                    id: req.source_id,
+                    database_id,
+                    schema_id,
+                    ..Default::default()
+                }),
+            )
+            .await;
+
+        Ok(DropMaterializedSourceResponse {
+            status: None,
             version,
         })
     }
