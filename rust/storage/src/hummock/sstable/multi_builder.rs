@@ -180,9 +180,9 @@ mod tests {
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        for _ in 0..table_capacity {
+        for i in 0..table_capacity {
             builder
-                .add_user_key(b"key".to_vec(), Put(b"value"), 233)
+                .add_user_key(b"key".to_vec(), Put(b"value"), (table_capacity - i) as u64)
                 .await
                 .unwrap();
         }
@@ -201,11 +201,13 @@ mod tests {
                 SSTableBuilder::new(default_builder_opt_for_test()),
             ))
         });
+        let mut epoch = 100;
 
         macro_rules! add {
             () => {
+                epoch -= 1;
                 builder
-                    .add_user_key(b"k".to_vec(), Put(b"v"), 233)
+                    .add_user_key(b"k".to_vec(), Put(b"v"), epoch)
                     .await
                     .unwrap();
             };

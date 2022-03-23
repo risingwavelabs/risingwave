@@ -89,7 +89,7 @@ impl SSTableBuilder {
         value.encode(&mut raw_value);
         let raw_value = raw_value.freeze();
 
-        block_builder.add(&full_key, &raw_value);
+        block_builder.add(full_key, &raw_value);
 
         let user_key = user_key(full_key);
         self.user_key_hashes.push(farmhash::fingerprint32(user_key));

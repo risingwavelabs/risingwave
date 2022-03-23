@@ -18,7 +18,9 @@ use std::cmp::{self};
 use std::hash::Hasher;
 use std::ptr;
 
+#[cfg(not(feature = "blockv2"))]
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+#[cfg(not(feature = "blockv2"))]
 use risingwave_pb::hummock::Checksum;
 use serde::Deserialize;
 
