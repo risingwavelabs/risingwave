@@ -597,14 +597,6 @@
                 "inputRef": {
                   "columnIdx": 1
                 }
-              },
-              {
-                "exprType": "INPUT_REF",
-                "returnType": {
-                  "typeName": "INT32",
-                  "isNullable": true
-                },
-                "inputRef": {}
               }
             ]
           }
