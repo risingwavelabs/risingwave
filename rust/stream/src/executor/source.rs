@@ -105,6 +105,10 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .map(|i| ColumnId::from(*i))
             .collect();
         let mut fields = Vec::with_capacity(column_ids.len());
+        debug!(
+            "column ids: {:?}, src columns: {:?}",
+            column_ids, source_desc.columns
+        );
         for &column_id in &column_ids {
             let column_desc = source_desc
                 .columns

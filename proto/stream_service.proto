@@ -87,6 +87,12 @@ message DropSourceResponse {
   common.Status status = 1;
 }
 
+message ShutdownRequest {}
+
+message ShutdownResponse {
+  common.Status status = 1;
+}
+
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -95,6 +101,7 @@ service StreamService {
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // TODO: Lifecycle management for actors.

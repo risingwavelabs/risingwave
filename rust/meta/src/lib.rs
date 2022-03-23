@@ -71,7 +71,7 @@ pub struct MetaNodeOpts {
     etcd_endpoints: String,
 
     /// Maximum allowed heartbeat interval in ms
-    #[clap(long, default_value = "10000")]
+    #[clap(long, default_value = "60000")]
     max_heartbeat_interval: u32,
 
     #[clap(long)]

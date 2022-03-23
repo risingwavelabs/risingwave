@@ -22,11 +22,14 @@ use itertools::Itertools;
 use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::data::Barrier;
+
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, InjectBarrierRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, InjectBarrierRequest,
+    ShutdownRequest, UpdateActorsRequest,
 };
 use smallvec::SmallVec;
 use tokio::sync::{oneshot, watch, RwLock};
@@ -35,9 +38,11 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
+use crate::cluster::StoredClusterManagerRef;
 use crate::hummock::HummockManager;
-use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
+use crate::manager::{
+    CatalogManagerRef, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -170,6 +175,8 @@ impl ScheduledBarriers {
 pub struct BarrierManager<S> {
     cluster_manager: StoredClusterManagerRef<S>,
 
+    catalog_manager: CatalogManagerRef<S>,
+
     fragment_manager: FragmentManagerRef<S>,
 
     epoch_generator: EpochGeneratorRef,
@@ -196,7 +203,8 @@ where
     /// Create a new [`BarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: StoredClusterManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
         hummock_manager: Arc<HummockManager<S>>,
@@ -204,6 +212,7 @@ where
     ) -> Self {
         Self {
             cluster_manager,
+            catalog_manager,
             fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
@@ -261,16 +270,19 @@ where
         // Wait for all barriers collected
         let timer = self.metrics.barrier_latency.start_timer();
 
+        debug!("fuck, injecting!");
         let collect_result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch != INVALID_EPOCH {
             match collect_result {
                 Ok(_) => {
+                    debug!("inject success!");
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch)
                         .await?;
                 }
                 Err(_) => {
+                    debug!("inject fail!");
                     self.hummock_manager
                         .abort_epoch(command_context.prev_epoch)
                         .await?;
@@ -278,6 +290,7 @@ where
             };
         }
         collect_result?;
+        debug!("fuck, injected!");
 
         timer.observe_duration();
         command_context.post_collect().await // do some post stuffs
@@ -347,6 +360,31 @@ where
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 
+    async fn create_sources(&self, info: &BarrierActorInfo) -> Result<()> {
+        // Attention, using catalog v2 here, it's not compatible with Java frontend.
+        let sources = self.catalog_manager.list_sources().await?;
+
+        for worker_node in info.node_map.values() {
+            let client = &self.clients.get(worker_node).await?;
+            let futures = sources.iter().map(|source| {
+                let request = CreateSourceRequest {
+                    source: Some(source.to_owned()),
+                };
+                async move {
+                    client
+                        .to_owned()
+                        .create_source(request)
+                        .await
+                        .to_rw_result()
+                }
+            });
+
+            let _response = try_join_all(futures).await?;
+        }
+
+        Ok(())
+    }
+
     async fn update_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         let mut actor_infos = vec![];
         for (node_id, actors) in &info.actor_map {
@@ -367,10 +405,8 @@ where
 
         let node_actors = self.fragment_manager.all_node_actors(false).await?;
         for (node_id, actors) in &info.actor_map {
-            let client = self
-                .clients
-                .get_by_node_id(node_id)
-                .expect("client not exists");
+            let node = info.node_map.get(node_id).unwrap();
+            let client = self.clients.get(node).await?;
 
             client
                 .to_owned()
@@ -398,10 +434,8 @@ where
 
     async fn build_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         for (node_id, actors) in &info.actor_map {
-            let client = self
-                .clients
-                .get_by_node_id(node_id)
-                .expect("client not exists");
+            let node = info.node_map.get(node_id).unwrap();
+            let client = self.clients.get(node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
@@ -418,29 +452,48 @@ where
         Ok(())
     }
 
+    /// Kill all compute nodes and wait for them to be online again.
+    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) {
+        debug!("fuck, start to stop!");
+        for worker_node in info.node_map.values() {
+            loop {
+                tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
+                match self.clients.get(worker_node).await {
+                    Ok(client) => {
+                        if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
+                            break;
+                        }
+                    }
+                    Err(err) => {
+                        debug!("failed to get client: {}", err);
+                        continue;
+                    }
+                }
+            }
+        }
+        debug!("fuck, wait for online!");
+        tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL * 20).await;
+
+        debug!("kill all compute node success");
+    }
+
     /// Recovery the whole cluster from the latest epoch.
     async fn recovery(&self, prev_epoch: u64) {
         let new_epoch = self.epoch_generator.generate().into_inner();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
+        debug!("fuck, start recovery!");
         loop {
             tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
 
             let info = self.resolve_actor_info(None).await;
 
-            // stop and drop all actors.
-            let command_ctx = CommandContext::new(
-                self.fragment_manager.clone(),
-                self.clients.clone(),
-                &info,
-                prev_epoch,
-                new_epoch,
-                Command::StopActors(info.actor_map.clone()),
-            );
-            if self.inject_barrier(&command_ctx).await.is_err()
-                || command_ctx.post_collect().await.is_err()
-            {
+            // kill all compute nodes and wait for online.
+            self.kill_and_wait_compute_nodes(&info).await;
+
+            // create sources.
+            if self.create_sources(&info).await.is_err() {
                 continue;
             }
 

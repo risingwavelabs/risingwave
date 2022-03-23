@@ -60,6 +60,7 @@ pub async fn compute_node_serve(
     // Load the configuration.
     let config = load_config(&opts);
     info!("Starting compute node with config {:?}", config);
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
@@ -125,15 +126,20 @@ pub async fn compute_node_serve(
 
     // Initialize the streaming environment.
     let stream_config = Arc::new(config.streaming.clone());
-    let stream_env =
-        StreamEnvironment::new(source_mgr, addr, stream_config, worker_id, state_store);
+    let stream_env = StreamEnvironment::new(
+        source_mgr,
+        addr,
+        stream_config,
+        worker_id,
+        state_store,
+        shutdown_send.clone(),
+    );
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))
