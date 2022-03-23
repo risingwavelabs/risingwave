@@ -53,8 +53,6 @@ pub struct CellBasedTable<S: StateStore> {
     pk_serializer: Option<OrderedRowSerializer>,
 
     cell_based_row_serializer: CellBasedRowSerializer,
-
-    column_ids: Vec<ColumnId>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -77,7 +75,6 @@ impl<S: StateStore> CellBasedTable<S> {
                 .collect_vec(),
         );
         let column_id_to_column_index = generate_column_id_to_column_index_mapping(&column_descs);
-        let column_ids = generate_column_id(&column_descs);
         Self {
             keyspace,
             schema,
@@ -86,7 +83,6 @@ impl<S: StateStore> CellBasedTable<S> {
 
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
-            column_ids,
         }
     }
 
@@ -108,43 +104,14 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
-        assert!(
-            self.pk_serializer.is_some(),
-            "this table is adhoc and there's no sort key serializer"
-        );
-        let get_column_id = ColumnId::new(column_id);
-        let column_index = self.column_id_to_column_index.get(&get_column_id).unwrap();
-        let key = &[
-            &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
-            &serialize_column_id(&get_column_id)?,
-        ]
-        .concat();
-        let state_store_get_res = self
-            .keyspace
-            .get(&key.clone(), epoch)
-            .await
-            .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
-
-        if let Some(state_store_get_res) = state_store_get_res {
-            let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
-            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-            Ok(Some(cell))
-        } else {
-            Ok(None)
-        }
-    }
 
     pub async fn get_row(&self, pk: Row, column_ids: Vec<i32>, epoch: u64) -> Result<Row> {
-        assert!(
-            self.pk_serializer.is_some(),
-            "this table is adhoc and there's no sort key serializer"
-        );
+        let pk_serializer = self.pk_serializer.as_ref().expect("...");
         let mut row = Vec::with_capacity(column_ids.len());
         for column_id in column_ids {
             let get_column_id = ColumnId::new(column_id);
             let key = &[
-                &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?[..],
+                &serialize_pk(&pk, pk_serializer)?[..],
                 &serialize_column_id(&get_column_id)?,
             ]
             .concat();
@@ -165,21 +132,14 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(Row::new(row))
     }
 
-    pub async fn insert_row(
-        &mut self,
-        pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
-        epoch: u64,
-    ) -> Result<()> {
+    pub async fn insert_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
+        let column_ids = generate_column_id(&self.column_descs);
+        let bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, cell_value, column_ids)?;
         for (key, value) in bytes {
             match value {
                 Some(val) => local.put(key, val),
@@ -194,12 +154,11 @@ impl<S: StateStore> CellBasedTable<S> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = self.column_ids.clone();
+        let column_ids = generate_column_id(&self.column_descs);
         let cell_value = None;
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
+        let bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, cell_value, column_ids)?;
         for (key, _value) in bytes {
             local.delete(key);
         }
@@ -207,21 +166,14 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(())
     }
 
-    pub async fn update_row(
-        &mut self,
-        pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
-        epoch: u64,
-    ) -> Result<()> {
+    pub async fn update_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
+        let column_ids = generate_column_id(&self.column_descs);
+        let bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, cell_value, column_ids)?;
         // delete original kv_pairs in state_store
         for (key, _value) in bytes.clone() {
             local.delete(key);
@@ -244,12 +196,11 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn batch_insert_row(
         &mut self,
         rows: Vec<(Row, Option<Row>)>,
-        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let column_ids = generate_column_id(column_descs);
+        let column_ids = generate_column_id(&self.column_descs);
         for (pk, cell_values) in rows {
             let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
             let bytes = self
@@ -319,11 +270,7 @@ fn generate_column_id_to_column_index_mapping(
 }
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
-    let mut column_ids = Vec::with_capacity(column_descs.len());
-    for (_, column_desc) in column_descs.iter().enumerate() {
-        column_ids.push(column_desc.column_id);
-    }
-    column_ids
+    column_descs.iter().map(|d| d.column_id).collect()
 }
 // (st1page): May be we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
