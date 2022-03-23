@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::ffi::OsStr;
 use std::fs::{create_dir_all, read_dir, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
