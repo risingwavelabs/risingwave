@@ -86,7 +86,6 @@ impl LocalBarrierManager {
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
-    // TODO: async collect barrier flush state from hummock.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,
