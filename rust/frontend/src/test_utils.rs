@@ -14,12 +14,13 @@
 //
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
-use risingwave_common::catalog::DEFAULT_DATABASE_NAME;
+use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
@@ -97,9 +98,9 @@ impl LocalFrontend {
     }
 }
 
-#[derive(Clone)]
 pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
+    id: AtomicU32,
 }
 
 #[async_trait::async_trait]
@@ -121,22 +122,43 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
-        todo!()
+    async fn create_materialized_table_source(&self, mut table: ProstTable) -> Result<()> {
+        table.id = self.gen_id();
+        self.catalog.write().create_table(&table);
+        Ok(())
     }
 
-    async fn create_materialized_view(&self, _table: ProstTable) -> Result<()> {
-        todo!()
+    async fn create_materialized_view(&self, mut table: ProstTable) -> Result<()> {
+        table.id = self.gen_id();
+        self.catalog.write().create_table(&table);
+        Ok(())
     }
 
-    async fn create_source(&self, _source: ProstSource) -> Result<()> {
-        todo!()
+    async fn create_source(&self, source: ProstSource) -> Result<()> {
+        self.catalog.write().create_source(source);
+        Ok(())
     }
 }
 
 impl MockCatalogWriter {
     pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
-        Self { catalog }
+        catalog.write().create_database(ProstDatabase {
+            name: DEFAULT_DATABASE_NAME.to_string(),
+            id: 0,
+        });
+        catalog.write().create_schema(ProstSchema {
+            id: 0,
+            name: DEFAULT_SCHEMA_NAME.to_string(),
+            database_id: 0,
+        });
+        Self {
+            catalog,
+            id: AtomicU32::new(0),
+        }
+    }
+
+    fn gen_id(&self) -> u32 {
+        self.id.fetch_add(1, Ordering::SeqCst)
     }
 }
 
