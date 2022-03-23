@@ -24,7 +24,7 @@
                             "columnDescs": [
                               {
                                 "columnType": {
-                                  "typeName": "INT32",
+                                  "typeName": "INT64",
                                   "isNullable": true
                                 },
                                 "name": "_row_id"
@@ -152,7 +152,7 @@
                         "columnDescs": [
                           {
                             "columnType": {
-                              "typeName": "INT32",
+                              "typeName": "INT64",
                               "isNullable": true
                             },
                             "name": "_row_id"
