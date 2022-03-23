@@ -52,6 +52,7 @@ pub struct SSTableBuilder {
     user_key_hashes: Vec<u32>,
     /// Last added full key.
     last_full_key: Bytes,
+    key_count: usize,
 }
 
 impl SSTableBuilder {
@@ -63,6 +64,7 @@ impl SSTableBuilder {
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
             user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
             last_full_key: Bytes::default(),
+            key_count: 0,
         }
     }
 
@@ -102,6 +104,7 @@ impl SSTableBuilder {
         if block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block();
         }
+        self.key_count += 1;
     }
 
     /// Finish building sst.
@@ -134,8 +137,7 @@ impl SSTableBuilder {
                 vec![]
             },
             estimated_size: self.buf.len() as u32,
-            // TODO: seems unused, remove this field.
-            key_count: 0,
+            key_count: self.key_count as u32,
             smallest_key,
             largest_key,
         };
