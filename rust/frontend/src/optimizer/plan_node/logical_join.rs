@@ -290,7 +290,7 @@ impl ColPrunable for LogicalJoin {
         let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         on = on.rewrite_expr(&mut mapping);
 
-        let (left_required_cols, right_required_cols): (FixedBitSet, FixedBitSet) =
+        let (mut left_required_cols, mut right_required_cols): (FixedBitSet, FixedBitSet) =
             visitor.input_bits.ones().partition_map(|i| {
                 if i < left_len {
                     Either::Left(i)
@@ -298,6 +298,8 @@ impl ColPrunable for LogicalJoin {
                     Either::Right(i - left_len)
                 }
             });
+        left_required_cols.grow(self.left.schema().fields().len());
+        right_required_cols.grow(self.right.schema().fields().len());
 
         let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
