@@ -65,7 +65,7 @@ pub fn gen_create_mv_plan(
 
     let column_descs = bound_query.gen_create_mv_column_desc();
 
-    let mut logical = planner.plan_query(bound_query)?;
+    let logical = planner.plan_query(bound_query)?;
 
     let plan =
         logical.gen_create_mv_plan(order, column_descs.iter().map(|x| x.column_id).collect());
