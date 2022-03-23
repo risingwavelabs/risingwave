@@ -246,6 +246,9 @@ impl PlanTreeNodeBinary for LogicalJoin {
         let new_on = {
             let (mut left_map, _) = left_col_change.into_parts();
             let (mut right_map, _) = right_col_change.into_parts();
+            for i in &mut right_map {
+                *i = Some(i.unwrap() + left.schema().len());
+            }
             left_map.append(&mut right_map);
             self.on()
                 .clone()

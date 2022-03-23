@@ -176,6 +176,10 @@ impl ColIndexMapping {
             assert_eq!(map[src], None);
             map[src] = Some(dst);
         }
+        for (src, dst) in other.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
         Self::with_target_size(map, target_size)
     }
 

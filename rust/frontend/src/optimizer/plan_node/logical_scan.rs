@@ -44,7 +44,7 @@ impl LogicalScan {
         ctx: QueryContextRef,
     ) -> Self {
         // TODO: get pk
-        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        let base = PlanBase::new_logical(ctx, schema, vec![0] /* TODO get the pk */);
         Self {
             table_name,
             table_id,

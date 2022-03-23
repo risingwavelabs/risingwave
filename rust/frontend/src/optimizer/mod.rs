@@ -146,8 +146,8 @@ impl PlanRoot {
 
     /// optimize and generate a create materialize view plan
     pub fn gen_create_mv_plan(&self) -> PlanRef {
-        let mut plan = self.gen_optimized_logical_plan();
-
+        let plan = self.gen_optimized_logical_plan();
+        let (mut plan, out_col_change) = plan.logical_rewrite_for_stream();
         // Convert to physical plan node
         plan = plan.to_stream_with_dist_required(&self.required_dist);
 
