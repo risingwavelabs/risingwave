@@ -25,8 +25,9 @@ use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 ///
 /// It is used in optimizer for transformation of column index.
 pub struct ColIndexMapping {
-    target_upper: Option<usize>,
-    /// The source column index is the subscript.
+    /// The size of the target space, i.e. target index is in the range `(0..target_size)`.
+    target_size: usize,
+    /// Each subscript is mapped to the corresponding element.
     map: Vec<Option<usize>>,
 }
 
@@ -34,8 +35,20 @@ impl ColIndexMapping {
     /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
     /// corresponding element.
     pub fn new(map: Vec<Option<usize>>) -> Self {
-        let target_upper = map.iter().filter_map(|x| *x).max_by_key(|x| *x);
-        Self { map, target_upper }
+        let target_size = match map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
+            Some(target_max) => target_max + 1,
+            None => 0,
+        };
+        Self { map, target_size }
+    }
+
+    /// Create a partial mapping which maps from the subscripts range `(0..map.len())` to
+    /// `(0..target_size)`. Each subscript is mapped to the corresponding element.
+    pub fn with_target_size(map: Vec<Option<usize>>, target_size: usize) -> Self {
+        if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
+            assert!(target_max < target_size)
+        };
+        Self { map, target_size }
     }
 
     /// Create a partial mapping which maps range `(0..source_num)` to range
@@ -136,7 +149,18 @@ impl ColIndexMapping {
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
         }
-        Self::new(map)
+        Self::with_target_size(map, following.target_size())
+    }
+
+    /// inverse the mapping, if a target corresponds more than one source, it will choose any one as
+    /// it inverse mapping's target
+    #[must_use]
+    pub fn inverse(&self) -> Self {
+        let mut map = vec![None; self.target_size()];
+        for (src, dst) in self.mapping_pairs() {
+            map[dst] = Some(src);
+        }
+        Self::with_target_size(map, self.source_size())
     }
 
     /// return iter of (src, dst) order by src
@@ -156,18 +180,18 @@ impl ColIndexMapping {
         self.try_map(index).unwrap()
     }
 
-    /// Returns the maximum index in the target space.
-    /// `None` means the mapping is empty.
-    pub fn target_upper(&self) -> Option<usize> {
-        self.target_upper
+    /// Returns the size of the target range. Target index is in the range `(0..target_size)`.
+    pub fn target_size(&self) -> usize {
+        self.target_size
     }
 
-    pub fn source_upper(&self) -> usize {
-        self.map.len() - 1
+    /// Returns the size of the source range. Source index is in the range `(0..source_size)`.
+    pub fn source_size(&self) -> usize {
+        self.map.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.target_upper().is_none()
+        self.target_size() == 0
     }
 }
 
@@ -181,12 +205,12 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping{{ map:({}), source_upper:{}, target_upper:{:?} }}",
+            "ColIndexMapping(source_size:{}, target_size:{}, mapping:{})",
+            self.source_size(),
+            self.target_size(),
             self.mapping_pairs()
                 .map(|(src, dst)| format!("{}->{}", src, dst))
-                .join(","),
-            self.source_upper(),
-            self.target_upper(),
+                .join(",")
         )
     }
 }

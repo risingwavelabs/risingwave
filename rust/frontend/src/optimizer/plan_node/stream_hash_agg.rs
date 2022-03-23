@@ -32,7 +32,13 @@ pub struct StreamHashAgg {
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let pk_indices = logical.base.pk_indices.to_vec();
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            Distribution::any().clone(), // TODO
+        );
         StreamHashAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {

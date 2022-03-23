@@ -55,16 +55,35 @@ impl LogicalProject {
         }
 
         let schema = Self::derive_schema(&exprs, &expr_alias);
+        let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref(expr, input.schema().fields().len());
         }
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
             input,
             base,
             exprs,
             expr_alias,
         }
+    }
+
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        let mut map = vec![None; exprs.len()];
+        for (i, expr) in exprs.iter().enumerate() {
+            map[i] = match expr {
+                ExprImpl::InputRef(input) => Some(input.index()),
+                _ => None,
+            }
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        Self::o2i_col_mapping(input_len, exprs).inverse()
     }
 
     pub fn create(
@@ -84,18 +103,17 @@ impl LogicalProject {
     pub fn with_mapping(input: PlanRef, mapping: ColIndexMapping) -> PlanRef {
         assert_eq!(
             input.schema().fields().len(),
-            mapping.source_upper() + 1,
+            mapping.source_size(),
             "invalid mapping given:\n----input: {:?}\n----mapping: {:?}",
             input,
             mapping
         );
-        let mut input_refs = if let Some(target_upper) = mapping.target_upper() {
-            vec![None; target_upper + 1]
-        } else {
+        if mapping.target_size() == 0 {
             // The mapping is empty, so the parent actually doesn't need the output of the input.
             // This can happen when the parent node only selects constant expressions.
             return input;
         };
+        let mut input_refs = vec![None; mapping.target_size()];
         for (src, tar) in mapping.mapping_pairs() {
             assert_eq!(input_refs[tar], None);
             input_refs[tar] = Some(src);
@@ -125,6 +143,15 @@ impl LogicalProject {
             })
             .collect();
         Schema { fields }
+    }
+
+    fn derive_pk(input_schema: &Schema, input_pk: &[usize], exprs: &[ExprImpl]) -> Vec<usize> {
+        let i2o = Self::i2o_col_mapping(input_schema.len(), exprs);
+        input_pk
+            .iter()
+            .map(|pk_col| i2o.try_map(*pk_col))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default()
     }
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.exprs

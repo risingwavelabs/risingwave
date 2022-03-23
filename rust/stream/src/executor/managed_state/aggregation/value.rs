@@ -52,7 +52,7 @@ impl<S: StateStore> ManagedValueState<S> {
 
             // Decode the Datum from the value.
             if let Some(raw_data) = raw_data {
-                let mut deserializer = memcomparable::Deserializer::new(&raw_data[..]);
+                let mut deserializer = memcomparable::Deserializer::new(raw_data.to_bytes());
                 Some(deserialize_datum_from(
                     &agg_call.return_type,
                     &mut deserializer,
