@@ -14,6 +14,7 @@
 
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -25,7 +26,8 @@ use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::storage_value::StorageValue;
-use crate::{StateStore, StateStoreIter};
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 type KeyWithEpoch = (Bytes, Reverse<u64>);
 
@@ -78,151 +80,131 @@ impl MemoryStateStore {
         }
         STORE.clone()
     }
-
-    async fn ingest_batch_inner(
-        &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
-        epoch: u64,
-    ) -> Result<()> {
-        let mut inner = self.inner.lock().await;
-        for (key, value) in kv_pairs {
-            inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes()));
-        }
-        Ok(())
-    }
-
-    async fn scan_inner<R, B>(
-        &self,
-        key_range: R,
-        limit: Option<usize>,
-        epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        let mut data = vec![];
-        if limit == Some(0) {
-            return Ok(vec![]);
-        }
-        let inner = self.inner.lock().await;
-
-        let mut last_key = None;
-        for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
-            if *key_epoch > epoch {
-                continue;
-            }
-            if Some(key) != last_key.as_ref() {
-                if let Some(value) = value {
-                    data.push((key.clone(), StorageValue::from(value.clone())));
-                }
-                last_key = Some(key.clone());
-            }
-            if let Some(limit) = limit && data.len() >= limit {
-                break;
-            }
-        }
-        Ok(data)
-    }
-
-    async fn reverse_scan_inner<R, B>(
-        &self,
-        _key_range: R,
-        _limit: Option<usize>,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        todo!()
-    }
 }
 
-#[async_trait]
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
+    define_state_store_associated_type!();
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
-        let res = self.scan_inner(key..=key, Some(1), epoch).await?;
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a> {
+        async move {
+            let res = self.scan(key..=key, Some(1), epoch).await?;
 
-        Ok(match res.as_slice() {
-            [] => None,
-            [(_, value)] => Some(value.clone()),
-            _ => unreachable!(),
-        })
+            Ok(match res.as_slice() {
+                [] => None,
+                [(_, value)] => Some(value.clone()),
+                _ => unreachable!(),
+            })
+        }
     }
 
-    async fn scan<R, B>(
-        &self,
+    fn scan<'a, R: 'a, B: 'a>(
+        &'a self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ScanFuture<'a, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.scan_inner(key_range, limit, epoch).await
+        async move {
+            let mut data = vec![];
+            if limit == Some(0) {
+                return Ok(vec![]);
+            }
+            let inner = self.inner.lock().await;
+
+            let mut last_key = None;
+            for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
+                if *key_epoch > epoch {
+                    continue;
+                }
+                if Some(key) != last_key.as_ref() {
+                    if let Some(value) = value {
+                        data.push((key.clone(), StorageValue::from(value.clone())));
+                    }
+                    last_key = Some(key.clone());
+                }
+                if let Some(limit) = limit && data.len() >= limit {
+                    break;
+                }
+            }
+            Ok(data)
+        }
     }
 
-    async fn reverse_scan<R, B>(
-        &self,
+    fn reverse_scan<'a, R: 'a, B: 'a>(
+        &'a self,
         key_range: R,
         limit: Option<usize>,
-        _epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+        epoch: u64,
+    ) -> Self::ReverseScanFuture<'a, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.reverse_scan_inner(key_range, limit).await
+        async move { unimplemented!() }
     }
 
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()> {
-        self.ingest_batch_inner(kv_pairs, epoch).await
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            let mut inner = self.inner.lock().await;
+            for (key, value) in kv_pairs {
+                inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes()));
+            }
+            Ok(())
+        }
     }
 
-    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        Ok(MemoryStateStoreIter::new(
-            self.scan_inner(key_range, None, epoch)
-                .await
-                .unwrap()
-                .into_iter(),
-        ))
-    }
-
-    async fn replicate_batch(
+    fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'a, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
+        async move {
+            Ok(MemoryStateStoreIter::new(
+                self.scan(key_range, None, epoch).await.unwrap().into_iter(),
+            ))
+        }
     }
 
-    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
-        // memory backend doesn't support wait for epoch, so this is a no-op.
-        Ok(())
+    fn reverse_iter<'a, R: 'a, B: 'a>(
+        &'a self,
+        key_range: R,
+        epoch: u64,
+    ) -> Self::ReverseIterFuture<'a, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
     }
 
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        // memory backend doesn't support push to S3, so this is a no-op
-        Ok(())
+    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move {
+            // memory backend doesn't support wait for epoch, so this is a no-op.
+            Ok(())
+        }
+    }
+
+    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move {
+            // memory backend doesn't support push to S3, so this is a no-op
+            Ok(())
+        }
     }
 }
 
