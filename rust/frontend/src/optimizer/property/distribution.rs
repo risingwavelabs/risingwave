@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use paste::paste;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
