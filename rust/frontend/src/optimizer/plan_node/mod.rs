@@ -392,7 +392,6 @@ for_all_plan_nodes! { impl_plan_ref }
 macro_rules! impl_down_cast_fn {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            #[allow(unused)]
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
                     self.downcast_ref::<[<$convention $name>]>()

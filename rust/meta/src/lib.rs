@@ -28,6 +28,7 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
+#![feature(drain_filter)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod barrier;
