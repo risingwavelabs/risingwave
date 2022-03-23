@@ -95,7 +95,7 @@ fn run_test_case(c: &TestCase) -> Result<()> {
         let expected_formatted_sql = c.formatted_sql.as_ref().unwrap();
         if &formatted_sql != expected_formatted_sql {
             return Err(anyhow!(
-                "Expected formatted sql: {}\n  Actual formatted sql: {}",
+                "Expected formatted sql:\n  {}\n  Actual formatted sql:\n  {}",
                 expected_formatted_sql,
                 formatted_sql
             ));
@@ -105,7 +105,7 @@ fn run_test_case(c: &TestCase) -> Result<()> {
         if &formatted_ast != expected_formatted_ast {
             return Err(anyhow!(
                 "Expected formatted ast: {}\n  Actual formatted ast: {}",
-                expected_formatted_sql,
+                expected_formatted_ast,
                 formatted_ast
             ));
         }
@@ -113,14 +113,17 @@ fn run_test_case(c: &TestCase) -> Result<()> {
     Ok(())
 }
 
-fn run_test_file(_file_name: &str, file_content: &str) {
+fn run_test_file(file_name: &str, file_content: &str) {
     let file_content = remove_comments(file_content);
     let cases = split_test_cases(&file_content);
     let mut failed_num = 0;
     for case_str in cases {
         let c = parse_test_case(&case_str);
         if let Err(e) = run_test_case(&c) {
-            println!("\nThe input SQL:\n  {}\n{}", c.input, e);
+            println!(
+                "\nThe input SQL from file {}:\n  {}\n{}",
+                file_name, c.input, e
+            );
             failed_num += 1;
         }
     }

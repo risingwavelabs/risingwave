@@ -2038,39 +2038,6 @@ fn parse_simple_math_expr_minus() {
 }
 
 #[test]
-fn parse_table_function() {
-    let select = verified_only_select("SELECT * FROM TABLE(FUN('1')) AS a");
-
-    match only(select.from).relation {
-        TableFactor::TableFunction { expr, alias } => {
-            let expected_expr = Expr::Function(Function {
-                name: ObjectName(vec![Ident::new("FUN")]),
-                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
-                    Value::SingleQuotedString("1".to_owned()),
-                )))],
-                over: None,
-                distinct: false,
-            });
-            assert_eq!(expr, expected_expr);
-            assert_eq!(alias, table_alias("a"))
-        }
-        _ => panic!("Expecting TableFactor::TableFunction"),
-    }
-
-    let res = parse_sql_statements("SELECT * FROM TABLE '1' AS a");
-    assert_eq!(
-        ParserError::ParserError("Expected (, found: \'1\'".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("SELECT * FROM TABLE (FUN(a) AS a");
-    assert_eq!(
-        ParserError::ParserError("Expected ), found: AS".to_string()),
-        res.unwrap_err()
-    );
-}
-
-#[test]
 fn parse_delimited_identifiers() {
     // check that quoted identifiers in any position remain quoted after serialization
     let select = verified_only_select(
@@ -2078,11 +2045,7 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table {
-            name,
-            alias,
-            args,
-        } => {
+        TableFactor::Table { name, alias, args } => {
             assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
             assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
             assert!(args.is_empty());
@@ -2195,12 +2158,6 @@ fn parse_simple_case_expr() {
         },
         expr_from_projection(only(&select.projection)),
     );
-}
-
-#[test]
-fn parse_from_advanced() {
-    let sql = "SELECT * FROM fn(1, 2) AS foo, schema.bar AS bar WITH (NOLOCK)";
-    let _select = verified_only_select(sql);
 }
 
 #[test]

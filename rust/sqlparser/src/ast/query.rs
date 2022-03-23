@@ -316,11 +316,7 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TableFactor::Table {
-                name,
-                alias,
-                args,
-            } => {
+            TableFactor::Table { name, alias, args } => {
                 write!(f, "{}", name)?;
                 if !args.is_empty() {
                     write!(f, "({})", display_comma_separated(args))?;

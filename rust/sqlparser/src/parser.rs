@@ -2470,11 +2470,7 @@ impl Parser {
                 vec![]
             };
             let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            Ok(TableFactor::Table {
-                name,
-                alias,
-                args,
-            })
+            Ok(TableFactor::Table { name, alias, args })
         }
     }
 
