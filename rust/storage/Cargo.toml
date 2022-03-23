@@ -26,6 +26,7 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
