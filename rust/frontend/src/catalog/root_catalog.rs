@@ -139,6 +139,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", db_name.to_string()).into())
     }
 
+    pub fn get_source_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        source_name: &str,
+    ) -> Result<&ProstSource> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_source_by_name(source_name)
+            .ok_or_else(|| CatalogError::NotFound("source", db_name.to_string()).into())
+    }
+
     /// Check the name if duplicated with existing table, materialized view or source.
     pub fn check_relation_name_duplicated(
         &self,

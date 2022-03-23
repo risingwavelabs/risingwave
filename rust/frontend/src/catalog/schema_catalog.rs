@@ -40,17 +40,17 @@ impl SchemaCatalog {
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
-
     pub fn drop_table(&mut self, id: TableId) {
         let name = self.table_name_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&name).unwrap();
     }
+
     pub fn create_source(&mut self, prost: ProstSource) {
         let name = prost.name.clone();
         let id = prost.id.into();
 
         self.source_by_name.try_insert(name.clone(), prost).unwrap();
-        self.table_name_by_id.try_insert(id, name).unwrap();
+        self.source_name_by_id.try_insert(id, name).unwrap();
     }
     pub fn drop_source(&mut self, id: SourceId) {
         let name = self.source_name_by_id.remove(&id).unwrap();

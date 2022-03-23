@@ -15,8 +15,6 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use crate::catalog::schema_catalog::SchemaCatalog;
-
 mod bind_context;
 mod delete;
 pub(crate) mod expr;

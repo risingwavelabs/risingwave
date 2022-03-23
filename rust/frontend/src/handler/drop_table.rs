@@ -16,16 +16,33 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::ObjectName;
 
+use crate::binder::Binder;
 use crate::session::QueryContext;
 
 pub async fn handle_drop_table(
     context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
-    let _session = context.session_ctx;
-    let _str_table_name = table_name.to_string();
+    let session = context.session_ctx;
+    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
-    // TODO:
+    let catalog_reader = session.env().catalog_reader();
+
+    let source_id = catalog_reader
+        .read_guard()
+        .get_source_by_name(session.database(), &schema_name, &table_name)?
+        .id;
+
+    let table_id = catalog_reader
+        .read_guard()
+        .get_table_by_name(session.database(), &schema_name, &table_name)?
+        .id();
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .drop_materialized_source(source_id, table_id)
+        .await?;
+
     Ok(PgResponse::new(
         StatementType::DROP_TABLE,
         0,
