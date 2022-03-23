@@ -24,7 +24,6 @@ use super::Convention;
 use crate::optimizer::PlanRef;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct Order {
     pub field_order: Vec<FieldOrder>,
@@ -75,7 +74,6 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Direction {
     Asc,
@@ -104,7 +102,6 @@ impl Direction {
     }
 }
 
-#[allow(dead_code)]
 impl Direction {
     pub fn satisfies(&self, other: &Direction) -> bool {
         match other {
@@ -113,6 +110,7 @@ impl Direction {
         }
     }
 }
+
 lazy_static::lazy_static! {
     static ref ANY_ORDER: Order = Order {
         field_order: vec![],
