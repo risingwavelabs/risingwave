@@ -263,7 +263,7 @@ impl ToStream for LogicalProject {
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
         // TODO: add row_count() aggCall for StreamAgg here
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
-        let (proj, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         drop(self); // prevent mistakes using self
         let input_pk = input.pk_indices();
         assert!(!input_pk.is_empty());
@@ -278,14 +278,13 @@ impl ToStream for LogicalProject {
             .map(|(a, b)| (a, b))
             .chain(col_need_to_add.map(|idx| {
                 (
-                    InputRef::new(idx, input_schema.fields[idx].data_type).into(),
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into(),
                     None,
                 )
             }))
             .unzip();
         let proj = Self::new(input, exprs, expr_alias);
         // the added columns is at the end, so it will not change the exists column index
-        let out_col_change = ColIndexMapping::identical_map(proj.schema().len());
         (proj.into(), out_col_change)
     }
 }

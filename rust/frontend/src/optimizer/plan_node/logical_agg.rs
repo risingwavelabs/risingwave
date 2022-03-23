@@ -350,7 +350,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .agg_calls
             .iter()
             .cloned()
-            .map(|agg_call| {
+            .map(|mut agg_call| {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });

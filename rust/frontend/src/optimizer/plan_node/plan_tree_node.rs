@@ -96,6 +96,19 @@ pub trait PlanTreeNodeBinary {
 
     #[must_use]
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
+    #[must_use]
+    fn rewrite_with_left_right(
+        &self,
+        left: PlanRef,
+        left_col_change: ColIndexMapping,
+        right: PlanRef,
+        right_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping)
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
 
     fn left_dist_required(&self) -> &Distribution {
         Distribution::any()

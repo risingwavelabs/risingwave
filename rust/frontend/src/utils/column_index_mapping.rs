@@ -1,3 +1,4 @@
+use std::cmp::max;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use std::fmt::Debug;
 use std::vec;
 
@@ -25,6 +25,7 @@ use crate::optimizer::property::{Distribution, Order};
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
 /// It is used in optimizer for transformation of column index.
+#[derive(Clone)]
 pub struct ColIndexMapping {
     /// The size of the target space, i.e. target index is in the range `(0..target_size)`.
     target_size: usize,
@@ -50,6 +51,9 @@ impl ColIndexMapping {
             assert!(target_max < target_size)
         };
         Self { map, target_size }
+    }
+    pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
+        (self.map, self.target_size)
     }
 
     pub fn identical_map(target_size: usize) -> Self {
@@ -155,6 +159,24 @@ impl ColIndexMapping {
             *tar = tar.and_then(|index| following.try_map(index));
         }
         Self::with_target_size(map, following.target_size())
+    }
+
+    /// union two mapping, the result mapping target_size and source size will be the max size of
+    /// the two mappings
+    /// # Panics
+    ///
+    /// Will panic if a source appears in both to mapping
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        debug!("union {:?} and {:?}", self, other);
+        let target_size = max(self.target_size(), other.target_size());
+        let source_size = max(self.source_size(), other.source_size());
+        let mut map = vec![None; source_size];
+        for (src, dst) in self.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
+        Self::with_target_size(map, target_size)
     }
 
     /// inverse the mapping, if a target corresponds more than one source, it will choose any one as

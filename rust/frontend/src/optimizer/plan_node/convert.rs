@@ -114,6 +114,10 @@ macro_rules! impl_to_stream {
                 fn to_stream(&self) -> PlanRef {
                     panic!("convert into stream is only allowed on logical plan")
                 }
+                fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping){
+                    panic!("convert into stream is only allowed on logical plan")
+                }
+
             })*
         }
     }
