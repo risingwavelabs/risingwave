@@ -246,7 +246,7 @@ impl ColIndexMapping {
 
     pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
         assert_eq!(bitset.len(), self.source_size());
-        let ret = FixedBitSet::with_capacity(self.target_size());
+        let mut ret = FixedBitSet::with_capacity(self.target_size());
         for i in bitset.ones() {
             if let Some(i) = self.try_map(i) {
                 ret.insert(i);

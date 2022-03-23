@@ -49,7 +49,7 @@ pub(super) fn handle_explain(
                 );
                 binder.bind_query(query.as_ref().clone())?
             };
-            let logical = planner.plan_query(bound)?;
+            let mut logical = planner.plan_query(bound)?;
             logical.gen_create_mv_plan()
         }
         stmt => {
