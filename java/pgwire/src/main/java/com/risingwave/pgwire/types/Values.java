@@ -2,7 +2,6 @@ package com.risingwave.pgwire.types;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -128,12 +127,12 @@ public class Values {
     };
   }
 
-  public static PgValue createDate(Date v) {
+  public static PgValue createDate(LocalDate v) {
     return new PgValue() {
       @Override
       public byte[] encodeInBinary() {
         // Days since 1970.1.1.
-        int epochDays = (int) v.toLocalDate().toEpochDay();
+        int epochDays = (int) v.toEpochDay();
         return ByteBuffer.allocate(4).order(ByteOrder.BIG_ENDIAN).putInt(epochDays).array();
       }
 
@@ -146,7 +145,7 @@ public class Values {
 
   public static PgValue createDate(int v) {
     // Note: v represents number of days since 1970-01-01.
-    return createDate(Date.valueOf(LocalDate.ofEpochDay(v)));
+    return createDate(LocalDate.ofEpochDay(v));
   }
 
   public static PgValue createTime(long v) {
