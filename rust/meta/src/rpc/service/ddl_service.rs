@@ -238,6 +238,7 @@ where
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
+        mview.id = id;
 
         // 1. Mark current mview as "creating" and add reference count to dependent tables
         self.catalog_manager
@@ -246,19 +247,21 @@ where
             .map_err(tonic_err)?;
 
         // 2. Create mview in stream manager
-        if let Err(e) = self.create_mview_on_compute_node(&stream_node, id).await {
+        if let Err(e) = self.create_mview_on_compute_node(stream_node, id).await {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
                 .await
                 .map_err(tonic_err)?;
             return Err(e.to_grpc_status());
         }
-        mview.id = id;
+
+        // Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_table_procedure(&mview)
             .await
             .map_err(tonic_err)?;
+
         Ok(Response::new(CreateMaterializedViewResponse {
             status: None,
             table_id: id,
@@ -353,7 +356,6 @@ where
     }
 
     async fn create_source_on_compute_node(&self, source: &Source) -> RwResult<()> {
-        // Create source on compute nodes.
         // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
             .all_stream_clients()
@@ -371,7 +373,6 @@ where
     }
 
     async fn drop_source_on_compute_node(&self, source_id: SourceId) -> RwResult<()> {
-        // TODO: restore the source on other nodes when scale out / fail over
         let futures = self
             .all_stream_clients()
             .await?
@@ -387,13 +388,34 @@ where
 
     async fn create_mview_on_compute_node(
         &self,
-        stream_node: &StreamNode,
+        mut stream_node: StreamNode,
         id: TableId,
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
         use crate::stream::CreateMaterializedViewContext;
 
+        // Fill in the correct mview id for stream node.
+        fn fill_mview_id(stream_node: &mut StreamNode, mview_id: TableId) -> usize {
+            let mut mview_count = 0;
+            if let Node::MaterializeNode(materialize_node) = stream_node.node.as_mut().unwrap() {
+                materialize_node.table_ref_id = TableRefId::from(&mview_id).into();
+                mview_count += 1;
+            }
+            for input in &mut stream_node.input {
+                mview_count += fill_mview_id(input, mview_id);
+            }
+            mview_count
+        }
+
+        let mview_id = TableId::new(id);
+        let mview_count = fill_mview_id(&mut stream_node, mview_id);
+        assert_eq!(
+            mview_count, 1,
+            "require exactly 1 materialize node when creating materialized view"
+        );
+
+        // Resolve fragments.
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
         let mut fragmenter = StreamFragmenter::new(
@@ -401,11 +423,14 @@ where
             self.fragment_manager.clone(),
             hash_mapping,
         );
-        let graph = fragmenter.generate_graph(stream_node, &mut ctx).await?;
-        let table_fragments = TableFragments::new(TableId::new(id), graph);
+        let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
+        let table_fragments = TableFragments::new(mview_id, graph);
+
+        // Create on compute node.
         self.stream_manager
             .create_materialized_view(table_fragments, ctx)
             .await?;
+
         Ok(())
     }
 
@@ -425,9 +450,10 @@ where
         mut mview: Table,
         mut stream_node: StreamNode,
     ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
+        // Generate source id.
         let source_id = self
             .id_gen_manager
-            .generate::<{ IdCategory::Table }>()
+            .generate::<{ IdCategory::Table }>() // TODO: use source category
             .await? as u32;
         source.id = source_id;
 
@@ -435,7 +461,7 @@ where
             .start_create_materialized_source_procedure(&source, &mview)
             .await?;
 
-        // Create source
+        // Create source on compute node.
         if let Err(e) = self.create_source_on_compute_node(&source).await {
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
@@ -468,14 +494,16 @@ where
         mview.optional_associated_source_id =
             Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
 
-        // Create mview
+        // Generate mview id.
         let mview_id = self
             .id_gen_manager
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
+        mview.id = mview_id;
 
+        // Create mview on compute node.
         if let Err(e) = self
-            .create_mview_on_compute_node(&stream_node, mview_id)
+            .create_mview_on_compute_node(stream_node, mview_id)
             .await
         {
             self.catalog_manager
@@ -485,7 +513,6 @@ where
             self.drop_source_on_compute_node(source_id).await?;
             return Err(e);
         }
-        mview.id = mview_id;
 
         // Finally, update the catalog.
         let version = self
