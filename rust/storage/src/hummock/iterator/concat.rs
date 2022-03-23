@@ -121,19 +121,16 @@ mod tests {
             sstable_store,
         );
 
-        iter.seek(iterator_test_key_of(1 * TEST_KEYS_COUNT + 1).as_slice())
+        iter.seek(iterator_test_key_of(TEST_KEYS_COUNT + 1).as_slice())
             .await
             .unwrap();
 
         let key = iter.key();
         let val = iter.value();
-        assert_eq!(
-            key,
-            iterator_test_key_of(1 * TEST_KEYS_COUNT + 1).as_slice()
-        );
+        assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT + 1).as_slice());
         assert_eq!(
             val.into_put_value().unwrap(),
-            iterator_test_value_of(1 * TEST_KEYS_COUNT + 1).as_slice()
+            iterator_test_value_of(TEST_KEYS_COUNT + 1).as_slice()
         );
 
         // Left edge case

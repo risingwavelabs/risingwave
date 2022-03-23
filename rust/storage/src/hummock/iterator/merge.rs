@@ -36,7 +36,7 @@ mod test {
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
-            |x| x * 3 + 0,
+            |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
         )
@@ -96,7 +96,7 @@ mod test {
         let table0 = gen_iterator_test_sstable_base(
             0,
             default_builder_opt_for_test(),
-            |x| x * 3 + 0,
+            |x| x * 3,
             sstable_store.clone(),
             TEST_KEYS_COUNT,
         )
