@@ -19,17 +19,14 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use super::variants::*;
-use crate::hummock::key::{key_with_epoch, user_key, Epoch};
-use crate::hummock::{sstable_store, HummockResult, HummockValue, SSTableBuilderOptions, Sstable};
+use sstable_store::{SstableStore, SstableStoreRef};
+
+use crate::hummock::key::{key_with_epoch, Epoch};
+pub use crate::hummock::test_utils::default_builder_opt_for_test;
+use crate::hummock::test_utils::gen_test_sstable;
+use crate::hummock::{sstable_store, HummockValue, SSTableBuilderOptions, Sstable};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreRef};
-
-pub trait IndexMapper: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
-
-impl<T> IndexMapper for T where T: Fn(u64, usize) -> Vec<u8> + Send + Sync + 'static {}
-
-type BoxedIndexMapper = Box<dyn IndexMapper>;
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -43,275 +40,35 @@ macro_rules! assert_bytes_eq {
     }};
 }
 
-pub struct TestIteratorConfig {
-    key_mapper: BoxedIndexMapper,
-    value_mapper: BoxedIndexMapper,
-    sort_index: u64,
-    total: usize,
-    table_builder_opt: SSTableBuilderOptions,
-}
-
-impl TestIteratorConfig {
-    fn gen_key(&self, idx: usize) -> Vec<u8> {
-        (self.key_mapper)(self.sort_index, idx)
-    }
-    fn gen_value(&self, idx: usize) -> Vec<u8> {
-        (self.value_mapper)(self.sort_index, idx)
-    }
-}
-
-impl Default for TestIteratorConfig {
-    fn default() -> Self {
-        Self {
-            key_mapper: Box::new(|sort_index, index| {
-                format!("{:03}_key_test_{:05}", sort_index, index)
-                    .as_bytes()
-                    .to_vec()
-            }),
-            value_mapper: Box::new(|sort_index, index| {
-                format!("{:03}_value_test_{:05}", sort_index, index)
-                    .as_bytes()
-                    .iter()
-                    .cycle()
-                    .cloned()
-                    .take(index % 100 + 1) // so that the table is not too big
-                    .collect_vec()
-            }),
-            sort_index: 0,
-            total: TEST_KEYS_COUNT,
-            table_builder_opt: default_builder_opt_for_test(),
-        }
-    }
-}
-
-/// Test iterator stores a buffer of key-value pairs `Vec<(Bytes, Bytes)>` and yields the data
-/// stored in the buffer.
-pub struct TestIteratorInner<const DIRECTION: usize> {
-    cfg: Arc<TestIteratorConfig>,
-    data: Vec<(Bytes, Bytes)>,
-    cur_idx: usize,
-}
-
-pub struct TestValidator {
-    cfg: Arc<TestIteratorConfig>,
-    key: Vec<u8>,
-    value: Vec<u8>,
-}
-
-#[derive(Default)]
-pub struct TestIteratorBuilder<const DIRECTION: usize> {
-    cfg: TestIteratorConfig,
-}
-
-impl<const DIRECTION: usize> TestIteratorBuilder<DIRECTION> {
-    pub fn total(mut self, t: usize) -> Self {
-        self.cfg.total = t;
-        self
-    }
-
-    pub fn map_key(mut self, m: impl IndexMapper) -> Self {
-        self.cfg.key_mapper = Box::new(m);
-        self
-    }
-
-    pub fn map_value(mut self, m: impl IndexMapper) -> Self {
-        self.cfg.value_mapper = Box::new(m);
-        self
-    }
-
-    pub fn sort_index(mut self, sort_index: u64) -> Self {
-        self.cfg.sort_index = sort_index;
-        self
-    }
-
-    pub fn finish(self) -> (TestIteratorInner<DIRECTION>, TestValidator) {
-        TestIteratorInner::<DIRECTION>::new(Arc::new(self.cfg))
-    }
-}
-
-impl TestValidator {
-    fn new(cfg: Arc<TestIteratorConfig>) -> Self {
-        Self {
-            cfg,
-            key: vec![],
-            value: vec![],
-        }
-    }
-    #[inline]
-    pub fn assert_key(&self, idx: usize, key: &[u8]) {
-        let expected = self.cfg.gen_key(idx);
-        assert_eq!(key, expected.as_slice());
-    }
-
-    #[inline]
-    pub fn assert_user_key(&self, idx: usize, key: &[u8]) {
-        let expected = self.cfg.gen_key(idx);
-
-        let expected = user_key(&expected);
-        assert_eq!(key, expected);
-    }
-
-    #[inline]
-    pub fn assert_hummock_value(&self, idx: usize, value: HummockValue<&[u8]>) {
-        let real = value.into_put_value().unwrap();
-        self.assert_value(idx, real)
-    }
-
-    #[inline]
-    pub fn assert_value(&self, idx: usize, value: &[u8]) {
-        let expected = self.cfg.gen_value(idx);
-        let real = value;
-        assert_eq!(real, expected.as_slice());
-    }
-
-    #[inline]
-    pub fn key(&self, idx: usize) -> Vec<u8> {
-        self.cfg.gen_key(idx)
-    }
-
-    #[inline]
-    pub fn value(&self, idx: usize) -> Vec<u8> {
-        self.cfg.gen_value(idx)
-    }
-}
-
-macro_rules! test_key {
-    ($val:expr, $idx:expr) => {
-        $val.key($idx).as_slice()
-    };
-}
-
-use sstable_store::{SstableStore, SstableStoreRef};
-pub(crate) use test_key;
-
-pub type TestIterator = TestIteratorInner<FORWARD>;
-pub type ReverseTestIterator = TestIteratorInner<BACKWARD>;
-
-impl<const DIRECTION: usize> TestIteratorInner<DIRECTION> {
-    /// Caller should make sure that `gen_key`
-    /// would generate keys arranged by the same order as `DIRECTION`.
-    fn new(cfg: Arc<TestIteratorConfig>) -> (Self, TestValidator) {
-        let data = (0..cfg.total)
-            .map(|x| (Bytes::from(cfg.gen_key(x)), Bytes::from(cfg.gen_value(x))))
-            .collect_vec();
-
-        let test_iter = TestIteratorInner {
-            cfg: cfg.clone(),
-            cur_idx: 0,
-            data,
-        };
-
-        let test_validator = TestValidator::new(cfg);
-
-        (test_iter, test_validator)
-    }
-    fn seek_inner(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.cur_idx = match DIRECTION {
-            FORWARD => self.data.partition_point(|x| x.0 < key),
-            BACKWARD => self.data.partition_point(|x| x.0 > key),
-            _ => unreachable!(),
-        };
-        Ok(())
-    }
-    pub fn key(&self) -> &[u8] {
-        self.data[self.cur_idx].0.as_ref()
-    }
-    pub fn value(&self) -> HummockValue<&[u8]> {
-        HummockValue::Put(self.data[self.cur_idx].1.as_ref())
-    }
-}
-
-#[async_trait]
-impl<const DIRECTION: usize> HummockIterator for TestIteratorInner<DIRECTION> {
-    async fn next(&mut self) -> HummockResult<()> {
-        self.cur_idx += 1;
-        Ok(())
-    }
-
-    fn key(&self) -> &[u8] {
-        self.key()
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        self.value()
-    }
-
-    fn is_valid(&self) -> bool {
-        self.cur_idx < self.data.len()
-    }
-
-    async fn rewind(&mut self) -> HummockResult<()> {
-        self.cur_idx = 0;
-        Ok(())
-    }
-
-    async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
-        self.seek_inner(key)
-    }
-}
-
 pub const TEST_KEYS_COUNT: usize = 10;
 
-use async_trait::async_trait;
-use bytes::Bytes;
-use itertools::Itertools;
-
-use super::HummockIterator;
-pub use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::test_utils::gen_test_sstable;
-
-/// Generate keys like `001_key_test_00002` with epoch 233.
-pub fn iterator_test_key_of(sort_index: u64, idx: usize) -> Vec<u8> {
-    // key format: {prefix_index}_version
-    key_with_epoch(
-        format!("{:03}_key_test_{:05}", sort_index, idx)
-            .as_bytes()
-            .to_vec(),
-        233,
-    )
+pub fn mock_sstable_store() -> SstableStoreRef {
+    let object_store = Arc::new(InMemObjectStore::new());
+    mock_sstable_store_with_object_store(object_store)
 }
 
-/// Generate keys like `001_key_test_00002` with epoch `epoch`.
-pub fn iterator_test_key_of_epoch(sort_index: u64, idx: usize, epoch: Epoch) -> Vec<u8> {
-    // key format: {prefix_index}_version
-    key_with_epoch(
-        format!("{:03}_key_test_{:05}", sort_index, idx)
-            .as_bytes()
-            .to_vec(),
-        epoch,
-    )
+pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
+    let path = "test".to_string();
+    Arc::new(SstableStore::new(
+        object_store,
+        path,
+        Arc::new(StateStoreMetrics::unused()),
+    ))
 }
 
-/// The value of an sort_index-index , the `sort_index` is used to sort
-pub fn iterator_test_value_of(sort_index: u64, idx: usize) -> Vec<u8> {
-    format!("{:03}_value_test_{:05}", sort_index, idx)
-        .as_bytes()
-        .to_vec()
+/// Generate keys like `key_test_00002` with epoch 233.
+pub fn iterator_test_key_of(idx: usize) -> Vec<u8> {
+    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), 233)
 }
 
-pub async fn gen_iterator_test_sstable(
-    sst_id: u64,
-    opts: SSTableBuilderOptions,
-    sstable_store: SstableStoreRef,
-) -> Sstable {
-    gen_iterator_test_sstable_base(sst_id, opts, |x| x, sstable_store, TEST_KEYS_COUNT).await
+/// Generate keys like `key_test_00002` with epoch `epoch` .
+pub fn iterator_test_key_of_epoch(idx: usize, epoch: Epoch) -> Vec<u8> {
+    key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
 }
 
-// key=[sort_index, idx, epoch], value
-pub async fn gen_iterator_test_sstable_from_kv_pair(
-    sst_id: u64,
-    kv_pairs: Vec<(u64, usize, u64, HummockValue<Vec<u8>>)>,
-    sstable_store: SstableStoreRef,
-) -> Sstable {
-    gen_test_sstable(
-        default_builder_opt_for_test(),
-        sst_id,
-        kv_pairs
-            .into_iter()
-            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1, kv.2), kv.3)),
-        sstable_store,
-    )
-    .await
+/// The value of an index,like `value_test_00002`
+pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
+    format!("value_test_{:05}", idx).as_bytes().to_vec()
 }
 
 /// Generate a test table used in almost all table-related tests. Developers may verify the
@@ -329,8 +86,8 @@ pub async fn gen_iterator_test_sstable_base(
         sst_id,
         (0..total).map(|i| {
             (
-                iterator_test_key_of(sst_id, idx_mapping(i)),
-                HummockValue::Put(iterator_test_value_of(sst_id, idx_mapping(i))),
+                iterator_test_key_of(idx_mapping(i)),
+                HummockValue::Put(iterator_test_value_of(idx_mapping(i))),
             )
         }),
         sstable_store,
@@ -338,32 +95,19 @@ pub async fn gen_iterator_test_sstable_base(
     .await
 }
 
-pub fn mock_sstable_store() -> SstableStoreRef {
-    let object_store = Arc::new(InMemObjectStore::new());
-    mock_sstable_store_with_object_store(object_store)
-}
-
-pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> SstableStoreRef {
-    let path = "test".to_string();
-    Arc::new(SstableStore::new(
-        object_store,
-        path,
-        Arc::new(StateStoreMetrics::unused()),
-    ))
-}
-
-#[cfg(test)]
-mod metatest {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_basic() {
-        let (_, val) = TestIteratorBuilder::<FORWARD>::default()
-            .sort_index(0)
-            .map_key(|id, x| iterator_test_key_of(id, x * 3))
-            .finish();
-
-        let expected = iterator_test_key_of(0, 9);
-        assert_eq!(expected.as_slice(), test_key!(val, 3));
-    }
+// key=[idx, epoch], value
+pub async fn gen_iterator_test_sstable_from_kv_pair(
+    sst_id: u64,
+    kv_pairs: Vec<(usize, u64, HummockValue<Vec<u8>>)>,
+    sstable_store: SstableStoreRef,
+) -> Sstable {
+    gen_test_sstable(
+        default_builder_opt_for_test(),
+        sst_id,
+        kv_pairs
+            .into_iter()
+            .map(|kv| (iterator_test_key_of_epoch(kv.0, kv.1), kv.2)),
+        sstable_store,
+    )
+    .await
 }
