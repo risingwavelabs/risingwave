@@ -31,9 +31,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
-use crate::catalog::catalog_service::{CatalogReader, CatalogWriter};
+use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::meta::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::schedule::WorkerNodeManager;
@@ -61,10 +62,11 @@ impl QueryContext {
         ret
     }
 
+    // TODO(TaoWu): Remove the async.
     #[cfg(test)]
     pub async fn mock() -> Self {
         Self {
-            session_ctx: Arc::new(SessionImpl::mock().await),
+            session_ctx: Arc::new(SessionImpl::mock()),
             next_id: 0,
         }
     }
@@ -88,11 +90,12 @@ fn load_config(opts: &FrontendOpts) -> FrontendConfig {
 /// The global environment for the frontend server.
 #[derive(Clone)]
 pub struct FrontendEnv {
-    meta_client: MetaClient,
     // Different session may access catalog at the same time and catalog is protected by a
     // RwLock.
-    catalog_writer: CatalogWriter,
+    meta_client: Arc<dyn FrontendMetaClient>,
+    catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
+    worker_node_manager: Arc<WorkerNodeManager>,
 }
 
 impl FrontendEnv {
@@ -103,18 +106,18 @@ impl FrontendEnv {
         Self::with_meta_client(meta_client, opts).await
     }
 
-    #[cfg(test)]
-    pub async fn mock() -> Self {
-        use crate::test_utils::FrontendMockMetaClient;
-        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
-        let (_catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
+    pub fn mock() -> Self {
+        use crate::test_utils::{MockCatalogWriter, MockFrontendMetaClient};
+
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = CatalogWriter::new(meta_client.clone(), catalog_updated_rx);
+        let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
+        let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         Self {
-            meta_client,
             catalog_writer,
             catalog_reader,
+            worker_node_manager,
+            meta_client: Arc::new(MockFrontendMetaClient {}),
         }
     }
 
@@ -137,7 +140,10 @@ impl FrontendEnv {
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
-        let catalog_writer = CatalogWriter::new(meta_client.clone(), catalog_updated_rx);
+        let catalog_writer = Arc::new(CatalogWriterImpl::new(
+            meta_client.clone(),
+            catalog_updated_rx,
+        ));
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
@@ -145,7 +151,7 @@ impl FrontendEnv {
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
             host,
-            worker_node_manager,
+            worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
         )
@@ -156,9 +162,10 @@ impl FrontendEnv {
 
         Ok((
             Self {
-                meta_client,
                 catalog_reader,
                 catalog_writer,
+                worker_node_manager,
+                meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -166,18 +173,22 @@ impl FrontendEnv {
         ))
     }
 
-    pub fn meta_client(&self) -> &MetaClient {
-        &self.meta_client
-    }
-
     /// Get a reference to the frontend env's catalog writer.
-    pub fn catalog_writer(&self) -> &CatalogWriter {
-        &self.catalog_writer
+    pub fn catalog_writer(&self) -> &dyn CatalogWriter {
+        &*self.catalog_writer
     }
 
     /// Get a reference to the frontend env's catalog reader.
     pub fn catalog_reader(&self) -> &CatalogReader {
         &self.catalog_reader
+    }
+
+    pub fn worker_node_manager(&self) -> &WorkerNodeManager {
+        &*self.worker_node_manager
+    }
+
+    pub fn meta_client(&self) -> &dyn FrontendMetaClient {
+        &*self.meta_client
     }
 }
 
@@ -192,9 +203,9 @@ impl SessionImpl {
     }
 
     #[cfg(test)]
-    pub async fn mock() -> Self {
+    pub fn mock() -> Self {
         Self {
-            env: FrontendEnv::mock().await,
+            env: FrontendEnv::mock(),
             database: "dev".to_string(),
         }
     }

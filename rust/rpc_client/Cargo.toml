@@ -9,6 +9,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 log = "0.4"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
+paste = "1"
 tokio = { version = "1", features = [
     "rt",
     "rt-multi-thread",

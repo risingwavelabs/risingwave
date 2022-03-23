@@ -14,11 +14,11 @@
 //
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use std::time::Duration;
 
+use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::ErrorCode::{self, InternalError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
 use risingwave_pb::catalog::{
@@ -64,22 +64,22 @@ type SchemaId = u32;
 #[derive(Clone)]
 pub struct MetaClient {
     worker_id_ref: Option<u32>,
-    pub inner: Arc<dyn MetaClientInner>,
+    pub inner: GrpcMetaClient,
 }
 
 impl MetaClient {
     /// Connect to the meta server `addr`.
     pub async fn new(meta_addr: &str) -> Result<Self> {
         Ok(Self {
-            inner: Arc::new(GrpcMetaClient::new(meta_addr).await?),
+            inner: GrpcMetaClient::new(meta_addr).await?,
             worker_id_ref: None,
         })
     }
 
-    pub fn mock(inner: impl MetaClientInner + 'static) -> Self {
+    pub fn mock(inner: GrpcMetaClient) -> Self {
         Self {
             worker_id_ref: None,
-            inner: Arc::new(inner),
+            inner,
         }
     }
 
@@ -212,7 +212,7 @@ impl MetaClient {
         let request = DeleteWorkerNodeRequest {
             host: Some(host_address),
         };
-        MetaClientInner::delete_worker_node(self.inner.as_ref(), request).await?;
+        self.inner.delete_worker_node(request).await?;
         Ok(())
     }
 
@@ -278,135 +278,6 @@ impl MetaClient {
     }
 }
 
-/// [`MetaClientInner`] is the low-level api to meta.
-/// It can be used for testing and allows implementations to bypass the network
-/// and directly call a mocked serivce method.
-#[async_trait::async_trait]
-pub trait MetaClientInner: Send + Sync {
-    async fn subscribe(&self, _req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
-        unimplemented!()
-    }
-
-    async fn add_worker_node(&self, _req: AddWorkerNodeRequest) -> Result<AddWorkerNodeResponse> {
-        unimplemented!()
-    }
-
-    async fn activate_worker_node(
-        &self,
-        _req: ActivateWorkerNodeRequest,
-    ) -> Result<ActivateWorkerNodeResponse> {
-        unimplemented!()
-    }
-
-    async fn delete_worker_node(
-        &self,
-        _req: DeleteWorkerNodeRequest,
-    ) -> Result<DeleteWorkerNodeResponse> {
-        unimplemented!()
-    }
-
-    async fn heartbeat(&self, _req: HeartbeatRequest) -> Result<HeartbeatResponse> {
-        Err(ErrorCode::NotImplementedError("heartbeat is not implemented".into()).into())
-    }
-
-    async fn list_all_nodes(&self, _req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
-        unimplemented!()
-    }
-
-    async fn pin_version(
-        &self,
-        _req: PinVersionRequest,
-    ) -> std::result::Result<PinVersionResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn unpin_version(
-        &self,
-        _req: UnpinVersionRequest,
-    ) -> std::result::Result<UnpinVersionResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn pin_snapshot(
-        &self,
-        _req: PinSnapshotRequest,
-    ) -> std::result::Result<PinSnapshotResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn unpin_snapshot(
-        &self,
-        _req: UnpinSnapshotRequest,
-    ) -> std::result::Result<UnpinSnapshotResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn add_tables(
-        &self,
-        _req: AddTablesRequest,
-    ) -> std::result::Result<AddTablesResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn report_compaction_tasks(
-        &self,
-        _req: ReportCompactionTasksRequest,
-    ) -> std::result::Result<ReportCompactionTasksResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn get_new_table_id(
-        &self,
-        _req: GetNewTableIdRequest,
-    ) -> std::result::Result<GetNewTableIdResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn subscribe_compact_tasks(
-        &self,
-        _req: SubscribeCompactTasksRequest,
-    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
-        unimplemented!()
-    }
-
-    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
-        unimplemented!()
-    }
-
-    async fn create_source(&self, _req: CreateSourceRequest) -> Result<CreateSourceResponse> {
-        unimplemented!()
-    }
-
-    async fn create_materialized_source(
-        &self,
-        _req: CreateMaterializedSourceRequest,
-    ) -> Result<CreateMaterializedSourceResponse> {
-        unimplemented!()
-    }
-
-    async fn create_materialized_view(
-        &self,
-        _req: CreateMaterializedViewRequest,
-    ) -> Result<CreateMaterializedViewResponse> {
-        unimplemented!()
-    }
-
-    async fn report_vacuum_task(
-        &self,
-        _req: ReportVacuumTaskRequest,
-    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
-        unimplemented!()
-    }
-
-    async fn flush(&self, _req: FlushRequest) -> Result<FlushResponse> {
-        unimplemented!()
-    }
-}
-
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Debug, Clone)]
 pub struct GrpcMetaClient {
@@ -447,11 +318,88 @@ impl GrpcMetaClient {
     }
 }
 
-#[async_trait::async_trait]
-impl MetaClientInner for GrpcMetaClient {
+macro_rules! grpc_meta_client_impl {
+    ([], $( { $client:ident, $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(paste! {
+            impl GrpcMetaClient {
+                pub async fn [<$fn_name>](&self, request: $req) -> Result<$resp> {
+                    Ok(self
+                        .$client
+                        .to_owned()
+                        .$fn_name(request)
+                        .await
+                        .to_rw_result()?
+                        .into_inner())
+                }
+            }
+        })*
+    }
+}
+
+macro_rules! for_all_meta_rpc {
+    ($macro:tt $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
+            ,{ cluster_client, activate_worker_node, ActivateWorkerNodeRequest, ActivateWorkerNodeResponse }
+            ,{ cluster_client, delete_worker_node, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse }
+            ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
+            ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
+            ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ ddl_client, create_materialized_source, CreateMaterializedSourceRequest, CreateMaterializedSourceResponse }
+            ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
+            ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
+            ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
+            ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
+        }
+    };
+}
+
+for_all_meta_rpc! { grpc_meta_client_impl }
+
+macro_rules! grpc_hummock_meta_client_impl {
+    ([], $( {  $fn_name:ident, $req:ty, $resp:ty }),*) => {
+        $(paste! {
+            impl GrpcMetaClient {
+                pub async fn [<$fn_name>](&self, request: $req) -> std::result::Result<$resp, tonic::Status> {
+                    Ok(self
+                        .hummock_client
+                        .to_owned()
+                        .$fn_name(request)
+                        .await?
+                        .into_inner())
+                }
+            }
+        })*
+    }
+}
+
+macro_rules! for_hummock_meta_rpc {
+    ($macro:tt $(, $x:tt)*) => {
+        $macro! {
+            [$($x),*]
+            ,{ pin_version, PinVersionRequest, PinVersionResponse }
+            ,{ unpin_version, UnpinVersionRequest, UnpinVersionResponse }
+            ,{ pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
+            ,{ add_tables, AddTablesRequest, AddTablesResponse }
+            ,{ report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
+            ,{ get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
+            ,{ report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
+        }
+    };
+}
+
+for_hummock_meta_rpc! { grpc_hummock_meta_client_impl }
+
+impl GrpcMetaClient {
     // TODO(TaoWu): Use macro to refactor the following methods.
 
-    async fn subscribe(&self, request: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
+    pub async fn subscribe(
+        &self,
+        request: SubscribeRequest,
+    ) -> Result<Box<dyn NotificationStream>> {
         Ok(Box::new(
             self.notification_client
                 .to_owned()
@@ -460,216 +408,6 @@ impl MetaClientInner for GrpcMetaClient {
                 .to_rw_result()?
                 .into_inner(),
         ))
-    }
-
-    async fn add_worker_node(&self, req: AddWorkerNodeRequest) -> Result<AddWorkerNodeResponse> {
-        Ok(self
-            .cluster_client
-            .to_owned()
-            .add_worker_node(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn activate_worker_node(
-        &self,
-        req: ActivateWorkerNodeRequest,
-    ) -> Result<ActivateWorkerNodeResponse> {
-        Ok(self
-            .cluster_client
-            .to_owned()
-            .activate_worker_node(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn delete_worker_node(
-        &self,
-        req: DeleteWorkerNodeRequest,
-    ) -> Result<DeleteWorkerNodeResponse> {
-        Ok(self
-            .cluster_client
-            .to_owned()
-            .delete_worker_node(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn heartbeat(&self, req: HeartbeatRequest) -> Result<HeartbeatResponse> {
-        Ok(self
-            .heartbeat_client
-            .to_owned()
-            .heartbeat(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn list_all_nodes(&self, req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
-        Ok(self
-            .cluster_client
-            .to_owned()
-            .list_all_nodes(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn pin_version(
-        &self,
-        req: PinVersionRequest,
-    ) -> std::result::Result<PinVersionResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .pin_version(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn unpin_version(
-        &self,
-        req: UnpinVersionRequest,
-    ) -> std::result::Result<UnpinVersionResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .unpin_version(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn pin_snapshot(
-        &self,
-        req: PinSnapshotRequest,
-    ) -> std::result::Result<PinSnapshotResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .pin_snapshot(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn unpin_snapshot(
-        &self,
-        req: UnpinSnapshotRequest,
-    ) -> std::result::Result<UnpinSnapshotResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .unpin_snapshot(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn add_tables(
-        &self,
-        req: AddTablesRequest,
-    ) -> std::result::Result<AddTablesResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .add_tables(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn report_compaction_tasks(
-        &self,
-        req: ReportCompactionTasksRequest,
-    ) -> std::result::Result<ReportCompactionTasksResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .report_compaction_tasks(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn get_new_table_id(
-        &self,
-        req: GetNewTableIdRequest,
-    ) -> std::result::Result<GetNewTableIdResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .get_new_table_id(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn subscribe_compact_tasks(
-        &self,
-        req: SubscribeCompactTasksRequest,
-    ) -> std::result::Result<Streaming<SubscribeCompactTasksResponse>, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .subscribe_compact_tasks(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn create_database(&self, _req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
-        // TODO: add catalog client for catalogV2
-        todo!()
-    }
-
-    async fn create_schema(&self, _req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
-        // TODO: add catalog client for catalogV2
-        todo!()
-    }
-
-    async fn create_materialized_source(
-        &self,
-        req: CreateMaterializedSourceRequest,
-    ) -> Result<CreateMaterializedSourceResponse> {
-        Ok(self
-            .ddl_client
-            .to_owned()
-            .create_materialized_source(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn create_materialized_view(
-        &self,
-        req: CreateMaterializedViewRequest,
-    ) -> Result<CreateMaterializedViewResponse> {
-        Ok(self
-            .ddl_client
-            .to_owned()
-            .create_materialized_view(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
-    }
-
-    async fn report_vacuum_task(
-        &self,
-        req: ReportVacuumTaskRequest,
-    ) -> std::result::Result<ReportVacuumTaskResponse, tonic::Status> {
-        Ok(self
-            .hummock_client
-            .to_owned()
-            .report_vacuum_task(req)
-            .await?
-            .into_inner())
-    }
-
-    async fn flush(&self, req: FlushRequest) -> Result<FlushResponse> {
-        Ok(self
-            .stream_client
-            .to_owned()
-            .flush(req)
-            .await
-            .to_rw_result()?
-            .into_inner())
     }
 }
 

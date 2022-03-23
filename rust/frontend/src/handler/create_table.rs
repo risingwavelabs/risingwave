@@ -72,9 +72,8 @@ pub async fn handle_create_table(
     };
 
     let catalog_writer = session.env().catalog_writer();
-    // FIX ME
     catalog_writer
-        .create_materialized_table_source_workaround(table)
+        .create_materialized_table_source(table)
         .await?;
 
     Ok(PgResponse::new(

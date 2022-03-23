@@ -27,6 +27,7 @@ mod scheduler;
 pub mod session;
 pub mod utils;
 extern crate log;
+mod meta;
 pub mod test_utils;
 
 use std::ffi::OsString;

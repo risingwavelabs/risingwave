@@ -17,8 +17,7 @@ use std::rc::Rc;
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError, ToRwResult};
-use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use risingwave_sqlparser::ast::Statement;
@@ -27,7 +26,6 @@ use uuid::Uuid;
 use crate::binder::Binder;
 use crate::handler::util::{get_pg_field_descs, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::schedule::WorkerNodeManager;
 use crate::session::QueryContext;
 
 pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgResponse> {
@@ -49,7 +47,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         .to_batch_prost();
 
     // Choose the first node by WorkerNodeManager.
-    let manager = WorkerNodeManager::new(session.env().meta_client().clone()).await?;
+    let manager = session.env().worker_node_manager();
     let address = manager
         .list_worker_nodes()
         .get(0)
@@ -74,20 +72,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
     // TODO: hummock snapshot should maintain as cache instead of RPC each query.
     let meta_client = session.env().meta_client();
-    let pin_snapshot_req = PinSnapshotRequest {
-        context_id: 0,
-        // u64::MAX always return the greatest current epoch. Use correct `last_pinned` when
-        // retrying this RPC.
-        last_pinned: u64::MAX,
-    };
-    let epoch = meta_client
-        .inner
-        .pin_snapshot(pin_snapshot_req)
-        .await
-        .to_rw_result()?
-        .snapshot
-        .unwrap()
-        .epoch;
+    let epoch = meta_client.pin_snapshot().await?;
 
     let mut rows = vec![];
     compute_client
@@ -99,14 +84,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     }
 
     // Unpin corresponding snapshot.
-    meta_client
-        .inner
-        .unpin_snapshot(UnpinSnapshotRequest {
-            context_id: 0,
-            snapshot: Some(HummockSnapshot { epoch }),
-        })
-        .await
-        .to_rw_result()?;
+    meta_client.unpin_snapshot(epoch).await?;
 
     Ok(PgResponse::new(
         stmt_type,

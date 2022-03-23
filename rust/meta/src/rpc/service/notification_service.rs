@@ -13,7 +13,6 @@
 // limitations under the License.
 //
 use risingwave_common::error::tonic_err;
-use risingwave_common::try_match_expand;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -66,8 +65,7 @@ where
     ) -> Result<Response<Self::SubscribeStream>, Status> {
         let req = request.into_inner();
         let worker_type = req.get_worker_type().map_err(tonic_err)?;
-        let host_address = try_match_expand!(req.host, Some, "SubscribeRequest::host is empty")
-            .map_err(|e| e.to_grpc_status())?;
+        let host_address = req.get_host().map_err(tonic_err)?.clone();
 
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -87,6 +85,7 @@ where
                 let cluster_guard = self.cluster_manager.get_cluster_core_guard().await;
                 let nodes = cluster_guard.list_worker_node(WorkerType::ComputeNode, Some(Running));
 
+                // Send the snapshot on subscription. After that we will send only updates.
                 let meta_snapshot = MetaSnapshot {
                     nodes,
                     database,

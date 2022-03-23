@@ -28,7 +28,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SchemaId};
+use super::DatabaseId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
@@ -47,31 +47,28 @@ impl CatalogReader {
 ///  [`CatalogWriter`] is for DDL (create table/schema/database), it will only send rpc to meta and
 /// get the catalog version as response. then it will wait the local catalog to update to sync with
 /// the version.
+#[async_trait::async_trait]
+pub trait CatalogWriter: Send + Sync {
+    async fn create_database(&self, db_name: &str) -> Result<()>;
+
+    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
+
+    async fn create_materialized_view(&self, table: ProstTable) -> Result<()>;
+
+    async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()>;
+
+    async fn create_source(&self, source: ProstSource) -> Result<()>;
+}
+
 #[derive(Clone)]
-pub struct CatalogWriter {
+pub struct CatalogWriterImpl {
     meta_client: MetaClient,
     catalog_updated_rx: Receiver<CatalogVersion>,
 }
 
-impl CatalogWriter {
-    pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
-        Self {
-            meta_client,
-            catalog_updated_rx,
-        }
-    }
-
-    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
-        let mut rx = self.catalog_updated_rx.clone();
-        while *rx.borrow_and_update() < version {
-            rx.changed()
-                .await
-                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-        }
-        Ok(())
-    }
-
-    pub async fn create_database(&self, db_name: &str) -> Result<()> {
+#[async_trait::async_trait]
+impl CatalogWriter for CatalogWriterImpl {
+    async fn create_database(&self, db_name: &str) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_database(ProstDatabase {
@@ -82,7 +79,7 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    pub async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
         let (_, version) = self
             .meta_client
             .create_schema(ProstSchema {
@@ -94,25 +91,8 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    // TODO: it just change the catalog, just to unit test,will be deprecated soon
-    pub async fn create_materialized_view_workaround(&self, table: ProstTable) -> Result<()> {
-        let (_, version) = self
-            .meta_client
-            .create_materialized_view(
-                table,
-                StreamNode {
-                    ..Default::default()
-                },
-            )
-            .await?;
-        self.wait_version(version).await
-    }
-
-    // TODO: it just change the catalog, just to unit test,will be deprecated soon
-    pub async fn create_materialized_table_source_workaround(
-        &self,
-        table: ProstTable,
-    ) -> Result<()> {
+    /// for the `CREATE TABLE statement`
+    async fn create_materialized_table_source(&self, table: ProstTable) -> Result<()> {
         let table_clone = table.clone();
         let table_source = ProstSource {
             id: 0,
@@ -138,22 +118,41 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
-        todo!()
-    }
-
     // TODO: maybe here to pass a materialize plan node
-    pub async fn create_materialized_view(
-        &self,
-        _db_id: DatabaseId,
-        _schema_id: SchemaId,
-    ) -> Result<()> {
-        todo!()
+    async fn create_materialized_view(&self, table: ProstTable) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_materialized_view(
+                table,
+                StreamNode {
+                    ..Default::default()
+                },
+            )
+            .await?;
+        self.wait_version(version).await
     }
 
-    pub async fn create_source(&self, source: ProstSource) -> Result<()> {
+    async fn create_source(&self, source: ProstSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
         self.wait_version(version).await
+    }
+}
+
+impl CatalogWriterImpl {
+    pub fn new(meta_client: MetaClient, catalog_updated_rx: Receiver<CatalogVersion>) -> Self {
+        Self {
+            meta_client,
+            catalog_updated_rx,
+        }
+    }
+
+    async fn wait_version(&self, version: CatalogVersion) -> Result<()> {
+        let mut rx = self.catalog_updated_rx.clone();
+        while *rx.borrow_and_update() < version {
+            rx.changed()
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?;
+        }
+        Ok(())
     }
 }
