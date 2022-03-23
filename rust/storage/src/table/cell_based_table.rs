@@ -186,8 +186,6 @@ impl<S: StateStore> CellBasedTable<S> {
         for (key, _value) in &bytes {
             local.delete(key);
         }
-        batch.ingest(epoch).await?;
-
         // write updated kv_pairs in state_store
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
