@@ -39,10 +39,6 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn delete_cf(&self, cf: &str, key: &[u8]) -> Result<()>;
     async fn txn(&self, trx: Transaction) -> Result<()>;
 
-    /// We will need a proper implementation for `list`, `list_cf` in etcd
-    /// [`MetaStore`]. In a naive implementation, we need to select the latest version for each key
-    /// locally after fetching all versions of it from etcd, which may not meet our
-    /// performance expectation.
     async fn list_cf(&self, cf: &str) -> Result<Vec<Vec<u8>>> {
         self.snapshot().await.list_cf(cf).await
     }
