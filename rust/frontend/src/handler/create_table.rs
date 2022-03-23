@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
-use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
 use crate::session::QueryContext;
 
@@ -82,7 +82,7 @@ pub async fn handle_create_table(
             let schema = Schema::new(fields);
             let logical_scan = LogicalScan::new(
                 table_name.clone(),
-                TableId::default(),
+                TableId::placeholder(),
                 columns,
                 schema,
                 context.clone(),
@@ -97,12 +97,12 @@ pub async fn handle_create_table(
             StreamMaterialize::new(
                 context,
                 exchange_node.into(),
-                TableId::default(),
+                TableId::placeholder(),
                 vec![
                     // RowId column as key
                     FieldOrder {
                         index: 0,
-                        direct: crate::optimizer::property::Direction::Asc,
+                        direct: Direction::Asc,
                     },
                 ],
                 column_descs.iter().map(|x| x.column_id).collect(),
@@ -112,8 +112,8 @@ pub async fn handle_create_table(
         (Rc::new(materialize_node) as PlanRef).to_stream_prost()
     };
 
-    let json_plan = serde_json::to_string(&plan).unwrap();
-    tracing::info!(name= ?table_name, plan = ?json_plan);
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::info!("name={}, plan=\n{}", table_name, json_plan);
 
     let columns = column_descs
         .into_iter()
@@ -130,7 +130,7 @@ pub async fn handle_create_table(
         .collect_vec();
 
     let source = ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name.clone(),
@@ -141,7 +141,7 @@ pub async fn handle_create_table(
     };
 
     let table = ProstTable {
-        id: 0,
+        id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name,

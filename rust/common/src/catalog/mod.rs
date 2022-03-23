@@ -62,9 +62,17 @@ impl SchemaId {
 pub struct TableId {
     pub table_id: u32,
 }
+
 impl TableId {
     pub const fn new(table_id: u32) -> Self {
         TableId { table_id }
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debug.
+    pub const fn placeholder() -> Self {
+        TableId {
+            table_id: u32::MAX - 1,
+        }
     }
 
     pub fn table_id(&self) -> u32 {
