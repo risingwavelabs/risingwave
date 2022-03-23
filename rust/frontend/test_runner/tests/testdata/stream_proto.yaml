@@ -129,8 +129,7 @@
       "materializeNode": {
         "columnIds": [
           0,
-          1,
-          2
+          1
         ]
       }
     }
@@ -228,8 +227,7 @@
       "materializeNode": {
         "columnIds": [
           0,
-          1,
-          2
+          1
         ]
       }
     }
@@ -302,8 +300,7 @@
       ],
       "materializeNode": {
         "columnIds": [
-          0,
-          1
+          0
         ]
       }
     }
@@ -434,8 +431,7 @@
       ],
       "materializeNode": {
         "columnIds": [
-          0,
-          1
+          0
         ]
       }
     }
@@ -608,8 +604,7 @@
       ],
       "materializeNode": {
         "columnIds": [
-          0,
-          1
+          0
         ]
       }
     }

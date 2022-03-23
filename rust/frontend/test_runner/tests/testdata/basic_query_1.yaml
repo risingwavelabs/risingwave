@@ -12,7 +12,7 @@
       BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
         BatchScan { table: t, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1, #2, #3] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1, #2] }
       StreamProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [_row_id, v1, v2] }
@@ -29,7 +29,7 @@
         BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
           BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
       StreamProject { exprs: [$0], expr_alias: [_row_id] }
         StreamExchange { dist: Single }
           StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
@@ -43,7 +43,7 @@
         BatchFilter { predicate: ($1 < 1:Int32) }
           BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1, #2] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1] }
       StreamProject { exprs: [$0, $1], expr_alias: [_row_id, v1] }
         StreamExchange { dist: Single }
           StreamFilter { predicate: ($1 < 1:Int32) }
@@ -56,7 +56,7 @@
       BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
         BatchScan { table: t, columns: [] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
       StreamProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [] }
@@ -68,7 +68,7 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1] }
+    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1] }

@@ -19,10 +19,8 @@ use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use super::create_table::ROWID_NAME;
 use crate::binder::{Binder, BoundQuery};
 use crate::catalog::ColumnId;
 use crate::optimizer::PlanRef;
@@ -46,12 +44,6 @@ impl BoundQuery {
                 name: name.to_string(),
             });
         }
-
-        column_descs.push(ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(self.data_types().len() as i32),
-            name: ROWID_NAME.to_string(),
-        });
 
         column_descs
     }
