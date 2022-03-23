@@ -25,6 +25,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 
@@ -122,9 +123,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_table_source(&self, mut table: ProstTable) -> Result<()> {
-        table.id = self.gen_id();
-        self.catalog.write().create_table(&table);
+    async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        _plan: StreamNode,
+    ) -> Result<()> {
+        self.create_source(source).await?;
+        self.create_materialized_view(table).await?;
         Ok(())
     }
 
@@ -134,7 +140,8 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, source: ProstSource) -> Result<()> {
+    async fn create_source(&self, mut source: ProstSource) -> Result<()> {
+        source.id = self.gen_id();
         self.catalog.write().create_source(source);
         Ok(())
     }
