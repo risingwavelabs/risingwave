@@ -91,7 +91,7 @@ message ChainNode {
   plan.TableRefId table_ref_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
-  repeated int32 column_ids = 4;
+  repeated int32 column_ids = 3;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
