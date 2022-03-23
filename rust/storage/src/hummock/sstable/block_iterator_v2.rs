@@ -63,7 +63,7 @@ impl BlockIteratorV2 {
 
     pub fn seek_to_last(&mut self) {
         self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
-        self.next_until_prev(self.block.len());
+        self.next_until_prev_offset(self.block.len());
     }
 
     pub fn seek(&mut self, key: &[u8]) {
@@ -83,7 +83,7 @@ impl BlockIteratorV2 {
 
 impl BlockIteratorV2 {
     /// Invalidate current state after reaching a invalid state.
-    fn invalid(&mut self) {
+    fn invalidate(&mut self) {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
         self.key.clear();
@@ -97,7 +97,7 @@ impl BlockIteratorV2 {
     fn next_inner(&mut self) {
         let offset = self.offset + self.entry_len;
         if offset >= self.block.len() {
-            self.invalid();
+            self.invalidate();
             return;
         }
         let prefix = self.decode_prefix_at(offset);
@@ -130,7 +130,7 @@ impl BlockIteratorV2 {
 
     /// Move forward until the position reaches the previous position of the given `next_offset` or
     /// the last valid position if exists.
-    fn next_until_prev(&mut self, offset: usize) {
+    fn next_until_prev_offset(&mut self, offset: usize) {
         while self.offset + self.entry_len < std::cmp::min(self.block.len(), offset) {
             self.next_inner();
         }
@@ -141,7 +141,7 @@ impl BlockIteratorV2 {
     /// Note: Ensure that the current state is valid.
     fn prev_inner(&mut self) {
         if self.offset == 0 {
-            self.invalid();
+            self.invalidate();
             return;
         }
         if self.block.restart_point(self.restart_point_index) as usize == self.offset {
@@ -149,7 +149,7 @@ impl BlockIteratorV2 {
         }
         let origin_offset = self.offset;
         self.seek_restart_point_by_index(self.restart_point_index);
-        self.next_until_prev(origin_offset);
+        self.next_until_prev_offset(origin_offset);
     }
 
     /// Decode [`KeyPrefix`] at given offset.
