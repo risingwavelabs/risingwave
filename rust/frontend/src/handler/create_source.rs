@@ -51,7 +51,7 @@ pub(super) async fn handle_create_source(
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name(session.database(), schema_name, &source_name)?;
+        .check_relation_name_duplicated(session.database(), schema_name, &source_name)?;
 
     let (source, _columns) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => extract_protobuf_table_schema(protobuf_schema)?,

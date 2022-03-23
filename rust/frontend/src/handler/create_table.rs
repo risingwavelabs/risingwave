@@ -47,7 +47,7 @@ pub async fn handle_create_table(
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name(session.database(), &schema_name, &table_name)?;
+        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
