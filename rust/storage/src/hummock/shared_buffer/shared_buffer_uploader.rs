@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -39,7 +39,6 @@ pub struct SyncItem {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),

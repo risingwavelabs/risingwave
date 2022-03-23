@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use paste::paste;
 use risingwave_pb::plan::plan_node as pb_batch_node;
 use risingwave_pb::stream_plan::stream_node as pb_stream_node;

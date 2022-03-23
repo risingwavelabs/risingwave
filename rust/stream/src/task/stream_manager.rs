@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -320,7 +320,7 @@ impl StreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone());
+        let context = SharedContext::new(addr);
         Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 

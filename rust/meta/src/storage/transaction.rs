@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use crate::storage::{ColumnFamily, Key, Value};
 
 /// A `Transaction` executes several writes(aka. operations) to meta store atomically with optional
@@ -77,15 +77,12 @@ impl Transaction {
 
 pub enum Operation {
     /// `put` key value pairs.
-    /// If `WithVersion` is not specified, a default global version is used.
     Put {
         cf: ColumnFamily,
         key: Key,
         value: Value,
     },
     /// `delete` key value pairs.
-    /// If `WithVersion` is not specified, all versions of this `Key` are matched and deleted.
-    /// Otherwise, only specific version of this `Key` is deleted.
     Delete { cf: ColumnFamily, key: Key },
 }
 

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -28,6 +28,7 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
+#![feature(drain_filter)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod barrier;

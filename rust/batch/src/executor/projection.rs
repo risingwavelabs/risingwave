@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
@@ -169,6 +169,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
+            1024,
         );
 
         let mut proj_executor = ProjectionExecutor {

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
@@ -138,9 +138,17 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    /// for the `CREATE TABLE statement`
-    pub async fn create_materialized_table_source(&self, _table: ProstTable) -> Result<()> {
-        todo!()
+    pub async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
+        let (_, _, version) = self
+            .meta_client
+            .create_materialized_source(source, table, plan)
+            .await?;
+        self.wait_version(version).await
     }
 
     // TODO: maybe here to pass a materialize plan node

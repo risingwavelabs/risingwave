@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_pb::plan::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
@@ -22,8 +22,14 @@ use crate::util::sort_util::OrderType;
 
 /// Column ID is the unique identifier of a column in a table. Different from table ID,
 /// column ID is not globally unique.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct ColumnId(i32);
+
+impl std::fmt::Debug for ColumnId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "#{}", self.0)
+    }
+}
 
 impl ColumnId {
     pub const fn new(column_id: i32) -> Self {

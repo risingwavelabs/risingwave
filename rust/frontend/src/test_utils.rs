@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
+use std::error::Error;
 use std::mem;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -60,8 +61,11 @@ pub struct LocalFrontend {
 }
 
 impl SessionManager for LocalFrontend {
-    fn connect(&self) -> Arc<dyn Session> {
-        self.session_ref()
+    fn connect(
+        &self,
+        _database: &str,
+    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
+        Ok(self.session_ref())
     }
 }
 
