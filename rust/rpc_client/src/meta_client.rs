@@ -239,11 +239,11 @@ impl MetaClient {
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(min_interval);
+            let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
                 tokio::select! {
                     // Wait for interval
-                    _ = min_interval.tick() => {},
+                    _ = min_interval_ticker.tick() => {},
                     // Shutdown
                     _ = shutdown_rx.recv() => {
                         tracing::info!("Heartbeat loop is shutting down");
@@ -251,8 +251,20 @@ impl MetaClient {
                     }
                 }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
-                if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
-                    tracing::warn!("Failed to send_heartbeat. {}", err);
+                match tokio::time::timeout(
+                    // TODO: decide better min_interval for timeout
+                    min_interval * 3,
+                    meta_client.send_heartbeat(meta_client.worker_id()),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => {
+                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
+                    }
                 }
             }
         });
