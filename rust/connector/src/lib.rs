@@ -43,8 +43,6 @@ pub enum ConnectorConfig {
     Kinesis(AwsConfigInfo),
 }
 
-mod utils;
-
 #[cfg(test)]
 mod tests {
     #[test]

@@ -16,8 +16,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use parking_lot::{Mutex, MutexGuard};
 use async_trait::async_trait;
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -125,24 +125,12 @@ impl SourceManager for MemSourceManager {
             columns,
             row_id_index,
         };
-<<<<<<< HEAD
         let mut tables = self.get_sources()?;
         ensure!(
             !tables.contains_key(source_id),
             "Source id already exists: {:?}",
             source_id
         );
-||||||| parent of 91e37142 (stage)
-
-=======
-
-        let mut tables = self.get_sources()?;
-        ensure!(
-            !tables.contains_key(source_id),
-            "Source id already exists: {:?}",
-            source_id
-        );
->>>>>>> 91e37142 (stage)
         tables.insert(*source_id, desc);
 
         Ok(())
@@ -267,6 +255,7 @@ mod tests {
         assert!(drop_source_res.is_ok());
 
         let get_source_res = mem_source_manager.get_source(&table_id);
+
         assert!(get_source_res.is_err());
 
         Ok(())
