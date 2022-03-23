@@ -42,10 +42,7 @@ pub(super) fn handle_explain(
             materialized: true,
             query,
             ..
-        } => gen_create_mv_plan(&session, &mut planner, query.as_ref().clone())?,
-
-        Statement::CreateTable { .. } => todo!(),
-
+        } => gen_create_mv_plan(&*session, &mut planner, *query)?,
         stmt => {
             let bound = {
                 let mut binder = Binder::new(

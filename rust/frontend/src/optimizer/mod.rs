@@ -28,8 +28,9 @@ use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{LogicalProject, StreamMaterialize};
+use self::property::FieldOrder;
 use self::rule::*;
-use crate::catalog::TableId;
+use crate::catalog::{ColumnId, TableId};
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -145,20 +146,28 @@ impl PlanRoot {
     }
 
     /// optimize and generate a create materialize view plan
-    pub fn gen_create_mv_plan(&self) -> PlanRef {
+    pub fn gen_create_mv_plan(&self, order: Vec<FieldOrder>, column_ids: Vec<ColumnId>) -> PlanRef {
         let plan = self.gen_optimized_logical_plan();
 
         // Convert to physical plan node
         let plan = plan.to_stream_with_dist_required(&self.required_dist);
 
         // TODO: get the correct table id
+        let plan = StreamMaterialize::new(
+            self.logical_plan.ctx(),
+            plan,
+            TableId::new(0),
+            order,
+            column_ids,
+        )
+        .into();
 
         // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
         // result.
         // TODO: do a final column pruning after add the streaming project, but now
         // the column pruning is not used in streaming node, need to think.
 
-        StreamMaterialize::new(self.logical_plan.ctx(), plan, TableId::new(0)).into()
+        plan
     }
 }
 

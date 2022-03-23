@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
 use crate::session::QueryContext;
 
@@ -93,8 +93,21 @@ pub async fn handle_create_table(
         let exchange_node =
             { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
 
-        let materialize_node =
-            { StreamMaterialize::new(context, exchange_node.into(), TableId::default()) };
+        let materialize_node = {
+            StreamMaterialize::new(
+                context,
+                exchange_node.into(),
+                TableId::default(),
+                vec![
+                    // RowId column as key
+                    FieldOrder {
+                        index: 0,
+                        direct: crate::optimizer::property::Direction::Asc,
+                    },
+                ],
+                column_descs.iter().map(|x| x.column_id.clone()).collect(),
+            )
+        };
 
         (Rc::new(materialize_node) as PlanRef).to_stream_prost()
     };
