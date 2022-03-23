@@ -494,6 +494,7 @@ where
 
     /// Recovery the whole cluster from the latest epoch.
     async fn recovery(&self, prev_epoch: u64) {
+        // Fixme: IIUC, should use last committed epoch as prev_epoch when recovery.
         let new_epoch = self.epoch_generator.generate().into_inner();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
