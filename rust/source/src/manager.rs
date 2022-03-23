@@ -14,11 +14,12 @@
 //
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
 
@@ -169,12 +170,7 @@ impl MemSourceManager {
     }
 
     fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
-        self.sources.lock().map_err(|e| {
-            RwError::from(ErrorCode::InternalError(format!(
-                "failed to acquire storage manager lock: {}",
-                e
-            )))
-        })
+        Ok(self.sources.lock())
     }
 }
 
