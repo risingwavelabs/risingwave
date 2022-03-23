@@ -64,7 +64,7 @@
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { table_id: 0 }
-      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
+      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $0], expr_alias: [ ,  ] }
         StreamExchange { dist: Single }
           StreamTableScan { table: t, columns: [v1] }
 - sql: |
