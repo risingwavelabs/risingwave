@@ -47,7 +47,7 @@ impl SchemaCatalog {
 
     pub fn create_source(&mut self, prost: ProstSource) {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
 
         self.source_by_name.try_insert(name.clone(), prost).unwrap();
         self.source_name_by_id.try_insert(id, name).unwrap();
