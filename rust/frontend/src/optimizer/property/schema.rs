@@ -29,6 +29,11 @@ pub trait WithSchema {
             required_cols,
             self.schema().fields().len()
         );
+        assert_eq!(
+            required_cols.len(),
+            self.schema().fields().len(),
+            "required cols capacity != columns available",
+        );
     }
 }
 
