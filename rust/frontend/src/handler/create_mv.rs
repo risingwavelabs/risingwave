@@ -32,11 +32,7 @@ use crate::session::{QueryContext, SessionImpl};
 impl BoundQuery {
     /// Generate create MV's column desc from query.
     pub fn gen_create_mv_column_desc(&self) -> Vec<ColumnDesc> {
-        let mut column_descs = vec![ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(0),
-            name: ROWID_NAME.to_string(),
-        }];
+        let mut column_descs = vec![];
 
         for (i, (data_type, name)) in self
             .data_types()
@@ -46,10 +42,17 @@ impl BoundQuery {
         {
             column_descs.push(ColumnDesc {
                 data_type: data_type.clone(),
-                column_id: ColumnId::new((i + 1) as i32),
+                column_id: ColumnId::new(i as i32),
                 name: name.to_string(),
             });
         }
+
+        column_descs.push(ColumnDesc {
+            data_type: DataType::Int64,
+            column_id: ColumnId::new(self.data_types().len() as i32),
+            name: ROWID_NAME.to_string(),
+        });
+
         column_descs
     }
 }
