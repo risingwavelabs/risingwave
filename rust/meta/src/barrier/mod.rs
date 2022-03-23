@@ -340,7 +340,10 @@ where
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, Some(Running))
             .await;
-        let all_actor_infos = self.fragment_manager.load_all_actors(creating_table_id);
+        let all_actor_infos = self
+            .fragment_manager
+            .load_all_actors(creating_table_id)
+            .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 

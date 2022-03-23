@@ -198,7 +198,10 @@ where
         }
     }
 
-    pub async fn all_node_actors(&self, include_inactive: bool) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    pub async fn all_node_actors(
+        &self,
+        include_inactive: bool,
+    ) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
