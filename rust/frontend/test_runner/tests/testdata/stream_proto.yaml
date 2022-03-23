@@ -7,55 +7,41 @@
     input:
       - input:
           - input:
-              - input:
-                  - mergeNode: {}
-                  - batchPlanNode:
-                      tableRefId:
-                        tableId: 5
-                      columnDescs:
-                        - columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
-                chainNode: {}
-            filterNode:
-              searchCondition:
-                exprType: LESS_THAN
-                returnType:
-                  typeName: BOOLEAN
-                  isNullable: true
-                funcCall:
-                  children:
-                    - exprType: INPUT_REF
-                      returnType:
+              - mergeNode: {}
+              - batchPlanNode:
+                  tableRefId:
+                    tableId: 5
+                  columnDescs:
+                    - columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    - columnType:
                         typeName: INT32
                         isNullable: true
-                      inputRef:
-                        columnIdx: 1
-                    - exprType: CONSTANT_VALUE
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      constant:
-                        body: AAAAAQ==
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT64
-                isNullable: true
-              inputRef: {}
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef:
-                columnIdx: 1
+                      columnId: 1
+                      name: v1
+            chainNode: {}
+        filterNode:
+          searchCondition:
+            exprType: LESS_THAN
+            returnType:
+              typeName: BOOLEAN
+              isNullable: true
+            funcCall:
+              children:
+                - exprType: INPUT_REF
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  inputRef:
+                    columnIdx: 1
+                - exprType: CONSTANT_VALUE
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  constant:
+                    body: AAAAAQ==
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -74,35 +60,21 @@
     ---
     input:
       - input:
-          - input:
-              - mergeNode: {}
-              - batchPlanNode:
-                  tableRefId:
-                    tableId: 5
-                  columnDescs:
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-            chainNode: {}
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT64
-                isNullable: true
-              inputRef: {}
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef:
-                columnIdx: 1
+          - mergeNode: {}
+          - batchPlanNode:
+              tableRefId:
+                tableId: 5
+              columnDescs:
+                - columnType:
+                    typeName: INT64
+                    isNullable: true
+                  name: _row_id
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
+        chainNode: {}
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -160,51 +132,43 @@
           - input:
               - input:
                   - input:
-                      - input:
-                          - mergeNode: {}
-                          - batchPlanNode:
-                              tableRefId:
-                                tableId: 5
-                              columnDescs:
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 1
-                                  name: v1
-                        chainNode: {}
-                    projectNode:
-                      selectList:
-                        - exprType: INPUT_REF
-                          returnType:
-                            typeName: INT32
-                            isNullable: true
-                          inputRef: {}
-                globalSimpleAggNode:
-                  aggCalls:
-                    - type: SUM
-                      args:
-                        - input: {}
-                          type:
-                            typeName: INT32
-                            isNullable: true
+                      - mergeNode: {}
+                      - batchPlanNode:
+                          tableRefId:
+                            tableId: 5
+                          columnDescs:
+                            - columnType:
+                                typeName: INT32
+                                isNullable: true
+                              columnId: 1
+                              name: v1
+                    chainNode: {}
+                projectNode:
+                  selectList:
+                    - exprType: INPUT_REF
                       returnType:
-                        typeName: INT64
+                        typeName: INT32
                         isNullable: true
-            exchangeNode:
-              fields:
-                - dataType:
+                      inputRef: {}
+            globalSimpleAggNode:
+              aggCalls:
+                - type: SUM
+                  args:
+                    - input: {}
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
                     typeName: INT64
                     isNullable: true
-                  name: "agg#0"
-              strategy:
-                type: SIMPLE
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
+        exchangeNode:
+          fields:
+            - dataType:
                 typeName: INT64
                 isNullable: true
-              inputRef: {}
+              name: "agg#0"
+          strategy:
+            type: SIMPLE
     materializeNode:
       columnOrders:
         - orderType: ASCENDING

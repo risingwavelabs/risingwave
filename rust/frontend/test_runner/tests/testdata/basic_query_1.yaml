@@ -9,12 +9,10 @@
     select * from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-        BatchScan { table: t, columns: [_row_id, v1, v2] }
+      BatchScan { table: t, columns: [_row_id, v1, v2] }
   stream_plan: |
     StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1, #2], pk_indices: [0] }
-      StreamProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-        StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
+      StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
@@ -24,27 +22,23 @@
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [_row_id] }
-        BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
-          BatchScan { table: t, columns: [_row_id] }
+      BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
+        BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
     StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0], pk_indices: [0] }
-      StreamProject { exprs: [$0], expr_alias: [_row_id] }
-        StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
-          StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
+      StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
+        StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
 - sql: |
     create table t (v1 int);
     select * from t where v1<1;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1], expr_alias: [_row_id, v1] }
-        BatchFilter { predicate: ($1 < 1:Int32) }
-          BatchScan { table: t, columns: [_row_id, v1] }
+      BatchFilter { predicate: ($1 < 1:Int32) }
+        BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
     StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
-      StreamProject { exprs: [$0, $1], expr_alias: [_row_id, v1] }
-        StreamFilter { predicate: ($1 < 1:Int32) }
-          StreamTableScan { table: t, columns: [_row_id, v1], pk_indices: [0] }
+      StreamFilter { predicate: ($1 < 1:Int32) }
+        StreamTableScan { table: t, columns: [_row_id, v1], pk_indices: [0] }
 - sql: |
     create table t ();
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;

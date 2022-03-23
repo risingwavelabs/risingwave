@@ -51,29 +51,27 @@
     select * from t1 join t2 on (t1.v1 = t2.v1) join t3 on (t2.v2 = t3.v2);
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [_row_id, v1, v2, _row_id, v1, v2, _row_id, v1, v2] }
-        BatchHashJoin { type: Inner, predicate: $5 = $8 }
-          BatchExchange { order: [], dist: HashShard([5]) }
-            BatchHashJoin { type: Inner, predicate: $1 = $4 }
-              BatchExchange { order: [], dist: HashShard([1]) }
-                BatchScan { table: t1, columns: [_row_id, v1, v2] }
-              BatchExchange { order: [], dist: HashShard([4]) }
-                BatchScan { table: t2, columns: [_row_id, v1, v2] }
-          BatchExchange { order: [], dist: HashShard([8]) }
-            BatchScan { table: t3, columns: [_row_id, v1, v2] }
+      BatchHashJoin { type: Inner, predicate: $5 = $8 }
+        BatchExchange { order: [], dist: HashShard([5]) }
+          BatchHashJoin { type: Inner, predicate: $1 = $4 }
+            BatchExchange { order: [], dist: HashShard([1]) }
+              BatchScan { table: t1, columns: [_row_id, v1, v2] }
+            BatchExchange { order: [], dist: HashShard([4]) }
+              BatchScan { table: t2, columns: [_row_id, v1, v2] }
+        BatchExchange { order: [], dist: HashShard([8]) }
+          BatchScan { table: t3, columns: [_row_id, v1, v2] }
   stream_plan: |
     StreamMaterialize { table_id: 0, column_order: [$0 ASC, $3 ASC, $6 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 3, 6] }
-      StreamProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7, $8], expr_alias: [_row_id, v1, v2, _row_id, v1, v2, _row_id, v1, v2] }
-        StreamExchange { dist: Single }
-          StreamHashJoin { type: Inner, predicate: $5 = $8 }
-            StreamExchange { dist: HashShard([5]) }
-              StreamHashJoin { type: Inner, predicate: $1 = $4 }
-                StreamExchange { dist: HashShard([1]) }
-                  StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
-                StreamExchange { dist: HashShard([4]) }
-                  StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
-            StreamExchange { dist: HashShard([8]) }
-              StreamTableScan { table: t3, columns: [_row_id, v1, v2], pk_indices: [0] }
+      StreamExchange { dist: Single }
+        StreamHashJoin { type: Inner, predicate: $5 = $8 }
+          StreamExchange { dist: HashShard([5]) }
+            StreamHashJoin { type: Inner, predicate: $1 = $4 }
+              StreamExchange { dist: HashShard([1]) }
+                StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
+              StreamExchange { dist: HashShard([4]) }
+                StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
+          StreamExchange { dist: HashShard([8]) }
+            StreamTableScan { table: t3, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
     create table t2 (v1 int not null, v2 int not null);
