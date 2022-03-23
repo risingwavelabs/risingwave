@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
+use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -233,19 +234,9 @@ where
         };
 
         // 2. Update expire_at
-        let expire_at = SystemTime::now()
-            .add(self.max_heartbeat_interval)
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Clock may have gone backwards")
-            .as_secs();
-        core.update_worker_ttl(key, expire_at);
+        core.update_worker_ttl(key, self.max_heartbeat_interval);
 
         Ok(())
-    }
-
-    async fn update_worker_ttl(&self, host_address: HostAddress, expire_at: u64) {
-        let mut core = self.core.write().await;
-        core.update_worker_ttl(host_address, expire_at);
     }
 
     pub async fn start_heartbeat_checker(
@@ -269,7 +260,7 @@ where
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("Clock may have gone backwards")
                     .as_secs();
-                let workers_to_init_or_delete = cluster_manager_ref
+                let mut workers_to_init_or_delete = cluster_manager_ref
                     .core
                     .read()
                     .await
@@ -281,18 +272,18 @@ where
                     .filter(|worker| worker.expire_at() < now)
                     .cloned()
                     .collect_vec();
+                // 1. Initialize new workers' expire_at.
+                for worker in
+                    workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
+                {
+                    cluster_manager_ref.core.write().await.update_worker_ttl(
+                        worker.key().expect("illegal key"),
+                        cluster_manager_ref.max_heartbeat_interval,
+                    );
+                }
+                // 2. Delete expired workers.
                 for worker in workers_to_init_or_delete {
                     let key = worker.key().expect("illegal key");
-                    if worker.expire_at() == INVALID_EXPIRE_AT {
-                        // Initialize expire_at
-                        cluster_manager_ref
-                            .update_worker_ttl(
-                                key,
-                                now + cluster_manager_ref.max_heartbeat_interval.as_secs(),
-                            )
-                            .await;
-                        continue;
-                    }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
                             cluster_manager_ref
@@ -510,9 +501,17 @@ impl StoredClusterManagerCore {
         }
     }
 
-    fn update_worker_ttl(&mut self, host_address: HostAddress, expire_at: u64) {
+    fn update_worker_ttl(&mut self, host_address: HostAddress, ttl: Duration) {
         match self.workers.entry(WorkerKey(host_address)) {
             Entry::Occupied(mut worker) => {
+                let expire_at = cmp::max(
+                    worker.get().expire_at(),
+                    SystemTime::now()
+                        .add(ttl)
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock may have gone backwards")
+                        .as_secs(),
+                );
                 worker.get_mut().set_expire_at(expire_at);
             }
             Entry::Vacant(_) => {}
