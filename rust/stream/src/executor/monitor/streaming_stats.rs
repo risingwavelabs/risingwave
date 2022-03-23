@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use prometheus::core::{AtomicU64, GenericCounterVec};
 use prometheus::{register_int_counter_vec_with_registry, Registry};
 

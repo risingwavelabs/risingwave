@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use core::fmt;
 use std::collections::HashMap;
 
@@ -20,7 +20,7 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::ObjectType;
-use crate::ast::{display_comma_separated, Ident, SqlOption};
+use crate::ast::{display_comma_separated, ColumnDef, Ident, SqlOption, TableConstraint};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -71,7 +71,8 @@ macro_rules! impl_fmt_display {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct CreateSourceStatement {
     pub if_not_exists: bool,
-    // Source name.
+    pub columns: Vec<ColumnDef>,
+    pub constraints: Vec<TableConstraint>,
     pub source_name: Ident,
     pub with_properties: WithProperties,
     pub source_schema: SourceSchema,
@@ -80,8 +81,9 @@ pub struct CreateSourceStatement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SourceSchema {
-    Protobuf(ProtobufSchema), // Keyword::PROTOBUF ProtobufSchema
-    Json,                     // Keyword::JSON
+    Protobuf(ProtobufSchema),
+    // Keyword::PROTOBUF ProtobufSchema
+    Json, // Keyword::JSON
 }
 
 impl ParseTo for SourceSchema {
@@ -148,13 +150,19 @@ impl fmt::Display for ProtobufSchema {
 
 impl ParseTo for CreateSourceStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS],    p);
+        impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(source_name: Ident, p);
+
+        // parse columns
+        let (columns, constraints) = p.parse_columns()?;
+
         impl_parse_to!(with_properties: WithProperties, p);
         impl_parse_to!([Keyword::ROW, Keyword::FORMAT], p);
         impl_parse_to!(source_schema: SourceSchema, p);
         Ok(Self {
             if_not_exists,
+            columns,
+            constraints,
             source_name,
             with_properties,
             source_schema,

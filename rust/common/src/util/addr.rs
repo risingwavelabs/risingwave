@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 
 pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
