@@ -26,6 +26,7 @@
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(map_first_last)]
 #![feature(let_chains)]
 #![feature(exact_size_is_empty)]
 #![cfg_attr(coverage, feature(no_coverage))]
