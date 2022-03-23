@@ -20,6 +20,8 @@ message StreamSourceInfo {
   RowFormatType row_format = 2;
   string row_schema_location = 3;
   int32 row_id_index = 4;
+  repeated plan.ColumnCatalog columns = 5;
+  repeated int32 pk_column_ids = 6;
 }
 
 message TableSourceInfo {

@@ -1233,10 +1233,11 @@ impl Parser {
             .is_some();
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_create_table(or_replace, temporary)
-        } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::VIEW) {
+        // } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::VIEW)
+        // {     self.prev_token();
+        // self.parse_create_view(or_replace)
+        } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::SOURCE) {
             self.prev_token();
-            self.parse_create_view(or_replace)
-        } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_create_source(or_replace)
         } else if or_replace {
             self.expected(
@@ -1361,7 +1362,7 @@ impl Parser {
         })
     }
 
-    fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+    pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {

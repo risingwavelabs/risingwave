@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::iter;
 
 // Copyright 2022 Singularity Data
 //
@@ -16,12 +17,17 @@ use std::collections::HashMap;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan::{ColumnDesc as ProstColumnDesc, RowFormatType};
+use risingwave_pb::plan::{
+    ColumnCatalog, ColumnDesc as ProstColumnDesc, ColumnDesc, RowFormatType,
+};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
+use crate::binder::expr::bind_data_type;
+use crate::handler::create_table::ROWID_NAME;
 use crate::session::QueryContext;
 
 fn extract_protobuf_table_schema(
@@ -47,6 +53,31 @@ pub(super) async fn handle_create_source(
     // fix: there is no schema name?
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
+
+    let _materialized = stmt.materialized;
+
+    let columns = stmt.columns;
+
+    let column_catalogs = iter::once(Ok(ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_id: 0,
+            name: ROWID_NAME.to_string(),
+            column_type: Some(DataType::Int32.to_protobuf()),
+        }),
+        is_hidden: true,
+    }))
+    .chain(columns.into_iter().enumerate().map(|(idx, col)| {
+        Ok(ColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_id: (idx + 1) as i32,
+                name: col.name.to_string(),
+                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
+            }),
+            is_hidden: false,
+        })
+    }))
+    .collect::<Result<_>>()?;
+
     let (database_id, schema_id) = session
         .env()
         .catalog_reader()
@@ -59,7 +90,10 @@ pub(super) async fn handle_create_source(
             StreamSourceInfo {
                 properties: HashMap::from(stmt.with_properties),
                 row_format: RowFormatType::Json as i32,
-                ..Default::default()
+                row_schema_location: "".to_string(),
+                row_id_index: 0,
+                columns: column_catalogs,
+                pk_column_ids: vec![0],
             },
             vec![],
         ),
