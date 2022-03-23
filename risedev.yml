@@ -10,6 +10,7 @@ risedev:
   ci-3node:
     - use: minio
     # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
     - use: meta-node
     - use: compute-node
       port: 5687
@@ -26,6 +27,7 @@ risedev:
   ci-1node:
     - use: minio
     # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
     - use: meta-node
     - use: compute-node
     - use: frontend
@@ -133,6 +135,9 @@ template:
 
     # Peer listen port of the single-node etcd.
     peer-port: 2389
+
+    # Whether to enable fsync (NEVER SET TO TRUE IN PRODUCTION ENVIRONMENT!)
+    unsafe-no-fsync: false
 
   compute-node:
     # Compute-node listen address
