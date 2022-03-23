@@ -1,11 +1,16 @@
 //! Custom implementation for prost types
 
-use std::net::{AddrParseError, SocketAddr};
+use std::net::{SocketAddr, ToSocketAddrs};
 
 impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
-    pub fn to_socket_addr(&self) -> Result<SocketAddr, AddrParseError> {
-        Ok(SocketAddr::new(self.host.parse()?, self.port as u16))
+    /// `HostAddress.host` may be a host name or an IP address.
+    pub fn to_socket_addr(&self) -> Result<SocketAddr, std::io::Error> {
+        match (self.host.clone(), self.port as u16)
+            .to_socket_addrs() {
+            Ok(mut addrs) => Ok(addrs.next().unwrap()),
+            Err(err) => Err(err),
+            }
     }
 }
 
