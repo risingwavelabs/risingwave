@@ -61,6 +61,8 @@ pub(super) async fn handle_create_source(
             column_id: 0,
             name: ROWID_NAME.to_string(),
             column_type: Some(DataType::Int32.to_protobuf()),
+            field_descs: vec![],
+            type_name: "".to_string(),
         }),
         is_hidden: true,
     }))
@@ -70,6 +72,8 @@ pub(super) async fn handle_create_source(
                 column_id: (idx + 1) as i32,
                 name: col.name.to_string(),
                 column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
+                field_descs: vec![],
+                type_name: "".to_string(),
             }),
             is_hidden: false,
         })
