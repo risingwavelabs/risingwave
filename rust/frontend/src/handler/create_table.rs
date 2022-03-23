@@ -165,38 +165,56 @@ pub async fn handle_create_table(
     ))
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::collections::HashMap;
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
 
-//     use risingwave_common::types::DataType;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
 
-//     use crate::catalog::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-//     use crate::catalog::table_catalog::ROWID_NAME;
-//     use crate::test_utils::LocalFrontend;
+    use super::*;
+    use crate::test_utils::LocalFrontend;
 
-//     #[tokio::test]
-//     async fn test_create_table_handler() {
-//         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
-//         let frontend = LocalFrontend::new().await;
-//         frontend.run_sql(sql).await.unwrap();
+    #[tokio::test]
+    async fn test_create_table_handler() {
+        let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
 
-//         let catalog_manager = frontend.session().env().catalog_mgr();
-//         let table = catalog_manager
-//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-//             .unwrap();
-//         let columns = table
-//             .columns()
-//             .iter()
-//             .map(|col| (col.name().into(), col.data_type()))
-//             .collect::<HashMap<String, DataType>>();
-//         let mut expected_map = HashMap::new();
-//         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
-//         expected_map.insert("v1".to_string(), DataType::Int16);
-//         expected_map.insert("v2".to_string(), DataType::Int32);
-//         expected_map.insert("v3".to_string(), DataType::Int64);
-//         expected_map.insert("v4".to_string(), DataType::Float64);
-//         expected_map.insert("v5".to_string(), DataType::Float64);
-//         assert_eq!(columns, expected_map);
-//     }
-// }
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        // Check source exists.
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .unwrap()
+            .clone();
+        assert_eq!(source.name, "t");
+
+        // Check table exists.
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .unwrap()
+            .clone();
+        assert_eq!(table.name(), "t");
+
+        let columns = table
+            .columns()
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let expected_columns = maplit::hashmap! {
+            ROWID_NAME => DataType::Int64,
+            "v1" => DataType::Int16,
+            "v2" => DataType::Int32,
+            "v3" => DataType::Int64,
+            "v4" => DataType::Float64,
+            "v5" => DataType::Float64,
+        };
+
+        assert_eq!(columns, expected_columns);
+    }
+}
