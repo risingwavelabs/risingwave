@@ -41,7 +41,6 @@ pub async fn handle_create_table(
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
-    let context = Rc::new(RefCell::new(context));
 
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let (database_id, schema_id) = session
@@ -67,34 +66,40 @@ pub async fn handle_create_table(
         column_descs
     };
 
-    let source_node = {
-        let (columns, fields) = column_descs
-            .iter()
-            .map(|c| {
-                (
-                    c.column_id,
-                    Field::with_name(c.data_type.clone(), c.name.clone()),
-                )
-            })
-            .unzip();
-        let schema = Schema::new(fields);
-        let logical_scan = LogicalScan::new(
-            table_name.clone(),
-            TableId::default(),
-            columns,
-            schema,
-            context.clone(),
-        );
-        StreamSource::new(logical_scan, SourceType::Table)
+    let plan = {
+        let context = Rc::new(RefCell::new(context));
+
+        let source_node = {
+            let (columns, fields) = column_descs
+                .iter()
+                .map(|c| {
+                    (
+                        c.column_id,
+                        Field::with_name(c.data_type.clone(), c.name.clone()),
+                    )
+                })
+                .unzip();
+            let schema = Schema::new(fields);
+            let logical_scan = LogicalScan::new(
+                table_name.clone(),
+                TableId::default(),
+                columns,
+                schema,
+                context.clone(),
+            );
+            StreamSource::new(logical_scan, SourceType::Table)
+        };
+
+        let exchange_node =
+            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
+
+        let materialize_node =
+            { StreamMaterialize::new(context.clone(), exchange_node.into(), TableId::default()) };
+
+        let plan = (Rc::new(materialize_node) as PlanRef).to_stream_prost();
+
+        plan
     };
-
-    let exchange_node =
-        { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
-
-    let materialize_node =
-        { StreamMaterialize::new(context.clone(), exchange_node.into(), TableId::default()) };
-
-    let plan = (Rc::new(materialize_node) as PlanRef).to_stream_prost();
 
     let json_plan = serde_json::to_string(&plan).unwrap();
     tracing::info!(name= ?table_name, plan = ?json_plan);
@@ -135,8 +140,6 @@ pub async fn handle_create_table(
         dependent_relations: vec![],
         optional_associated_source_id: None,
     };
-
-    drop(context);
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
