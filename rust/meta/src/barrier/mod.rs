@@ -284,7 +284,7 @@ where
     }
 
     async fn inject_barrier<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
-        let mutation = command_context.to_mutation()?;
+        let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
 
         let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {
@@ -362,7 +362,7 @@ where
                 })?;
         }
 
-        let node_actors = self.fragment_manager.all_node_actors(false)?;
+        let node_actors = self.fragment_manager.all_node_actors(false).await?;
         for (node_id, actors) in &info.actor_map {
             let client = self
                 .clients

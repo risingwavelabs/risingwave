@@ -13,14 +13,15 @@
 // limitations under the License.
 //
 use std::sync::Arc;
+use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, DataChunk, I32Array};
+use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -30,15 +31,21 @@ pub(super) struct ValuesExecutor {
     rows: Vec<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
+    chunk_size: usize,
 }
 
 impl ValuesExecutor {
-    #[cfg(test)]
-    pub(crate) fn new(rows: Vec<Vec<BoxedExpression>>, schema: Schema, identity: String) -> Self {
+    pub(crate) fn new(
+        rows: Vec<Vec<BoxedExpression>>,
+        schema: Schema,
+        identity: String,
+        chunk_size: usize,
+    ) -> Self {
         Self {
             rows,
             schema,
             identity,
+            chunk_size,
         }
     }
 }
@@ -58,22 +65,6 @@ impl Executor for ValuesExecutor {
         let cardinality = self.rows.len();
         ensure!(cardinality > 0);
 
-        let mut array_builders = self
-            .rows
-            .first()
-            .ok_or_else(|| RwError::from(InternalError("Can't values empty rows!".to_string())))?
-            .iter() // for each column
-            .map(|col| {
-                col.return_type()
-                    .create_array_builder(cardinality)
-                    .map_err(|_| {
-                        RwError::from(InternalError(
-                            "Creat array builder failed when values".to_string(),
-                        ))
-                    })
-            })
-            .collect::<Result<Vec<ArrayBuilderImpl>>>()?;
-
         if self.schema.fields.is_empty() {
             let cardinality = self.rows.len();
             self.rows.clear();
@@ -87,7 +78,9 @@ impl Executor for ValuesExecutor {
             .columns(vec![Column::new(Arc::new(one_row_array.into()))])
             .build();
 
-        for row in self.rows.drain(0..self.rows.len()) {
+        let chunk_size = self.chunk_size.min(self.rows.len());
+        let mut array_builders = self.schema.create_array_builders(chunk_size)?;
+        for row in self.rows.drain(..chunk_size) {
             for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
                 builder.append_array(&out)?;
@@ -140,11 +133,12 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self {
+        Ok(Box::new(Self::new(
             rows,
-            schema: Schema { fields },
-            identity: source.plan_node().get_identity().clone(),
-        }))
+            Schema { fields },
+            source.plan_node().get_identity().clone(),
+            DEFAULT_CHUNK_BUFFER_SIZE,
+        )))
     }
 }
 
@@ -178,11 +172,12 @@ mod tests {
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
-        let mut values_executor = ValuesExecutor {
-            rows: vec![exprs],
-            schema: Schema { fields },
-            identity: "ValuesExecutor".to_string(),
-        };
+        let mut values_executor = ValuesExecutor::new(
+            vec![exprs],
+            Schema { fields },
+            "ValuesExecutor".to_string(),
+            1024,
+        );
         values_executor.open().await.unwrap();
 
         let fields = &values_executor.schema().fields;
@@ -207,14 +202,54 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_chunk_split_size() {
+        let rows = [
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(1)),
+            )) as BoxedExpression,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(2)),
+            )) as BoxedExpression,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(3)),
+            )) as BoxedExpression,
+            Box::new(LiteralExpression::new(
+                DataType::Int32,
+                Some(ScalarImpl::Int32(4)),
+            )) as BoxedExpression,
+        ]
+        .into_iter()
+        .map(|expr| vec![expr])
+        .collect::<Vec<_>>();
+
+        let fields = vec![Field::unnamed(DataType::Int32)];
+        let mut values_executor =
+            ValuesExecutor::new(rows, Schema { fields }, "ValuesExecutor".to_string(), 3);
+
+        assert_eq!(
+            values_executor.next().await.unwrap().unwrap().cardinality(),
+            3
+        );
+        assert_eq!(
+            values_executor.next().await.unwrap().unwrap().cardinality(),
+            1
+        );
+        assert!(values_executor.next().await.unwrap().is_none());
+    }
+
     // Handle the possible case of ValuesNode([[]])
     #[tokio::test]
     async fn test_no_column_values_executor() {
-        let mut values_executor = ValuesExecutor {
-            rows: vec![vec![]], // One single row with no column.
-            schema: Schema::default(),
-            identity: "ValuesExecutor".to_string(),
-        };
+        let mut values_executor = ValuesExecutor::new(
+            vec![vec![]], // One single row with no column.
+            Schema::default(),
+            "ValuesExecutor".to_string(),
+            1024,
+        );
         values_executor.open().await.unwrap();
 
         let result = values_executor.next().await.unwrap().unwrap();

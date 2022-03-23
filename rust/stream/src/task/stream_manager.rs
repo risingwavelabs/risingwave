@@ -16,10 +16,11 @@ use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
+use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
@@ -149,7 +150,7 @@ impl StreamManager {
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<oneshot::Receiver<()>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
             .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
@@ -191,7 +192,7 @@ impl StreamManager {
     pub fn send_barrier_for_test(&self, barrier: &Barrier) -> Result<()> {
         use std::iter::empty;
 
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         assert!(barrier_manager.is_local_mode());
         barrier_manager.send_barrier(barrier, empty(), empty())?;
@@ -199,7 +200,7 @@ impl StreamManager {
     }
 
     pub fn drop_actor(&self, actors: &[ActorId]) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         for id in actors {
             core.drop_actor(*id);
         }
@@ -218,7 +219,7 @@ impl StreamManager {
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         core.context.take_receiver(&ids)
     }
 
@@ -227,13 +228,13 @@ impl StreamManager {
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
     ) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.update_actors(actors, hanging_channels)
     }
 
     /// This function was called while [`StreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
-        let handles = self.core.lock().unwrap().take_all_handles()?;
+        let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
             handle.await?;
         }
@@ -242,7 +243,7 @@ impl StreamManager {
 
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
-        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
+        let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap();
         }
@@ -254,30 +255,30 @@ impl StreamManager {
         &self,
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.update_actor_info(req)
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
 
     #[cfg(test)]
     pub fn take_source(&self) -> futures::channel::mpsc::Sender<Message> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.mock_source.0.take().unwrap()
     }
 
     #[cfg(test)]
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         core.context.take_receiver(&ids).unwrap()
     }
 
     pub fn state_store(&self) -> StateStoreImpl {
-        self.core.lock().unwrap().state_store.clone()
+        self.core.lock().state_store.clone()
     }
 }
 
