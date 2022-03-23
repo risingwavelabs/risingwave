@@ -21,7 +21,8 @@ use serde::Deserialize;
 
 use crate::error::{ErrorCode, Result, RwError};
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, DataType, Datum, Decimal, ScalarImpl,
+    deserialize_datum_from, deserialize_datum_not_null_from, serialize_datum_into,
+    serialize_datum_not_null_into, DataType, Datum, Decimal, ScalarImpl,
 };
 
 /// Serialize datum into cell bytes (Not order guarantee, used in value encoding).
@@ -34,6 +35,16 @@ pub fn serialize_cell(cell: &Datum) -> Result<Vec<u8>> {
     Ok(serializer.into_inner())
 }
 
+/// Serialize datum cannot be null into cell bytes.
+pub fn serialize_cell_not_null(cell: &Datum) -> Result<Vec<u8>> {
+    let mut serializer = value_encoding::Serializer::new(vec![]);
+    if let Some(ScalarImpl::Decimal(decimal)) = cell {
+        return serialize_decimal(decimal);
+    }
+    serialize_datum_not_null_into(cell, serializer.memcom_ser())?;
+    Ok(serializer.into_inner())
+}
+
 /// Deserialize cell bytes into datum (Not order guarantee, used in value decoding).
 pub fn deserialize_cell(
     deserializer: &mut value_encoding::Deserializer<impl Buf>,
@@ -42,6 +53,20 @@ pub fn deserialize_cell(
     match ty {
         &DataType::Decimal => deserialize_decimal(deserializer),
         _ => Ok(deserialize_datum_from(ty, deserializer.memcom_de())?),
+    }
+}
+
+/// Deserialize cell bytes which cannot be null into datum.
+pub fn deserialize_cell_not_null(
+    deserializer: &mut value_encoding::Deserializer<impl Buf>,
+    ty: DataType,
+) -> Result<Datum> {
+    match ty {
+        DataType::Decimal => deserialize_decimal(deserializer),
+        _ => Ok(deserialize_datum_not_null_from(
+            ty,
+            deserializer.memcom_de(),
+        )?),
     }
 }
 
