@@ -20,6 +20,7 @@ use itertools::Itertools;
 use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -51,6 +52,10 @@ impl ColIndexMapping {
         Self { map, target_size }
     }
 
+    pub fn identical_map(target_size: usize) -> Self {
+        let map = (0..target_size).into_iter().map(|x| Some(x)).collect();
+        Self::new(map)
+    }
     /// Create a partial mapping which maps range `(0..source_num)` to range
     /// `(offset..offset+source_num)`.
     ///
@@ -192,6 +197,25 @@ impl ColIndexMapping {
 
     pub fn is_empty(&self) -> bool {
         self.target_size() == 0
+    }
+
+    pub fn rewrite_order(&self, mut order: Order) -> Order {
+        for field in order.field_order.iter_mut() {
+            field.index = self.map(field.index)
+        }
+        order
+    }
+
+    pub fn rewrite_distribution(&mut self, mut dist: Distribution) -> Distribution {
+        match dist {
+            Distribution::HashShard(mut col_idxes) => {
+                for idx in col_idxes.iter_mut() {
+                    *idx = self.map(*idx);
+                }
+                Distribution::HashShard(col_idxes)
+            }
+            _ => dist,
+        }
     }
 }
 

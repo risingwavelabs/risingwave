@@ -99,4 +99,8 @@ impl ToStream for LogicalDelete {
     fn to_stream(&self) -> PlanRef {
         unreachable!("delete should always be converted to batch plan");
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+        unreachable!("delete should always be converted to batch plan");
+    }
 }

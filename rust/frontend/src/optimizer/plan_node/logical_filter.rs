@@ -72,6 +72,15 @@ impl PlanTreeNodeUnary for LogicalFilter {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.predicate.clone())
     }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        mut input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let predicate = self.predicate().clone().rewrite_expr(&mut input_col_change);
+        (Self::new(input, predicate).into(), input_col_change)
+    }
 }
 impl_plan_tree_node_for_unary! {LogicalFilter}
 impl fmt::Display for LogicalFilter {
@@ -121,6 +130,12 @@ impl ToStream for LogicalFilter {
         let new_input = self.input().to_stream();
         let new_logical = self.clone_with_input(new_input);
         StreamFilter::new(new_logical).into()
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        (filter.into(), out_col_change)
     }
 }
 
