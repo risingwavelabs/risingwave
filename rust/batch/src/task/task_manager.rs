@@ -13,8 +13,9 @@
 // limitations under the License.
 //
 use std::collections::{hash_map, HashMap};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
@@ -48,7 +49,7 @@ impl BatchManager {
         let task_id = task.get_task_id().clone();
 
         task.async_execute()?;
-        if let hash_map::Entry::Vacant(e) = self.tasks.lock().unwrap().entry(task_id.clone()) {
+        if let hash_map::Entry::Vacant(e) = self.tasks.lock().entry(task_id.clone()) {
             e.insert(Box::new(task));
             Ok(())
         } else {
@@ -64,7 +65,6 @@ impl BatchManager {
         let task_id = TaskId::from(output_id.get_task_id()?);
         self.tasks
             .lock()
-            .unwrap()
             .get(&task_id)
             .ok_or(TaskNotFound)?
             .get_task_output(output_id)
@@ -73,7 +73,7 @@ impl BatchManager {
     #[cfg(test)]
     pub fn remove_task(&self, sid: &ProstTaskId) -> Result<Option<Box<BatchTaskExecution>>> {
         let task_id = TaskId::from(sid);
-        match self.tasks.lock().unwrap().remove(&task_id) {
+        match self.tasks.lock().remove(&task_id) {
             Some(t) => Ok(Some(t)),
             None => Err(TaskNotFound.into()),
         }
@@ -81,7 +81,7 @@ impl BatchManager {
 
     /// Returns error if task is not running.
     pub fn check_if_task_running(&self, task_id: &TaskId) -> Result<()> {
-        match self.tasks.lock().unwrap().get(task_id) {
+        match self.tasks.lock().get(task_id) {
             Some(task) => task.check_if_running(),
             None => Err(TaskNotFound.into()),
         }
@@ -91,7 +91,6 @@ impl BatchManager {
         Ok(self
             .tasks
             .lock()
-            .unwrap()
             .get(task_id)
             .ok_or(TaskNotFound)?
             .get_error())
