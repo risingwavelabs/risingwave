@@ -10,10 +10,10 @@ CREATE SOURCE src ROW FORMAT JSON
 ---
 CREATE SOURCE src ROW FORMAT JSON
 =>
-CreateSource(CreateSourceStatement { if_not_exists: false, source_name: Ident { value: "src", quote_style: None }, with_properties: WithProperties([]), source_schema: Json })
+CreateSource(CreateSourceStatement { if_not_exists: false, columns: [], constraints: [], source_name: Ident { value: "src", quote_style: None }, with_properties: WithProperties([]), source_schema: Json })
 
 CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
 ---
 CREATE SOURCE IF NOT EXISTS src WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
 =>
-CreateSource(CreateSourceStatement { if_not_exists: true, source_name: Ident { value: "src", quote_style: None }, with_properties: WithProperties([SqlOption { name: Ident { value: "kafka.topic", quote_style: Some('\'') }, value: SingleQuotedString("abc") }, SqlOption { name: Ident { value: "kafka.servers", quote_style: Some('\'') }, value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://") }) })
+CreateSource(CreateSourceStatement { if_not_exists: true, columns: [], constraints: [], source_name: Ident { value: "src", quote_style: None }, with_properties: WithProperties([SqlOption { name: Ident { value: "kafka.topic", quote_style: Some('\'') }, value: SingleQuotedString("abc") }, SqlOption { name: Ident { value: "kafka.servers", quote_style: Some('\'') }, value: SingleQuotedString("localhost:1001") }]), source_schema: Protobuf(ProtobufSchema { message_name: AstString("Foo"), row_schema_location: AstString("file://") }) })
