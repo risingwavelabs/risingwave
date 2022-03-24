@@ -3,7 +3,7 @@
     BatchExchange { order: [], dist: Single }
       BatchValues { rows: [[11:Int32, 22:Int32], [(33:Int32 + (1:Int32 + 2:Int32)), 44:Int32]] }
 - sql: select * from t
-  binder_error: "Catalog error: table not found: t"
+  binder_error: 'Catalog error: table not found: t'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t;
@@ -11,7 +11,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1, #2], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1, #2], pk_indices: [0] }
       StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -25,7 +25,7 @@
       BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
         BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
       StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
         StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
 - sql: |
@@ -36,7 +36,7 @@
       BatchFilter { predicate: ($1 < 1:Int32) }
         BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
       StreamFilter { predicate: ($1 < 1:Int32) }
         StreamTableScan { table: t, columns: [_row_id, v1], pk_indices: [0] }
 - sql: |

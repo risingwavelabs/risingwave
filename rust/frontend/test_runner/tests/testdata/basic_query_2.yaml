@@ -30,20 +30,20 @@
   binder_error: 'Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }'
 - sql: |
     values(sum(1));
-  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
 - sql: |
     values(count(1));
-  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
 - sql: |
     values(min(1));
-  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
 - sql: |
     values(1 + max(1));
-  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
 - sql: |
     create table t (v1 int);
     select v1 from t where min(v1);
-  binder_error: "Invalid input syntax: aggregate functions are not allowed in WHERE"
+  binder_error: 'Invalid input syntax: aggregate functions are not allowed in WHERE'
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -61,17 +61,16 @@
         BatchExchange { order: [], dist: HashShard([8]) }
           BatchScan { table: t3, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC, $3 ASC, $6 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 3, 6] }
-      StreamExchange { dist: Single }
-        StreamHashJoin { type: Inner, predicate: $5 = $8 }
-          StreamExchange { dist: HashShard([5]) }
-            StreamHashJoin { type: Inner, predicate: $1 = $4 }
-              StreamExchange { dist: HashShard([1]) }
-                StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
-              StreamExchange { dist: HashShard([4]) }
-                StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
-          StreamExchange { dist: HashShard([8]) }
-            StreamTableScan { table: t3, columns: [_row_id, v1, v2], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC, $3 ASC, $6 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 3, 6] }
+      StreamHashJoin { type: Inner, predicate: $5 = $8 }
+        StreamExchange { dist: HashShard([5]) }
+          StreamHashJoin { type: Inner, predicate: $1 = $4 }
+            StreamExchange { dist: HashShard([1]) }
+              StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
+            StreamExchange { dist: HashShard([4]) }
+              StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
+        StreamExchange { dist: HashShard([8]) }
+          StreamTableScan { table: t3, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
     create table t2 (v1 int not null, v2 int not null);
@@ -133,7 +132,7 @@
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
-  planner_error: "Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function"
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) from t group by v3;

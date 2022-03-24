@@ -4,14 +4,19 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "20"
+    operatorId: "14"
     input:
-      - input:
-          - input:
+      - operatorId: "13"
+        input:
+          - operatorId: "11"
+            input:
               - mergeNode: {}
-              - batchPlanNode:
+              - operatorId: "10"
+                pkIndices:
+                  - 0
+                batchPlanNode:
                   tableRefId:
-                    tableId: 5
+                    tableId: 1
                   columnDescs:
                     - columnType:
                         typeName: INT64
@@ -22,7 +27,11 @@
                         isNullable: true
                       columnId: 1
                       name: v1
+            pkIndices:
+              - 0
             chainNode: {}
+        pkIndices:
+          - 0
         filterNode:
           searchCondition:
             exprType: LESS_THAN
@@ -43,6 +52,8 @@
                     isNullable: true
                   constant:
                     body: AAAAAQ==
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -80,13 +91,17 @@
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "13"
+    operatorId: "7"
     input:
-      - input:
+      - operatorId: "6"
+        input:
           - mergeNode: {}
-          - batchPlanNode:
+          - operatorId: "5"
+            pkIndices:
+              - 0
+            batchPlanNode:
               tableRefId:
-                tableId: 5
+                tableId: 1
               columnDescs:
                 - columnType:
                     typeName: INT64
@@ -97,7 +112,11 @@
                     isNullable: true
                   columnId: 1
                   name: v1
+        pkIndices:
+          - 0
         chainNode: {}
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -198,49 +217,54 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "28"
+    operatorId: "22"
     input:
-      - input:
-          - input:
-              - input:
-                  - input:
-                      - mergeNode: {}
-                      - batchPlanNode:
-                          tableRefId:
-                            tableId: 5
-                          columnDescs:
-                            - columnType:
-                                typeName: INT32
-                                isNullable: true
-                              columnId: 1
-                              name: v1
-                    chainNode: {}
-                projectNode:
-                  selectList:
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      inputRef: {}
-            globalSimpleAggNode:
-              aggCalls:
-                - type: SUM
-                  args:
-                    - input: {}
-                      type:
-                        typeName: INT32
-                        isNullable: true
+      - operatorId: "21"
+        input:
+          - operatorId: "19"
+            input:
+              - operatorId: "17"
+                input:
+                  - mergeNode: {}
+                  - operatorId: "16"
+                    pkIndices:
+                      - 0
+                    batchPlanNode:
+                      tableRefId:
+                        tableId: 1
+                      columnDescs:
+                        - columnType:
+                            typeName: INT32
+                            isNullable: true
+                          columnId: 1
+                          name: v1
+                pkIndices:
+                  - 0
+                chainNode: {}
+            pkIndices:
+              - 0
+            projectNode:
+              selectList:
+                - exprType: INPUT_REF
                   returnType:
-                    typeName: INT64
+                    typeName: INT32
                     isNullable: true
-        exchangeNode:
-          fields:
-            - dataType:
+                  inputRef: {}
+        pkIndices:
+          - 0
+        globalSimpleAggNode:
+          aggCalls:
+            - type: SUM
+              args:
+                - input: {}
+                  type:
+                    typeName: INT32
+                    isNullable: true
+              returnType:
                 typeName: INT64
                 isNullable: true
-              name: "agg#0"
-          strategy:
-            type: SIMPLE
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
