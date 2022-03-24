@@ -19,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::StateStore;
+use crate::storage_value::StorageValue;
 use crate::StateStoreIter;
 
 #[derive(Clone)]
@@ -33,7 +34,7 @@ impl TikvStateStore {
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
 
-    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
+    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<StorageValue>> {
         unimplemented!()
     }
 
@@ -42,7 +43,7 @@ impl StateStore for TikvStateStore {
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Result<Vec<(Bytes, StorageValue)>>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]>,
@@ -52,7 +53,7 @@ impl StateStore for TikvStateStore {
 
     async fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
@@ -68,7 +69,7 @@ impl StateStore for TikvStateStore {
 
     async fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         _epoch: u64,
     ) -> Result<()> {
         unimplemented!()
@@ -105,5 +106,5 @@ impl StateStoreIter for TikvStateStoreIter {
         unimplemented!()
     }
 
-    type Item = (Bytes, Bytes);
+    type Item = (Bytes, StorageValue);
 }

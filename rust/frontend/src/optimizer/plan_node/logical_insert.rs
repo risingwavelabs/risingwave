@@ -45,7 +45,7 @@ impl LogicalInsert {
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
-        let base = PlanBase::new_logical(ctx, schema);
+        let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self {
             table_name,
             table_id,

@@ -117,7 +117,7 @@ mod handlers {
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
-        let node_actors = srv.fragment_manager.all_node_actors().map_err(err)?;
+        let node_actors = srv.fragment_manager.all_node_actors().await.map_err(err)?;
         let nodes = srv
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None)
@@ -139,6 +139,7 @@ mod handlers {
         let table_fragments = srv
             .fragment_manager
             .list_table_fragments()
+            .await
             .map_err(err)?
             .iter()
             .map(|f| (f.table_id().table_id() as i32, f.actors()))

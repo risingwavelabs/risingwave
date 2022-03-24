@@ -29,7 +29,7 @@ pub struct KinesisSplitEnumerator {
 impl SplitEnumerator for KinesisSplitEnumerator {
     type Split = KinesisSplit;
 
-    async fn list_splits(&mut self) -> Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;
         let mut shard_collect: Vec<Shard> = Vec::new();
 

@@ -23,6 +23,8 @@ pub enum HummockError {
     ChecksumMismatch { expected: u64, found: u64 },
     #[error("Invalid block.")]
     InvalidBlock,
+    #[error("Encode error {0}.")]
+    EncodeError(String),
     #[error("Decode error {0}.")]
     DecodeError(String),
     #[error("Mock error {0}.")]
@@ -50,6 +52,10 @@ impl HummockError {
 
     pub fn invalid_block() -> TracedHummockError {
         Self::InvalidBlock.into()
+    }
+
+    pub fn encode_error(error: impl ToString) -> TracedHummockError {
+        Self::EncodeError(error.to_string()).into()
     }
 
     pub fn decode_error(error: impl ToString) -> TracedHummockError {

@@ -14,11 +14,10 @@
 //
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::{Mutex, MutexGuard};
 
 use futures::channel::mpsc::{Receiver, Sender};
+use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_storage::StateStoreImpl;
 
 use crate::executor::Message;
 
@@ -72,44 +71,33 @@ pub struct SharedContext {
     pub(crate) addr: SocketAddr,
 
     pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
-
-    #[allow(dead_code)]
-    pub(crate) state_store: StateStoreImpl,
 }
 
 impl SharedContext {
-    pub fn new(addr: SocketAddr, state_store: StateStoreImpl) -> Self {
+    pub fn new(addr: SocketAddr) -> Self {
         Self {
             channel_map: Mutex::new(HashMap::new()),
             addr,
             barrier_manager: Mutex::new(LocalBarrierManager::new()),
-            state_store,
         }
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        use std::sync::Arc;
-
-        use risingwave_storage::monitor::StateStoreMetrics;
-
         Self {
             channel_map: Mutex::new(HashMap::new()),
             addr: *LOCAL_TEST_ADDR,
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
-            state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
-                StateStoreMetrics::unused(),
-            )),
         }
     }
 
     #[inline]
     fn lock_channel_map(&self) -> MutexGuard<HashMap<UpDownActorIds, ConsumableChannelPair>> {
-        self.channel_map.lock().unwrap()
+        self.channel_map.lock()
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
-        self.barrier_manager.lock().unwrap()
+        self.barrier_manager.lock()
     }
 
     #[inline]

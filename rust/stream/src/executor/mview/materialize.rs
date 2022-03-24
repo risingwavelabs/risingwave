@@ -69,7 +69,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let keyspace = Keyspace::table_root(store, &table_id);
-
         Ok(Box::new(MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,

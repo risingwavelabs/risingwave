@@ -118,7 +118,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let mut deserializer = memcomparable::Deserializer::new(&raw_value[..]);
+            let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
             let value =
                 deserialize_datum_not_null_from(DataType::Char, &mut deserializer)?.unwrap();
             let value_string: String = value.into_utf8();

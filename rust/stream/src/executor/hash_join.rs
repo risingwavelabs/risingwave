@@ -106,7 +106,6 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
 }
 
 impl<S: StateStore> JoinSide<S> {
-    #[allow(dead_code)]
     fn is_dirty(&self) -> bool {
         self.ht.values().any(|state| state.is_dirty())
     }

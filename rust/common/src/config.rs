@@ -209,7 +209,7 @@ mod default {
     }
 
     pub fn checksum_algorithm() -> risingwave_pb::hummock::checksum::Algorithm {
-        risingwave_pb::hummock::checksum::Algorithm::Crc32c
+        risingwave_pb::hummock::checksum::Algorithm::XxHash64
     }
 
     pub fn async_checkpoint_enabled() -> bool {

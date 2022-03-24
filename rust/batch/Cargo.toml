@@ -19,6 +19,7 @@ lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prost = "0.9"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
@@ -45,7 +46,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-stream = "0.1"
 tonic = "0.6"
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
 tracing-futures = "0.2"
 twox-hash = "1"
 url = "2"

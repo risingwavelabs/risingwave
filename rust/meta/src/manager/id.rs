@@ -129,6 +129,7 @@ pub mod IdCategory {
     pub const HummockSnapshot: IdCategoryType = 7;
     pub const HummockSSTableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
+    pub const Source: IdCategoryType = 10;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;

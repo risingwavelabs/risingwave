@@ -34,7 +34,7 @@ impl std::fmt::Debug for AggCall {
                 .field("inputs", &self.inputs)
                 .finish()
         } else {
-            let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+            let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
             self.inputs.iter().for_each(|child| {
                 builder.field(child);
             });

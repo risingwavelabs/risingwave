@@ -31,6 +31,21 @@ pub enum AggKind {
     SingleValue,
 }
 
+impl std::fmt::Display for AggKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AggKind::Min => write!(f, "min"),
+            AggKind::Max => write!(f, "max"),
+            AggKind::Sum => write!(f, "sum"),
+            AggKind::Count => write!(f, "count"),
+            AggKind::RowCount => write!(f, "row_count"),
+            AggKind::Avg => write!(f, "avg"),
+            AggKind::StringAgg => write!(f, "string_agg"),
+            AggKind::SingleValue => write!(f, "single_value"),
+        }
+    }
+}
+
 impl TryFrom<Type> for AggKind {
     type Error = RwError;
 
@@ -44,6 +59,23 @@ impl TryFrom<Type> for AggKind {
             Type::StringAgg => Ok(AggKind::StringAgg),
             Type::SingleValue => Ok(AggKind::SingleValue),
             _ => Err(ErrorCode::InternalError("Unrecognized agg.".into()).into()),
+        }
+    }
+}
+
+impl AggKind {
+    pub fn to_prost(&self) -> Type {
+        match self {
+            Self::Min => Type::Min,
+            Self::Max => Type::Max,
+            Self::Sum => Type::Sum,
+            Self::Avg => Type::Avg,
+            Self::Count => Type::Count,
+            Self::StringAgg => Type::StringAgg,
+            Self::SingleValue => Type::SingleValue,
+            Self::RowCount => {
+                panic!("cannot convert RowCount to prost, TODO: remove RowCount from AggKind")
+            }
         }
     }
 }

@@ -36,7 +36,7 @@ use crate::storage::MemStore;
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
-    let notification_manager = Arc::new(NotificationManager::new());
+    let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
     let cluster_manager = Arc::new(
         StoredClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
             .await

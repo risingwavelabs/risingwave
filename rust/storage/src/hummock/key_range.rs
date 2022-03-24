@@ -18,7 +18,6 @@ use bytes::Bytes;
 
 use super::version_cmp::VersionedComparator;
 
-/// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,

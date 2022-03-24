@@ -10,7 +10,7 @@ cd frontend/test_runner/tests/testdata/
 
 for f in *.apply.yaml
 do
-  yq -N -I4 -i '.. style="literal"' "$f"
+  yq -N -I4 -i '.. style=""' "$f"
 done
 '''
 
@@ -50,6 +50,8 @@ do
     cp "$f" "$SOURCE"
   fi
 done
+
+rm *.apply.yaml
 
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
 '''

@@ -169,6 +169,7 @@ mod tests {
             vec![vec![]], // One single row with no column.
             Schema::default(),
             "ValuesExecutor".to_string(),
+            1024,
         );
 
         let mut proj_executor = ProjectionExecutor {

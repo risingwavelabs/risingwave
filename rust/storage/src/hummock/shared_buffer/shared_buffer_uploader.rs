@@ -39,7 +39,6 @@ pub struct SyncItem {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),

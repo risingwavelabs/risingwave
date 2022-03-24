@@ -173,7 +173,7 @@ impl EtcdMetaStore {
 impl MetaStore for EtcdMetaStore {
     type Snapshot = EtcdSnapshot;
 
-    fn snapshot(&self) -> Self::Snapshot {
+    async fn snapshot(&self) -> Self::Snapshot {
         EtcdSnapshot {
             client: self.client.kv_client(),
             revision: AtomicI64::new(REVISION_UNINITIALIZED),

@@ -15,6 +15,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -29,7 +30,13 @@ pub struct StreamSimpleAgg {
 impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let pk_indices = logical.base.pk_indices.to_vec();
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            Distribution::any().clone(),
+        );
         StreamSimpleAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -62,4 +69,17 @@ impl WithSchema for StreamSimpleAgg {
     }
 }
 
-impl ToStreamProst for StreamSimpleAgg {}
+impl ToStreamProst for StreamSimpleAgg {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        use risingwave_pb::stream_plan::*;
+
+        // TODO: local or global simple agg?
+        ProstStreamNode::GlobalSimpleAggNode(SimpleAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+        })
+    }
+}

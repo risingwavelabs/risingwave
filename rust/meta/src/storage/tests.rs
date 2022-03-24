@@ -91,7 +91,7 @@ async fn test_meta_store_basic<S: MetaStore>(store: &S) -> MetaResult<()> {
     assert_eq!(store.list().await.unwrap().len(), 3);
     assert_eq!(store.list_cf("test_cf").await.unwrap().len(), 2);
     {
-        let snapshot = store.snapshot();
+        let snapshot = store.snapshot().await;
         let vals = snapshot.list_cf("test_cf").await?;
         assert_eq!(vals.len(), 2);
         let vals = snapshot.list_cf(TEST_DEFAULT_CF).await?;

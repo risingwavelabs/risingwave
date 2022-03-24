@@ -28,7 +28,8 @@ impl Planner {
         let plan: PlanRef =
             LogicalInsert::create(input, insert.table.name, insert.table.table_id, vec![])?.into();
         let order = Order::any().clone();
-        let dist = Distribution::Single;
+        // For insert, frontend will only schedule one task so do not need this to be single.
+        let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let root = PlanRoot::new(plan, dist, order, out_fields);

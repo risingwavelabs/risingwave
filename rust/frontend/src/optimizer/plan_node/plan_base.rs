@@ -25,6 +25,8 @@ pub struct PlanBase {
     pub id: PlanNodeId,
     pub ctx: QueryContextRef,
     pub schema: Schema,
+    /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
+    pub pk_indices: Vec<usize>,
     /// The order property of the PlanNode's output, store an `Order::any()` here will not affect
     /// correctness, but insert unnecessary sort in plan
     pub order: Order,
@@ -33,17 +35,24 @@ pub struct PlanBase {
     pub dist: Distribution,
 }
 impl PlanBase {
-    pub fn new_logical(ctx: QueryContextRef, schema: Schema) -> Self {
+    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
         let id = ctx.borrow_mut().get_id();
         Self {
             id,
             ctx,
             schema,
+            pk_indices,
             dist: Distribution::any().clone(),
             order: Order::any().clone(),
         }
     }
-    pub fn new_stream(ctx: QueryContextRef, schema: Schema, dist: Distribution) -> Self {
+    pub fn new_stream(
+        ctx: QueryContextRef,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        dist: Distribution,
+    ) -> Self {
+        // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.borrow_mut().get_id();
         Self {
             id,
@@ -51,6 +60,7 @@ impl PlanBase {
             schema,
             dist,
             order: Order::any().clone(),
+            pk_indices,
         }
     }
     pub fn new_batch(
@@ -66,6 +76,7 @@ impl PlanBase {
             schema,
             dist,
             order,
+            pk_indices: vec![],
         }
     }
 }

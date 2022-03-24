@@ -138,15 +138,22 @@ impl ChainExecutor {
 
     async fn init(&mut self) -> Result<Message> {
         match self.read_mview().await? {
-            // The first message should be a barrier with conf change from mview side.
-            // Swallow it and get its barrier for snapshot read.
+            // The first message should be a barrier.
             Message::Chunk(_) => Err(ErrorCode::InternalError(
                 "the first message received by chain node should be a barrier".to_owned(),
             )
             .into()),
             Message::Barrier(barrier) => {
-                self.snapshot.init(barrier.epoch.prev)?;
-                self.state = ChainState::ReadingSnapshot;
+                if barrier.is_add_output() {
+                    // If the barrier is a conf change from mview side, init snapshot from its epoch
+                    // and set its state to reading snapshot.
+                    self.snapshot.init(barrier.epoch.prev)?;
+                    self.state = ChainState::ReadingSnapshot;
+                } else {
+                    // If the barrier is not a conf change, means snapshot already read and state
+                    // should be set to reading mview.
+                    self.state = ChainState::ReadingMView;
+                }
                 Ok(Message::Barrier(barrier))
             }
         }

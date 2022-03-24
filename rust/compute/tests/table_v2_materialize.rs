@@ -32,7 +32,8 @@ use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::table::mview::MViewTable;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
+// use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
@@ -202,7 +203,7 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
-    let table = MViewTable::new_adhoc(keyspace, column_descs);
+    let table = CellBasedTable::new_adhoc(keyspace, column_descs);
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),

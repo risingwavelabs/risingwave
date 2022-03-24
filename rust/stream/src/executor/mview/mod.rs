@@ -21,5 +21,4 @@ mod table_state_tests;
 pub mod test_utils;
 
 pub use materialize::*;
-pub use risingwave_storage::table::mview::*;
 pub use state::*;

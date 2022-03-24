@@ -16,6 +16,8 @@
 
 mod trace_runtime;
 
+use std::time::Duration;
+
 use tracing::Level;
 use tracing_subscriber::filter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -137,10 +139,30 @@ pub fn init_risingwave_logger(enable_jaeger_tracing: bool, colorful: bool) {
 pub fn oneshot_common() {
     use std::panic;
 
-    let default_hook = panic::take_hook();
+    if cfg!(debug_assertion) {
+        let default_hook = panic::take_hook();
 
-    panic::set_hook(Box::new(move |info| {
-        default_hook(info);
-        std::process::abort();
-    }));
+        panic::set_hook(Box::new(move |info| {
+            default_hook(info);
+            std::process::abort();
+        }));
+    }
+
+    // TODO: remove this in release mode
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(3));
+        let deadlocks = parking_lot::deadlock::check_deadlock();
+        if deadlocks.is_empty() {
+            continue;
+        }
+
+        println!("{} deadlocks detected", deadlocks.len());
+        for (i, threads) in deadlocks.iter().enumerate() {
+            println!("Deadlock #{}", i);
+            for t in threads {
+                println!("Thread Id {:#?}", t.thread_id());
+                println!("{:#?}", t.backtrace());
+            }
+        }
+    });
 }

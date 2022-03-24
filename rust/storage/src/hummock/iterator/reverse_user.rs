@@ -835,11 +835,12 @@ mod tests {
         assert_eq!(num_kvs, num_puts);
     }
 
-    #[tokio::test]
-    async fn test_reverse_user_chaos() {
+    type ChaosTestTruth = BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>>;
+
+    async fn generate_chaos_test_data() -> (usize, Sstable, ChaosTestTruth, SstableStoreRef) {
         // We first generate the key value pairs.
         let mut rng = thread_rng();
-        let mut truth: BTreeMap<Vec<u8>, BTreeMap<Epoch, HummockValue<Vec<u8>>>> = BTreeMap::new();
+        let mut truth: ChaosTestTruth = BTreeMap::new();
         let mut prev_key_number: usize = 1;
         let number_of_keys = 5000;
         for _ in 0..number_of_keys {
@@ -888,6 +889,12 @@ mod tests {
         )
         .await;
 
+        (prev_key_number, sst, truth, sstable_store)
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_unbounded_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
         let repeat = 20;
         for _ in 0..repeat {
             let mut rng = thread_rng();
@@ -907,6 +914,23 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_unbounded_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
             chaos_test_case(
                 clone_sst(&sst),
                 Unbounded,
@@ -915,6 +939,23 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_included_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
             chaos_test_case(
                 clone_sst(&sst),
                 Included(begin_key_bytes.clone()),
@@ -923,6 +964,23 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_excluded_unbounded() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
             chaos_test_case(
                 clone_sst(&sst),
                 Excluded(begin_key_bytes.clone()),
@@ -931,6 +989,23 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_included_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
             chaos_test_case(
                 clone_sst(&sst),
                 Included(begin_key_bytes.clone()),
@@ -939,6 +1014,23 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_reverse_user_chaos_excluded_included() {
+        let (prev_key_number, sst, truth, sstable_store) = generate_chaos_test_data().await;
+        let repeat = 20;
+        for _ in 0..repeat {
+            let mut rng = thread_rng();
+            let end_key: usize = rng.gen_range(2..=prev_key_number);
+            let end_key_bytes = key_from_num(end_key);
+            let begin_key: usize = rng.gen_range(1..=end_key);
+            let begin_key_bytes = key_from_num(begin_key);
+            println!(
+                "begin_key:{:?},end_key:{:?}",
+                begin_key_bytes, end_key_bytes
+            );
             chaos_test_case(
                 clone_sst(&sst),
                 Excluded(begin_key_bytes),

@@ -13,8 +13,9 @@
 // limitations under the License.
 //
 use std::fmt::{Debug, Formatter};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan::{PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId};
@@ -205,7 +206,7 @@ impl BatchTaskExecution {
             self.task_id,
             serde_json::to_string_pretty(self.plan.get_root()?).unwrap()
         );
-        *self.state.lock().unwrap() = TaskStatus::Running;
+        *self.state.lock() = TaskStatus::Running;
         let exec = ExecutorBuilder::new(
             self.plan.root.as_ref().unwrap(),
             &self.task_id.clone(),
@@ -217,7 +218,6 @@ impl BatchTaskExecution {
         let (sender, receivers) = create_output_channel(self.plan.get_exchange_info()?)?;
         self.receivers
             .lock()
-            .unwrap()
             .extend(receivers.into_iter().map(Some));
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
@@ -241,7 +241,7 @@ impl BatchTaskExecution {
                 {
                     // Prints the entire backtrace of error.
                     error!("Execution failed [{:?}]: {:?}", &task_id, &e);
-                    *failure.lock().unwrap() = Some(e);
+                    *failure.lock() = Some(e);
                 }
             });
 
@@ -266,7 +266,7 @@ impl BatchTaskExecution {
 
     pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
-        let receiver = self.receivers.lock().unwrap()[output_id.get_output_id() as usize]
+        let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()
             .ok_or_else(|| {
                 ErrorCode::InternalError(format!(
@@ -284,11 +284,11 @@ impl BatchTaskExecution {
     }
 
     pub fn get_error(&self) -> Option<RwError> {
-        self.failure.lock().unwrap().clone()
+        self.failure.lock().clone()
     }
 
     pub fn check_if_running(&self) -> Result<()> {
-        if *self.state.lock().unwrap() != TaskStatus::Running {
+        if *self.state.lock() != TaskStatus::Running {
             return Err(ErrorCode::InternalError(format!(
                 "task {:?} is not running",
                 self.get_task_id()

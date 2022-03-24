@@ -96,6 +96,7 @@ impl Array for Utf8Array {
             values,
             array_type: ArrayType::Utf8 as i32,
             struct_array_data: None,
+            list_array_data: None,
         }
     }
 

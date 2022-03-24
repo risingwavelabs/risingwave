@@ -68,7 +68,8 @@ rust_clean_build:
 	cd rust && cargo clean && cargo build
 
 rust_doc:
-	cd rust && cargo doc --workspace --no-deps --document-private-items
+	echo "This command is deprecated. Use ./risedev docs instead."
+	exit 1
 
 # state store bench
 ss_bench_build:

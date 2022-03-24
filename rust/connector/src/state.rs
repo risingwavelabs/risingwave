@@ -142,7 +142,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                         .state_identifier
                         .eq(&state_identifier.clone())
                     {
-                        restore_values.push((stored_key.epoch, pair.1))
+                        restore_values.push((stored_key.epoch, pair.1.to_bytes()))
                     }
                 }
                 Ok(restore_values)

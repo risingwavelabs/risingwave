@@ -60,6 +60,7 @@ pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
     pub order: OrderType,
 }
+
 impl ColumnDesc {
     pub fn unnamed(column_id: ColumnId, data_type: DataType) -> ColumnDesc {
         ColumnDesc {

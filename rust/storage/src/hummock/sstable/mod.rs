@@ -18,6 +18,10 @@
 
 mod block;
 pub use block::*;
+mod blockv2;
+pub use blockv2::*;
+mod block_iterator_v2;
+pub use block_iterator_v2::*;
 mod block_iterator;
 mod bloom;
 use bloom::Bloom;

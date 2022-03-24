@@ -34,6 +34,7 @@ pub enum Components {
     Dashboard,
     Release,
     AllInOne,
+    Sanitizer,
 }
 
 impl Components {
@@ -48,6 +49,7 @@ impl Components {
             Self::Tracing => "[Component] Tracing: Jaeger",
             Self::Release => "[Build] Enable release mode",
             Self::AllInOne => "[Build] Enable all-in-one binary",
+            Self::Sanitizer => "[Build] Enable sanitizer",
         }
         .into()
     }
@@ -97,6 +99,15 @@ With this option enabled, RiseDev will help you create
 symlinks to `risingwave` all-in-one binary, so as to build
 and use `risingwave` in all-in-one mode."
             }
+            Self::Sanitizer => {
+                "
+With this option enabled, RiseDev will build Rust components
+with thread sanitizer. The built binaries will be at
+`target/<arch-triple>/(debug|release)` instead of simply at
+`target/debug`. RiseDev will help link binaries when starting
+a dev cluster.
+"
+            }
         }
         .into()
     }
@@ -111,6 +122,7 @@ and use `risingwave` in all-in-one mode."
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
+            "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             _ => None,
         }
     }
@@ -126,6 +138,7 @@ and use `risingwave` in all-in-one mode."
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
+            Self::Sanitizer => "ENABLE_SANITIZER",
         }
         .into()
     }

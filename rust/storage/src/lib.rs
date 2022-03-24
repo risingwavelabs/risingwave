@@ -32,12 +32,14 @@
 #![feature(let_chains)]
 
 pub mod cell_based_row_deserializer;
+pub mod cell_based_row_serializer;
 pub mod hummock;
 pub mod keyspace;
 pub mod memory;
 pub mod monitor;
 pub mod object;
 pub mod panic_store;
+pub mod storage_value;
 pub mod store;
 pub mod store_impl;
 pub mod table;

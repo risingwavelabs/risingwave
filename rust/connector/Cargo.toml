@@ -53,6 +53,6 @@ urlencoding = "2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
-httpmock = "0.6"
 rand = "0.8"
 tempfile = "3"
+wiremock = "0.5"

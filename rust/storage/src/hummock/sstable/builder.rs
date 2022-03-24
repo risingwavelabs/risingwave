@@ -165,23 +165,21 @@ impl SSTableBuilder {
         }
 
         // We should include current entry also in size, that's why +1 to len(b.entryOffsets).
-        let entries_offsets_size = ((self.entry_offsets.len() + 1) * 4 +
+        let entries_offsets_size = (self.entry_offsets.len() + 1) * 4 +
         4 + // size of list
         8 + // sum64 in checksum proto
-        4) as u32; // checksum length
+        4; // checksum length
 
-        // Integer overflow check for statements above.
-        assert!(entries_offsets_size < u32::MAX);
-        let estimated_size = (self.data_buf.len() as u32)
-            - self.base_offset + 6 // header size for entry
-            + key.len() as u32
-            + value.encoded_len() as u32
+        let estimated_size = self.data_buf.len()
+            - self.base_offset as usize + 6 // header size for entry
+            + key.len()
+            + value.encoded_len()
             + entries_offsets_size;
 
         // Integer overflow check for table size.
-        assert!(self.data_buf.len() as u32 + estimated_size < u32::MAX);
+        let _ = u32::try_from(self.data_buf.len() + estimated_size).unwrap();
 
-        estimated_size > self.options.block_size
+        estimated_size > self.options.block_size as usize
     }
 
     /// Table data format:

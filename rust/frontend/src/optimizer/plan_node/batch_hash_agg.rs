@@ -14,10 +14,12 @@
 //
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::expr::InputRefDisplay;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -48,7 +50,15 @@ impl BatchHashAgg {
 impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BatchHashAgg")
-            .field("group_keys", &self.group_keys())
+            .field(
+                "group_keys",
+                &self
+                    .group_keys()
+                    .iter()
+                    .copied()
+                    .map(InputRefDisplay)
+                    .collect_vec(),
+            )
             .field("aggs", &self.agg_calls())
             .finish()
     }

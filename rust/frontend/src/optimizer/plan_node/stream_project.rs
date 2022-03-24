@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::WithSchema;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -39,8 +39,10 @@ impl fmt::Display for StreamProject {
 impl StreamProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let input = logical.input();
+        let pk_indices = logical.base.pk_indices.to_vec();
+        let dist = input.distribution().clone();
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
         StreamProject { logical, base }
     }
 }

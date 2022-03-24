@@ -80,6 +80,7 @@ pub struct EtcdConfig {
     pub address: String,
     pub port: u16,
     pub peer_port: u16,
+    pub unsafe_no_fsync: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

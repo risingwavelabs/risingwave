@@ -67,6 +67,10 @@ impl Task for EtcdService {
             .arg("--name")
             .arg("risedev-meta");
 
+        if self.config.unsafe_no_fsync {
+            cmd.arg("--unsafe-no-fsync");
+        }
+
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 
         Ok(())

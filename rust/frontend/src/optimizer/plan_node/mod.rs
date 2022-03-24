@@ -63,6 +63,7 @@ pub trait PlanNode:
     + ToProst
 {
     fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
 }
 
 impl_downcast!(PlanNode);
@@ -87,6 +88,10 @@ impl dyn PlanNode {
         self.explain(0, &mut output)
             .map_err(|e| ErrorCode::InternalError(format!("failed to explain: {}", e)))?;
         Ok(output)
+    }
+
+    pub fn pk_indices(&self) -> &[usize] {
+        &self.plan_base().pk_indices
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
@@ -359,6 +364,9 @@ macro_rules! enum_plan_node_type {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
                 }
+                fn plan_base(&self) -> &PlanBase {
+                    &self.base
+                }
             })*
         }
     }
@@ -384,7 +392,6 @@ for_all_plan_nodes! { impl_plan_ref }
 macro_rules! impl_down_cast_fn {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            #[allow(unused)]
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
                     self.downcast_ref::<[<$convention $name>]>()

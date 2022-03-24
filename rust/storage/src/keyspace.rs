@@ -17,6 +17,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 
 use crate::hummock::key::next_key;
+use crate::storage_value::StorageValue;
 use crate::StateStore;
 
 /// Represents a unit part of [`Keyspace`].
@@ -131,7 +132,7 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Treat the keyspace as a single key, and get its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn value(&self, epoch: u64) -> Result<Option<Bytes>> {
+    pub async fn value(&self, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefix, epoch).await
     }
 
@@ -142,14 +143,18 @@ impl<S: StateStore> Keyspace<S> {
 
     /// Get from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
-    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> Result<Option<Bytes>> {
+    pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
     /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
-    pub async fn scan(&self, limit: Option<usize>, epoch: u64) -> Result<Vec<(Bytes, Bytes)>> {
+    pub async fn scan(
+        &self,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Result<Vec<(Bytes, StorageValue)>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.scan(range, limit, epoch).await
     }
@@ -162,7 +167,7 @@ impl<S: StateStore> Keyspace<S> {
         start_key: Vec<u8>,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
+    ) -> Result<Vec<(Bytes, StorageValue)>> {
         assert!(
             start_key[..self.prefix.len()] == self.prefix,
             "{:?} does not start with prefix {:?}",
@@ -181,7 +186,7 @@ impl<S: StateStore> Keyspace<S> {
         &self,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>> {
+    ) -> Result<Vec<(Bytes, StorageValue)>> {
         let mut pairs = self.scan(limit, epoch).await?;
         pairs
             .iter_mut()
