@@ -32,11 +32,14 @@ pub async fn handle_show_table(
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
     let catalog_reader = session.env().catalog_reader().read_guard();
-    let table = catalog_reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-    let mut columns = vec![];
-    for catalog in table.columns() {
-        columns.append(
+    let catalogs = catalog_reader
+        .get_table_by_name(session.database(), &schema_name, &table_name)?
+        .columns();
+
+    let mut rows = vec![];
+    for catalog in catalogs {
+        rows.append(
             &mut catalog
                 .column_desc
                 .get_column_descs()
@@ -48,8 +51,8 @@ pub async fn handle_show_table(
 
     Ok(PgResponse::new(
         StatementType::SHOW_TABLE,
-        columns.len() as i32,
-        columns,
+        rows.len() as i32,
+        rows,
         vec![
             PgFieldDescriptor::new("column_name".to_owned(), TypeOid::Varchar),
             PgFieldDescriptor::new("data_type".to_owned(), TypeOid::Varchar),
@@ -59,6 +62,7 @@ pub async fn handle_show_table(
 
 fn col_desc_to_row(col: ColumnDesc) -> Row {
     let type_name = {
+        // if datatype is struct, use type name as struct name
         if let DataType::Struct { fields: _f } = col.data_type {
             col.type_name.clone()
         } else {
@@ -71,6 +75,7 @@ fn col_desc_to_row(col: ColumnDesc) -> Row {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::ops::Index;
 
     use crate::test_utils::LocalFrontend;
 
@@ -87,19 +92,19 @@ mod tests {
             .iter()
             .map(|row| {
                 (
-                    row.values().to_vec()[0].as_ref().unwrap().to_string(),
-                    row.values().to_vec()[1].as_ref().unwrap().to_string(),
+                    row.index(0).as_ref().unwrap().as_str(),
+                    row.index(1).as_ref().unwrap().as_str(),
                 )
             })
-            .collect::<HashMap<String, String>>();
+            .collect::<HashMap<&str, &str>>();
 
         let expected_columns = maplit::hashmap! {
-            "_row_id".to_string() => "Int64".to_string(),
-            "v1".to_string() => "Int16".to_string(),
-            "v2".to_string() => "Int32".to_string(),
-            "v3".to_string() => "Int64".to_string(),
-            "v4".to_string() => "Float64".to_string(),
-            "v5".to_string() => "Float64".to_string(),
+            "_row_id" => "Int64",
+            "v1" => "Int16",
+            "v2" => "Int32",
+            "v3" => "Int64",
+            "v4" => "Float64",
+            "v5" => "Float64",
         };
 
         assert_eq!(columns, expected_columns);

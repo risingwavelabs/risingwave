@@ -35,7 +35,6 @@
 
 #[cfg(not(feature = "std"))]
 extern crate alloc;
-extern crate core;
 
 pub mod ast;
 pub mod keywords;

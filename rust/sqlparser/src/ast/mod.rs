@@ -738,6 +738,7 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// SHOW TABLE
     ShowTable {
         /// Table name
         name: ObjectName,

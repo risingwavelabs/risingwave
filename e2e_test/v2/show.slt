@@ -1,0 +1,13 @@
+statement ok
+create table t3 (v1 int not null, v2 int not null, v3 int not null);
+
+query III
+show table t3;
+----
+_row_id Int64
+v1 Int32
+v2 Int32
+v3 Int32
+
+statement ok
+drop table t3;
