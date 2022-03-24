@@ -3436,7 +3436,6 @@ dependencies = [
  "num-traits",
  "parking_lot 0.12.0",
  "paste",
- "prometheus 0.13.0",
  "prost",
  "rand 0.8.5",
  "rdkafka",

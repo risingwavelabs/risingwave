@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use risingwave_batch::executor::monitor::BatchMetrics;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +19,6 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::Keyspace;
 use risingwave_stream::executor::ManagedMViewState;
@@ -48,20 +44,10 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
     ];
 
-    let table = CellBasedTable::new_adhoc(
-        keyspace,
-        column_descs,
-        Arc::new(StateStoreMetrics::unused()),
-    );
+    let table = CellBasedTable::new_adhoc(keyspace, column_descs);
 
-    let mut executor = RowSeqScanExecutor::new(
-        table,
-        1,
-        true,
-        "RowSeqScanExecutor".to_string(),
-        u64::MAX,
-        Arc::new(BatchMetrics::unused()),
-    );
+    let mut executor =
+        RowSeqScanExecutor::new(table, 1, true, "RowSeqScanExecutor".to_string(), u64::MAX);
 
     let epoch: u64 = 0;
     state.put(
