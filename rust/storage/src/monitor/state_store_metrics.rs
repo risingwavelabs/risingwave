@@ -83,8 +83,6 @@ macro_rules! for_all_metrics {
             sst_block_request_miss_counts: GenericCounter<AtomicU64>,
             sst_block_fetch_remote_duration: Histogram,
             sst_block_put_remote_duration: Histogram,
-
-            cell_table_next_pack_cell_duration: Histogram,
         }
     };
 }
@@ -384,15 +382,6 @@ impl StateStoreMetrics {
         let sst_block_put_remote_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
-        let buckets = DEFAULT_BUCKETS.to_vec();
-        let opts = histogram_opts!(
-            "state_store_cell_table_next_pack_cell_duration",
-            "Time spent deserializing into a row in cell based table.",
-            buckets
-        );
-        let cell_table_next_pack_cell_duration =
-            register_histogram_with_registry!(opts, registry).unwrap();
-
         Self {
             get_duration,
             get_key_size,
@@ -432,8 +421,6 @@ impl StateStoreMetrics {
             sst_block_request_miss_counts,
             sst_block_fetch_remote_duration,
             sst_block_put_remote_duration,
-
-            cell_table_next_pack_cell_duration,
         }
     }
 
