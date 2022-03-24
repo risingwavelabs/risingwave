@@ -2,6 +2,11 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_rpc_client::MetaClient;
 
+/// A wrapper around the `MetaClient` that only provides a minor set of meta rpc.
+/// Most of the rpc to meta are delegated by other separate structs like `CatalogWriter`,
+/// `WorkerNodeManager`, etc. So frontend rarely needs to call `MetaClient` directly.
+/// Hence instead of to mock all rpc of `MetaClient` in tests, we aggregate those "direct" rpc
+/// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
     async fn pin_snapshot(&self) -> Result<u64>;
