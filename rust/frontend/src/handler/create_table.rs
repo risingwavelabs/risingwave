@@ -12,25 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
-
-use pgwire::pg_response::{PgResponse};
+use pgwire::pg_response::PgResponse;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-
-
-
-
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-
-
-
 use crate::session::QueryContext;
 
 pub const ROWID_NAME: &str = "_row_id";
@@ -43,13 +32,13 @@ pub async fn handle_create_table(
     let session = context.session_ctx;
 
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
-    let (_database_id, _schema_id) = session
+    let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
-    let _column_descs = {
+    let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
