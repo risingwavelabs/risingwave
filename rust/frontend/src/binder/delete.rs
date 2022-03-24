@@ -41,8 +41,6 @@ impl Binder {
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
         };
 
-        // TODO: validate & add casts here
-
         Ok(delete)
     }
 }
