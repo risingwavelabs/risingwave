@@ -81,6 +81,22 @@ impl ColumnDesc {
         }
     }
 
+    /// Convert to proto
+    pub fn to_protobuf(&self) -> ProstColumnDesc {
+        ProstColumnDesc {
+            column_type: Some(self.data_type.to_protobuf()),
+            column_id: self.column_id.get_id(),
+            name: self.name.clone(),
+            field_descs: self
+                .field_descs
+                .clone()
+                .into_iter()
+                .map(|f| f.to_protobuf())
+                .collect_vec(),
+            type_name: self.type_name.clone(),
+        }
+    }
+
     // Get all column descs under field_descs
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];

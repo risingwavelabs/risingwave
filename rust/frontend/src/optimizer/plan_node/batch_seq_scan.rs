@@ -14,9 +14,10 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
+use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, RowSeqScanNode};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
@@ -71,13 +72,26 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        // TODO(Bowen): Fix this serialization.
+        // TODO(bugen): directly store `ColumnDesc`s in logical scan.
+        let column_descs = self
+            .logical
+            .columns()
+            .iter()
+            .zip_eq(self.logical.schema().fields())
+            .map(|(column_id, field)| ProstColumnDesc {
+                column_type: field.data_type().to_protobuf().into(),
+                column_id: column_id.get_id(),
+                name: field.name.clone(),
+                ..Default::default()
+            })
+            .collect();
+
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
                 table_id: self.logical.table_id(),
-                pk: vec![],
+                pk: vec![], // not used
             }),
-            ..Default::default()
+            column_descs,
         })
     }
 }

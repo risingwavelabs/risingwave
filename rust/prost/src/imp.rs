@@ -2,6 +2,7 @@
 
 use std::net::{AddrParseError, SocketAddr};
 
+use crate::common::HostAddress;
 use crate::data::data_type::TypeName;
 use crate::data::DataType;
 use crate::plan::ColumnDesc;
@@ -10,6 +11,14 @@ impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
     pub fn to_socket_addr(&self) -> Result<SocketAddr, AddrParseError> {
         Ok(SocketAddr::new(self.host.parse()?, self.port as u16))
+    }
+}
+
+impl<'a> TryInto<SocketAddr> for &'a HostAddress {
+    type Error = AddrParseError;
+
+    fn try_into(self) -> Result<SocketAddr, AddrParseError> {
+        self.to_socket_addr()
     }
 }
 

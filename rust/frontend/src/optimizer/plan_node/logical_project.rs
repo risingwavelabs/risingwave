@@ -91,7 +91,12 @@ impl LogicalProject {
         exprs: Vec<ExprImpl>,
         expr_alias: Vec<Option<String>>,
     ) -> PlanRef {
-        Self::new(input, exprs, expr_alias).into()
+        let project = Self::new(input, exprs, expr_alias);
+        if project.is_identity() {
+            project.input()
+        } else {
+            project.into()
+        }
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -174,6 +179,20 @@ impl LogicalProject {
                     .collect::<Vec<_>>(),
             )
             .finish()
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.schema().len() == self.input.schema().len()
+            && self
+                .exprs
+                .iter()
+                .zip_eq(self.expr_alias.iter())
+                .zip_eq(self.input.schema().fields())
+                .enumerate()
+                .all(|(i, ((expr, alias), field))| {
+                    alias.as_ref().map(|alias| alias == &field.name).unwrap_or(true) &&
+                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
+                })
     }
 }
 
@@ -265,7 +284,6 @@ impl ToStream for LogicalProject {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let input_pk = input.pk_indices();
-        assert!(!input_pk.is_empty());
         let i2o = Self::i2o_col_mapping(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
@@ -273,7 +291,7 @@ impl ToStream for LogicalProject {
             .exprs()
             .iter()
             .cloned()
-            .zip_eq(self.expr_alias().iter().cloned())
+            .zip_eq(proj.expr_alias().iter().cloned())
             .map(|(a, b)| (a, b))
             .chain(col_need_to_add.map(|idx| {
                 (

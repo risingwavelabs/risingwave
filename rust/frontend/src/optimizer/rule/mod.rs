@@ -31,3 +31,5 @@ mod filter_join;
 pub use filter_join::*;
 mod filter_project;
 pub use filter_project::*;
+mod filter_agg;
+pub use filter_agg::*;

@@ -57,6 +57,7 @@ mod insert;
 mod join;
 mod limit;
 mod merge_sort_exchange;
+pub mod monitor;
 mod order_by;
 mod projection;
 mod row_seq_scan;

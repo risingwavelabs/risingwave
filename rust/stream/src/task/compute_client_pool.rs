@@ -33,7 +33,7 @@ impl ComputeClientPool {
     /// Get a compute client from the pool.
     pub async fn get_client_for_addr(&self, addr: &SocketAddr) -> Result<ComputeClient> {
         self.cache
-            .get_or_try_insert_with(*addr, async { ComputeClient::new(addr).await })
+            .get_or_try_insert_with(*addr, async { ComputeClient::new(*addr).await })
             .await
             .map_err(|e| {
                 // TODO: change this to error when we completed failover and error handling

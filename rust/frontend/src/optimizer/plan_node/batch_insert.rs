@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::InsertNode;
+use risingwave_pb::plan::{InsertNode, TableRefId};
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::PlanBase;
@@ -78,10 +78,14 @@ impl ToDistributedBatch for BatchInsert {
 
 impl ToBatchProst for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
-        #[allow(unreachable_code)]
         NodeBody::Insert(InsertNode {
-            table_source_ref_id: todo!("fill source id here"),
-            column_ids: todo!("this field is unused now"),
+            table_source_ref_id: TableRefId {
+                table_id: self.logical.source_id().table_id() as i32,
+                ..Default::default()
+            }
+            .into(),
+            column_ids: vec![], // unused
+            frontend_v2: true,
         })
     }
 }
