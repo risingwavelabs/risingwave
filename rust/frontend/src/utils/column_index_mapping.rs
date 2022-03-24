@@ -1,4 +1,3 @@
-use std::cmp::max;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -188,15 +187,11 @@ impl ColIndexMapping {
     /// it inverse mapping's target
     #[must_use]
     pub fn inverse(&self) -> Self {
-        let source_num = match self.target_upper() {
-            Some(target_upper) => target_upper + 1,
-            None => 0,
-        };
-        let mut map = vec![None; source_num];
+        let mut map = vec![None; self.target_size()];
         for (src, dst) in self.mapping_pairs() {
             map[dst] = Some(src);
         }
-        Self::with_target_upper(map, self.source_upper())
+        Self::with_target_size(map, self.source_size())
     }
 
     /// return iter of (src, dst) order by src
@@ -270,20 +265,14 @@ impl ExprRewriter for ColIndexMapping {
 impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
-                    f,
-        <<<<<<< HEAD
-                    "ColIndexMapping(source_upper:{:?}, target_upper:{:?}, mapping:{})",
-                    self.source_upper(),
-                    self.target_upper(),
-        =======
-                    "ColIndexMapping(source_size:{}, target_size:{}, mapping:{})",
-                    self.source_size(),
-                    self.target_size(),
-        >>>>>>> main
-                    self.mapping_pairs()
-                        .map(|(src, dst)| format!("{}->{}", src, dst))
-                        .join(",")
-                )
+            f,
+            "ColIndexMapping(source_size:{}, target_size:{}, mapping:{})",
+            self.source_size(),
+            self.target_size(),
+            self.mapping_pairs()
+                .map(|(src, dst)| format!("{}->{}", src, dst))
+                .join(",")
+        )
     }
 }
 
