@@ -20,6 +20,7 @@ use crate::expr::ExprImpl;
 
 #[derive(Debug)]
 pub struct BoundDelete {
+    // TODO(bugen): refactor with `BoundTableSource`.
     pub table: BoundBaseTable,
     pub selection: Option<ExprImpl>,
 }
@@ -30,6 +31,7 @@ impl Binder {
         table_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
+        // TODO: validate & add casts here
         let delete = BoundDelete {
             table: self.bind_table(table_name)?,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,

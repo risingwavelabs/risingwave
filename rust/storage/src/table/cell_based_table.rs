@@ -29,6 +29,7 @@ use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::hummock::key::next_key;
+use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
 
@@ -52,6 +53,9 @@ pub struct CellBasedTable<S: StateStore> {
     pk_serializer: Option<OrderedRowSerializer>,
 
     cell_based_row_serializer: CellBasedRowSerializer,
+
+    /// Statistics.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -66,6 +70,7 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
+        stats: Arc<StateStoreMetrics>,
     ) -> Self {
         let schema = Schema::new(
             column_descs
@@ -82,6 +87,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
+            stats,
         }
     }
 
@@ -94,12 +100,17 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
+            Arc::new(StateStoreMetrics::unused()),
         )
     }
 
     /// Create an "adhoc" [`CellBasedTable`] with specified columns.
-    pub fn new_adhoc(keyspace: Keyspace<S>, column_descs: Vec<ColumnDesc>) -> Self {
-        Self::new(keyspace, column_descs, None)
+    pub fn new_adhoc(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        Self::new(keyspace, column_descs, None, stats)
     }
 
     // cell-based interface
@@ -244,7 +255,13 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> Result<CellBasedTableRowIter<S>> {
-        CellBasedTableRowIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
+        CellBasedTableRowIter::new(
+            self.keyspace.clone(),
+            self.column_descs.clone(),
+            epoch,
+            self.stats.clone(),
+        )
+        .await
     }
 
     pub fn schema(&self) -> &Schema {
@@ -281,13 +298,21 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     epoch: u64,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
+    /// Statistics
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
-    async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
+    async fn new(
+        keyspace: Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        epoch: u64,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await?;
+
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
         let iter = Self {
@@ -298,6 +323,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             err_msg: None,
             epoch,
             cell_based_row_deserializer,
+            stats,
         };
         Ok(iter)
     }
@@ -377,6 +403,11 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
         }
 
         loop {
+            let _pack_cell_timer = self
+                .stats
+                .cell_table_next_pack_cell_duration
+                .local()
+                .start_timer();
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
                 None => {

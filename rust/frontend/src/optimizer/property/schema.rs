@@ -23,11 +23,12 @@ pub trait WithSchema {
     fn schema(&self) -> &Schema;
 
     fn must_contain_columns(&self, required_cols: &FixedBitSet) {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
+        // Having equal length also implies:
+        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
+        assert_eq!(
+            required_cols.len(),
+            self.schema().fields().len(),
+            "required cols capacity != columns available",
         );
     }
 }

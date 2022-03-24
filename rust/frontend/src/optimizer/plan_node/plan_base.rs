@@ -33,6 +33,9 @@ pub struct PlanBase {
     /// The distribution property of the PlanNode's output, store an `Distribution::any()` here
     /// will not affect correctness, but insert unnecessary exchange in plan
     pub dist: Distribution,
+    /// The append-only property of the PlanNode's output is a stream-only property. Append-only
+    /// means the stream contains only insert operation.
+    pub append_only: bool,
 }
 impl PlanBase {
     pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
@@ -44,6 +47,8 @@ impl PlanBase {
             pk_indices,
             dist: Distribution::any().clone(),
             order: Order::any().clone(),
+            // Logical plan node won't touch `append_only` field
+            append_only: true,
         }
     }
     pub fn new_stream(
@@ -51,6 +56,7 @@ impl PlanBase {
         schema: Schema,
         pk_indices: Vec<usize>,
         dist: Distribution,
+        append_only: bool,
     ) -> Self {
         // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
         let id = ctx.borrow_mut().get_id();
@@ -61,6 +67,7 @@ impl PlanBase {
             dist,
             order: Order::any().clone(),
             pk_indices,
+            append_only,
         }
     }
     pub fn new_batch(
@@ -77,6 +84,8 @@ impl PlanBase {
             dist,
             order,
             pk_indices: vec![],
+            // Batch plan node won't touch `append_only` field
+            append_only: true,
         }
     }
 }

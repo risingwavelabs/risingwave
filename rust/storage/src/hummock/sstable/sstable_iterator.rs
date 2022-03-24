@@ -18,7 +18,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, SeekPos, Sstable};
+use super::{BlockIterator, Sstable};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
@@ -74,7 +74,7 @@ impl SSTableIterator {
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
-                block_iter.seek(key, SeekPos::Origin);
+                block_iter.seek(key);
             } else {
                 block_iter.seek_to_first();
             }
@@ -102,20 +102,11 @@ impl HummockIterator for SSTableIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.block_iter
-            .as_ref()
-            .expect("no block iter")
-            .key()
-            .expect("invalid iter")
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self
-            .block_iter
-            .as_ref()
-            .expect("no block iter")
-            .value()
-            .expect("invalid iter");
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
 
         HummockValue::from_slice(raw_value).expect("decode error")
     }

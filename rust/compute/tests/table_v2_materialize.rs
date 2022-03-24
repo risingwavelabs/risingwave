@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     CreateTableExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor,
@@ -181,6 +182,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_manager.clone(),
         Box::new(insert_inner),
         0,
+        false,
     );
 
     tokio::spawn(async move {
@@ -202,7 +204,11 @@ async fn test_table_v2_materialize() -> Result<()> {
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
-    let table = CellBasedTable::new_adhoc(keyspace, column_descs);
+    let table = CellBasedTable::new_adhoc(
+        keyspace,
+        column_descs,
+        Arc::new(StateStoreMetrics::unused()),
+    );
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
@@ -210,6 +216,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
@@ -251,6 +258,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqScanExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();
@@ -317,6 +325,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqScanExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();
