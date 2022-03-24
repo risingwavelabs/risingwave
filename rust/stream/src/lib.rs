@@ -30,10 +30,12 @@
 #![feature(hash_drain_filter)]
 #![feature(drain_filter)]
 #![feature(generators)]
+#![feature(type_alias_impl_trait)]
 
 #[macro_use]
 extern crate log;
 
 pub mod common;
 pub mod executor;
+pub mod executor_v2;
 pub mod task;
