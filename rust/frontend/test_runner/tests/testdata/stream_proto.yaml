@@ -4,12 +4,19 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
+    operatorId: "14"
     input:
-      - input:
-          - input:
-              - input:
+      - operatorId: "13"
+        input:
+          - operatorId: "11"
+            input:
+              - operatorId: "9"
+                input:
                   - mergeNode: {}
-                  - batchPlanNode:
+                  - operatorId: "8"
+                    pkIndices:
+                      - 0
+                    batchPlanNode:
                       tableRefId:
                         tableId: 5
                       columnDescs:
@@ -22,7 +29,11 @@
                             isNullable: true
                           columnId: 1
                           name: v1
+                pkIndices:
+                  - 0
                 chainNode: {}
+            pkIndices:
+              - 0
             filterNode:
               searchCondition:
                 exprType: LESS_THAN
@@ -43,6 +54,8 @@
                         isNullable: true
                       constant:
                         body: AAAAAQ==
+        pkIndices:
+          - 0
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -56,6 +69,8 @@
                 isNullable: true
               inputRef:
                 columnIdx: 1
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -72,11 +87,17 @@
     select * from t;
   stream_plan_proto: |
     ---
+    operatorId: "9"
     input:
-      - input:
-          - input:
+      - operatorId: "8"
+        input:
+          - operatorId: "6"
+            input:
               - mergeNode: {}
-              - batchPlanNode:
+              - operatorId: "5"
+                pkIndices:
+                  - 0
+                batchPlanNode:
                   tableRefId:
                     tableId: 5
                   columnDescs:
@@ -89,7 +110,11 @@
                         isNullable: true
                       columnId: 1
                       name: v1
+            pkIndices:
+              - 0
             chainNode: {}
+        pkIndices:
+          - 0
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -103,6 +128,8 @@
                 isNullable: true
               inputRef:
                 columnIdx: 1
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -119,11 +146,17 @@
     select v1 from t;
   stream_plan_proto: |
     ---
+    operatorId: "9"
     input:
-      - input:
-          - input:
+      - operatorId: "8"
+        input:
+          - operatorId: "6"
+            input:
               - mergeNode: {}
-              - batchPlanNode:
+              - operatorId: "5"
+                pkIndices:
+                  - 0
+                batchPlanNode:
                   tableRefId:
                     tableId: 5
                   columnDescs:
@@ -132,7 +165,11 @@
                         isNullable: true
                       columnId: 1
                       name: v1
+            pkIndices:
+              - 0
             chainNode: {}
+        pkIndices:
+          - 0
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -140,6 +177,8 @@
                 typeName: INT32
                 isNullable: true
               inputRef: {}
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -155,49 +194,56 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
+    operatorId: "19"
     input:
-      - input:
-          - input:
-              - input:
-                  - input:
-                      - input:
-                          - mergeNode: {}
-                          - batchPlanNode:
-                              tableRefId:
-                                tableId: 5
-                              columnDescs:
-                                - columnType:
-                                    typeName: INT32
-                                    isNullable: true
-                                  columnId: 1
-                                  name: v1
-                        chainNode: {}
-                    projectNode:
-                      selectList:
-                        - exprType: INPUT_REF
-                          returnType:
-                            typeName: INT32
-                            isNullable: true
-                          inputRef: {}
-                globalSimpleAggNode:
-                  aggCalls:
-                    - type: SUM
-                      args:
-                        - input: {}
-                          type:
-                            typeName: INT32
-                            isNullable: true
+      - operatorId: "18"
+        input:
+          - operatorId: "16"
+            input:
+              - operatorId: "14"
+                input:
+                  - operatorId: "12"
+                    input:
+                      - mergeNode: {}
+                      - operatorId: "11"
+                        pkIndices:
+                          - 0
+                        batchPlanNode:
+                          tableRefId:
+                            tableId: 5
+                          columnDescs:
+                            - columnType:
+                                typeName: INT32
+                                isNullable: true
+                              columnId: 1
+                              name: v1
+                    pkIndices:
+                      - 0
+                    chainNode: {}
+                pkIndices:
+                  - 0
+                projectNode:
+                  selectList:
+                    - exprType: INPUT_REF
                       returnType:
-                        typeName: INT64
+                        typeName: INT32
                         isNullable: true
-            exchangeNode:
-              fields:
-                - dataType:
+                      inputRef: {}
+            pkIndices:
+              - 0
+            globalSimpleAggNode:
+              aggCalls:
+                - type: SUM
+                  args:
+                    - input: {}
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
                     typeName: INT64
                     isNullable: true
-                  name: "agg#0"
-              strategy:
-                type: SIMPLE
+        pkIndices:
+          - 0
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -205,6 +251,8 @@
                 typeName: INT64
                 isNullable: true
               inputRef: {}
+    pkIndices:
+      - 0
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -220,82 +268,86 @@
     select sum(v1) from t group by v2;
   stream_plan_proto: |
     ---
+    operatorId: "21"
     input:
-      - input:
-          - input:
-              - input:
-                  - input:
-                      - input:
-                          - input:
-                              - mergeNode: {}
-                              - batchPlanNode:
-                                  tableRefId:
-                                    tableId: 5
-                                  columnDescs:
-                                    - columnType:
-                                        typeName: INT32
-                                        isNullable: true
-                                      columnId: 1
-                                      name: v1
-                                    - columnType:
-                                        typeName: INT32
-                                        isNullable: true
-                                      columnId: 2
-                                      name: v2
-                            chainNode: {}
-                        exchangeNode:
-                          fields:
-                            - dataType:
-                                typeName: INT32
-                                isNullable: true
-                              name: v1
-                            - dataType:
-                                typeName: INT32
-                                isNullable: true
-                              name: v2
-                          strategy:
-                            type: HASH
-                            columnIndices:
+      - operatorId: "20"
+        input:
+          - operatorId: "18"
+            input:
+              - operatorId: "16"
+                input:
+                  - operatorId: "14"
+                    input:
+                      - operatorId: "13"
+                        input:
+                          - mergeNode: {}
+                          - operatorId: "12"
+                            pkIndices:
                               - 0
-                    projectNode:
-                      selectList:
-                        - exprType: INPUT_REF
-                          returnType:
+                            batchPlanNode:
+                              tableRefId:
+                                tableId: 5
+                              columnDescs:
+                                - columnType:
+                                    typeName: INT32
+                                    isNullable: true
+                                  columnId: 1
+                                  name: v1
+                                - columnType:
+                                    typeName: INT32
+                                    isNullable: true
+                                  columnId: 2
+                                  name: v2
+                        pkIndices:
+                          - 0
+                        chainNode: {}
+                    pkIndices:
+                      - 0
+                    exchangeNode:
+                      fields:
+                        - dataType:
                             typeName: INT32
                             isNullable: true
-                          inputRef:
-                            columnIdx: 1
-                        - exprType: INPUT_REF
-                          returnType:
+                          name: v1
+                        - dataType:
                             typeName: INT32
                             isNullable: true
-                          inputRef: {}
-                hashAggNode:
-                  groupKeys:
-                    - {}
-                  aggCalls:
-                    - type: SUM
-                      args:
-                        - input:
-                            columnIdx: 1
-                          type:
-                            typeName: INT32
-                            isNullable: true
+                          name: v2
+                      strategy:
+                        type: HASH
+                        columnIndices:
+                          - 0
+                pkIndices:
+                  - 1
+                projectNode:
+                  selectList:
+                    - exprType: INPUT_REF
                       returnType:
-                        typeName: INT64
+                        typeName: INT32
                         isNullable: true
-            exchangeNode:
-              fields:
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: "expr#0"
-                - dataType:
+                      inputRef:
+                        columnIdx: 1
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      inputRef: {}
+            pkIndices:
+              - 0
+            hashAggNode:
+              groupKeys:
+                - {}
+              aggCalls:
+                - type: SUM
+                  args:
+                    - input:
+                        columnIdx: 1
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
                     typeName: INT64
                     isNullable: true
-                  name: "agg#0"
-              strategy:
-                type: SIMPLE
         projectNode:
           selectList:
             - exprType: INPUT_REF

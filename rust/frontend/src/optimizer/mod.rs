@@ -77,6 +77,14 @@ impl PlanRoot {
         }
     }
 
+    /// Change the distribution of [`PlanRoot`].
+    pub fn with_distribution(&self, dist: Distribution) -> Self {
+        Self {
+            required_dist: dist,
+            ..self.clone()
+        }
+    }
+
     /// Get a reference to the plan root's schema.
     #[allow(dead_code)]
     fn schema(&self) -> &Schema {
@@ -149,8 +157,11 @@ impl PlanRoot {
     pub fn gen_create_mv_plan(&self, order: Vec<FieldOrder>, column_ids: Vec<ColumnId>) -> PlanRef {
         let plan = self.gen_optimized_logical_plan();
 
-        // Convert to physical plan node
-        let plan = plan.to_stream_with_dist_required(&self.required_dist);
+        // Ignore the required_dist and required_order, as they are provided by user now.
+        // TODO: need more thinking and refactor.
+
+        // Convert to physical plan node, using distribution of the input node
+        let plan = plan.to_stream_with_dist_required(plan.distribution());
 
         // TODO: get the correct table id
 
