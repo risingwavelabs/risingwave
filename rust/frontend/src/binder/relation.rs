@@ -180,7 +180,7 @@ impl Binder {
         let columns = table_catalog.columns().to_vec();
 
         let mut descs = vec![];
-        for col in columns{
+        for col in columns {
             descs.append(&mut col.column_desc.get_column_descs());
         }
         self.bind_context(

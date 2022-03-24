@@ -27,8 +27,8 @@ pub mod drop_table;
 mod explain;
 mod flush;
 mod query;
-pub mod util;
 mod show_table;
+pub mod util;
 
 pub use create_mv::{gen_create_mv_plan, MvInfo};
 
@@ -42,6 +42,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
+        Statement::ShowTable { name } => show_table::handle_show_table(context, name).await,
         Statement::Drop(drop_statement) => {
             let table_object_name = ObjectName(vec![drop_statement.name]);
             drop_table::handle_drop_table(context, table_object_name).await

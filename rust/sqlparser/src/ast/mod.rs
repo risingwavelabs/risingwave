@@ -738,6 +738,10 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    ShowTable {
+        /// Table name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -870,6 +874,10 @@ impl fmt::Display for Statement {
             }
             Statement::Analyze { table_name } => {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::ShowTable { name } => {
+                write!(f, "SHOW TABLE {}", name)?;
                 Ok(())
             }
             Statement::Insert {
