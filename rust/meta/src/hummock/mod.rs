@@ -49,40 +49,9 @@ where
     S: MetaStore,
 {
     vec![
-        start_compaction_trigger(hummock_manager_ref.clone(), compactor_manager_ref),
+        start_compaction_trigger(hummock_manager_ref, compactor_manager_ref),
         VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
-        start_context_checker(hummock_manager_ref),
     ]
-}
-
-const CONTEXT_CHECKER_INTERVAL: Duration = Duration::from_secs(60);
-/// Start a worker to periodically check whether the contexts which have pinned certain hummock
-/// resources are still valid.
-pub fn start_context_checker<S>(
-    hummock_manager_ref: Arc<HummockManager<S>>,
-) -> (JoinHandle<()>, UnboundedSender<()>)
-where
-    S: MetaStore,
-{
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
-    let join_handle = tokio::spawn(async move {
-        let mut min_interval = tokio::time::interval(CONTEXT_CHECKER_INTERVAL);
-        loop {
-            tokio::select! {
-                // Wait for interval
-                _ = min_interval.tick() => {},
-                // Shutdown compactor
-                _ = shutdown_rx.recv() => {
-                    tracing::info!("context checker is shutting down");
-                    return;
-                }
-            }
-            if let Err(err) = hummock_manager_ref.release_invalid_contexts().await {
-                tracing::warn!("Failed to release invalid contexts {}", err);
-            }
-        }
-    });
-    (join_handle, shutdown_tx)
 }
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);

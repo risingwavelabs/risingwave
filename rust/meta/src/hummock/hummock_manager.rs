@@ -103,6 +103,7 @@ where
         };
 
         instance.load_meta_store_state().await?;
+        instance.release_invalid_contexts().await?;
 
         Ok(instance)
     }
