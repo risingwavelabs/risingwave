@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{OrderedColumnDesc, TableId};
+use super::{ColumnDesc, OrderedColumnDesc, TableId};
 
 /// the table descriptor of table with cell based encoding in state store and include all
 /// information for compute node to access data of the table.
 #[derive(Debug, Clone)]
-pub struct CellBasedTableDesc {
+pub struct TableDesc {
     /// id of the table, to find in Storage()
     pub table_id: TableId,
     /// the primary key columns' descriptor
     pub pk: Vec<OrderedColumnDesc>,
+    /// all columns in the table, noticed it is NOT sorted by columnId in the vec
+    pub columns: Vec<ColumnDesc>,
 }

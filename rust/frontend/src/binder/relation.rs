@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
@@ -47,7 +47,7 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub cell_based_desc: CellBasedTableDesc,
+    pub cell_based_desc: TableDesc,
     pub columns: Vec<ColumnDesc>,
 }
 
