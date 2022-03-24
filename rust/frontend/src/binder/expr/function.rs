@@ -22,7 +22,6 @@ use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        // Rewrite.
         let mut inputs = vec![];
         f.args
             .into_iter()

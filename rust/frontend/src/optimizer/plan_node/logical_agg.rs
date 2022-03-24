@@ -348,26 +348,34 @@ impl PlanTreeNodeUnary for LogicalAgg {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let agg_calls = self
-            .agg_calls
-            .iter()
-            .cloned()
-            .map(|mut agg_call| {
-                agg_call.inputs.iter_mut().for_each(|i| {
-                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
-                });
-                agg_call
-            })
-            .collect();
-        let group_keys = self
+        // For StreamAgg, we need to insert a RowCountAgg at the beginning of `agg_calls`, and it is
+        // invisible to the LogicalProject above the LogicalAgg.
+        let mut agg_calls = vec![PlanAggCall {
+            agg_kind: AggKind::RowCount,
+            return_type: DataType::Int64,
+            inputs: vec![],
+        }];
+        agg_calls.extend(self.agg_calls.iter().cloned().map(|mut agg_call| {
+            agg_call
+                .inputs
+                .iter_mut()
+                .for_each(|i| *i = InputRef::new(input_col_change.map(i.index()), i.return_type()));
+            agg_call
+        }));
+        let group_keys: Vec<usize> = self
             .group_keys
             .iter()
             .cloned()
             .map(|key| input_col_change.map(key))
             .collect();
+
+        // The index of agg_call should be incremented by 1 due to the insertion of RowCountAgg.
+        let mut map: Vec<usize> = (0..group_keys.len()).collect();
+        map.extend((0..agg_calls.len()).into_iter().map(|index| index + 1));
+        let out_col_change = ColIndexMapping::new(map.into_iter().map(Some).collect());
+
         let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
-        // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(agg.schema().len());
+
         (agg, out_col_change)
     }
 }
@@ -470,7 +478,6 @@ impl ToStream for LogicalAgg {
     }
 
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        // TODO: add row_count() aggCall for StreamAgg here
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
         (agg.into(), out_col_change)

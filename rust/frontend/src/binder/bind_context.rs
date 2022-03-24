@@ -65,7 +65,6 @@ pub struct BindContext {
     // `wildcard` indicates whether we have wildcard or not.
     // Currently, we only use it help detecting count(*).
     // TODO: we may use it report errors like sum(*).
-    // Consider again.
     pub wildcard: bool,
 }
 
