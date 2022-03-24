@@ -473,8 +473,8 @@ pub(crate) mod test {
         aws_sdk_s3::client::Client::from_conf(s3_config)
     }
 
-    async fn upload_json_file_test() {
-        let input_stream = ByteStream::from(JSON_DATA.as_bytes().to_vec());
+    pub async fn upload_json_file_test(data: &str) {
+        let input_stream = ByteStream::from(data.as_bytes().to_vec());
         let bucket_key = Utc::now().format("%Y-%m-%d-%H:%M:%S").to_string();
         let s3_client = new_aws_s3_client().await;
         let rs = s3_client
@@ -529,7 +529,7 @@ pub(crate) mod test {
             assert!(rs.is_ok());
         });
         let status_control_join = tokio::task::spawn(async move {
-            upload_json_file_test().await;
+            upload_json_file_test(JSON_DATA).await;
             let entry_event = rx.recv().await;
             println!(
                 "receive S3 DirectoryEntryOptEvent={:?}",

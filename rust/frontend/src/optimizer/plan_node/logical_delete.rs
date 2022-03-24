@@ -11,11 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-<<<<<<< HEAD
 
-=======
-//
->>>>>>> 2be8fa2e (feat(optimizer): pk derive (#1108))
 use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
