@@ -103,56 +103,45 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // cell-based interface
     // TODO: multi-get. We can optimize get_row to parallelize I/O.
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Row> {
-        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let column_ids = generate_column_id(&self.column_descs);
-        let mut row = Vec::with_capacity(column_ids.len());
-        for column_id in column_ids {
-            let key = &[
-                &serialize_pk(pk, pk_serializer)?[..],
-                &serialize_column_id(&column_id)?,
-            ]
-            .concat();
-            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
-            let column_index = self
-                .column_id_to_column_index
-                .get(&column_id)
-                .expect("column id not found");
-            if let Some(state_store_get_res) = state_store_get_res {
-                let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
-                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-                row.push(cell);
-            } else {
-                row.push(None);
-            }
-        }
-        Ok(Row::new(row))
-    }
 
-    pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Row> {
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let column_ids = generate_column_id(&self.column_descs);
-        let mut row = Vec::with_capacity(column_ids.len());
+        let mut row = vec![None; column_ids.len()];
         let start_key = &serialize_pk(pk, pk_serializer)?;
 
         let state_store_range_scan_res = self
             .keyspace
-            .scan_with_start_key(self.keyspace.prefixed_key(start_key), None, epoch)
+            .scan_with_start_key(
+                self.keyspace.prefixed_key(start_key),
+                Some(column_ids.len()),
+                epoch,
+            )
             .await?;
 
-        for (index, column_id) in column_ids.iter().enumerate() {
-            let column_index = self
-                .column_id_to_column_index
-                .get(column_id)
-                .expect("column id not found");
-            let mut de = value_encoding::Deserializer::new(
-                state_store_range_scan_res[index].1.clone().to_bytes(),
-            );
-            let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-            row.push(cell);
+        if state_store_range_scan_res.is_empty() {
+            return Ok(None);
         }
 
-        Ok(Row::new(row))
+        for (key, value) in state_store_range_scan_res {
+            let key_vec = key.to_vec();
+            if key_vec.len() > 4 {
+                let column_id_bytes = &key_vec[key_vec.len() - 4..];
+                let column_id = deserialize_column_id(column_id_bytes)?;
+                if column_id == NULL_ROW_SPECIAL_CELL_ID {
+                    break;
+                }
+                let column_index = self
+                    .column_id_to_column_index
+                    .get(&column_id)
+                    .expect("column id not found");
+                let mut de = value_encoding::Deserializer::new(value.to_bytes());
+                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+                row[*column_index] = cell;
+            }
+        }
+
+        Ok(Some(Row::new(row)))
     }
 
     pub async fn insert_row(
