@@ -27,7 +27,7 @@ use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 use crate::executor::ExecutorBuilder;
-use crate::executor_v2::{FilterExecutor as FilterExecutorV2, Executor as ExecutorV2};
+use crate::executor_v2::{Executor as ExecutorV2, FilterExecutor as FilterExecutorV2};
 use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
@@ -59,12 +59,15 @@ impl ExecutorBuilder for FilterExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
         let search_condition = build_from_prost(node.get_search_condition()?)?;
-        Ok(Box::new(Box::new(FilterExecutorV2::new_from_v1(
-            params.input.remove(0),
-            search_condition,
-            params.executor_id,
-            params.op_info,
-        )).v1()))
+        Ok(Box::new(
+            Box::new(FilterExecutorV2::new_from_v1(
+                params.input.remove(0),
+                search_condition,
+                params.executor_id,
+                params.op_info,
+            ))
+            .v1(),
+        ))
     }
 }
 
