@@ -4,16 +4,14 @@
   batch_plan: |
     BatchExchange { order: [$1 DESC], dist: Single }
       BatchSort { order: [$1 DESC] }
-        BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-          BatchScan { table: t, columns: [_row_id, v1, v2] }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t.* from t order by v1;
   batch_plan: |
     BatchExchange { order: [$1 ASC], dist: Single }
       BatchSort { order: [$1 ASC] }
-        BatchProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-          BatchScan { table: t, columns: [_row_id, v1, v2] }
+        BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1, v1+1 from t order by v1;

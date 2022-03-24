@@ -91,7 +91,12 @@ impl LogicalProject {
         exprs: Vec<ExprImpl>,
         expr_alias: Vec<Option<String>>,
     ) -> PlanRef {
-        Self::new(input, exprs, expr_alias).into()
+        let project = Self::new(input, exprs, expr_alias);
+        if project.is_identity() {
+            project.input()
+        } else {
+            project.into()
+        }
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.
@@ -174,6 +179,20 @@ impl LogicalProject {
                     .collect::<Vec<_>>(),
             )
             .finish()
+    }
+
+    pub fn is_identity(&self) -> bool {
+        self.schema().len() == self.input.schema().len()
+            && self
+                .exprs
+                .iter()
+                .zip_eq(self.expr_alias.iter())
+                .zip_eq(self.input.schema().fields())
+                .enumerate()
+                .all(|(i, ((expr, alias), field))| {
+                    alias.as_ref().map(|alias| alias == &field.name).unwrap_or(true) &&
+                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
+                })
     }
 }
 

@@ -4,8 +4,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [v1] }
       LogicalFilter { predicate: ($2 > 1:Int32) }
-        LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-          LogicalScan { table: t, columns: [_row_id, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
@@ -29,18 +28,15 @@
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t);
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-      LogicalScan { table: t, columns: [_row_id, v1, v2] }
+    LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* joins */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t), t;
   logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5], expr_alias: [_row_id, v1, v2, _row_id, v1, v2] }
-      LogicalJoin { type: Inner, on: true:Boolean }
-        LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-          LogicalScan { table: t, columns: [_row_id, v1, v2] }
-        LogicalScan { table: t, columns: [_row_id, v1, v2] }
+    LogicalJoin { type: Inner, on: true:Boolean }
+      LogicalScan { table: t, columns: [_row_id, v1, v2] }
+      LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     /* table alias not supported yet */
     create table t (v1 bigint, v2 double precision);
