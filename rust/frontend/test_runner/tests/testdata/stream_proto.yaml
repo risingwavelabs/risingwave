@@ -161,7 +161,7 @@
           - mergeNode: {}
           - operatorId: "9"
             pkIndices:
-              - 0
+              - 1
             batchPlanNode:
               tableRefId:
                 tableId: 1
@@ -176,19 +176,21 @@
                     isNullable: true
                   name: _row_id
         pkIndices:
-          - 0
+          - 1
         chainNode: {}
     pkIndices:
-      - 0
+      - 1
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
-          inputRef: {}
+          inputRef:
+            columnIdx: 1
           returnType:
-            typeName: INT32
+            typeName: INT64
             isNullable: true
       columnIds:
         - 0
+        - 1
     ---
     id: 4294967294
     schemaId: 4294967295
@@ -200,8 +202,15 @@
             typeName: INT32
             isNullable: true
           name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 1
+          name: _pk_1
+        isHidden: true
     pkColumnIds:
-      - 0
+      - 1
     pkOrders:
       - ASCENDING
 - sql: |
@@ -219,7 +228,7 @@
               - mergeNode: {}
               - operatorId: "20"
                 pkIndices:
-                  - 0
+                  - 1
                 batchPlanNode:
                   tableRefId:
                     tableId: 1
@@ -234,7 +243,7 @@
                         isNullable: true
                       name: _row_id
             pkIndices:
-              - 0
+              - 1
             chainNode: {}
         pkIndices:
           - 0
@@ -296,7 +305,7 @@
                           - mergeNode: {}
                           - operatorId: "27"
                             pkIndices:
-                              - 0
+                              - 2
                             batchPlanNode:
                               tableRefId:
                                 tableId: 1
@@ -316,10 +325,10 @@
                                     isNullable: true
                                   name: _row_id
                         pkIndices:
-                          - 0
+                          - 2
                         chainNode: {}
                     pkIndices:
-                      - 0
+                      - 2
                     exchangeNode:
                       fields:
                         - dataType:
@@ -339,7 +348,7 @@
                         columnIndices:
                           - 0
                 pkIndices:
-                  - 1
+                  - 2
                 projectNode:
                   selectList:
                     - exprType: INPUT_REF

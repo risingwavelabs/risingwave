@@ -31,6 +31,7 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
+        dbg!(base_table.table_desc.clone());
         LogicalScan::create(base_table.name, Rc::new(base_table.table_desc), self.ctx())
     }
 

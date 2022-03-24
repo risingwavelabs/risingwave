@@ -46,7 +46,7 @@ impl StreamTableScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            vec![0], // TODO
+            logical.base.pk_indices.clone(),
             Distribution::Single,
             false, // TODO: determine the `append-only` field of table scan
         );
