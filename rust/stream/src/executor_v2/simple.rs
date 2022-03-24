@@ -37,8 +37,8 @@ pub trait SimpleExecutor: Send + 'static {
 
 /// The struct wraps a [`SimpleExecutor`], and implements the interface of [`Executor`].
 pub struct SimpleExecutorWrapper<E> {
-    input: BoxedExecutor,
-    inner: E,
+    pub(super) input: BoxedExecutor,
+    pub(super) inner: E,
 }
 
 impl<E> Executor for SimpleExecutorWrapper<E>

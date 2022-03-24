@@ -23,12 +23,25 @@ mod filter;
 mod simple;
 mod v1_compact;
 
-pub use filter::SimpleFilterExecutor;
-pub use simple::{SimpleExecutor, SimpleExecutorWrapper};
+pub use filter::FilterExecutor;
+pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compact::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, Result<Message>>;
+
+/// Static information of an executor.
+#[derive(Debug)]
+pub struct ExecutorInfo {
+    /// See [`Executor::schema`].
+    pub schema: Schema,
+
+    /// See [`Executor::pk_indices`].
+    pub pk_indices: PkIndices,
+
+    /// See [`Executor::identity`].
+    pub identity: String,
+}
 
 /// `Executor` supports handling of control messages.
 pub trait Executor: Send + 'static {
@@ -58,9 +71,11 @@ pub trait Executor: Send + 'static {
 
         StreamExecutorV1 {
             stream,
-            schema,
-            pk_indices,
-            identity,
+            info: ExecutorInfo {
+                schema,
+                pk_indices,
+                identity,
+            },
         }
     }
 }

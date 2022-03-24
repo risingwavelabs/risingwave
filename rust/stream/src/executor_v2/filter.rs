@@ -20,10 +20,9 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::BoxedExpression;
 
-use super::{BoxedExecutor, Executor, SimpleExecutor, SimpleExecutorWrapper};
+use super::{ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper};
 use crate::executor::PkIndicesRef;
 
-#[allow(dead_code)]
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
@@ -31,23 +30,22 @@ pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 /// `FilterExecutor` will insert, delete or update element into next executor according
 /// to the result of the expression.
 pub struct SimpleFilterExecutor {
-    /// The input of the current executor
-    input: BoxedExecutor,
+    info: ExecutorInfo,
 
     /// Expression of the current filter, note that the filter must always have the same output for
     /// the same input.
     expr: BoxedExpression,
-
-    /// Identity string
-    identity: String,
 }
 
 impl SimpleFilterExecutor {
-    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression, executor_id: u64) -> Self {
+    pub fn new(input_info: ExecutorInfo, expr: BoxedExpression, executor_id: u64) -> Self {
         Self {
-            input,
+            info: ExecutorInfo {
+                schema: input_info.schema,
+                pk_indices: input_info.pk_indices,
+                identity: format!("FilterExecutor {:X}", executor_id),
+            },
             expr,
-            identity: format!("FilterExecutor {:X}", executor_id),
         }
     }
 }
@@ -138,14 +136,14 @@ impl SimpleExecutor for SimpleFilterExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        self.input.schema()
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
-        self.input.pk_indices()
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        &self.identity
+        &self.info.identity
     }
 }
