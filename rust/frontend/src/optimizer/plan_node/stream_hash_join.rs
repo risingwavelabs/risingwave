@@ -39,11 +39,13 @@ impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
+        // Hash join executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.to_vec(),
             Distribution::any().clone(),
+            false,
         );
 
         Self {

@@ -40,6 +40,7 @@ impl StreamSource {
             logical.schema().clone(),
             vec![0], // TODO
             Distribution::any().clone(),
+            true, // TODO: determine the `append-only` field of source
         );
         Self {
             logical,

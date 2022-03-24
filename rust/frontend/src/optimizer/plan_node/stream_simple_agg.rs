@@ -31,11 +31,14 @@ impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
+        // Simple agg executor won't change the append-only behavior of the stream, so it depends on
+        // input's `append_only`.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
             Distribution::any().clone(),
+            logical.input().append_only(),
         );
         StreamSimpleAgg { logical, base }
     }
