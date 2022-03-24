@@ -131,11 +131,11 @@ pub async fn handle_create_table(
         name: table_name,
         columns: columns_catalog,
         pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending as i32],
+        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
         dependent_relations: vec![],
         optional_associated_source_id: None,
     };
-
+    dbg!(table.clone());
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_source(source, table, plan)

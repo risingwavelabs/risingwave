@@ -299,7 +299,6 @@ impl MetaClientInner for FrontendMockMetaClient {
             materialized_view: mv,
             stream_node: _,
         } = req;
-
         let source_id = self.gen_id();
         let source = Source {
             id: source_id,
