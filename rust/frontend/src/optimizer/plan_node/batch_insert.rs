@@ -85,6 +85,7 @@ impl ToBatchProst for BatchInsert {
             }
             .into(),
             column_ids: vec![], // unused
+            frontend_v2: true,
         })
     }
 }
