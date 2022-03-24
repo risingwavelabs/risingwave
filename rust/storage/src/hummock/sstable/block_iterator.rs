@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::*;
 use std::sync::Arc;
 
@@ -75,21 +75,19 @@ impl BlockIterator {
         let mut entry_data = self.block.raw_entry(i as usize);
 
         let header = Header::decode(&mut entry_data);
+        let diff_key = &entry_data[..header.diff as usize];
 
-        // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
                 &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
             );
+        } else {
+            self.key.truncate(header.overlap as usize);
         }
-        self.perv_overlap = header.overlap;
-
-        let diff_key = &entry_data[..header.diff as usize];
-        self.key.truncate(header.overlap as usize);
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
-
+        self.perv_overlap = header.overlap;
         true
     }
 

@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 //! Data-driven tests.
 #![feature(let_chains)]
@@ -22,7 +21,7 @@ use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
-use risingwave_frontend::binder::Binder;
+use risingwave_frontend::binder::{Binder, BoundStatement};
 use risingwave_frontend::handler::{create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
@@ -196,6 +195,17 @@ impl TestCase {
             }
         };
 
+        let order;
+        let column_descs;
+
+        if let BoundStatement::Query(ref q) = bound {
+            order = Some(q.order.clone());
+            column_descs = Some(q.gen_create_mv_column_desc());
+        } else {
+            order = None;
+            column_descs = None;
+        }
+
         let logical_plan = match Planner::new(context).plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
@@ -225,14 +235,21 @@ impl TestCase {
 
             // Only generate batch_plan_proto if it is specified in test case
             if self.batch_plan_proto.is_some() {
-                ret.batch_plan_proto = Some(serde_json::to_string_pretty(
+                ret.batch_plan_proto = Some(serde_yaml::to_string(
                     &batch_plan.to_batch_prost_identity(false),
                 )?);
             }
         }
 
         if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
-            let stream_plan = logical_plan.gen_create_mv_plan();
+            let stream_plan = logical_plan.gen_create_mv_plan(
+                order.ok_or_else(|| anyhow!("order not found"))?,
+                column_descs
+                    .ok_or_else(|| anyhow!("column_descs not found"))?
+                    .into_iter()
+                    .map(|x| x.column_id)
+                    .collect(),
+            );
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
@@ -241,7 +258,7 @@ impl TestCase {
 
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(serde_json::to_string_pretty(
+                ret.stream_plan_proto = Some(serde_yaml::to_string(
                     &stream_plan.to_stream_prost_identity(false),
                 )?);
             }

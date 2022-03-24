@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -29,7 +29,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
 use crate::session::QueryContext;
 
@@ -82,7 +82,7 @@ pub async fn handle_create_table(
             let schema = Schema::new(fields);
             let logical_scan = LogicalScan::new(
                 table_name.clone(),
-                TableId::default(),
+                TableId::placeholder(),
                 columns,
                 schema,
                 context.clone(),
@@ -93,14 +93,27 @@ pub async fn handle_create_table(
         let exchange_node =
             { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
 
-        let materialize_node =
-            { StreamMaterialize::new(context, exchange_node.into(), TableId::default()) };
+        let materialize_node = {
+            StreamMaterialize::new(
+                context,
+                exchange_node.into(),
+                TableId::placeholder(),
+                vec![
+                    // RowId column as key
+                    FieldOrder {
+                        index: 0,
+                        direct: Direction::Asc,
+                    },
+                ],
+                column_descs.iter().map(|x| x.column_id).collect(),
+            )
+        };
 
         (Rc::new(materialize_node) as PlanRef).to_stream_prost()
     };
 
-    let json_plan = serde_json::to_string(&plan).unwrap();
-    tracing::info!(name= ?table_name, plan = ?json_plan);
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let columns = column_descs
         .into_iter()
@@ -117,7 +130,7 @@ pub async fn handle_create_table(
         .collect_vec();
 
     let source = ProstSource {
-        id: 0,
+        id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name.clone(),
@@ -128,7 +141,7 @@ pub async fn handle_create_table(
     };
 
     let table = ProstTable {
-        id: 0,
+        id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name,

@@ -11,20 +11,46 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundQuery};
+use crate::catalog::ColumnId;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{QueryContext, SessionImpl};
 
-pub(super) fn gen_create_mv_plan(
+impl BoundQuery {
+    /// Generate create MV's column desc from query.
+    pub fn gen_create_mv_column_desc(&self) -> Vec<ColumnDesc> {
+        let mut column_descs = vec![];
+
+        for (i, (data_type, name)) in self
+            .data_types()
+            .iter()
+            .zip_eq(self.names().iter())
+            .enumerate()
+        {
+            column_descs.push(ColumnDesc {
+                data_type: data_type.clone(),
+                column_id: ColumnId::new(i as i32),
+                name: name.to_string(),
+            });
+        }
+
+        column_descs
+    }
+}
+
+/// Generate create MV plan
+pub fn gen_create_mv_plan(
     session: &SessionImpl,
     planner: &mut Planner,
     query: Query,
@@ -34,8 +60,15 @@ pub(super) fn gen_create_mv_plan(
         session.database().to_string(),
     )
     .bind_query(query)?;
+
+    let order = bound_query.order.clone();
+
+    let column_descs = bound_query.gen_create_mv_column_desc();
+
     let logical = planner.plan_query(bound_query)?;
-    let plan = logical.gen_create_mv_plan();
+
+    let plan =
+        logical.gen_create_mv_plan(order, column_descs.iter().map(|x| x.column_id).collect());
 
     Ok(plan)
 }
@@ -55,8 +88,7 @@ pub async fn handle_create_mv(
         .read_guard()
         .check_relation_name(session.database(), &schema_name, &table_name)?;
 
-    let plan =
-        gen_create_mv_plan(&session, &mut planner, query.as_ref().clone())?.to_stream_prost();
+    let plan = gen_create_mv_plan(&session, &mut planner, *query)?.to_stream_prost();
 
     let json_plan = serde_json::to_string(&plan).unwrap();
     tracing::info!(name= ?name, plan = ?json_plan);
