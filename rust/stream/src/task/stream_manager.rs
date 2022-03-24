@@ -176,7 +176,7 @@ impl StreamManager {
                 // TODO: Handle sync failure by propagating it
                 // back to global barrier manager
                 Err(e) => panic!(
-                    "Failed to sync state store after receving barrier {:?} due to {}",
+                    "Failed to sync state store after receiving barrier {:?} due to {}",
                     barrier, e
                 ),
             }

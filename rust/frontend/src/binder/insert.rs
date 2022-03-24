@@ -19,7 +19,9 @@ use crate::binder::{Binder, BoundQuery, BoundTableSource};
 
 #[derive(Debug)]
 pub struct BoundInsert {
+    /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
+
     pub source: BoundQuery,
 }
 
@@ -30,10 +32,13 @@ impl Binder {
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        // TODO: validate & add casts here
-        Ok(BoundInsert {
+        let insert = BoundInsert {
             table_source: self.bind_table_source(source_name)?,
             source: self.bind_query(source)?,
-        })
+        };
+
+        // TODO: validate & add casts here
+
+        Ok(insert)
     }
 }

@@ -21,8 +21,8 @@ use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
-use risingwave_frontend::binder::{Binder, BoundStatement};
-use risingwave_frontend::handler::{create_table, drop_table};
+use risingwave_frontend::binder::Binder;
+use risingwave_frontend::handler::{create_table, drop_table, gen_create_mv_plan, MvInfo};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{QueryContext, QueryContextRef};
@@ -195,18 +195,9 @@ impl TestCase {
             }
         };
 
-        let order;
-        let column_descs;
+        let mut planner = Planner::new(context);
 
-        if let BoundStatement::Query(ref q) = bound {
-            order = Some(q.order.clone());
-            column_descs = Some(q.gen_create_mv_column_desc());
-        } else {
-            order = None;
-            column_descs = None;
-        }
-
-        let mut logical_plan = match Planner::new(context).plan(bound) {
+        let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
@@ -242,14 +233,14 @@ impl TestCase {
         }
 
         if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
-            let stream_plan = logical_plan.gen_create_mv_plan(
-                order.ok_or_else(|| anyhow!("order not found"))?,
-                column_descs
-                    .ok_or_else(|| anyhow!("column_descs not found"))?
-                    .into_iter()
-                    .map(|x| x.column_id)
-                    .collect(),
-            );
+            let q = if let Statement::Query(q) = stmt {
+                q.as_ref().clone()
+            } else {
+                return Err(anyhow!("expect a query"));
+            };
+
+            let (stream_plan, table) =
+                gen_create_mv_plan(&session, &mut planner, q, MvInfo::with_name("test"))?;
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
@@ -258,9 +249,10 @@ impl TestCase {
 
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(serde_yaml::to_string(
-                    &stream_plan.to_stream_prost_identity(false),
-                )?);
+                ret.stream_plan_proto = Some(
+                    serde_yaml::to_string(&stream_plan.to_stream_prost_identity(false))?
+                        + &serde_yaml::to_string(&table)?,
+                );
             }
         }
 

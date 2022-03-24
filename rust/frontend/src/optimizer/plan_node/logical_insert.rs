@@ -74,12 +74,6 @@ impl LogicalInsert {
     pub fn source_id(&self) -> TableId {
         self.source_id
     }
-
-    /// Get a reference to the logical insert's table source name.
-    #[must_use]
-    pub fn table_source_name(&self) -> &str {
-        self.table_source_name.as_ref()
-    }
 }
 
 impl PlanTreeNodeUnary for LogicalInsert {
