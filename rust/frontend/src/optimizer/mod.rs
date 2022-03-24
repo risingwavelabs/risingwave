@@ -168,8 +168,6 @@ impl PlanRoot {
             self.schema = plan.schema().clone();
             plan
         };
-        // Convert to physical plan node
-        let plan = plan.to_stream_with_dist_required(&self.required_dist);
         // Ignore the required_dist and required_order, as they are provided by user now.
         // TODO: need more thinking and refactor.
 
