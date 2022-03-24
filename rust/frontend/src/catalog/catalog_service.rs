@@ -27,7 +27,7 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::{DatabaseId, SchemaId};
+use super::DatabaseId;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 
@@ -93,20 +93,6 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    // TODO: it just change the catalog, just to unit test,will be deprecated soon
-    pub async fn create_materialized_view_workaround(&self, table: ProstTable) -> Result<()> {
-        let (_, version) = self
-            .meta_client
-            .create_materialized_view(
-                table,
-                StreamNode {
-                    ..Default::default()
-                },
-            )
-            .await?;
-        self.wait_version(version).await
-    }
-
     pub async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -131,10 +117,14 @@ impl CatalogWriter {
     // TODO: maybe here to pass a materialize plan node
     pub async fn create_materialized_view(
         &self,
-        _db_id: DatabaseId,
-        _schema_id: SchemaId,
+        table: ProstTable,
+        plan: StreamNode,
     ) -> Result<()> {
-        todo!()
+        let (_, version) = self
+            .meta_client
+            .create_materialized_view(table, plan)
+            .await?;
+        self.wait_version(version).await
     }
 
     pub async fn create_source(&self, source: ProstSource) -> Result<()> {

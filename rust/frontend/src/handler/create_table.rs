@@ -97,7 +97,6 @@ pub async fn handle_create_table(
             StreamMaterialize::new(
                 context,
                 exchange_node.into(),
-                TableId::placeholder(),
                 vec![
                     // RowId column as key
                     FieldOrder {

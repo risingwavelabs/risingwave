@@ -4,16 +4,16 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "17"
+    operatorId: "20"
     input:
-      - operatorId: "16"
+      - operatorId: "19"
         input:
-          - operatorId: "14"
+          - operatorId: "17"
             input:
-              - operatorId: "12"
+              - operatorId: "15"
                 input:
                   - mergeNode: {}
-                  - operatorId: "11"
+                  - operatorId: "14"
                     pkIndices:
                       - 0
                     batchPlanNode:
@@ -81,20 +81,49 @@
       columnIds:
         - 0
         - 1
+        - 2
+    ---
+    id: 4294967294
+    schemaId: 4294967295
+    databaseId: 4294967295
+    name: test
+    columns:
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          name: _row_id
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          columnId: 1
+          name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 2
+          name: _pk_0
+        isHidden: true
+    pkColumnIds:
+      - 0
+    pkOrders:
+      - ASCENDING
 - sql: |
     /* test projection */
     create table t (v1 int);
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "11"
+    operatorId: "13"
     input:
-      - operatorId: "10"
+      - operatorId: "12"
         input:
-          - operatorId: "8"
+          - operatorId: "10"
             input:
               - mergeNode: {}
-              - operatorId: "7"
+              - operatorId: "9"
                 pkIndices:
                   - 0
                 batchPlanNode:
@@ -140,20 +169,49 @@
       columnIds:
         - 0
         - 1
+        - 2
+    ---
+    id: 4294967294
+    schemaId: 4294967295
+    databaseId: 4294967295
+    name: test
+    columns:
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          name: _row_id
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          columnId: 1
+          name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 2
+          name: _pk_0
+        isHidden: true
+    pkColumnIds:
+      - 0
+    pkOrders:
+      - ASCENDING
 - sql: |
     /* test projection for single column */
     create table t (v1 int, v2 int);
     select v1 from t;
   stream_plan_proto: |
     ---
-    operatorId: "11"
+    operatorId: "13"
     input:
-      - operatorId: "10"
+      - operatorId: "12"
         input:
-          - operatorId: "8"
+          - operatorId: "10"
             input:
               - mergeNode: {}
-              - operatorId: "7"
+              - operatorId: "9"
                 pkIndices:
                   - 0
                 batchPlanNode:
@@ -188,24 +246,47 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
+    ---
+    id: 4294967294
+    schemaId: 4294967295
+    databaseId: 4294967295
+    name: test
+    columns:
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          columnId: 1
+          name: _pk_0
+        isHidden: true
+    pkColumnIds:
+      - 0
+    pkOrders:
+      - ASCENDING
 - sql: |
     /* test simple agg */
     create table t (v1 int);
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "24"
+    operatorId: "28"
     input:
-      - operatorId: "23"
+      - operatorId: "27"
         input:
-          - operatorId: "21"
+          - operatorId: "25"
             input:
-              - operatorId: "19"
+              - operatorId: "23"
                 input:
-                  - operatorId: "17"
+                  - operatorId: "21"
                     input:
                       - mergeNode: {}
-                      - operatorId: "16"
+                      - operatorId: "20"
                         pkIndices:
                           - 0
                         batchPlanNode:
@@ -262,26 +343,49 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
+    ---
+    id: 4294967294
+    schemaId: 4294967295
+    databaseId: 4294967295
+    name: test
+    columns:
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          name: "?column?"
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 1
+          name: _pk_0
+        isHidden: true
+    pkColumnIds:
+      - 0
+    pkOrders:
+      - ASCENDING
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
     select sum(v1) from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "26"
+    operatorId: "30"
     input:
-      - operatorId: "25"
+      - operatorId: "29"
         input:
-          - operatorId: "23"
+          - operatorId: "27"
             input:
-              - operatorId: "21"
+              - operatorId: "25"
                 input:
-                  - operatorId: "19"
+                  - operatorId: "23"
                     input:
-                      - operatorId: "18"
+                      - operatorId: "22"
                         input:
                           - mergeNode: {}
-                          - operatorId: "17"
+                          - operatorId: "21"
                             pkIndices:
                               - 0
                             batchPlanNode:
@@ -375,3 +479,26 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
+    ---
+    id: 4294967294
+    schemaId: 4294967295
+    databaseId: 4294967295
+    name: test
+    columns:
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          name: "?column?"
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          columnId: 1
+          name: _pk_1
+        isHidden: true
+    pkColumnIds:
+      - 1
+    pkOrders:
+      - ASCENDING
