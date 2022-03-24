@@ -13,7 +13,6 @@ use std::sync::Arc;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
