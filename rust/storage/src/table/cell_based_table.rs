@@ -119,6 +119,7 @@ impl<S: StateStore> CellBasedTable<S> {
             )
             .await?;
 
+        println!("len = {}",state_store_range_scan_res.len());
         if state_store_range_scan_res.is_empty() {
             return Ok(None);
         }
@@ -137,7 +138,7 @@ impl<S: StateStore> CellBasedTable<S> {
                     .expect("column id not found");
                 let mut de = value_encoding::Deserializer::new(value.to_bytes());
                 let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-                row[*column_index] = cell;
+                row[column_id.get_id() as usize] = cell;
             }
         }
 

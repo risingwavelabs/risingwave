@@ -362,12 +362,7 @@ async fn test_cell_based_get_row() {
         .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
         .await
         .unwrap();
-    assert_eq!(
-        get_row2_res,
-        Some(Row(vec![
-           None, None, None,
-        ])),
-    );
+    assert_eq!(get_row2_res, Some(Row(vec![None, None, None])));
 
     let get_row3_res = table
         .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
@@ -427,6 +422,12 @@ async fn test_cell_based_get_no_exist_row() {
         get_row3_res,
         Some(Row(vec![Some(3_i32.into()), None, None,]))
     );
+
+    let get_no_exist_res = table
+        .get_row(&Row(vec![Some(9_i32.into()), Some(99_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_no_exist_res, None);
 }
 
 #[tokio::test]
