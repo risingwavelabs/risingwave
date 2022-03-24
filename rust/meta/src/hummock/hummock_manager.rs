@@ -21,9 +21,10 @@ use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, HummockContextRefId, HummockPinnedSnapshot, HummockPinnedVersion,
-    HummockSnapshot, HummockStaleSstables, HummockVersion, HummockVersionRefId, Level, LevelType,
-    SstableIdInfo, SstableInfo, SstableRefId, TableSetStatistics, UncommittedEpoch,
+    CompactMetrics, CompactTask, CompactTaskAssignment, CompactTaskRefId, HummockContextRefId,
+    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockStaleSstables,
+    HummockVersion, HummockVersionRefId, Level, LevelType, SstableIdInfo, SstableInfo,
+    SstableRefId, TableSetStatistics, UncommittedEpoch,
 };
 use risingwave_storage::hummock::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -43,13 +44,13 @@ use crate::model::{MetadataModel, Transactional, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
 
-// Update to states are performed as follow:
-// - Call load_meta_store_state when creating HummockManager (on boot or on meta-node leadership
+// Update to states are performed as follows:
+// - 1. Call load_meta_store_state when creating HummockManager (on boot or on meta-node leadership
 //   change).
-// - Read in-mem states and make copies of them.
-// - Make changes on the copies.
-// - Commit the changes via meta store transaction.
-// - If transaction succeeds, update in-mem states with the copies.
+// - 2. Read in-mem states and make copies of them.
+// - 3. Make changes on the copies.
+// - 4. Commit the changes via meta store transaction.
+// - 5. If transaction succeeds, update in-mem states with the copies.
 pub struct HummockManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
@@ -60,10 +61,12 @@ pub struct HummockManager<S> {
     versioning: RwLock<Versioning>,
 
     metrics: Arc<MetaMetrics>,
+    // TODO: #1263 subscribe to cluster membership change.
 }
 
 struct Compaction {
     compact_status: CompactStatus,
+    compact_task_assignment: BTreeMap<u64, CompactTaskAssignment>,
 }
 
 struct Versioning {
@@ -97,6 +100,7 @@ where
             }),
             compaction: Mutex::new(Compaction {
                 compact_status: CompactStatus::new(),
+                compact_task_assignment: Default::default(),
             }),
             metrics,
             cluster_manager_ref,
@@ -114,6 +118,12 @@ where
         compaction_guard.compact_status = CompactStatus::get(self.meta_store_ref.as_ref())
             .await?
             .unwrap_or_else(CompactStatus::new);
+        compaction_guard.compact_task_assignment =
+            CompactTaskAssignment::list(self.meta_store_ref.as_ref())
+                .await?
+                .into_iter()
+                .map(|assigned| (assigned.key().unwrap().id, assigned))
+                .collect();
 
         let mut versioning_guard = self.versioning.write().await;
         versioning_guard.current_version_id =
@@ -626,16 +636,33 @@ where
         Ok(())
     }
 
+    /// `get_compact_task` picks a compact task to process.
+    /// Return None if no compact task is available.
     pub async fn get_compact_task(&self) -> Result<Option<CompactTask>> {
         let mut compaction_guard = self.compaction.lock().await;
+        // 1. Try to pick a compact task that is found previously but not assigned yet.
+        if let Some(compact_task_assignment) = compaction_guard
+            .compact_task_assignment
+            .values()
+            .find(|c| c.context_id.is_none())
+        {
+            return Ok(compact_task_assignment.compact_task.clone());
+        }
+
+        // 2. Try to find a new compact task.
         let mut compact_status_copy = compaction_guard.compact_status.clone();
         let compact_task = compact_status_copy.get_compact_task();
         let ret = match compact_task {
             None => Ok(None),
             Some(mut compact_task) => {
+                let new_compact_task_assignment = CompactTaskAssignment {
+                    compact_task: Some(compact_task.clone()),
+                    context_id: None,
+                };
                 let mut transaction = Transaction::default();
-                // Q: why update?
+                // compact_status has been modified by get_compact_task so update is required.
                 compact_status_copy.update_in_transaction(&mut transaction);
+                new_compact_task_assignment.upsert_in_transaction(&mut transaction)?;
                 self.commit_trx(self.meta_store_ref.as_ref(), transaction, None)
                     .await?;
                 compact_task.watermark = {
@@ -653,6 +680,10 @@ where
                         .fold(max_committed_epoch, std::cmp::min)
                 };
                 // Update in-mem state after transaction succeeds.
+                compaction_guard.compact_task_assignment.insert(
+                    new_compact_task_assignment.key()?.id,
+                    new_compact_task_assignment,
+                );
                 compaction_guard.compact_status = compact_status_copy;
                 Ok(Some(compact_task))
             }
@@ -667,9 +698,10 @@ where
         ret
     }
 
-    /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
-    /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
-    /// been processed previously.
+    /// Finish or cancel a compact task.
+    /// It is retryable. `task_id` in `compact_task` parameter is used as the idempotency key.
+    /// Return Ok(false) to indicate the `task_id` is not found, which may have been processed
+    /// previously.
     pub async fn report_compact_task(
         &self,
         mut compact_task: CompactTask,
@@ -698,6 +730,15 @@ where
         let compact_task_metrics = compact_task.metrics.take();
         let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
+
+        // The task is not found.
+        if !compaction_guard
+            .compact_task_assignment
+            .contains_key(&compact_task_id)
+        {
+            return Ok(false);
+        }
+
         let mut transaction = Transaction::default();
         let mut compact_status_copy = compaction_guard.compact_status.clone();
         let delete_table_ids = match compact_status_copy.report_compact_task(
@@ -706,11 +747,16 @@ where
             task_result,
         ) {
             None => {
-                // The task is not found.
                 return Ok(false);
             }
             Some(delete_table_ids) => delete_table_ids,
         };
+        CompactTaskAssignment::delete_in_transaction(
+            CompactTaskRefId {
+                id: compact_task_id,
+            },
+            &mut transaction,
+        )?;
         compact_status_copy.update_in_transaction(&mut transaction);
         if task_result {
             // The compact task is finished.
@@ -766,7 +812,7 @@ where
                 match versioning_guard.sstable_id_infos.get(sst_id).cloned() {
                     None => {
                         return Err(ErrorCode::MetaError(format!(
-                            "invalid sst id {}, may have been vacuumed",
+                            "Invalid SST {}, may have been vacuumed",
                             sst_id
                         ))
                         .into());
@@ -784,6 +830,9 @@ where
 
             // Update in-mem state after transaction succeeds. after transaction succeeds.
             compaction_guard.compact_status = compact_status_copy;
+            compaction_guard
+                .compact_task_assignment
+                .remove(&compact_task_id);
             versioning_guard.current_version_id = current_version_id_copy;
             versioning_guard
                 .hummock_versions
@@ -798,7 +847,7 @@ where
             }
 
             tracing::debug!(
-                "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
+                "Finish hummock compaction task {}, compact {} SSTs {:?} to {} SSTs {:?}",
                 compact_task_id,
                 input_sst_ids.len(),
                 input_sst_ids,
@@ -812,8 +861,11 @@ where
 
             // Update in-mem state after transaction succeeds. after transaction succeeds.
             compaction_guard.compact_status = compact_status_copy;
+            compaction_guard
+                .compact_task_assignment
+                .remove(&compact_task_id);
 
-            tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
+            tracing::debug!("Cancel hummock compaction task {}", compact_task_id);
         }
 
         self.trigger_sst_stat(&compaction_guard.compact_status);
@@ -1028,18 +1080,30 @@ where
     /// Release resources pinned by these contexts, including:
     /// - Version
     /// - Snapshot
-    /// - TODO: Compact task
+    /// - Compact task
     pub async fn release_contexts(
         &self,
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
         for context_id in context_ids.as_ref() {
             tracing::debug!("Release context {}", *context_id);
+            let mut compaction_guard = self.compaction.lock().await;
             let mut versioning_guard = self.versioning.write().await;
             let mut transaction = Transaction::default();
-            let pinned_version = versioning_guard.pinned_versions.get(context_id);
             let mut to_commit = false;
-            if let Some(pinned_version) = pinned_version {
+            let mut modified_compact_task_assignment = vec![];
+            for assignment in compaction_guard.compact_task_assignment.values() {
+                if let Some(ref assigned_context_id) = assignment.context_id {
+                    if assigned_context_id.id == *context_id {
+                        let mut assignment_copy = assignment.clone();
+                        assignment_copy.context_id = None;
+                        assignment_copy.upsert_in_transaction(&mut transaction)?;
+                        modified_compact_task_assignment.push(assignment_copy);
+                        to_commit = true;
+                    }
+                }
+            }
+            if let Some(pinned_version) = versioning_guard.pinned_versions.get(context_id) {
                 HummockPinnedVersion::delete_in_transaction(
                     HummockContextRefId {
                         id: pinned_version.context_id,
@@ -1048,8 +1112,7 @@ where
                 )?;
                 to_commit = true;
             }
-            let pinned_snapshot = versioning_guard.pinned_snapshots.get(context_id);
-            if let Some(pinned_snapshot) = pinned_snapshot {
+            if let Some(pinned_snapshot) = versioning_guard.pinned_snapshots.get(context_id) {
                 HummockPinnedSnapshot::delete_in_transaction(
                     HummockContextRefId {
                         id: pinned_snapshot.context_id,
@@ -1058,6 +1121,7 @@ where
                 )?;
                 to_commit = true;
             }
+
             if !to_commit {
                 return Ok(());
             }
@@ -1065,12 +1129,18 @@ where
                 .await?;
 
             // Update in-mem state after transaction succeeds.
+            for compact_task_assignment in modified_compact_task_assignment {
+                compaction_guard
+                    .compact_task_assignment
+                    .insert(compact_task_assignment.key()?.id, compact_task_assignment);
+            }
             versioning_guard.pinned_versions.remove(context_id);
             versioning_guard.pinned_snapshots.remove(context_id);
 
             #[cfg(test)]
             {
                 drop(versioning_guard);
+                drop(compaction_guard);
                 self.check_state_consistency().await;
             }
         }
@@ -1178,7 +1248,8 @@ where
         Ok(())
     }
 
-    // TODO: use proc macro to call check_state_consistency
+    // TODO: use proc macro to simplify check_state_consistency usage. The contracts crate cannot be
+    // used on async fn.
     #[cfg(test)]
     pub async fn check_state_consistency(&self) {
         let get_state = || async {
@@ -1186,19 +1257,21 @@ where
             let versioning_guard = self.versioning.read().await;
             let compact_status_copy = compaction_guard.compact_status.clone();
             let current_version_id_copy = versioning_guard.current_version_id.clone();
-            let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
+            let hummock_versions_copy = versioning_guard.hummock_versions.clone();
             let pinned_versions_copy = versioning_guard.pinned_versions.clone();
             let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
             let stale_sstables_copy = versioning_guard.stale_sstables.clone();
             let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
+            let assigned_compact_tasks_copy = compaction_guard.compact_task_assignment.clone();
             (
                 compact_status_copy,
                 current_version_id_copy,
-                hummmock_versions_copy,
+                hummock_versions_copy,
                 pinned_versions_copy,
                 pinned_snapshots_copy,
                 stale_sstables_copy,
                 sst_id_infos_copy,
+                assigned_compact_tasks_copy,
             )
         };
         let mem_state = get_state().await;
@@ -1247,8 +1320,16 @@ where
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
     pub async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let active_context_ids = {
+            let compaction_guard = self.compaction.lock().await;
             let versioning_guard = self.versioning.read().await;
             let mut active_context_ids = HashSet::new();
+            active_context_ids.extend(
+                compaction_guard
+                    .compact_task_assignment
+                    .values()
+                    .filter_map(|c| c.context_id.clone())
+                    .map(|c| c.id),
+            );
             active_context_ids.extend(versioning_guard.pinned_versions.keys());
             active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
             active_context_ids
@@ -1269,5 +1350,47 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// `assign_compact_task` assigns a compact task to a context. The compact task will be
+    /// unassigned if the context is invalidated.
+    pub async fn assign_compact_task(
+        &self,
+        context_id: HummockContextId,
+        task_id: u64,
+    ) -> Result<()> {
+        let mut compaction_guard = self.compaction.lock().await;
+        match compaction_guard.compact_task_assignment.get(&task_id) {
+            None => {
+                return Err(ErrorCode::InternalError(format!(
+                    "Compact task {} is not found.",
+                    task_id
+                ))
+                .into());
+            }
+            Some(compact_task) => match compact_task.context_id {
+                None => {
+                    let mut copy_compact_task_assignment = compact_task.clone();
+                    copy_compact_task_assignment.context_id =
+                        Some(HummockContextRefId { id: context_id });
+                    let mut transaction = Transaction::default();
+                    copy_compact_task_assignment.upsert_in_transaction(&mut transaction)?;
+                    self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
+                        .await?;
+                    compaction_guard.compact_task_assignment.insert(
+                        copy_compact_task_assignment.key()?.id,
+                        copy_compact_task_assignment,
+                    );
+                    Ok(())
+                }
+                Some(ref assigned_context_id) => {
+                    return Err(ErrorCode::InternalError(format!(
+                        "Compact task {} has been assigned to context {}.",
+                        task_id, assigned_context_id.id
+                    ))
+                    .into());
+                }
+            },
+        }
     }
 }

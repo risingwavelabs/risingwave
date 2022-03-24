@@ -56,7 +56,6 @@ where
 
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
-/// A vacuum trigger is started here too.
 pub fn start_compaction_trigger<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
@@ -84,8 +83,8 @@ where
                 Ok(None) => {
                     continue;
                 }
-                Err(e) => {
-                    tracing::warn!("failed to get_compact_task {}", e);
+                Err(err) => {
+                    tracing::warn!("Failed to get compact task. {}", err);
                     continue;
                 }
             };
@@ -94,21 +93,23 @@ where
                 .iter()
                 .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
                 .collect_vec();
-            if !compactor_manager_ref
-                .try_assign_compact_task(Some(compact_task.clone()), None)
+            match compactor_manager_ref
+                .try_assign_compact_task(Some(compact_task), None, hummock_manager_ref.as_ref())
                 .await
             {
-                // TODO #546: Cancel a task only requires task_id. compact_task.clone() can be
-                // avoided.
-                if let Err(e) = hummock_manager_ref
-                    .report_compact_task(compact_task, false)
-                    .await
-                {
-                    tracing::warn!("failed to report_compact_task {}", e);
+                Ok(assigned) => {
+                    if let Some(assigned) = assigned {
+                        tracing::debug!(
+                            "Try to compact SSTs {:?} in worker {}.",
+                            input_ssts,
+                            assigned
+                        );
+                    }
                 }
-                continue;
+                Err(err) => {
+                    tracing::warn!("Failed to assign_compact_task. {}", err);
+                }
             }
-            tracing::debug!("Try to compact SSTs {:?}", input_ssts);
         }
     });
 
