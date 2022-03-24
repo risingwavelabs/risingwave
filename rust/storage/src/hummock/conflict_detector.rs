@@ -11,19 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
+
+use std::collections::HashSet;
 
 use bytes::Bytes;
 use crossbeam::atomic::AtomicCell;
-use dashmap::{DashMap, DashSet};
+use dashmap::DashMap;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
 
 pub struct ConflictDetector {
     // epoch -> key-sets
-    epoch_history: DashMap<HummockEpoch, DashSet<Bytes>>,
+    epoch_history: DashMap<HummockEpoch, HashSet<Bytes>>,
     epoch_watermark: AtomicCell<HummockEpoch>,
 }
 
@@ -73,7 +75,7 @@ impl ConflictDetector {
             epoch
         );
 
-        let written_key = self.epoch_history.entry(epoch).or_insert(DashSet::new());
+        let mut written_key = self.epoch_history.entry(epoch).or_insert(HashSet::new());
 
         for (key, value) in kv_pairs.iter() {
             assert!(

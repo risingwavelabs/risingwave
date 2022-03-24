@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::Debug;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,7 +29,8 @@ use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
+    CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -177,6 +178,15 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+        let request = CreateSourceRequest {
+            source: Some(source),
+        };
+
+        let resp = self.inner.create_source(request).await?;
+        Ok((resp.source_id, resp.version))
+    }
+
     pub async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -191,6 +201,20 @@ impl MetaClient {
         let resp = self.inner.create_materialized_source(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.source_id, resp.version))
+    }
+
+    pub async fn drop_materialized_source(
+        &self,
+        source_id: u32,
+        table_id: TableId,
+    ) -> Result<CatalogVersion> {
+        let request = DropMaterializedSourceRequest {
+            source_id,
+            table_id: table_id.table_id(),
+        };
+
+        let resp = self.inner.drop_materialized_source(request).await?;
+        Ok(resp.version)
     }
 
     /// Unregister the current node to the cluster.
@@ -229,11 +253,11 @@ impl MetaClient {
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
         let join_handle = tokio::spawn(async move {
-            let mut min_interval = tokio::time::interval(min_interval);
+            let mut min_interval_ticker = tokio::time::interval(min_interval);
             loop {
                 tokio::select! {
                     // Wait for interval
-                    _ = min_interval.tick() => {},
+                    _ = min_interval_ticker.tick() => {},
                     // Shutdown
                     _ = shutdown_rx.recv() => {
                         tracing::info!("Heartbeat loop is shutting down");
@@ -241,8 +265,20 @@ impl MetaClient {
                     }
                 }
                 tracing::trace!(target: "events::meta::client_heartbeat", "heartbeat");
-                if let Err(err) = meta_client.send_heartbeat(meta_client.worker_id()).await {
-                    tracing::warn!("Failed to send_heartbeat. {}", err);
+                match tokio::time::timeout(
+                    // TODO: decide better min_interval for timeout
+                    min_interval * 3,
+                    meta_client.send_heartbeat(meta_client.worker_id()),
+                )
+                .await
+                {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(err)) => {
+                        tracing::warn!("Failed to send_heartbeat: error {}", err);
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to send_heartbeat: timeout {}", err);
+                    }
                 }
             }
         });
@@ -355,10 +391,21 @@ pub trait MetaClientInner: Send + Sync {
         unimplemented!()
     }
 
+    async fn create_source(&self, _req: CreateSourceRequest) -> Result<CreateSourceResponse> {
+        unimplemented!()
+    }
+
     async fn create_materialized_source(
         &self,
         _req: CreateMaterializedSourceRequest,
     ) -> Result<CreateMaterializedSourceResponse> {
+        unimplemented!()
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        _req: DropMaterializedSourceRequest,
+    ) -> Result<DropMaterializedSourceResponse> {
         unimplemented!()
     }
 
@@ -606,6 +653,19 @@ impl MetaClientInner for GrpcMetaClient {
             .ddl_client
             .to_owned()
             .create_materialized_source(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        req: DropMaterializedSourceRequest,
+    ) -> Result<DropMaterializedSourceResponse> {
+        Ok(self
+            .ddl_client
+            .to_owned()
+            .drop_materialized_source(req)
             .await
             .to_rw_result()?
             .into_inner())

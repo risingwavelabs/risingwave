@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::Debug;
 
 use anyhow::{anyhow, Result};
@@ -142,7 +142,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                         .state_identifier
                         .eq(&state_identifier.clone())
                     {
-                        restore_values.push((stored_key.epoch, pair.1))
+                        restore_values.push((stored_key.epoch, pair.1.to_bytes()))
                     }
                 }
                 Ok(restore_values)

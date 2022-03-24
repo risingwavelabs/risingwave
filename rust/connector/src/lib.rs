@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -26,12 +26,15 @@
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-mod base;
+pub mod base;
 mod filesystem;
 mod kafka;
 mod kinesis;
 mod pulsar;
 mod state;
+mod utils;
+
+pub use base::*;
 
 #[cfg(test)]
 mod tests {

@@ -11,11 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::time::Duration;
 
-mod enumerator;
+pub(crate) mod enumerator;
 mod source;
 mod split;
 
+pub use enumerator::*;
+pub use split::*;
+
 const KAFKA_SYNC_CALL_TIMEOUT: Duration = Duration::from_secs(1);
+const KAFKA_CONFIG_BROKER_KEY: &str = "kafka.broker";
+const KAFKA_CONFIG_TOPIC_KEY: &str = "kafka.topic";

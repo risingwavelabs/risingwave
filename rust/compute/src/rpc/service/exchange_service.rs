@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -141,7 +141,7 @@ impl ExchangeServiceImpl {
         mut receiver: Receiver<Message>,
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
-        debug!("Serve stream exchange RPC from {}", peer_addr);
+        tracing::debug!(peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
             loop {
                 let msg = receiver.next().await;

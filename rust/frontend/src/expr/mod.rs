@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl};
 mod input_ref;
 pub use input_ref::*;
@@ -56,7 +56,6 @@ pub enum ExprImpl {
 impl ExprImpl {
     /// A literal int value.
     #[inline(always)]
-    #[allow(dead_code)]
     pub fn literal_int(v: i32) -> Self {
         Self::Literal(Box::new(Literal::new(
             Some(v.to_scalar_value()),

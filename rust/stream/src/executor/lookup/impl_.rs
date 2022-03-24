@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef, StreamChunk};
@@ -286,7 +286,7 @@ impl<S: StateStore> LookupExecutor<S> {
             if let Some((_, row)) = self
                 .arrangement
                 .deserializer
-                .deserialize(&pk_with_cell_id, &cell)?
+                .deserialize(&pk_with_cell_id, cell.as_bytes())?
             {
                 all_rows.push(row);
             }

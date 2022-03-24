@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::atomic::{self, AtomicI64};
 
 use anyhow;
@@ -173,7 +173,7 @@ impl EtcdMetaStore {
 impl MetaStore for EtcdMetaStore {
     type Snapshot = EtcdSnapshot;
 
-    fn snapshot(&self) -> Self::Snapshot {
+    async fn snapshot(&self) -> Self::Snapshot {
         EtcdSnapshot {
             client: self.client.kv_client(),
             revision: AtomicI64::new(REVISION_UNINITIALIZED),

@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 
+use super::Transactional;
 use crate::model::MetadataModel;
 
 /// Column family name for source catalog.
@@ -55,3 +56,6 @@ impl_model_for_catalog!(Source, CATALOG_SOURCE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Table, CATALOG_TABLE_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Schema, CATALOG_SCHEMA_CF_NAME, u32, get_id);
 impl_model_for_catalog!(Database, CATALOG_DATABASE_CF_NAME, u32, get_id);
+
+impl Transactional for Table {}
+impl Transactional for Source {}

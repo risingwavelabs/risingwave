@@ -18,5 +18,5 @@ tokio = { version = "1", features = [
     "signal",
 ] }
 tonic = "0.6"
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

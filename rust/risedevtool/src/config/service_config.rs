@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,6 +80,7 @@ pub struct EtcdConfig {
     pub address: String,
     pub port: u16,
     pub peer_port: u16,
+    pub unsafe_no_fsync: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

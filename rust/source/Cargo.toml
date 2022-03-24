@@ -20,6 +20,7 @@ log = "0.4"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+parking_lot = "0.12"
 paste = "1"
 prost = "0.9"
 protobuf = "2"
