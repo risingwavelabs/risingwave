@@ -128,31 +128,28 @@ impl FilterJoinRule {
         let mut cannot_pushed = vec![];
 
         let left = if push_left {
-            Some(Condition { conjunctions: left })
+            Some(left)
         } else {
             cannot_pushed.extend(left);
             None
         };
 
         let right = if push_right {
-            let cond = Condition {
-                conjunctions: right,
-            };
             let mut mapping = ColIndexMapping::with_shift_offset(
                 left_col_num + right_col_num,
                 -(left_col_num as isize),
             );
-            Some(cond.rewrite_expr(&mut mapping))
+            Some(right.rewrite_expr(&mut mapping))
         } else {
             cannot_pushed.extend(right);
             None
         };
 
         let on = if push_on {
-            others.extend(std::mem::take(&mut cannot_pushed));
-            Some(Condition {
-                conjunctions: others,
-            })
+            others
+                .conjunctions
+                .extend(std::mem::take(&mut cannot_pushed));
+            Some(others)
         } else {
             cannot_pushed.extend(others);
             None
