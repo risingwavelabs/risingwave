@@ -131,7 +131,7 @@ impl dyn PlanNode {
     /// testing).
     pub fn to_stream_prost_identity(&self, identity: bool) -> StreamPlanProst {
         if let Some(stream_scan) = self.as_stream_table_scan() {
-            return stream_scan.adhoc_to_stream_prost();
+            return stream_scan.adhoc_to_stream_prost(identity);
         }
 
         let node = Some(self.to_stream_prost_body());
@@ -144,13 +144,13 @@ impl dyn PlanNode {
         StreamPlanProst {
             input,
             identity: if identity {
-                format!("{:?}", self)
+                format!("{}", self)
             } else {
                 "".into()
             },
             node,
-            operator_id: 0,
-            pk_indices: vec![],
+            operator_id: self.id().0 as u64,
+            pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
         }
     }
 }
