@@ -188,8 +188,8 @@ pub struct BarrierManager<S> {
     metrics: Arc<MetaMetrics>,
 }
 
-// TODO: Persist barrier manager states in meta store including
-// previous epoch number, current epoch number and barrier collection progress
+// TODO: Persist barrier manager states in meta store including previous epoch number, current epoch
+// number and barrier collection progress
 impl<S> BarrierManager<S>
 where
     S: MetaStore,
@@ -243,7 +243,7 @@ where
                 &info,
                 prev_epoch,
                 new_epoch,
-                command,
+                command.clone(),
             );
 
             let mut notifiers = notifiers;
@@ -258,7 +258,7 @@ where
                         .iter_mut()
                         .for_each(|notify| notify.notify_failed(e.clone()));
                     // If failed, enter recovery mode.
-                    self.recovery(prev_epoch).await;
+                    self.recovery(prev_epoch, &command).await;
                 }
             }
         }
@@ -266,9 +266,9 @@ where
 
     /// Running a scheduled command.
     async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
-        // Wait for all barriers collected
         let timer = self.metrics.barrier_latency.start_timer();
 
+        // Wait for all barriers collected
         let collect_result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch != INVALID_EPOCH {
@@ -365,10 +365,13 @@ where
     S: MetaStore,
 {
     /// Recovery the whole cluster from the latest epoch.
-    async fn recovery(&self, prev_epoch: u64) {
+    async fn recovery(&self, prev_epoch: u64, prev_command: &Command) {
         let new_epoch = self.epoch_generator.generate().into_inner();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
+
+        // clean up the previous command dirty data.
+        self.clean_up(prev_command).await;
 
         debug!("recovery start!");
         loop {
@@ -405,6 +408,26 @@ where
 
             debug!("recovery success");
             break;
+        }
+    }
+
+    /// Clean up previous command dirty data. Currently, we only need to handle table fragments info
+    /// for `CreateMaterializedView`. For `DropMaterializedView`, since we already response fail to
+    /// frontend and the actors will be rebuild by follow recovery process, it's okay to retain
+    /// it.
+    async fn clean_up(&self, prev_command: &Command) {
+        if let Some(table_id) = prev_command.creating_table_id() {
+            loop {
+                if self
+                    .fragment_manager
+                    .drop_table_fragments(&table_id)
+                    .await
+                    .is_ok()
+                {
+                    break;
+                }
+                tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
+            }
         }
     }
 

@@ -147,13 +147,13 @@ where
             Entry::Occupied(entry) => {
                 TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
                 entry.remove();
-
-                Ok(())
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            Entry::Vacant(_) => {
+                tracing::warn!("table_fragment not exist when dropping: {}", table_id)
+            }
         }
+
+        Ok(())
     }
 
     /// Used in [`crate::barrier::BarrierManager`]
