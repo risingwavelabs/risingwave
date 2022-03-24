@@ -19,7 +19,9 @@ use crate::binder::{Binder, BoundQuery, BoundTableSource};
 
 #[derive(Debug)]
 pub struct BoundInsert {
+    /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
+
     pub source: BoundQuery,
 }
 

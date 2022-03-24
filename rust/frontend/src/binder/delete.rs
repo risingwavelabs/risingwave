@@ -20,8 +20,12 @@ use crate::expr::ExprImpl;
 
 #[derive(Debug)]
 pub struct BoundDelete {
+    /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
+
+    /// Used for scanning the records to delete with the `selection`.
     pub table: BoundBaseTable,
+
     pub selection: Option<ExprImpl>,
 }
 
