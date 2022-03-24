@@ -83,6 +83,9 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                 },
                 column_ids,
             )?),
+            SourceImpl::Connector(_) => {
+                panic!("connector source do not support batch query yet")
+            }
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
             }

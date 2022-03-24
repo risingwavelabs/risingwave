@@ -29,12 +29,19 @@
 pub mod base;
 mod filesystem;
 mod kafka;
-mod kinesis;
+pub mod kinesis;
 mod pulsar;
-mod state;
 mod utils;
 
 pub use base::*;
+pub mod state;
+
+use crate::kinesis::config::AwsConfigInfo;
+
+#[derive(Clone, Debug)]
+pub enum ConnectorConfig {
+    Kinesis(AwsConfigInfo),
+}
 
 #[cfg(test)]
 mod tests {
