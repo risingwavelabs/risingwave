@@ -57,11 +57,8 @@ impl ComputeClient {
 
     pub async fn get_data(&self, output_id: TaskOutputId) -> Result<GrpcExchangeSource> {
         let stream = self.get_data_inner(output_id.clone()).await?;
-        let addr = self.addr;
         Ok(GrpcExchangeSource {
-            client: self.clone(),
             stream,
-            addr,
             task_id: output_id.get_task_id().unwrap().clone(),
             output_id,
         })
@@ -136,11 +133,8 @@ pub trait ExchangeSource: Send {
 
 /// Use grpc client as the source.
 pub struct GrpcExchangeSource {
-    client: ComputeClient,
     stream: Streaming<GetDataResponse>,
 
-    // Address of the remote endpoint.
-    addr: SocketAddr,
     output_id: TaskOutputId,
     task_id: TaskId,
 }

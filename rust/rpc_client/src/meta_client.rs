@@ -76,13 +76,6 @@ impl MetaClient {
         })
     }
 
-    pub fn mock(inner: GrpcMetaClient) -> Self {
-        Self {
-            worker_id_ref: None,
-            inner,
-        }
-    }
-
     pub fn set_worker_id(&mut self, worker_id: u32) {
         self.worker_id_ref = Some(worker_id);
     }
