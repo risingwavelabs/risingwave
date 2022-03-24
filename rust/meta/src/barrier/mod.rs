@@ -39,7 +39,7 @@ use self::info::BarrierActorInfo;
 use crate::cluster::StoredClusterManagerRef;
 use crate::hummock::HummockManager;
 use crate::manager::{
-    CatalogManagerRef, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
+    CatalogManagerRef, Epoch, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
 };
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -258,7 +258,7 @@ where
                         .iter_mut()
                         .for_each(|notify| notify.notify_failed(e.clone()));
                     // If failed, enter recovery mode.
-                    self.recovery(prev_epoch, &command).await;
+                    prev_epoch = self.recovery(prev_epoch, &command).await.into_inner();
                 }
             }
         }
@@ -363,8 +363,8 @@ where
     S: MetaStore,
 {
     /// Recovery the whole cluster from the latest epoch.
-    async fn recovery(&self, prev_epoch: u64, prev_command: &Command) {
-        let new_epoch = self.epoch_generator.generate().into_inner();
+    async fn recovery(&self, prev_epoch: u64, prev_command: &Command) -> Epoch {
+        let new_epoch = self.epoch_generator.generate();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
@@ -395,7 +395,7 @@ where
                 self.clients.clone(),
                 &info,
                 prev_epoch,
-                new_epoch,
+                new_epoch.into_inner(),
                 Command::checkpoint(),
             );
             if self.inject_barrier(&command_ctx).await.is_err()
@@ -407,6 +407,8 @@ where
             debug!("recovery success");
             break;
         }
+
+        new_epoch
     }
 
     /// Clean up previous command dirty data. Currently, we only need to handle table fragments info
@@ -415,15 +417,7 @@ where
     /// it.
     async fn clean_up(&self, prev_command: &Command) {
         if let Some(table_id) = prev_command.creating_table_id() {
-            loop {
-                if self
-                    .fragment_manager
-                    .drop_table_fragments(&table_id)
-                    .await
-                    .is_ok()
-                {
-                    break;
-                }
+            while self.fragment_manager.drop_table_fragments(&table_id).await.is_err() {
                 tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
             }
         }
