@@ -18,13 +18,12 @@ use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanNode, PlanRef, StreamTableScan, ToBatch, ToStream};
-use crate::catalog::ColumnId;
+use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::{WithContext, WithSchema};
+use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -169,8 +168,8 @@ impl ToStream for LogicalScan {
                     .pk
                     .iter()
                     .enumerate()
-                    .filter(|(idx, c)| !col_ids.contains(&c.column_desc.column_id))
-                    .map(|(idx, c)| idx)
+                    .filter(|(_idx, c)| !col_ids.contains(&c.column_desc.column_id))
+                    .map(|(idx, _c)| idx)
                     .collect_vec();
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
