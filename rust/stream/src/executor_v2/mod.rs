@@ -30,18 +30,6 @@ pub use v1_compact::StreamExecutorV1;
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, Result<Message>>;
 
-/// Static information of executors.
-pub struct ExecutorInfo {
-    /// The schema of the executor's output.
-    pub schema: Schema,
-
-    /// The primary key indices of the executor's input.
-    pub pk_indices: PkIndices,
-
-    /// The identity of the executor.
-    pub identity: String,
-}
-
 pub trait Executor: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
