@@ -345,12 +345,12 @@ async fn test_cell_based_get_row() {
 
     let epoch = u64::MAX;
 
-    let get_row_res = table
+    let get_row1_res = table
         .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
         .await
         .unwrap();
     assert_eq!(
-        get_row_res,
+        get_row1_res,
         Some(Row(vec![
             Some(1_i32.into()),
             Some(11_i32.into()),
@@ -362,7 +362,7 @@ async fn test_cell_based_get_row() {
         .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
         .await
         .unwrap();
-    assert_eq!(get_row2_res, Some(Row(vec![None, None, None])));
+    assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
         .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
@@ -393,16 +393,13 @@ async fn test_cell_based_get_no_exist_row() {
     );
     state.put(
         Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
-        Row(vec![
-            Some(2_i32.into()),
-            Some(22_i32.into()),
-            Some(222_i32.into()),
-        ]),
+        Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
     );
     state.put(
         Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
         Row(vec![Some(3_i32.into()), None, None]),
     );
+
     state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
     state.flush(epoch).await.unwrap();
 
@@ -413,6 +410,12 @@ async fn test_cell_based_get_no_exist_row() {
         .await
         .unwrap();
     assert_eq!(get_row1_res, Some(Row(vec![None, None, None,])));
+
+    let get_row2_res = table
+        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_row2_res, None);
 
     let get_row3_res = table
         .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)

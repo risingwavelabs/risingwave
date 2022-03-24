@@ -28,6 +28,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::hummock::key::next_key;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
 
@@ -112,14 +113,16 @@ impl<S: StateStore> CellBasedTable<S> {
 
         let state_store_range_scan_res = self
             .keyspace
-            .scan_with_start_key(
-                self.keyspace.prefixed_key(start_key),
-                Some(column_ids.len()),
+            .state_store()
+            .scan(
+                self.keyspace.prefixed_key(start_key)
+                    ..next_key(&self.keyspace.prefixed_key(start_key)),
+                None,
                 epoch,
             )
             .await?;
 
-        println!("len = {}",state_store_range_scan_res.len());
+        // row does not exist
         if state_store_range_scan_res.is_empty() {
             return Ok(None);
         }
