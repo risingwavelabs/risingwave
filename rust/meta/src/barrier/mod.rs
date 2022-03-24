@@ -274,13 +274,11 @@ where
         if command_context.prev_epoch != INVALID_EPOCH {
             match collect_result {
                 Ok(_) => {
-                    debug!("inject success!");
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch)
                         .await?;
                 }
                 Err(_) => {
-                    debug!("inject fail!");
                     self.hummock_manager
                         .abort_epoch(command_context.prev_epoch)
                         .await?;
