@@ -115,7 +115,7 @@ class JdbcIter implements PgResult.PgIter {
       case Types.VARCHAR:
         return Values.createString(res.getString(i));
       case Types.DATE:
-        return Values.createDate(res.getDate(i));
+        return Values.createDate(res.getDate(i).toLocalDate());
       case Types.TIMESTAMP:
         return Values.createTimestamp(res.getTimestamp(i));
       default:

@@ -19,7 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
-use super::{LogicalScan, PlanBase, ToStreamProst};
+use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
 use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
@@ -31,19 +31,31 @@ use crate::optimizer::property::{Distribution, WithSchema};
 pub struct StreamTableScan {
     pub base: PlanBase,
     logical: LogicalScan,
+    batch_plan_id: PlanNodeId,
 }
 
 impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
+
+        let batch_plan_id;
+        {
+            let mut ctx = ctx.borrow_mut();
+            batch_plan_id = ctx.get_id();
+        }
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             vec![0], // TODO
             Distribution::Single,
+            false, // TODO: determine the `append-only` field of table scan
         );
-        Self { logical, base }
+        Self {
+            logical,
+            base,
+            batch_plan_id,
+        }
     }
 
     pub fn table_id(&self) -> u32 {
@@ -86,7 +98,7 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self, identity: bool) -> ProstStreamPlan {
         use risingwave_pb::plan::*;
         use risingwave_pb::stream_plan::*;
 
@@ -109,6 +121,8 @@ impl StreamTableScan {
                 .collect(),
         };
 
+        let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();
+
         ProstStreamPlan {
             input: vec![
                 // The merge node should be empty
@@ -118,11 +132,23 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node: Some(ProstStreamNode::BatchPlanNode(batch_plan_node)),
-                    ..Default::default()
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: if identity { "BatchPlanNode" } else { "" }.into(),
+                    pk_indices: pk_indices.clone(),
+                    input: vec![],
                 },
             ],
-            node: Some(ProstStreamNode::ChainNode(Default::default())),
-            ..Default::default()
+            node: Some(ProstStreamNode::ChainNode(
+                // TODO: how to fill the chain node body?
+                Default::default(),
+            )),
+            pk_indices,
+            operator_id: self.base.id.0 as u64,
+            identity: if identity {
+                format!("{}", self)
+            } else {
+                "".into()
+            },
         }
     }
 }

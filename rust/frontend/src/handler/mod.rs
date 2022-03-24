@@ -29,6 +29,8 @@ mod flush;
 mod query;
 pub mod util;
 
+pub use create_mv::{gen_create_mv_plan, MvInfo};
+
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
     let context = QueryContext::new(session.clone());
     match stmt {

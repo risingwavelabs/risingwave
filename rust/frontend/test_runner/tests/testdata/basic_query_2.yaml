@@ -2,7 +2,7 @@
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
-    BatchDelete { table_name: "t" }
+    BatchDelete { table: t }
       BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 int, v2 int);
@@ -12,7 +12,7 @@
       BatchProject { exprs: [$0], expr_alias: [v1] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
       StreamProject { exprs: [$0], expr_alias: [v1] }
         StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
 - sql: |
@@ -30,20 +30,20 @@
   binder_error: 'Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }'
 - sql: |
     values(sum(1));
-  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
+  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
 - sql: |
     values(count(1));
-  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
+  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
 - sql: |
     values(min(1));
-  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
+  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
 - sql: |
     values(1 + max(1));
-  binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
+  binder_error: "Invalid input syntax: aggregate functions are not allowed in VALUES"
 - sql: |
     create table t (v1 int);
     select v1 from t where min(v1);
-  binder_error: 'Invalid input syntax: aggregate functions are not allowed in WHERE'
+  binder_error: "Invalid input syntax: aggregate functions are not allowed in WHERE"
 - sql: |
     create table t1 (v1 int, v2 int);
     create table t2 (v1 int, v2 int);
@@ -85,14 +85,13 @@
           BatchExchange { order: [], dist: HashShard([2]) }
             BatchScan { table: t2, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0, #1], pk_indices: [] }
-      StreamProject { exprs: [$1, $3], expr_alias: [v2, v2] }
-        StreamExchange { dist: Single }
-          StreamHashJoin { type: Inner, predicate: $0 = $2 }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t1, columns: [v1, v2], pk_indices: [0] }
-            StreamExchange { dist: HashShard([2]) }
-              StreamTableScan { table: t2, columns: [v1, v2], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$2 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [2, 3] }
+      StreamProject { exprs: [$1, $3, $0, $2], expr_alias: [v2, v2,  ,  ] }
+        StreamHashJoin { type: Inner, predicate: $0 = $2 }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: t1, columns: [v1, v2], pk_indices: [0] }
+          StreamExchange { dist: HashShard([2]) }
+            StreamTableScan { table: t2, columns: [v1, v2], pk_indices: [0] }
 - sql: select 1
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -109,13 +108,12 @@
             BatchProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
       StreamProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [v1,  ] }
-        StreamExchange { dist: Single }
-          StreamHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($3)] }
-            StreamProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+        StreamHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($3)] }
+          StreamProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) from t;
@@ -127,16 +125,15 @@
             BatchProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [], column_id: [#0], pk_indices: [] }
-      StreamProject { exprs: [($0 + ($1 * $2))], expr_alias: [ ] }
-        StreamExchange { dist: Single }
-          StreamSimpleAgg { aggs: [min($0), max($1), count($2)] }
-            StreamProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
-              StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$1 ASC, $2 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [1, 2, 3] }
+      StreamProject { exprs: [($0 + ($1 * $2)), $0, $1, $2], expr_alias: [ ,  ,  ,  ] }
+        StreamSimpleAgg { aggs: [min($0), max($1), count($2)] }
+          StreamProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
+            StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
-  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
+  planner_error: "Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function"
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) from t group by v3;
@@ -148,10 +145,9 @@
             BatchProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
       StreamProject { exprs: [$0, ($1 * ($2 / $3))], expr_alias: [v3,  ] }
-        StreamExchange { dist: Single }
-          StreamHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
-            StreamProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+        StreamHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
+          StreamProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
+            StreamExchange { dist: HashShard([0]) }
+              StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }

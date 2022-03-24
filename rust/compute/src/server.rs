@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
+use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
@@ -76,10 +77,14 @@ pub async fn compute_node_serve(
             Duration::from_millis(config.server.heartbeat_interval as u64),
         )];
 
+    // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
+    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
+    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
+    let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+
     // Initialize state store.
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -102,7 +107,6 @@ pub async fn compute_node_serve(
         ));
     }
 
-    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
     let stream_mgr = Arc::new(StreamManager::new(
@@ -121,6 +125,7 @@ pub async fn compute_node_serve(
         batch_config,
         worker_id,
         state_store.clone(),
+        batch_metrics.clone(),
     );
 
     // Initialize the streaming environment.

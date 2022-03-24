@@ -16,7 +16,7 @@ use std::fmt::{self};
 use std::iter;
 
 use fixedbitset::FixedBitSet;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
@@ -290,14 +290,16 @@ impl ColPrunable for LogicalJoin {
         let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         on = on.rewrite_expr(&mut mapping);
 
-        let (left_required_cols, right_required_cols): (FixedBitSet, FixedBitSet) =
-            visitor.input_bits.ones().partition_map(|i| {
-                if i < left_len {
-                    Either::Left(i)
-                } else {
-                    Either::Right(i - left_len)
-                }
-            });
+        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_required_cols =
+            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        visitor.input_bits.ones().for_each(|i| {
+            if i < left_len {
+                left_required_cols.insert(i);
+            } else {
+                right_required_cols.insert(i - left_len);
+            }
+        });
 
         let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
