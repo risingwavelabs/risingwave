@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -19,6 +19,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
+use crate::executor::monitor::BatchMetrics;
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -44,6 +45,9 @@ pub struct BatchEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Statistics.
+    stats: Arc<BatchMetrics>,
 }
 
 impl BatchEnvironment {
@@ -54,6 +58,7 @@ impl BatchEnvironment {
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        stats: Arc<BatchMetrics>,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -62,6 +67,7 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
+            stats,
         }
     }
 
@@ -80,6 +86,7 @@ impl BatchEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            stats: Arc::new(BatchMetrics::unused()),
         }
     }
 
@@ -109,5 +116,9 @@ impl BatchEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn stats(&self) -> Arc<BatchMetrics> {
+        self.stats.clone()
     }
 }

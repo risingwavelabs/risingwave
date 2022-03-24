@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -263,7 +263,7 @@ mod tests {
         for key in put_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Put(iterator_test_value_of(0, *idx).into()),
+                HummockValue::Put(iterator_test_value_of(*idx).into()),
             ));
             *idx += 1;
         }

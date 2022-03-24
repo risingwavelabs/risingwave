@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -20,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::monitor::StateStoreMetrics;
 // use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use risingwave_storage::{Keyspace, StateStore};
@@ -75,7 +77,11 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_adhoc(keyspace, column_descs);
+        let table = CellBasedTable::new_adhoc(
+            keyspace,
+            column_descs,
+            Arc::new(StateStoreMetrics::unused()),
+        );
         Ok(Box::new(BatchQueryExecutor::new(
             table,
             params.pk_indices,

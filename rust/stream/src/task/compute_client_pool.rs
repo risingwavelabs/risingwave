@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 
 use moka::future::Cache;
@@ -33,7 +33,7 @@ impl ComputeClientPool {
     /// Get a compute client from the pool.
     pub async fn get_client_for_addr(&self, addr: &SocketAddr) -> Result<ComputeClient> {
         self.cache
-            .get_or_try_insert_with(*addr, async { ComputeClient::new(addr).await })
+            .get_or_try_insert_with(*addr, async { ComputeClient::new(*addr).await })
             .await
             .map_err(|e| {
                 // TODO: change this to error when we completed failover and error handling

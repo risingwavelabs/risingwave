@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -29,8 +29,8 @@ use crate::catalog::{ColumnId, TableId};
 #[derive(Debug, Clone)]
 pub struct LogicalInsert {
     pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
+    table_source_name: String, // explain-only
+    source_id: TableId,        // TODO: use SourceId
     columns: Vec<ColumnId>,
     input: PlanRef,
 }
@@ -39,16 +39,16 @@ impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
     pub fn new(
         input: PlanRef,
-        table_name: String,
-        table_id: TableId,
+        table_source_name: String,
+        source_id: TableId,
         columns: Vec<ColumnId>,
     ) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self {
-            table_name,
-            table_id,
+            table_source_name,
+            source_id,
             columns,
             input,
             base,
@@ -58,18 +58,21 @@ impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used by planner.
     pub fn create(
         input: PlanRef,
-        table_name: String,
-        table_id: TableId,
+        table_source_name: String,
+        source_id: TableId,
         columns: Vec<ColumnId>,
     ) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id, columns))
+        Ok(Self::new(input, table_source_name, source_id, columns))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        f.debug_struct(name)
-            .field("table_name", &self.table_name)
-            .field("columns", &self.columns)
-            .finish()
+        write!(f, "{} {{ table: {} }}", name, self.table_source_name)
+    }
+
+    /// Get the logical insert's source id.
+    #[must_use]
+    pub fn source_id(&self) -> TableId {
+        self.source_id
     }
 }
 
@@ -77,15 +80,17 @@ impl PlanTreeNodeUnary for LogicalInsert {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             input,
-            self.table_name.clone(),
-            self.table_id,
+            self.table_source_name.clone(),
+            self.source_id,
             self.columns.clone(),
         )
     }
 }
+
 impl_plan_tree_node_for_unary! {LogicalInsert}
 
 impl fmt::Display for LogicalInsert {
@@ -114,5 +119,8 @@ impl ToBatch for LogicalInsert {
 impl ToStream for LogicalInsert {
     fn to_stream(&self) -> PlanRef {
         unreachable!("insert should always be converted to batch plan");
+    }
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+        unreachable!("delete should always be converted to batch plan");
     }
 }

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Hummock is the state store of the streaming system.
 
 use std::fmt;
@@ -408,12 +408,25 @@ impl HummockStorage {
         self.shared_buffer_manager.sync(epoch).await
     }
 
+    #[cfg(not(feature = "blockv2"))]
     fn get_builder(options: &StorageConfig) -> SSTableBuilder {
         SSTableBuilder::new(SSTableBuilderOptions {
             table_capacity: options.sstable_size,
             block_size: options.block_size,
             bloom_false_positive: options.bloom_false_positive,
             checksum_algo: options.checksum_algo,
+        })
+    }
+
+    #[cfg(feature = "blockv2")]
+    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
+        SSTableBuilder::new(SSTableBuilderOptions {
+            capacity: options.sstable_size as usize,
+            block_capacity: options.block_size as usize,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: options.bloom_false_positive,
+            // TODO: Make this configurable.
+            compression_algorithm: CompressionAlgorithm::None,
         })
     }
 

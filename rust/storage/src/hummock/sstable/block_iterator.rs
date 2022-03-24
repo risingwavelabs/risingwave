@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::*;
 use std::sync::Arc;
 
@@ -75,21 +75,19 @@ impl BlockIterator {
         let mut entry_data = self.block.raw_entry(i as usize);
 
         let header = Header::decode(&mut entry_data);
+        let diff_key = &entry_data[..header.diff as usize];
 
-        // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
                 &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
             );
+        } else {
+            self.key.truncate(header.overlap as usize);
         }
-        self.perv_overlap = header.overlap;
-
-        let diff_key = &entry_data[..header.diff as usize];
-        self.key.truncate(header.overlap as usize);
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
-
+        self.perv_overlap = header.overlap;
         true
     }
 
@@ -114,7 +112,12 @@ impl BlockIterator {
     }
 
     /// Seek to the first entry that is equal or greater than key.
-    pub fn seek(&mut self, key: &[u8], whence: SeekPos) {
+    pub fn seek(&mut self, key: &[u8]) {
+        self.seek_from(key, SeekPos::Origin);
+    }
+
+    /// Seek to the first entry that is equal or greater than key.
+    pub fn seek_from(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx as usize,
@@ -129,7 +132,12 @@ impl BlockIterator {
     }
 
     /// Seek to the first entry that is equal or less than key.
-    pub fn seek_le(&mut self, key: &[u8], whence: SeekPos) {
+    pub fn seek_le(&mut self, key: &[u8]) {
+        self.seek_le_from(key, SeekPos::Origin);
+    }
+
+    /// Seek to the first entry that is equal or less than key.
+    pub fn seek_le_from(&mut self, key: &[u8], whence: SeekPos) {
         let end_index = match whence {
             SeekPos::Origin => self.block.len(),
             SeekPos::Current => self.idx as usize + 1,
@@ -163,12 +171,14 @@ impl BlockIterator {
         }
     }
 
-    pub fn key(&self) -> Option<&[u8]> {
-        self.data().map(|(k, _v)| k)
+    pub fn key(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.key[..]
     }
 
-    pub fn value(&self) -> Option<&[u8]> {
-        self.data().map(|(_k, v)| v)
+    pub fn value(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.val[..]
     }
 
     /// Check whether the iterator is at the last position
@@ -302,23 +312,23 @@ mod tests {
         }
         assert_eq!(idx, 0);
 
-        blk_iter.seek(&Bytes::from("key_test_4"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_4"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_4"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_9"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_9"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_9"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_99"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_99"), SeekPos::Origin);
         assert!(blk_iter.data().is_none());
 
         blk_iter.set_idx(3);
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Current);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Current);
 
         assert_eq!(BytesMut::from("key_test_3"), blk_iter.key);
     }

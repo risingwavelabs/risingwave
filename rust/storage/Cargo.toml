@@ -68,5 +68,7 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
+default = ["blockv2"]
 rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]
+blockv2 = []
