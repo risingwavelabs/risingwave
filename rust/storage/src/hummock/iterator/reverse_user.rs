@@ -462,10 +462,10 @@ mod tests {
         // verify
         let k = ui.key();
         let v = ui.value();
-      
+
         assert_eq!(k, user_key(iterator_test_key_of(1).as_slice()));
         assert_eq!(v, iterator_test_value_of(1));
-      
+
         // only one valid kv pair
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
