@@ -12,7 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod config;
-mod enumerator;
-pub mod source;
-mod split;
+use super::super::plan_node::*;
+use super::{BoxedRule, Rule};
+
+/// Eliminate useless (identity) [`LogicalProject`] nodes.
+pub struct ProjectEliminateRule {}
+impl Rule for ProjectEliminateRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+        let project = plan.as_logical_project()?;
+        if project.is_identity() {
+            Some(project.input())
+        } else {
+            None
+        }
+    }
+}
+
+impl ProjectEliminateRule {
+    pub fn create() -> BoxedRule {
+        Box::new(ProjectEliminateRule {})
+    }
+}

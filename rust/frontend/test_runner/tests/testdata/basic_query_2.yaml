@@ -9,12 +9,10 @@
     select v1 from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [v1] }
-        BatchScan { table: t, columns: [v1] }
+      BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
-      StreamProject { exprs: [$0], expr_alias: [v1] }
-        StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
+      StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
 - sql: |
     values(cast(1 as bigint));
   batch_plan: |
@@ -121,14 +119,12 @@
       BatchProject { exprs: [($0 + ($1 * $2))], expr_alias: [ ] }
         BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
           BatchExchange { order: [], dist: Single }
-            BatchProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
-              BatchScan { table: t, columns: [v1, v2, v3] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { column_orders: [$1 ASC, $2 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [1, 2, 3] }
       StreamProject { exprs: [($0 + ($1 * $2)), $0, $1, $2], expr_alias: [ ,  ,  ,  ] }
         StreamSimpleAgg { aggs: [min($0), max($1), count($2)] }
-          StreamProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
-            StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+          StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
