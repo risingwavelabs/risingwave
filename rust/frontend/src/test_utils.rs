@@ -22,8 +22,9 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
+use risingwave_meta::manager::SchemaId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -107,6 +108,7 @@ impl LocalFrontend {
 pub struct MockCatalogWriter {
     catalog: Arc<RwLock<Catalog>>,
     id: AtomicU32,
+    id_to_schema_id: RwLock<HashMap<u32, (DatabaseId, SchemaId)>>,
 }
 
 #[async_trait::async_trait]
@@ -142,12 +144,26 @@ impl CatalogWriter for MockCatalogWriter {
     async fn create_materialized_view(&self, mut table: ProstTable) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
+        self.add_id(table.id, table.database_id, table.schema_id);
         Ok(())
     }
 
     async fn create_source(&self, mut source: ProstSource) -> Result<()> {
         source.id = self.gen_id();
-        self.catalog.write().create_source(source);
+        self.catalog.write().create_source(source.clone());
+        self.add_id(source.id, source.database_id, source.schema_id);
+        Ok(())
+    }
+
+    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(source_id);
+        self.drop_id(table_id.table_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, table_id);
+        self.catalog
+            .write()
+            .drop_source(database_id, schema_id, source_id);
         Ok(())
     }
 }
@@ -166,11 +182,22 @@ impl MockCatalogWriter {
         Self {
             catalog,
             id: AtomicU32::new(0),
+            id_to_schema_id: Default::default(),
         }
     }
 
     fn gen_id(&self) -> u32 {
         self.id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    fn add_id(&self, id: u32, database_id: DatabaseId, schema_id: SchemaId) {
+        self.id_to_schema_id
+            .write()
+            .insert(id, (database_id, schema_id));
+    }
+
+    fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
+        self.id_to_schema_id.write().remove(&id).unwrap()
     }
 }
 
