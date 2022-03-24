@@ -447,6 +447,7 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
     ---
     id: 4294967294
     schemaId: 4294967295
@@ -458,6 +459,13 @@
             typeName: INT64
             isNullable: true
           name: "?column?"
+      - columnDesc:
+          columnType:
+            typeName: INT32
+            isNullable: true
+          columnId: 1
+          name: _pk_1
+        isHidden: true
     pkColumnIds:
       - 1
     pkOrders:

@@ -60,7 +60,7 @@
       BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$1 ASC], column_id: [#0], pk_indices: [1] }
+    StreamMaterialize { column_orders: [$1 ASC], column_id: [#0, #1], pk_indices: [1] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $0], expr_alias: [ ,  ] }
         StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
 - sql: |
