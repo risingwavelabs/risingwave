@@ -403,13 +403,13 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::{Field};
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::{LogicalScan, LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
     use crate::session::QueryContext;
 
@@ -448,7 +448,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -534,7 +534,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
         let on: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -614,7 +614,7 @@ mod tests {
             Schema {
                 fields: fields[3..6].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
 
         let eq_cond = ExprImpl::FunctionCall(Box::new(

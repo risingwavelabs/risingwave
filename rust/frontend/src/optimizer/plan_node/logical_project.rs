@@ -292,13 +292,13 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::{LogicalScan, LogicalValues};
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::session::QueryContext;
 
     #[tokio::test]
@@ -311,13 +311,7 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let values = LogicalValues::new(
-            vec![],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
 
         let inner = LogicalProject::new(
             values.into(),

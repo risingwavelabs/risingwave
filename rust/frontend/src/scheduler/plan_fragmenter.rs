@@ -240,7 +240,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc, TableId};
+    use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{
         HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
@@ -249,8 +249,8 @@ mod tests {
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, BatchValues, EqJoinPredicate, LogicalJoin,
-        LogicalScan, LogicalValues, PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin,
+        LogicalScan, PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;

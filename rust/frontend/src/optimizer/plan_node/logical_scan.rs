@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::Hash;
+
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
-use crate::catalog::{ColumnId, TableId};
+use crate::catalog::{ColumnId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
@@ -57,7 +57,7 @@ impl LogicalScan {
         let pk_indices = table_desc
             .pk
             .iter()
-            .map(|c| id_to_idx.get(&c.column_desc.column_id).map(|x| *x))
+            .map(|c| id_to_idx.get(&c.column_desc.column_id).copied())
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let schema = Schema { fields };

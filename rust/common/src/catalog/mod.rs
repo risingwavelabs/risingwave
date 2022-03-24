@@ -85,9 +85,9 @@ impl From<u32> for TableId {
         Self::new(id)
     }
 }
-impl Into<u32> for TableId {
-    fn into(self) -> u32 {
-        self.table_id
+impl From<TableId> for u32 {
+    fn from(id: TableId) -> Self {
+        id.table_id
     }
 }
 

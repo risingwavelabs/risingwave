@@ -48,9 +48,9 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
-impl Into<i32> for ColumnId {
-    fn into(self) -> i32 {
-        self.0
+impl From<ColumnId> for i32 {
+    fn from(id: ColumnId) -> i32 {
+        id.0
     }
 }
 impl std::fmt::Display for ColumnId {

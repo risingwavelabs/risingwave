@@ -190,7 +190,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::catalog::{ColumnId, TableId};
+    
     use crate::optimizer::plan_node::LogicalValues;
     use crate::session::QueryContext;
 

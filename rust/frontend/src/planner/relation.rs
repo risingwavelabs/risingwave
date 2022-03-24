@@ -14,7 +14,7 @@
 
 use std::rc::Rc;
 
-use risingwave_common::catalog::{Field, Schema};
+
 use risingwave_common::error::Result;
 
 use crate::binder::{BoundBaseTable, BoundJoin, Relation};

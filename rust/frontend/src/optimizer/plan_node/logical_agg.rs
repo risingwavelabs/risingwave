@@ -480,14 +480,14 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
     };
-    use crate::optimizer::plan_node::{LogicalScan, LogicalValues};
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
@@ -509,13 +509,7 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(
-            vec![],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let input = Rc::new(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
