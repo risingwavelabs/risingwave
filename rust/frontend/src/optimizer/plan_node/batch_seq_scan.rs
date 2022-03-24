@@ -71,7 +71,6 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        // TODO(Bowen): Fix this serialization.
         // TODO(bugen): directly store `ColumnDesc`s in logical scan.
         let column_descs = self
             .logical

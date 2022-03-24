@@ -119,7 +119,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
             let first_row = rows[0].values();
             let affected_rows_str = first_row[0]
                 .as_ref()
-                .expect("compute node should return affected rows in result set");
+                .expect("compute node should return affected rows in output");
             affected_rows_str.parse().unwrap_or_default()
         }
 

@@ -30,6 +30,7 @@ impl Binder {
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
+        // TODO: validate & add casts here
         Ok(BoundInsert {
             table_source: self.bind_table_source(source_name)?,
             source: self.bind_query(source)?,

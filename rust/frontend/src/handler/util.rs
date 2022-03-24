@@ -38,7 +38,7 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
 /// Get the [`PgFieldDescriptor`] for return values of the given statement.
 pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
     let pg_descs = match bound {
-        // Only return the count of affected rows for these commands.
+        // The result set of these commands is ingored.
         BoundStatement::Insert(_) | BoundStatement::Delete(_) => vec![],
 
         BoundStatement::Query(query) => match &query.body {
