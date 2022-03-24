@@ -32,10 +32,10 @@ impl Rule for FilterAggRule {
         assert!(num_group_keys + num_agg_calls == agg.schema().len());
 
         // If the filter references agg_calls, we can not push it.
-        let (agg_call_pred, pushed_predicate) = filter.predicate().clone().split_disjoint(
-            &FixedBitSet::from_iter(num_group_keys..num_group_keys + num_agg_calls),
-            num_group_keys + num_agg_calls,
-        );
+        let mut agg_call_columns = FixedBitSet::with_capacity(num_group_keys + num_agg_calls);
+        agg_call_columns.insert_range(num_group_keys..num_group_keys + num_agg_calls);
+        let (agg_call_pred, pushed_predicate) =
+            filter.predicate().clone().split_disjoint(&agg_call_columns);
         if pushed_predicate.always_true() {
             return None;
         }

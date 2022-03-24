@@ -141,10 +141,10 @@ impl Condition {
     #[must_use]
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which
     /// are disjoint with columns.
-    pub fn split_disjoint(self, columns: &FixedBitSet, capacity: usize) -> (Self, Self) {
+    pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
         let (mut referencing, mut disjoint) = (vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, capacity);
+            let input_bits = CollectInputRef::collect(&expr, columns.len());
             if input_bits.is_disjoint(columns) {
                 disjoint.push(expr)
             } else {
