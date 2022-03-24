@@ -42,7 +42,8 @@ pub mod storage;
 mod stream;
 pub mod test_utils;
 
-use std::{time::Duration, net::ToSocketAddrs};
+use std::net::ToSocketAddrs;
+use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 
