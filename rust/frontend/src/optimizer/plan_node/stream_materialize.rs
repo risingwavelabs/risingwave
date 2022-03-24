@@ -60,11 +60,14 @@ impl StreamMaterialize {
             }
         }
 
+        // Materialize executor won't change the append-only behavior of the stream, so it depends
+        // on input's `append_only`.
         let base = PlanBase::new_stream(
             ctx,
             input.schema().clone(),
             input.pk_indices().to_vec(),
             Distribution::AnyShard,
+            input.append_only(),
         );
 
         Self {

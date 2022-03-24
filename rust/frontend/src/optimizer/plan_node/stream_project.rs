@@ -55,7 +55,15 @@ impl StreamProject {
             }
             dist => dist.clone(),
         };
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, distribution);
+        // Project executor won't change the append-only behavior of the stream, so it depends on
+        // input's `append_only`.
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            distribution,
+            logical.input().append_only(),
+        );
         StreamProject { logical, base }
     }
 }
