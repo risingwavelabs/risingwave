@@ -337,7 +337,7 @@
 - sql: |
     /* test simple agg */
     create table t (v1 int, v2 int);
-    select sum(v1) from t group by v2;
+    select sum(v1) as sum_v1 from t group by v2;
   stream_plan_proto: |
     ---
     operatorId: "30"
@@ -458,7 +458,7 @@
           columnType:
             typeName: INT64
             isNullable: true
-          name: "?column?"
+          name: sum_v1
       - columnDesc:
           columnType:
             typeName: INT32
