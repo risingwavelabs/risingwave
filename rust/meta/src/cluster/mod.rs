@@ -158,7 +158,7 @@ where
         }
     }
 
-    pub async fn inactive_worker_node(&self, host_address: HostAddress) -> Result<()> {
+    pub async fn deactivate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
             Some(mut worker) => {

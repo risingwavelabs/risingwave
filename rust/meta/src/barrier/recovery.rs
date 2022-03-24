@@ -206,7 +206,7 @@ where
                     Ok(client) => {
                         if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
                             self.cluster_manager
-                                .inactive_worker_node(worker_node.host.clone().unwrap())
+                                .deactivate_worker_node(worker_node.host.clone().unwrap())
                                 .await?;
                             break;
                         }
