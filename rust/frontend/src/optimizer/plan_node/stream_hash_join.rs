@@ -15,6 +15,7 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
@@ -38,14 +39,18 @@ pub struct StreamHashJoin {
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
+        // Inner join won't change the append-only behavior of the stream. The rest might.
+        let append_only = match logical.join_type() {
+            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+            _ => false,
+        };
         // TODO: derive from input
-        // Hash join executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.to_vec(),
             Distribution::any().clone(),
-            false,
+            append_only,
         );
 
         Self {
