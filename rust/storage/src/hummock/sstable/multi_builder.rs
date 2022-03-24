@@ -153,6 +153,36 @@ mod tests {
     use crate::hummock::DEFAULT_RESTART_INTERVAL;
 
     #[tokio::test]
+    async fn test_empty() {
+        let next_id = AtomicU64::new(1001);
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let get_id_and_builder = || async {
+            Ok((
+                next_id.fetch_add(1, SeqCst),
+                #[cfg(not(feature = "blockv2"))]
+                SSTableBuilder::new(SSTableBuilderOptions {
+                    table_capacity,
+                    block_size,
+                    bloom_false_positive: 0.1,
+                    checksum_algo: checksum::Algorithm::XxHash64,
+                }),
+                #[cfg(feature = "blockv2")]
+                SSTableBuilder::new(SSTableBuilderOptions {
+                    capacity: table_capacity,
+                    block_capacity: block_size,
+                    restart_interval: DEFAULT_RESTART_INTERVAL,
+                    bloom_false_positive: 0.1,
+                    compression_algorithm: CompressionAlgorithm::None,
+                }),
+            ))
+        };
+        let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
+        let results = builder.finish();
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_lots_of_tables() {
         let next_id = AtomicU64::new(1001);
 

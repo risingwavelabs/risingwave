@@ -72,6 +72,7 @@ impl SSTableBuilder {
     pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) {
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_none() {
+            self.last_full_key.clear();
             self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
                 capacity: self.options.capacity,
                 restart_interval: self.options.restart_interval,
@@ -158,7 +159,6 @@ impl SSTableBuilder {
         let block = self.block_builder.take().unwrap().build();
         self.buf.put_slice(&block);
         block_meta.len = self.buf.len() as u32 - block_meta.offset;
-        self.last_full_key.clear();
     }
 
     pub fn len(&self) -> usize {

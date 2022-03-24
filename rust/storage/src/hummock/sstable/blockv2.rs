@@ -234,6 +234,7 @@ impl BlockBuilder {
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
+            debug_assert!(!key.is_empty());
             debug_assert_eq!(
                 VersionedComparator::compare_key(&self.last_key[..], key),
                 Ordering::Less
