@@ -400,8 +400,6 @@ impl ToStream for LogicalJoin {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::types::{DataType, Datum};
@@ -429,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -519,7 +517,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -604,7 +602,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: DataType::Int32,
@@ -692,7 +690,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_stream() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: DataType::Int32,
