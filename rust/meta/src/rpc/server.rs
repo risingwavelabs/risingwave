@@ -116,11 +116,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
-    let hummock_manager = Arc::new(
-        hummock::HummockManager::new(env.clone(), meta_metrics.clone())
-            .await
-            .unwrap(),
-    );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
     let notification_manager = Arc::new(NotificationManager::new(epoch_generator_ref.clone()));
@@ -132,6 +127,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
         .await
         .unwrap(),
+    );
+    let hummock_manager = Arc::new(
+        hummock::HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+            .await
+            .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {

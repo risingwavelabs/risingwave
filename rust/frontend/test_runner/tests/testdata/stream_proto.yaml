@@ -4,71 +4,54 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "20"
+    operatorId: "18"
     input:
-      - operatorId: "19"
+      - operatorId: "17"
         input:
-          - operatorId: "17"
+          - operatorId: "15"
             input:
-              - operatorId: "15"
-                input:
-                  - mergeNode: {}
-                  - operatorId: "14"
-                    pkIndices:
-                      - 0
-                    batchPlanNode:
-                      tableRefId:
-                        tableId: 1
-                      columnDescs:
-                        - columnType:
-                            typeName: INT64
-                            isNullable: true
-                          name: _row_id
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
+              - mergeNode: {}
+              - operatorId: "14"
                 pkIndices:
                   - 0
-                chainNode: {}
+                batchPlanNode:
+                  tableRefId:
+                    tableId: 1
+                  columnDescs:
+                    - columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    - columnType:
+                        typeName: INT32
+                        isNullable: true
+                      columnId: 1
+                      name: v1
             pkIndices:
               - 0
-            filterNode:
-              searchCondition:
-                exprType: LESS_THAN
-                returnType:
-                  typeName: BOOLEAN
-                  isNullable: true
-                funcCall:
-                  children:
-                    - exprType: INPUT_REF
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      inputRef:
-                        columnIdx: 1
-                    - exprType: CONSTANT_VALUE
-                      returnType:
-                        typeName: INT32
-                        isNullable: true
-                      constant:
-                        body: AAAAAQ==
+            chainNode: {}
         pkIndices:
           - 0
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT64
-                isNullable: true
-              inputRef: {}
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef:
-                columnIdx: 1
+        filterNode:
+          searchCondition:
+            exprType: LESS_THAN
+            returnType:
+              typeName: BOOLEAN
+              isNullable: true
+            funcCall:
+              children:
+                - exprType: INPUT_REF
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  inputRef:
+                    columnIdx: 1
+                - exprType: CONSTANT_VALUE
+                  returnType:
+                    typeName: INT32
+                    isNullable: true
+                  constant:
+                    body: AAAAAQ==
     pkIndices:
       - 0
     materializeNode:
@@ -108,47 +91,30 @@
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "13"
+    operatorId: "10"
     input:
-      - operatorId: "12"
+      - operatorId: "9"
         input:
-          - operatorId: "10"
-            input:
-              - mergeNode: {}
-              - operatorId: "9"
-                pkIndices:
-                  - 0
-                batchPlanNode:
-                  tableRefId:
-                    tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
+          - mergeNode: {}
+          - operatorId: "8"
             pkIndices:
               - 0
-            chainNode: {}
+            batchPlanNode:
+              tableRefId:
+                tableId: 1
+              columnDescs:
+                - columnType:
+                    typeName: INT64
+                    isNullable: true
+                  name: _row_id
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
         pkIndices:
           - 0
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT64
-                isNullable: true
-              inputRef: {}
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef:
-                columnIdx: 1
+        chainNode: {}
     pkIndices:
       - 0
     materializeNode:
@@ -188,37 +154,26 @@
     select v1 from t;
   stream_plan_proto: |
     ---
-    operatorId: "13"
+    operatorId: "10"
     input:
-      - operatorId: "12"
+      - operatorId: "9"
         input:
-          - operatorId: "10"
-            input:
-              - mergeNode: {}
-              - operatorId: "9"
-                pkIndices:
-                  - 0
-                batchPlanNode:
-                  tableRefId:
-                    tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
+          - mergeNode: {}
+          - operatorId: "8"
             pkIndices:
               - 0
-            chainNode: {}
+            batchPlanNode:
+              tableRefId:
+                tableId: 1
+              columnDescs:
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
         pkIndices:
           - 0
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef: {}
+        chainNode: {}
     pkIndices:
       - 0
     materializeNode:
@@ -251,63 +206,41 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "28"
+    operatorId: "23"
     input:
-      - operatorId: "27"
+      - operatorId: "22"
         input:
-          - operatorId: "25"
+          - operatorId: "20"
             input:
-              - operatorId: "23"
-                input:
-                  - operatorId: "21"
-                    input:
-                      - mergeNode: {}
-                      - operatorId: "20"
-                        pkIndices:
-                          - 0
-                        batchPlanNode:
-                          tableRefId:
-                            tableId: 1
-                          columnDescs:
-                            - columnType:
-                                typeName: INT32
-                                isNullable: true
-                              columnId: 1
-                              name: v1
-                    pkIndices:
-                      - 0
-                    chainNode: {}
+              - mergeNode: {}
+              - operatorId: "19"
                 pkIndices:
                   - 0
-                projectNode:
-                  selectList:
-                    - exprType: INPUT_REF
-                      returnType:
+                batchPlanNode:
+                  tableRefId:
+                    tableId: 1
+                  columnDescs:
+                    - columnType:
                         typeName: INT32
                         isNullable: true
-                      inputRef: {}
+                      columnId: 1
+                      name: v1
             pkIndices:
               - 0
-            globalSimpleAggNode:
-              aggCalls:
-                - type: SUM
-                  args:
-                    - input: {}
-                      type:
-                        typeName: INT32
-                        isNullable: true
-                  returnType:
-                    typeName: INT64
-                    isNullable: true
+            chainNode: {}
         pkIndices:
           - 0
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
+        globalSimpleAggNode:
+          aggCalls:
+            - type: SUM
+              args:
+                - input: {}
+                  type:
+                    typeName: INT32
+                    isNullable: true
               returnType:
                 typeName: INT64
                 isNullable: true
-              inputRef: {}
     pkIndices:
       - 0
     materializeNode:
@@ -340,20 +273,20 @@
     select sum(v1) as sum_v1 from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "30"
+    operatorId: "35"
     input:
-      - operatorId: "29"
+      - operatorId: "34"
         input:
-          - operatorId: "27"
+          - operatorId: "32"
             input:
-              - operatorId: "25"
+              - operatorId: "30"
                 input:
-                  - operatorId: "23"
+                  - operatorId: "28"
                     input:
-                      - operatorId: "22"
+                      - operatorId: "27"
                         input:
                           - mergeNode: {}
-                          - operatorId: "21"
+                          - operatorId: "26"
                             pkIndices:
                               - 0
                             batchPlanNode:

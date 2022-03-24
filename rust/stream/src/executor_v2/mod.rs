@@ -17,10 +17,14 @@ pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-pub use super::executor::{Executor as ExecutorV1, Message, PkIndices, PkIndicesRef};
+pub use super::executor::{
+    Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
+};
 
 mod filter;
 mod simple;
+#[cfg(test)]
+mod test_utils;
 mod v1_compact;
 
 pub use filter::FilterExecutor;
@@ -58,24 +62,27 @@ pub trait Executor: Send + 'static {
     /// Identity of the executor.
     fn identity(&self) -> &str;
 
+    #[inline(always)]
+    fn info(&self) -> ExecutorInfo {
+        let schema = self.schema().to_owned();
+        let pk_indices = self.pk_indices().to_owned();
+        let identity = self.identity().to_owned();
+        ExecutorInfo {
+            schema,
+            pk_indices,
+            identity,
+        }
+    }
+
     /// Return an Executor which satisfied [`ExecutorV1`].
     fn v1(self: Box<Self>) -> StreamExecutorV1
     where
         Self: Sized,
     {
-        let schema = self.schema().to_owned();
-        let pk_indices = self.pk_indices().to_owned();
-        let identity = self.identity().to_owned();
+        let info = self.info();
         let stream = self.execute();
         let stream = Box::pin(stream);
 
-        StreamExecutorV1 {
-            stream,
-            info: ExecutorInfo {
-                schema,
-                pk_indices,
-                identity,
-            },
-        }
+        StreamExecutorV1 { stream, info }
     }
 }

@@ -490,8 +490,10 @@ mod tests {
                 .await?,
             );
             let meta_metrics = Arc::new(MetaMetrics::new());
-            let hummock_manager =
-                Arc::new(HummockManager::new(env.clone(), meta_metrics.clone()).await?);
+            let hummock_manager = Arc::new(
+                HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+                    .await?,
+            );
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
