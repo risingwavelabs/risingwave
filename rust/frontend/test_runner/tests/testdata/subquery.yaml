@@ -7,6 +7,16 @@
         LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
+    /* merge and then eliminate */
+    create table t (v1 bigint, v2 double precision);
+    select a1 as v1, a2 as v2 from (select v1 as a1, v2 as a2 from t);
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [v1, v2] }
+      LogicalProject { exprs: [$1, $2], expr_alias: [a1, a2] }
+        LogicalScan { table: t, columns: [_row_id, v1, v2] }
+  optimized_logical_plan: |
+    LogicalScan { table: t, columns: [v1, v2] }
+- sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 as v3 from t) where v2 > 1;
   binder_error: 'Item not found: Invalid column: v1'
