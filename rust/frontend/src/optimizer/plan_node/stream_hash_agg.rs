@@ -37,7 +37,7 @@ impl StreamHashAgg {
             ctx,
             logical.schema().clone(),
             pk_indices,
-            Distribution::any().clone(), // TODO
+            Distribution::HashShard(logical.group_keys().to_vec()),
         );
         StreamHashAgg { logical, base }
     }
