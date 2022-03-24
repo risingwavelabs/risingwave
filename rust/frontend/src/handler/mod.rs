@@ -28,6 +28,7 @@ mod explain;
 mod flush;
 mod query;
 pub mod util;
+mod show_table;
 
 pub use create_mv::{gen_create_mv_plan, MvInfo};
 

@@ -179,12 +179,12 @@ impl Binder {
         let cell_based_desc = table_catalog.cell_based_table();
         let columns = table_catalog.columns().to_vec();
 
-        let columns = columns
-            .into_iter()
-            .map(|c| c.column_desc)
-            .collect::<Vec<ColumnDesc>>();
+        let mut descs = vec![];
+        for col in columns{
+            descs.append(&mut col.column_desc.get_column_descs());
+        }
         self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
+            descs.iter().cloned().map(|c| (c.name, c.data_type)),
             table_name.clone(),
         )?;
 
@@ -192,7 +192,7 @@ impl Binder {
             name: table_name,
             cell_based_desc,
             table_id,
-            columns,
+            columns: descs,
         })
     }
 
