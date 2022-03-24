@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
-use super::{LogicalScan, PlanBase, ToStreamProst};
+use super::{PlanBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::session::QueryContextRef;
 
