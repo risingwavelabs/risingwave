@@ -257,13 +257,14 @@ where
                     notifiers
                         .iter_mut()
                         .for_each(|notify| notify.notify_failed(e.clone()));
+                    // If failed, enter recovery mode.
                     self.recovery(prev_epoch).await;
                 }
             }
         }
     }
 
-    /// running a scheduled command.
+    /// Running a scheduled command.
     async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
         // Wait for all barriers collected
         let timer = self.metrics.barrier_latency.start_timer();
@@ -292,6 +293,7 @@ where
         command_context.post_collect().await // do some post stuffs
     }
 
+    /// Inject barrier to all computer nodes.
     async fn inject_barrier<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
@@ -344,6 +346,7 @@ where
         Ok(())
     }
 
+    /// Resolve actor information from cluster and fragment manager.
     async fn resolve_actor_info(&self, creating_table_id: Option<TableId>) -> BarrierActorInfo {
         let all_nodes = self
             .cluster_manager
@@ -355,7 +358,57 @@ where
             .await;
         BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
+}
 
+impl<S> BarrierManager<S>
+where
+    S: MetaStore,
+{
+    /// Recovery the whole cluster from the latest epoch.
+    async fn recovery(&self, prev_epoch: u64) {
+        let new_epoch = self.epoch_generator.generate().into_inner();
+        // Abort buffered schedules, they might be dirty already.
+        self.scheduled_barriers.abort().await;
+
+        debug!("recovery start!");
+        loop {
+            tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
+
+            let info = self.resolve_actor_info(None).await;
+
+            // kill all compute nodes and wait for online, and create all sources.
+            if self.kill_and_wait_compute_nodes(&info).await.is_err()
+                || self.create_sources(&info).await.is_err()
+            {
+                continue;
+            }
+
+            // update and build all actors.
+            if self.update_actors(&info).await.is_err() || self.build_actors(&info).await.is_err() {
+                continue;
+            }
+
+            // checkpoint, used as init barrier to initialize all executors.
+            let command_ctx = CommandContext::new(
+                self.fragment_manager.clone(),
+                self.clients.clone(),
+                &info,
+                prev_epoch,
+                new_epoch,
+                Command::checkpoint(),
+            );
+            if self.inject_barrier(&command_ctx).await.is_err()
+                || command_ctx.post_collect().await.is_err()
+            {
+                continue;
+            }
+
+            debug!("recovery success");
+            break;
+        }
+    }
+
+    /// Create all sources in compute nodes.
     async fn create_sources(&self, info: &BarrierActorInfo) -> Result<()> {
         // Attention, using catalog v2 here, it's not compatible with Java frontend.
         let sources = self.catalog_manager.list_sources().await?;
@@ -381,22 +434,24 @@ where
         Ok(())
     }
 
+    /// Update all actors in compute nodes.
     async fn update_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         let mut actor_infos = vec![];
         for (node_id, actors) in &info.actor_map {
-            info.node_map
+            let host = info
+                .node_map
                 .get(node_id)
-                .map(|worker_node| {
-                    actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
-                        actor_id,
-                        host: worker_node.host.clone(),
-                    }))
-                })
                 .ok_or_else(|| {
                     RwError::from(ErrorCode::InternalError(
                         "worker evicted, wait for online.".to_string(),
                     ))
-                })?;
+                })?
+                .host
+                .clone();
+            actor_infos.extend(actors.iter().map(|&actor_id| ActorInfo {
+                actor_id,
+                host: host.clone(),
+            }));
         }
 
         let node_actors = self.fragment_manager.all_node_actors(false).await?;
@@ -428,6 +483,7 @@ where
         Ok(())
     }
 
+    /// Build all actors in compute nodes.
     async fn build_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
@@ -490,51 +546,6 @@ where
 
         debug!("all compute nodes have been killed and restart.");
         Ok(())
-    }
-
-    /// Recovery the whole cluster from the latest epoch.
-    async fn recovery(&self, prev_epoch: u64) {
-        // FIXME: IIUC, should use last committed epoch as prev_epoch when recovery.
-        let new_epoch = self.epoch_generator.generate().into_inner();
-        // Abort buffered schedules, they might be dirty already.
-        self.scheduled_barriers.abort().await;
-
-        debug!("recovery start!");
-        loop {
-            tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
-
-            let info = self.resolve_actor_info(None).await;
-
-            // kill all compute nodes and wait for online, and create all sources.
-            if self.kill_and_wait_compute_nodes(&info).await.is_err()
-                || self.create_sources(&info).await.is_err()
-            {
-                continue;
-            }
-
-            // update and build all actors.
-            if self.update_actors(&info).await.is_err() || self.build_actors(&info).await.is_err() {
-                continue;
-            }
-
-            // checkpoint, used as init barrier to initialize all executors.
-            let command_ctx = CommandContext::new(
-                self.fragment_manager.clone(),
-                self.clients.clone(),
-                &info,
-                prev_epoch,
-                new_epoch,
-                Command::checkpoint(),
-            );
-            if self.inject_barrier(&command_ctx).await.is_err()
-                || command_ctx.post_collect().await.is_err()
-            {
-                continue;
-            }
-
-            debug!("recovery success");
-            break;
-        }
     }
 }
 
