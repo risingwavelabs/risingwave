@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -25,7 +25,6 @@
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(test)]
 #![feature(map_first_last)]
 #![feature(let_chains)]
 #![feature(hash_drain_filter)]
@@ -34,7 +33,6 @@
 
 #[macro_use]
 extern crate log;
-extern crate test;
 
 pub mod common;
 pub mod executor;

@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::{self};
+use std::iter;
 
 use fixedbitset::FixedBitSet;
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
@@ -58,7 +59,14 @@ impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let ctx = left.ctx();
         let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let base = PlanBase::new_logical(ctx, schema);
+        let pk_indices = Self::derive_pk(
+            left.schema().len(),
+            right.schema().len(),
+            left.pk_indices(),
+            right.pk_indices(),
+            join_type,
+        );
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalJoin {
             left,
             right,
@@ -77,18 +85,128 @@ impl LogicalJoin {
         Self::new(left, right, join_type, Condition::with_expr(on_clause)).into()
     }
 
-    fn derive_schema(left: &Schema, right: &Schema, join_type: JoinType) -> Schema {
-        let mut new_fields = Vec::with_capacity(left.fields.len() + right.fields.len());
+    pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                new_fields.extend_from_slice(&left.fields);
-                new_fields.extend_from_slice(&right.fields);
-                Schema { fields: new_fields }
+                left_len + right_len
             }
             _ => unimplemented!(),
         }
     }
 
+    /// get the Mapping of columnIndex from output column index to left column index
+    fn o2l_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::new(
+                    (0..left_len)
+                        .into_iter()
+                        .map(Some)
+                        .chain(iter::repeat(None).take(right_len))
+                        .collect_vec(),
+                )
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    /// get the Mapping of columnIndex from output column index to right column index
+    fn o2r_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        match join_type {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    /// get the Mapping of columnIndex from left column index to output column index
+    fn l2o_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        Self::o2l_col_mapping_inner(left_len, right_len, join_type).inverse()
+    }
+
+    /// get the Mapping of columnIndex from right column index to output column index
+    fn r2o_col_mapping_inner(
+        left_len: usize,
+        right_len: usize,
+        join_type: JoinType,
+    ) -> ColIndexMapping {
+        Self::o2r_col_mapping_inner(left_len, right_len, join_type).inverse()
+    }
+
+    pub fn o2l_col_mapping(&self) -> ColIndexMapping {
+        Self::o2l_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn o2r_col_mapping(&self) -> ColIndexMapping {
+        Self::o2r_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn l2o_col_mapping(&self) -> ColIndexMapping {
+        Self::l2o_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+    pub fn r2o_col_mapping(&self) -> ColIndexMapping {
+        Self::r2o_col_mapping_inner(
+            self.left().schema().len(),
+            self.right().schema().len(),
+            self.join_type(),
+        )
+    }
+
+    fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
+        let left_len = left_schema.len();
+        let right_len = right_schema.len();
+        let out_column_num = Self::out_column_num(left_len, right_len, join_type);
+        let o2l = Self::o2l_col_mapping_inner(left_len, right_len, join_type);
+        let o2r = Self::o2r_col_mapping_inner(left_len, right_len, join_type);
+        let fields = (0..out_column_num)
+            .into_iter()
+            .map(|i| match (o2l.try_map(i), o2r.try_map(i)) {
+                (Some(l_i), None) => left_schema.fields()[l_i].clone(),
+                (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
+                _ => panic!(),
+            })
+            .collect();
+        Schema { fields }
+    }
+
+    fn derive_pk(
+        left_len: usize,
+        right_len: usize,
+        left_pk: &[usize],
+        right_pk: &[usize],
+        join_type: JoinType,
+    ) -> Vec<usize> {
+        let l2o = Self::l2o_col_mapping_inner(left_len, right_len, join_type);
+        let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
+        left_pk
+            .iter()
+            .map(|index| l2o.map(*index))
+            .chain(right_pk.iter().map(|index| r2o.map(*index)))
+            .collect()
+    }
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on
@@ -117,6 +235,37 @@ impl PlanTreeNodeBinary for LogicalJoin {
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
         Self::new(left, right, self.join_type, self.on.clone())
     }
+    #[must_use]
+    fn rewrite_with_left_right(
+        &self,
+        left: PlanRef,
+        left_col_change: ColIndexMapping,
+        right: PlanRef,
+        right_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let new_on = {
+            let (mut left_map, _) = left_col_change.into_parts();
+            let (mut right_map, _) = right_col_change.into_parts();
+            for i in &mut right_map {
+                *i = Some(i.unwrap() + left.schema().len());
+            }
+            left_map.append(&mut right_map);
+            self.on()
+                .clone()
+                .rewrite_expr(&mut ColIndexMapping::new(left_map))
+        };
+        let join = Self::new(left, right, self.join_type, new_on);
+
+        let old_o2l = self.o2l_col_mapping();
+        let old_o2r = self.o2r_col_mapping();
+        let new_l2o = join.l2o_col_mapping();
+        let new_r2o = join.r2o_col_mapping();
+
+        let out_col_change = old_o2l
+            .composite(&new_l2o)
+            .union(&old_o2r.composite(&new_r2o));
+        (join, out_col_change)
+    }
 }
 
 impl_plan_tree_node_for_binary! { LogicalJoin }
@@ -141,14 +290,16 @@ impl ColPrunable for LogicalJoin {
         let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
         on = on.rewrite_expr(&mut mapping);
 
-        let (left_required_cols, right_required_cols): (FixedBitSet, FixedBitSet) =
-            visitor.input_bits.ones().partition_map(|i| {
-                if i < left_len {
-                    Either::Left(i)
-                } else {
-                    Either::Right(i - left_len)
-                }
-            });
+        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_required_cols =
+            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        visitor.input_bits.ones().for_each(|i| {
+            if i < left_len {
+                left_required_cols.insert(i);
+            } else {
+                right_required_cols.insert(i - left_len);
+            }
+        });
 
         let join = LogicalJoin::new(
             self.left.prune_col(&left_required_cols),
@@ -166,7 +317,6 @@ impl ColPrunable for LogicalJoin {
                 join.into(),
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
-            .into()
         }
     }
 }
@@ -237,6 +387,14 @@ impl ToStream for LogicalJoin {
             // Convert to Nested-loop Join for non-equal joins
             todo!("nested loop join")
         }
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (left, left_col_change) = self.left.logical_rewrite_for_stream();
+        let (right, right_col_change) = self.right.logical_rewrite_for_stream();
+        let (join, out_col_change) =
+            self.rewrite_with_left_right(left, left_col_change, right, right_col_change);
+        (join.into(), out_col_change)
     }
 }
 

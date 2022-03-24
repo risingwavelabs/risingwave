@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
@@ -63,6 +63,7 @@ pub trait PlanNode:
     + ToProst
 {
     fn node_type(&self) -> PlanNodeType;
+    fn plan_base(&self) -> &PlanBase;
 }
 
 impl_downcast!(PlanNode);
@@ -89,18 +90,31 @@ impl dyn PlanNode {
         Ok(output)
     }
 
+    pub fn pk_indices(&self) -> &[usize] {
+        &self.plan_base().pk_indices
+    }
+
     /// Serialize the plan node and its children to a batch plan proto.
     pub fn to_batch_prost(&self) -> BatchPlanProst {
+        self.to_batch_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a batch plan proto without the identity field
+    /// (for testing).
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_batch_prost())
+            .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         BatchPlanProst {
             children,
-            identity,
+            identity: if identity {
+                format!("{:?}", self)
+            } else {
+                "".into()
+            },
             node_body,
         }
     }
@@ -110,24 +124,33 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
+        self.to_stream_prost_identity(true)
+    }
+
+    /// Serialize the plan node and its children to a stream plan proto without identity (for
+    /// testing).
+    pub fn to_stream_prost_identity(&self, identity: bool) -> StreamPlanProst {
         if let Some(stream_scan) = self.as_stream_table_scan() {
-            return stream_scan.adhoc_to_stream_prost();
+            return stream_scan.adhoc_to_stream_prost(identity);
         }
 
         let node = Some(self.to_stream_prost_body());
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost())
+            .map(|plan| plan.to_stream_prost_identity(identity))
             .collect();
-        let identity = format!("{:?}", self);
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
-            identity,
+            identity: if identity {
+                format!("{}", self)
+            } else {
+                "".into()
+            },
             node,
-            operator_id: 0,
-            pk_indices: vec![],
+            operator_id: self.id().0 as u64,
+            pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
         }
     }
 }
@@ -175,7 +198,7 @@ mod stream_hash_join;
 mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
-mod stream_source_scan;
+mod stream_source;
 mod stream_table_scan;
 
 pub use batch_delete::BatchDelete;
@@ -207,7 +230,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
-pub use stream_source_scan::StreamSourceScan;
+pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
@@ -255,7 +278,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, Project }
             ,{ Stream, Filter }
             ,{ Stream, TableScan }
-            ,{ Stream, SourceScan }
+            ,{ Stream, Source }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
             ,{ Stream, HashAgg }
@@ -319,7 +342,7 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
             ,{ Stream, TableScan }
-            ,{ Stream, SourceScan }
+            ,{ Stream, Source }
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
@@ -340,6 +363,9 @@ macro_rules! enum_plan_node_type {
             $(impl PlanNode for [<$convention $name>] {
                 fn node_type(&self) -> PlanNodeType{
                     PlanNodeType::[<$convention $name>]
+                }
+                fn plan_base(&self) -> &PlanBase {
+                    &self.base
                 }
             })*
         }
@@ -366,7 +392,6 @@ for_all_plan_nodes! { impl_plan_ref }
 macro_rules! impl_down_cast_fn {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            #[allow(unused)]
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
                     self.downcast_ref::<[<$convention $name>]>()

@@ -6,9 +6,13 @@ option java_multiple_files = true;
 option java_package = "com.risingwave.proto.streaming.plan";
 option optimize_for = SPEED;
 
-import "common.proto";
 import "expr.proto";
 import "plan.proto";
+
+// Hash mapping for compute node. Stores mapping from virtual key to actor id.
+message ActorMapping {
+  repeated uint32 hash_mapping = 1;
+}
 
 message SourceNode {
   enum SourceType {
@@ -87,8 +91,7 @@ message ChainNode {
   plan.TableRefId table_ref_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan.Field upstream_fields = 2;
-  repeated int32 pk_indices = 3;
-  repeated int32 column_ids = 4;
+  repeated int32 column_ids = 3;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
@@ -96,7 +99,6 @@ message ChainNode {
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
-  repeated int32 pk_indices = 2;
   repeated plan.ColumnDesc column_descs = 3;
 }
 
@@ -142,8 +144,8 @@ message DispatchStrategy {
 message Dispatcher {
   DispatcherType type = 1;
   repeated uint32 column_indices = 2;
-  // The hash mapping for consistent hashing.
-  common.HashMapping hash_mapping = 3;
+  // The hash mapping for consistent hash.
+  ActorMapping hash_mapping = 3;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }

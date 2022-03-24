@@ -11,18 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use crate::hummock::HummockError;
+use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
 
 /// [`WriteBatch`] wrap a list of key-value pairs and an associated [`StateStore`].
 pub struct WriteBatch<S: StateStore> {
     store: S,
 
-    batch: Vec<(Bytes, Option<Bytes>)>,
+    batch: Vec<(Bytes, Option<StorageValue>)>,
 }
 
 impl<S> WriteBatch<S>
@@ -120,7 +121,7 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
             None => self.keyspace.key().to_vec(),
         }
         .into();
-        self.global.batch.push((key, value));
+        self.global.batch.push((key, value.map(StorageValue::from)));
     }
 
     /// Treat the keyspace as a single key, and put a value.

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
@@ -25,9 +25,16 @@ impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
         let input = self.plan_query(insert.source)?.as_subplan();
         // `columns` not used by backend yet.
-        let plan: PlanRef = LogicalInsert::create(input, insert.table, vec![])?.into();
+        let plan: PlanRef = LogicalInsert::create(
+            input,
+            insert.table_source.name,
+            insert.table_source.source_id,
+            vec![],
+        )?
+        .into();
         let order = Order::any().clone();
-        let dist = Distribution::Single;
+        // For insert, frontend will only schedule one task so do not need this to be single.
+        let dist = Distribution::Any;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
         let root = PlanRoot::new(plan, dist, order, out_fields);

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
@@ -21,10 +21,10 @@ use crate::session::QueryContextRef;
 mod delete;
 mod insert;
 mod query;
+mod relation;
 mod select;
 mod set_expr;
 mod statement;
-mod table_ref;
 mod values;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree

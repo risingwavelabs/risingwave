@@ -11,27 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use crate::binder::{BaseTableRef, Binder, BoundQuery};
+use crate::binder::{Binder, BoundQuery, BoundTableSource};
 
 #[derive(Debug)]
 pub struct BoundInsert {
-    pub table: BaseTableRef,
+    pub table_source: BoundTableSource,
     pub source: BoundQuery,
 }
 
 impl Binder {
     pub(super) fn bind_insert(
         &mut self,
-        table_name: ObjectName,
+        source_name: ObjectName,
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
+        // TODO: validate & add casts here
         Ok(BoundInsert {
-            table: self.bind_table(table_name)?,
+            table_source: self.bind_table_source(source_name)?,
             source: self.bind_query(source)?,
         })
     }

@@ -10,7 +10,8 @@ via function `run_all_test_files()` in `plan_test_runner.rs`.
 The test data in YAML format is organized under `tests/testdata` folder.
 
 ```yaml
-- sql: select * from t
+- sql: |
+    select * from t
   binder_error: "Item not found: relation \"t\""
 ```
 
@@ -57,3 +58,5 @@ Then we can find the updated tests at `*.apply.yaml`. If everything is okay, you
 ```
 
 To apply the new test results.
+
+You may use the `before` key to include other testcases by `id`.

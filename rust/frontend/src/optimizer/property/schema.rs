@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
@@ -23,11 +23,12 @@ pub trait WithSchema {
     fn schema(&self) -> &Schema;
 
     fn must_contain_columns(&self, required_cols: &FixedBitSet) {
-        assert!(
-            required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len())),
-            "Invalid required cols: {}, only {} columns available",
-            required_cols,
-            self.schema().fields().len()
+        // Having equal length also implies:
+        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
+        assert_eq!(
+            required_cols.len(),
+            self.schema().fields().len(),
+            "required cols capacity != columns available",
         );
     }
 }

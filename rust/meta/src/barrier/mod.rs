@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
@@ -219,7 +219,8 @@ where
                     .await;
                 let all_actor_infos = self
                     .fragment_manager
-                    .load_all_actors(command.creating_table_id());
+                    .load_all_actors(command.creating_table_id())
+                    .await;
                 BarrierActorInfo::resolve(all_nodes, all_actor_infos)
             };
 
@@ -251,7 +252,7 @@ where
 
     /// running a scheduled command.
     async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
-        let mutation = command_context.to_mutation()?;
+        let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
 
         let collect_futures = info.node_map.iter().filter_map(|(node_id, node)| {

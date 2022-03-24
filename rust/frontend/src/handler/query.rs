@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -89,13 +89,16 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         .unwrap()
         .epoch;
 
-    let mut rows = vec![];
+    // Create task.
     compute_client
         .create_task(task_id.clone(), plan, epoch)
         .await?;
+
+    // Receive data.
     let mut source = compute_client.get_data(task_sink_id.clone()).await?;
+    let mut rows = vec![];
     while let Some(chunk) = source.take_data().await? {
-        rows.append(&mut to_pg_rows(chunk));
+        rows.extend(to_pg_rows(chunk));
     }
 
     // Unpin corresponding snapshot.
@@ -108,12 +111,22 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         .await
         .to_rw_result()?;
 
-    Ok(PgResponse::new(
-        stmt_type,
-        rows.len() as i32,
-        rows,
-        pg_descs,
-    ))
+    let rows_count = match stmt_type {
+        StatementType::SELECT => rows.len() as i32,
+
+        // TODO(renjie): We need a better solution for this.
+        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
+            let first_row = rows[0].values();
+            let affected_rows_str = first_row[0]
+                .as_ref()
+                .expect("compute node should return affected rows in output");
+            affected_rows_str.parse().unwrap_or_default()
+        }
+
+        _ => unreachable!(),
+    };
+
+    Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

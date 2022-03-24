@@ -35,7 +35,7 @@ RiseDev also provides several other modes:
 Sometimes, you might want to debug a single component, but need to spawn all other components to make that component work. For example, debugging the compute node. In this case, simply run:
 
 ```bash
-./risedev dev-compute-node
+./risedev dev dev-compute-node
 ```
 
 And you will see:

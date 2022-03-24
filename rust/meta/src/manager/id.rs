@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 
@@ -113,7 +113,7 @@ where
 
 type IdCategoryType = u8;
 
-// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/44580) get completed.
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod IdCategory {
     use super::IdCategoryType;
@@ -129,6 +129,7 @@ pub mod IdCategory {
     pub const HummockSnapshot: IdCategoryType = 7;
     pub const HummockSSTableId: IdCategoryType = 8;
     pub const ParallelUnit: IdCategoryType = 9;
+    pub const Source: IdCategoryType = 10;
 }
 
 pub type IdGeneratorManagerRef<S> = Arc<IdGeneratorManager<S>>;

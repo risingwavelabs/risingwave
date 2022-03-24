@@ -11,9 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 mod admin;
-mod enumerator;
+pub(crate) mod enumerator;
 mod source;
 mod split;
 mod topic;
+
+pub use enumerator::*;
+pub use split::*;
+
+const PULSAR_CONFIG_TOPIC_KEY: &str = "pulsar.topic";
+const PULSAR_CONFIG_ADMIN_URL_KEY: &str = "pulsar.admin.url";

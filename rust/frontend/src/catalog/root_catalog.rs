@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
@@ -116,13 +116,16 @@ impl Catalog {
             .drop_source(source_id);
     }
 
-    pub fn get_database_by_name(&self, db_name: &str) -> Option<&DatabaseCatalog> {
-        self.database_by_name.get(db_name)
+    pub fn get_database_by_name(&self, db_name: &str) -> Result<&DatabaseCatalog> {
+        self.database_by_name
+            .get(db_name)
+            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
-    pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Option<&SchemaCatalog> {
+    pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Result<&SchemaCatalog> {
         self.get_database_by_name(db_name)?
             .get_schema_by_name(schema_name)
+            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()).into())
     }
 
     pub fn get_table_by_name(
@@ -130,43 +133,49 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         table_name: &str,
-    ) -> Option<&TableCatalog> {
+    ) -> Result<&TableCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_table_by_name(table_name)
+            .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
-    /// check the name if duplicated with existing table, materialized view or source;
-    pub fn check_relation_name(
+    pub fn get_source_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        source_name: &str,
+    ) -> Result<&ProstSource> {
+        self.get_schema_by_name(db_name, schema_name)?
+            .get_source_by_name(source_name)
+            .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
+    }
+
+    /// Check the name if duplicated with existing table, materialized view or source.
+    pub fn check_relation_name_duplicated(
         &self,
         db_name: &str,
         schema_name: &str,
         relation_name: &str,
     ) -> Result<(DatabaseId, SchemaId)> {
-        let db = self
-            .get_database_by_name(db_name)
-            .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()))?;
-        let schema = db
-            .get_schema_by_name(schema_name)
-            .ok_or_else(|| CatalogError::NotFound("schema", schema_name.to_string()))?;
+        let db = self.get_database_by_name(db_name)?;
+        let schema = self.get_schema_by_name(db_name, schema_name)?;
+
+        // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            return match source.info {
-                Some(source::Info::TableSource(_)) => {
+            match source.info.as_ref().unwrap() {
+                source::Info::TableSource(_) => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
                 }
-                Some(source::Info::StreamSource(_)) => {
+                source::Info::StreamSource(_) => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
-                None => unreachable!(),
-            };
+            }
+        } else if let Some(_table) = schema.get_table_by_name(relation_name) {
+            Err(CatalogError::Duplicated("materialized view", relation_name.to_string()).into())
+        } else {
+            Ok((db.id(), schema.id()))
         }
-
-        if let Some(_table) = schema.get_table_by_name(relation_name) {
-            return Err(
-                CatalogError::Duplicated("materialized view", schema_name.to_string()).into(),
-            );
-        }
-        Ok((db.id(), schema.id()))
     }
 
     /// Get the catalog cache's catalog version.

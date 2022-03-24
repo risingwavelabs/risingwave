@@ -11,11 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use parking_lot::Mutex;
 
 pub const EPOCH_PHYSICAL_SHIFT_BITS: u8 = 16;
 pub const INVALID_EPOCH: u64 = 0;
@@ -92,7 +94,7 @@ impl MemEpochGenerator {
 
 impl EpochGenerator for MemEpochGenerator {
     fn generate(&self) -> Epoch {
-        let mut ce = self.current_epoch.lock().unwrap();
+        let mut ce = self.current_epoch.lock();
         *ce = ce.next();
         *ce
     }

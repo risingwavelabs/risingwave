@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::path::PathBuf;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "catalog",
         "common",
         "data",
+        "ddl_service",
         "expr",
         "meta",
         "plan",

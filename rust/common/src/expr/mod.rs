@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 mod agg;
 pub mod build_expr_from_prost;
 pub mod data_types;
@@ -54,7 +54,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// # Arguments
     ///
     /// * `input` - input data of the Project Executor
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef>;
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef>;
 }
 
 pub type BoxedExpression = Box<dyn Expression>;

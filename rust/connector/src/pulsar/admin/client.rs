@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use anyhow::Result;
 use hyper::body::Buf;
 use hyper::{Client, Uri};
@@ -95,23 +95,26 @@ pub struct PartitionedTopicMetadata {
 
 #[cfg(test)]
 mod test {
-    use httpmock::Method::GET;
-    use httpmock::MockServer;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use crate::pulsar::admin::client::PulsarAdminClient;
     use crate::pulsar::topic::parse_topic;
 
-    fn mock_server(path: &str, body: &str) -> MockServer {
-        let server = MockServer::start();
+    async fn mock_server(web_path: &str, body: &str) -> MockServer {
+        let mock_server = MockServer::start().await;
+        use wiremock::matchers::{method, path};
 
-        server.mock(|when, then| {
-            when.method(GET).path(path);
-            then.status(200)
-                .header("content-type", "application/json")
-                .body(body);
-        });
+        let response = ResponseTemplate::new(200)
+            .set_body_string(body)
+            .append_header("content-type", "application/json");
 
-        server
+        Mock::given(method("GET"))
+            .and(path(web_path))
+            .respond_with(response)
+            .mount(&mock_server)
+            .await;
+
+        mock_server
     }
 
     #[tokio::test]
@@ -119,16 +122,15 @@ mod test {
         let server = mock_server(
             "/admin/v2/persistent/public/default/t2/partitions",
             "{\"partitions\":3}",
-        );
+        )
+        .await;
 
-        let client = PulsarAdminClient::new(server.base_url());
+        let client = PulsarAdminClient::new(server.uri());
 
         let topic = parse_topic("public/default/t2").unwrap();
 
         let meta = client.get_topic_metadata(&topic).await.unwrap();
 
         assert_eq!(meta.partitions, 3);
-
-        std::mem::drop(server);
     }
 }

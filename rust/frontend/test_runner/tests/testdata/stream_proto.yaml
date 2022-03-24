@@ -1,0 +1,377 @@
+- sql: |
+    /* test filter protobuf encoding */
+    create table t (v1 int);
+    select * from t where v1<1;
+  stream_plan_proto: |
+    ---
+    operatorId: "17"
+    input:
+      - operatorId: "16"
+        input:
+          - operatorId: "14"
+            input:
+              - operatorId: "12"
+                input:
+                  - mergeNode: {}
+                  - operatorId: "11"
+                    pkIndices:
+                      - 0
+                    batchPlanNode:
+                      tableRefId:
+                        tableId: 5
+                      columnDescs:
+                        - columnType:
+                            typeName: INT64
+                            isNullable: true
+                          name: _row_id
+                        - columnType:
+                            typeName: INT32
+                            isNullable: true
+                          columnId: 1
+                          name: v1
+                pkIndices:
+                  - 0
+                chainNode: {}
+            pkIndices:
+              - 0
+            filterNode:
+              searchCondition:
+                exprType: LESS_THAN
+                returnType:
+                  typeName: BOOLEAN
+                  isNullable: true
+                funcCall:
+                  children:
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      inputRef:
+                        columnIdx: 1
+                    - exprType: CONSTANT_VALUE
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      constant:
+                        body: AAAAAQ==
+        pkIndices:
+          - 0
+        projectNode:
+          selectList:
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT64
+                isNullable: true
+              inputRef: {}
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT32
+                isNullable: true
+              inputRef:
+                columnIdx: 1
+    pkIndices:
+      - 0
+    materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef: {}
+          returnType:
+            typeName: INT64
+            isNullable: true
+      columnIds:
+        - 0
+        - 1
+- sql: |
+    /* test projection */
+    create table t (v1 int);
+    select * from t;
+  stream_plan_proto: |
+    ---
+    operatorId: "11"
+    input:
+      - operatorId: "10"
+        input:
+          - operatorId: "8"
+            input:
+              - mergeNode: {}
+              - operatorId: "7"
+                pkIndices:
+                  - 0
+                batchPlanNode:
+                  tableRefId:
+                    tableId: 5
+                  columnDescs:
+                    - columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: _row_id
+                    - columnType:
+                        typeName: INT32
+                        isNullable: true
+                      columnId: 1
+                      name: v1
+            pkIndices:
+              - 0
+            chainNode: {}
+        pkIndices:
+          - 0
+        projectNode:
+          selectList:
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT64
+                isNullable: true
+              inputRef: {}
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT32
+                isNullable: true
+              inputRef:
+                columnIdx: 1
+    pkIndices:
+      - 0
+    materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef: {}
+          returnType:
+            typeName: INT64
+            isNullable: true
+      columnIds:
+        - 0
+        - 1
+- sql: |
+    /* test projection for single column */
+    create table t (v1 int, v2 int);
+    select v1 from t;
+  stream_plan_proto: |
+    ---
+    operatorId: "11"
+    input:
+      - operatorId: "10"
+        input:
+          - operatorId: "8"
+            input:
+              - mergeNode: {}
+              - operatorId: "7"
+                pkIndices:
+                  - 0
+                batchPlanNode:
+                  tableRefId:
+                    tableId: 5
+                  columnDescs:
+                    - columnType:
+                        typeName: INT32
+                        isNullable: true
+                      columnId: 1
+                      name: v1
+            pkIndices:
+              - 0
+            chainNode: {}
+        pkIndices:
+          - 0
+        projectNode:
+          selectList:
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT32
+                isNullable: true
+              inputRef: {}
+    pkIndices:
+      - 0
+    materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef: {}
+          returnType:
+            typeName: INT32
+            isNullable: true
+      columnIds:
+        - 0
+- sql: |
+    /* test simple agg */
+    create table t (v1 int);
+    select sum(v1) from t;
+  stream_plan_proto: |
+    ---
+    operatorId: "24"
+    input:
+      - operatorId: "23"
+        input:
+          - operatorId: "21"
+            input:
+              - operatorId: "19"
+                input:
+                  - operatorId: "17"
+                    input:
+                      - mergeNode: {}
+                      - operatorId: "16"
+                        pkIndices:
+                          - 0
+                        batchPlanNode:
+                          tableRefId:
+                            tableId: 5
+                          columnDescs:
+                            - columnType:
+                                typeName: INT32
+                                isNullable: true
+                              columnId: 1
+                              name: v1
+                    pkIndices:
+                      - 0
+                    chainNode: {}
+                pkIndices:
+                  - 0
+                projectNode:
+                  selectList:
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      inputRef: {}
+            pkIndices:
+              - 0
+            globalSimpleAggNode:
+              aggCalls:
+                - type: SUM
+                  args:
+                    - input: {}
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
+        pkIndices:
+          - 0
+        projectNode:
+          selectList:
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT64
+                isNullable: true
+              inputRef: {}
+    pkIndices:
+      - 0
+    materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef: {}
+          returnType:
+            typeName: INT64
+            isNullable: true
+      columnIds:
+        - 0
+- sql: |
+    /* test simple agg */
+    create table t (v1 int, v2 int);
+    select sum(v1) from t group by v2;
+  stream_plan_proto: |
+    ---
+    operatorId: "26"
+    input:
+      - operatorId: "25"
+        input:
+          - operatorId: "23"
+            input:
+              - operatorId: "21"
+                input:
+                  - operatorId: "19"
+                    input:
+                      - operatorId: "18"
+                        input:
+                          - mergeNode: {}
+                          - operatorId: "17"
+                            pkIndices:
+                              - 0
+                            batchPlanNode:
+                              tableRefId:
+                                tableId: 5
+                              columnDescs:
+                                - columnType:
+                                    typeName: INT32
+                                    isNullable: true
+                                  columnId: 1
+                                  name: v1
+                                - columnType:
+                                    typeName: INT32
+                                    isNullable: true
+                                  columnId: 2
+                                  name: v2
+                        pkIndices:
+                          - 0
+                        chainNode: {}
+                    pkIndices:
+                      - 0
+                    exchangeNode:
+                      fields:
+                        - dataType:
+                            typeName: INT32
+                            isNullable: true
+                          name: v1
+                        - dataType:
+                            typeName: INT32
+                            isNullable: true
+                          name: v2
+                      strategy:
+                        type: HASH
+                        columnIndices:
+                          - 0
+                pkIndices:
+                  - 1
+                projectNode:
+                  selectList:
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      inputRef:
+                        columnIdx: 1
+                    - exprType: INPUT_REF
+                      returnType:
+                        typeName: INT32
+                        isNullable: true
+                      inputRef: {}
+            pkIndices:
+              - 0
+            hashAggNode:
+              groupKeys:
+                - {}
+              aggCalls:
+                - type: SUM
+                  args:
+                    - input:
+                        columnIdx: 1
+                      type:
+                        typeName: INT32
+                        isNullable: true
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
+        pkIndices:
+          - 1
+        projectNode:
+          selectList:
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT64
+                isNullable: true
+              inputRef:
+                columnIdx: 1
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT32
+                isNullable: true
+              inputRef: {}
+    pkIndices:
+      - 1
+    materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef:
+            columnIdx: 1
+          returnType:
+            typeName: INT32
+            isNullable: true
+      columnIds:
+        - 0

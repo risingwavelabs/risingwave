@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::any::{type_name, Any};
 use std::sync::Arc;
 
@@ -29,6 +29,7 @@ pub mod prost;
 pub mod sort_util;
 #[macro_use]
 pub mod try_match;
+pub mod value_encoding;
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where

@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 mod fragmenter;
 mod graph;
 mod meta;
 mod scheduler;
+mod source_manager;
 mod stream_manager;
 
 #[cfg(test)]
@@ -24,4 +25,5 @@ mod test_fragmenter;
 pub use fragmenter::*;
 pub use meta::*;
 pub use scheduler::*;
+pub use source_manager::*;
 pub use stream_manager::*;

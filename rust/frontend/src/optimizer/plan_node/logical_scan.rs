@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -23,12 +23,13 @@ use crate::catalog::{ColumnId, TableId};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
+use crate::utils::ColIndexMapping;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
 #[derive(Debug, Clone)]
 pub struct LogicalScan {
     pub base: PlanBase,
-    table_name: String,
+    table_name: String, // explain-only
     table_id: TableId,
     columns: Vec<ColumnId>,
 }
@@ -42,7 +43,8 @@ impl LogicalScan {
         schema: Schema,
         ctx: QueryContextRef,
     ) -> Self {
-        let base = PlanBase::new_logical(ctx, schema);
+        // TODO: get pk
+        let base = PlanBase::new_logical(ctx, schema, vec![0] /* TODO get the pk */);
         Self {
             table_name,
             table_id,
@@ -125,5 +127,13 @@ impl ToBatch for LogicalScan {
 impl ToStream for LogicalScan {
     fn to_stream(&self) -> PlanRef {
         StreamTableScan::new(self.clone()).into()
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        // TODO: add pk here
+        (
+            self.clone().into(),
+            ColIndexMapping::identical_map(self.schema().len()),
+        )
     }
 }

@@ -11,31 +11,29 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
-
-use crate::catalog::schema_catalog::SchemaCatalog;
 
 mod bind_context;
 mod delete;
 pub(crate) mod expr;
 mod insert;
 mod query;
+mod relation;
 mod select;
 mod set_expr;
 mod statement;
-mod table_ref;
 mod values;
 
 pub use bind_context::BindContext;
 pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
+pub use relation::{BoundBaseTable, BoundJoin, BoundTableSource, Relation};
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
-pub use table_ref::{BaseTableRef, BoundJoin, TableRef};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
@@ -67,9 +65,6 @@ impl Binder {
         self.bind_statement(stmt)
     }
 
-    fn get_schema_by_name(&self, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.catalog.get_schema_by_name(&self.db_name, schema_name)
-    }
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
         self.upper_contexts.push(new_context);

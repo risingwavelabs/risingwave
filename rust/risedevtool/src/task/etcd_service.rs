@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -66,6 +66,10 @@ impl Task for EtcdService {
             .arg(&peer_urls)
             .arg("--name")
             .arg("risedev-meta");
+
+        if self.config.unsafe_no_fsync {
+            cmd.arg("--unsafe-no-fsync");
+        }
 
         ctx.run_command(ctx.tmux_run(cmd)?)?;
 

@@ -7,6 +7,8 @@ pub mod common;
 #[rustfmt::skip]
 pub mod data;
 #[rustfmt::skip]
+pub mod ddl_service;
+#[rustfmt::skip]
 pub mod expr;
 #[rustfmt::skip]
 pub mod meta;
@@ -30,6 +32,9 @@ pub mod common_serde;
 #[rustfmt::skip]
 #[path = "data.serde.rs"]
 pub mod data_serde;
+#[rustfmt::skip]
+#[path = "ddl_service.serde.rs"]
+pub mod ddl_service_serde;
 #[rustfmt::skip]
 #[path = "expr.serde.rs"]
 pub mod expr_serde;

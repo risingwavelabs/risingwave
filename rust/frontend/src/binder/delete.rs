@@ -11,16 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
-use super::{BaseTableRef, Binder};
+use super::{Binder, BoundBaseTable};
 use crate::expr::ExprImpl;
 
 #[derive(Debug)]
 pub struct BoundDelete {
-    pub table: BaseTableRef,
+    // TODO(bugen): refactor with `BoundTableSource`.
+    pub table: BoundBaseTable,
     pub selection: Option<ExprImpl>,
 }
 
@@ -30,6 +31,7 @@ impl Binder {
         table_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
+        // TODO: validate & add casts here
         let delete = BoundDelete {
             table: self.bind_table(table_name)?,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::hash::{Hash, Hasher};
 use std::iter;
 use std::mem::size_of;
@@ -96,6 +96,7 @@ impl Array for Utf8Array {
             values,
             array_type: ArrayType::Utf8 as i32,
             struct_array_data: None,
+            list_array_data: None,
         }
     }
 

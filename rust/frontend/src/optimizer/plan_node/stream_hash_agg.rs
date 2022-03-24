@@ -11,13 +11,16 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -29,7 +32,13 @@ pub struct StreamHashAgg {
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
+        let pk_indices = logical.base.pk_indices.to_vec();
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            Distribution::HashShard(logical.group_keys().to_vec()),
+        );
         StreamHashAgg { logical, base }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -43,7 +52,15 @@ impl StreamHashAgg {
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("StreamHashAgg")
-            .field("group_keys", &self.group_keys())
+            .field(
+                "group_keys",
+                &self
+                    .group_keys()
+                    .iter()
+                    .copied()
+                    .map(InputRefDisplay)
+                    .collect_vec(),
+            )
             .field("aggs", &self.agg_calls())
             .finish()
     }
@@ -66,4 +83,21 @@ impl WithSchema for StreamHashAgg {
     }
 }
 
-impl ToStreamProst for StreamHashAgg {}
+impl ToStreamProst for StreamHashAgg {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        use risingwave_pb::stream_plan::*;
+
+        ProstStreamNode::HashAggNode(HashAggNode {
+            group_keys: self
+                .group_keys()
+                .iter()
+                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .collect_vec(),
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect_vec(),
+        })
+    }
+}

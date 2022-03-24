@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::fmt;
+
+use std::sync::Arc;
+use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
@@ -26,7 +27,7 @@ use crate::session::QueryContextRef;
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     pub base: PlanBase,
-    rows: Vec<Vec<ExprImpl>>,
+    rows: Arc<[Vec<ExprImpl>]>,
 }
 
 impl LogicalValues {
@@ -37,8 +38,11 @@ impl LogicalValues {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = PlanBase::new_logical(ctx, schema);
-        Self { rows, base }
+        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        Self {
+            rows: rows.into(),
+            base,
+        }
     }
 
     /// Create a LogicalValues node. Used by planner.
@@ -89,6 +93,10 @@ impl ToBatch for LogicalValues {
 
 impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
         unimplemented!("Stream values executor is unimplemented!")
     }
 }

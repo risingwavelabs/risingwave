@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
@@ -25,7 +25,7 @@ impl Planner {
         // Plan the FROM clause.
         let mut root = match select.from {
             None => self.create_dummy_values()?,
-            Some(t) => self.plan_table_ref(t)?,
+            Some(t) => self.plan_relation(t)?,
         };
         // Plan the WHERE clause.
         root = match select.where_clause {

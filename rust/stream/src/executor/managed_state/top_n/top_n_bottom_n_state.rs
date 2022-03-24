@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(clippy::mutable_key_type)]
 #![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::vec::Drain;
 
+use itertools::Itertools;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
@@ -263,7 +264,10 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
                 number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
                 epoch,
             )
-            .await?;
+            .await?
+            .into_iter()
+            .map(|(k, v)| (k, v.to_bytes()))
+            .collect_vec();
         deserialize_bytes_to_pk_and_row::<TOP_N_MIN>(
             pk_row_bytes,
             &mut self.ordered_row_deserializer,

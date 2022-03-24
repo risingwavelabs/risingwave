@@ -11,15 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Define all [`Rule`]
 
 use super::PlanRef;
 
 /// A one-to-one transform for the PlanNode, every [`Rule`] should downcast and check if the node
 /// matches the rule
-#[allow(unused)]
-#[allow(clippy::result_unit_err)]
 pub trait Rule: Send + Sync + 'static {
     /// return err(()) if not match
     fn apply(&self, plan: PlanRef) -> Option<PlanRef>;

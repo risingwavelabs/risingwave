@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
@@ -35,9 +35,13 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
+/// Get the [`PgFieldDescriptor`] for return values of the given statement.
 pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
-    if let BoundStatement::Query(query) = bound {
-        let pg_descs = match &query.body {
+    let pg_descs = match bound {
+        // The result set of these commands is ingored.
+        BoundStatement::Insert(_) | BoundStatement::Delete(_) => vec![],
+
+        BoundStatement::Query(query) => match &query.body {
             BoundSetExpr::Select(select) => select
                 .select_items
                 .iter()
@@ -55,11 +59,10 @@ pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescripto
                     PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
                 })
                 .collect(),
-        };
-        Ok(pg_descs)
-    } else {
-        panic!("get_pg_field_descs only supports query bound_statement")
-    }
+        },
+    };
+
+    Ok(pg_descs)
 }
 
 pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
@@ -79,6 +82,7 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
         DataType::Decimal => TypeOid::Decimal,
         DataType::Interval => TypeOid::Varchar,
         DataType::Struct { .. } => TypeOid::Varchar,
+        DataType::List { .. } => TypeOid::Varchar,
     }
 }
 

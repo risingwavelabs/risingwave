@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::array::{I32Array, Op};
@@ -227,7 +227,7 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
-        let mut deserializer = memcomparable::Deserializer::new(&v[..]);
+        let mut deserializer = memcomparable::Deserializer::new(v.to_bytes());
         println!(
             "{:?} => {:?}",
             k,
