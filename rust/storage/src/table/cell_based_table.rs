@@ -105,7 +105,7 @@ impl<S: StateStore> CellBasedTable<S> {
     // cell-based interface
     // TODO: multi-get. We can optimize get_row to parallelize I/O.
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Row> {
-        let pk_serializer = self.pk_serializer.as_ref().expect("...");
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let column_ids = generate_column_id(&self.column_descs);
         let mut row = Vec::with_capacity(column_ids.len());
         for column_id in column_ids {
@@ -114,7 +114,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 &serialize_column_id(&column_id)?,
             ]
             .concat();
-            let state_store_get_res = self.keyspace.get(&key.clone(), epoch).await?;
+            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
             let column_index = self
                 .column_id_to_column_index
                 .get(&column_id)
@@ -131,7 +131,7 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Row> {
-        let pk_serializer = self.pk_serializer.as_ref().expect("...");
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let column_ids = generate_column_id(&self.column_descs);
         let mut row = Vec::with_capacity(column_ids.len());
         let start_key = &serialize_pk(pk, pk_serializer)?;
