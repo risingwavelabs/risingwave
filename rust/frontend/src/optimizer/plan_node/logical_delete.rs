@@ -28,35 +28,39 @@ use crate::catalog::TableId;
 #[derive(Debug, Clone)]
 pub struct LogicalDelete {
     pub base: PlanBase,
-    table_name: String, // explain-only
-    table_id: TableId,
+    table_source_name: String, // explain-only
+    source_id: TableId,        // TODO: use SourceId
     input: PlanRef,
 }
 
 impl LogicalDelete {
     /// Create a [`LogicalDelete`] node. Used internally by optimizer.
-    pub fn new(input: PlanRef, table_name: String, table_id: TableId) -> Self {
+    pub fn new(input: PlanRef, table_source_name: String, source_id: TableId) -> Self {
         let ctx = input.ctx();
         // TODO: support `RETURNING`.
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self {
             base,
-            table_name,
-            table_id,
+            table_source_name,
+            source_id,
             input,
         }
     }
 
     /// Create a [`LogicalDelete`] node. Used by planner.
-    pub fn create(input: PlanRef, table_name: String, table_id: TableId) -> Result<Self> {
-        Ok(Self::new(input, table_name, table_id))
+    pub fn create(input: PlanRef, table_source_name: String, source_id: TableId) -> Result<Self> {
+        Ok(Self::new(input, table_source_name, source_id))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
-        f.debug_struct(name)
-            .field("table_name", &self.table_name)
-            .finish()
+        write!(f, "{} {{ table: {} }}", name, self.table_source_name)
+    }
+
+    /// Get the logical delete's source id.
+    #[must_use]
+    pub fn source_id(&self) -> TableId {
+        self.source_id
     }
 }
 
@@ -66,7 +70,7 @@ impl PlanTreeNodeUnary for LogicalDelete {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.table_name.clone(), self.table_id)
+        Self::new(input, self.table_source_name.clone(), self.source_id)
     }
 }
 

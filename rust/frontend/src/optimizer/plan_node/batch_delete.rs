@@ -16,7 +16,7 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::DeleteNode;
+use risingwave_pb::plan::{DeleteNode, TableRefId};
 
 use super::{
     LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -78,9 +78,12 @@ impl ToDistributedBatch for BatchDelete {
 
 impl ToBatchProst for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
-        #[allow(unreachable_code)]
         NodeBody::Delete(DeleteNode {
-            table_source_ref_id: todo!("fill source id here"),
+            table_source_ref_id: TableRefId {
+                table_id: self.logical.source_id().table_id() as i32,
+                ..Default::default()
+            }
+            .into(),
         })
     }
 }

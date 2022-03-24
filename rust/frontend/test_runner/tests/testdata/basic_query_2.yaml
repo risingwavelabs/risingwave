@@ -2,7 +2,7 @@
     create table t (v1 int, v2 int);
     delete from t;
   batch_plan: |
-    BatchDelete { table_name: "t" }
+    BatchDelete { table: t }
       BatchScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 int, v2 int);
