@@ -42,6 +42,14 @@ impl ColumnCatalog {
     pub fn name(&self) -> &str {
         self.column_desc.name.as_ref()
     }
+
+    /// Convert column catalog to proto
+    pub fn to_protobuf(&self) -> ProstColumnCatalog {
+        ProstColumnCatalog {
+            column_desc: Some(self.column_desc.to_protobuf()),
+            is_hidden: self.is_hidden,
+        }
+    }
 }
 
 impl From<ProstColumnCatalog> for ColumnCatalog {

@@ -52,7 +52,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()>;
 
-    async fn create_materialized_view(&self, table: ProstTable) -> Result<()>;
+    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()>;
 
     async fn create_materialized_source(
         &self,
@@ -111,15 +111,10 @@ impl CatalogWriter for CatalogWriterImpl {
     }
 
     // TODO: maybe here to pass a materialize plan node
-    async fn create_materialized_view(&self, table: ProstTable) -> Result<()> {
+    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()> {
         let (_, version) = self
             .meta_client
-            .create_materialized_view(
-                table,
-                StreamNode {
-                    ..Default::default()
-                },
-            )
+            .create_materialized_view(table, plan)
             .await?;
         self.wait_version(version).await
     }

@@ -134,14 +134,18 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         source: ProstSource,
         table: ProstTable,
-        _plan: StreamNode,
+        plan: StreamNode,
     ) -> Result<()> {
         self.create_source(source).await?;
-        self.create_materialized_view(table).await?;
+        self.create_materialized_view(table, plan).await?;
         Ok(())
     }
 
-    async fn create_materialized_view(&self, mut table: ProstTable) -> Result<()> {
+    async fn create_materialized_view(
+        &self,
+        mut table: ProstTable,
+        _plan: StreamNode,
+    ) -> Result<()> {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
         self.add_id(table.id, table.database_id, table.schema_id);
