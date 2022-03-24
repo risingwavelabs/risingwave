@@ -19,6 +19,7 @@ use risingwave_pb::common::HostAddress as ProstHostAddress;
 
 use crate::error::{ErrorCode, Result, RwError};
 
+/// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HostAddr {
     pub host: String,
@@ -115,6 +116,6 @@ mod tests {
         check_local("10.11.12.13:3456", "10.11.12.13:3456", true);
         check_local("some.host.in.k8s:3456", "some.host.in.k8s:3456", true);
         check_local("some.host.in.k8s:3456", "other.host.in.k8s:3456", false);
-        check_local("some.host.in.k8s:3456", "some.host.in.k8s:4567", true);
+        check_local("some.host.in.k8s:3456", "some.host.in.k8s:4567", false);
     }
 }

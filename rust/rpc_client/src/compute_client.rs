@@ -18,7 +18,7 @@ use futures::StreamExt;
 use log::trace;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::plan::exchange_info::DistributionMode;
 use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};

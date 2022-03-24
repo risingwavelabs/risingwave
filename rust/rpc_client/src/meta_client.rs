@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::sync::Arc;
-use std::net::SocketAddr;
 use std::time::Duration;
 
 use paste::paste;
