@@ -33,3 +33,7 @@ mod filter_project;
 pub use filter_project::*;
 mod filter_agg;
 pub use filter_agg::*;
+mod project_elim;
+pub use project_elim::*;
+mod project_merge;
+pub use project_merge::*;

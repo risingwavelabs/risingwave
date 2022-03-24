@@ -91,12 +91,7 @@ impl LogicalProject {
         exprs: Vec<ExprImpl>,
         expr_alias: Vec<Option<String>>,
     ) -> PlanRef {
-        let project = Self::new(input, exprs, expr_alias);
-        if project.is_identity() {
-            project.input()
-        } else {
-            project.into()
-        }
+        Self::new(input, exprs, expr_alias).into()
     }
 
     /// Creates a `LogicalProject` which select some columns from the input.

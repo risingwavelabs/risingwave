@@ -4,14 +4,14 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "14"
+    operatorId: "18"
     input:
-      - operatorId: "13"
+      - operatorId: "17"
         input:
-          - operatorId: "11"
+          - operatorId: "15"
             input:
               - mergeNode: {}
-              - operatorId: "10"
+              - operatorId: "14"
                 pkIndices:
                   - 0
                 batchPlanNode:
@@ -91,12 +91,12 @@
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "7"
+    operatorId: "10"
     input:
-      - operatorId: "6"
+      - operatorId: "9"
         input:
           - mergeNode: {}
-          - operatorId: "5"
+          - operatorId: "8"
             pkIndices:
               - 0
             batchPlanNode:
@@ -154,37 +154,26 @@
     select v1 from t;
   stream_plan_proto: |
     ---
-    operatorId: "13"
+    operatorId: "10"
     input:
-      - operatorId: "12"
+      - operatorId: "9"
         input:
-          - operatorId: "10"
-            input:
-              - mergeNode: {}
-              - operatorId: "9"
-                pkIndices:
-                  - 0
-                batchPlanNode:
-                  tableRefId:
-                    tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
+          - mergeNode: {}
+          - operatorId: "8"
             pkIndices:
               - 0
-            chainNode: {}
+            batchPlanNode:
+              tableRefId:
+                tableId: 1
+              columnDescs:
+                - columnType:
+                    typeName: INT32
+                    isNullable: true
+                  columnId: 1
+                  name: v1
         pkIndices:
           - 0
-        projectNode:
-          selectList:
-            - exprType: INPUT_REF
-              returnType:
-                typeName: INT32
-                isNullable: true
-              inputRef: {}
+        chainNode: {}
     pkIndices:
       - 0
     materializeNode:
@@ -217,39 +206,28 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "22"
+    operatorId: "23"
     input:
-      - operatorId: "21"
+      - operatorId: "22"
         input:
-          - operatorId: "19"
+          - operatorId: "20"
             input:
-              - operatorId: "17"
-                input:
-                  - mergeNode: {}
-                  - operatorId: "16"
-                    pkIndices:
-                      - 0
-                    batchPlanNode:
-                      tableRefId:
-                        tableId: 1
-                      columnDescs:
-                        - columnType:
-                            typeName: INT32
-                            isNullable: true
-                          columnId: 1
-                          name: v1
+              - mergeNode: {}
+              - operatorId: "19"
                 pkIndices:
                   - 0
-                chainNode: {}
+                batchPlanNode:
+                  tableRefId:
+                    tableId: 1
+                  columnDescs:
+                    - columnType:
+                        typeName: INT32
+                        isNullable: true
+                      columnId: 1
+                      name: v1
             pkIndices:
               - 0
-            projectNode:
-              selectList:
-                - exprType: INPUT_REF
-                  returnType:
-                    typeName: INT32
-                    isNullable: true
-                  inputRef: {}
+            chainNode: {}
         pkIndices:
           - 0
         globalSimpleAggNode:
@@ -295,20 +273,20 @@
     select sum(v1) as sum_v1 from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "30"
+    operatorId: "33"
     input:
-      - operatorId: "29"
+      - operatorId: "32"
         input:
-          - operatorId: "27"
+          - operatorId: "30"
             input:
-              - operatorId: "25"
+              - operatorId: "28"
                 input:
-                  - operatorId: "23"
+                  - operatorId: "26"
                     input:
-                      - operatorId: "22"
+                      - operatorId: "25"
                         input:
                           - mergeNode: {}
-                          - operatorId: "21"
+                          - operatorId: "24"
                             pkIndices:
                               - 0
                             batchPlanNode:
