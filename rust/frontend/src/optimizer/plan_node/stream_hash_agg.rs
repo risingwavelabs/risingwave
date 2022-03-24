@@ -33,11 +33,13 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
+        // Hash agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
-            Distribution::any().clone(), // TODO
+            Distribution::HashShard(logical.group_keys().to_vec()),
+            false,
         );
         StreamHashAgg { logical, base }
     }
