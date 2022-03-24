@@ -23,7 +23,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use super::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     id: TableId,
     name: String,
@@ -65,17 +65,18 @@ impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
         let name = tb.name.clone();
-        let columns = tb.columns.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
-        for col in &columns {
-            let col_desc = col.column_desc.clone().unwrap();
-            let col_name = col_desc.name.clone();
-            if !col_names.insert(col_name.clone()) {
-                panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+        let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
+        for catalog in columns.clone() {
+            for col_desc in catalog.column_desc.get_column_descs() {
+                let col_name = col_desc.name.clone();
+                if !col_names.insert(col_name.clone()) {
+                    panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+                }
+                let col_id = col_desc.column_id.get_id();
+                col_descs.insert(col_id, col_desc);
             }
-            let col_id = col_desc.column_id;
-            col_descs.insert(col_id, col_desc.into());
         }
         let pk_desc = tb
             .pk_column_ids
@@ -91,8 +92,6 @@ impl From<ProstTable> for TableCatalog {
                 order,
             })
             .collect();
-
-        let columns = columns.into_iter().map(ColumnCatalog::from).collect();
         Self {
             id: id.into(),
             name,
@@ -104,5 +103,122 @@ impl From<ProstTable> for TableCatalog {
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::types::*;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
+
+    use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::table_catalog::TableCatalog;
+    use crate::handler::create_table::ROWID_NAME;
+
+    #[test]
+    fn test_into_table_catalog() {
+        let table: TableCatalog = ProstTable {
+            id: 0,
+            schema_id: 0,
+            database_id: 0,
+            name: "test".to_string(),
+            columns: vec![
+                ProstColumnCatalog {
+                    column_desc: Some(ProstColumnDesc {
+                        column_id: 0,
+                        name: ROWID_NAME.to_string(),
+                        field_descs: vec![],
+                        column_type: Some(DataType::Int32.to_protobuf()),
+                        type_name: String::new(),
+                    }),
+                    is_hidden: true,
+                },
+                ProstColumnCatalog {
+                    column_desc: Some(ProstColumnDesc::new_struct(
+                        "country",
+                        1,
+                        ".test.Country",
+                        vec![
+                            ProstColumnDesc::new_atomic(
+                                DataType::Varchar.to_protobuf(),
+                                "country.address",
+                                2,
+                            ),
+                            ProstColumnDesc::new_atomic(
+                                DataType::Varchar.to_protobuf(),
+                                "country.zipcode",
+                                3,
+                            ),
+                        ],
+                    )),
+                    is_hidden: false,
+                },
+            ],
+            pk_column_ids: vec![0],
+            pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+            dependent_relations: vec![],
+            optional_associated_source_id: None,
+        }
+        .into();
+
+        assert_eq!(
+            table,
+            TableCatalog {
+                id: TableId::new(0),
+                name: "test".to_string(),
+                columns: vec![
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: DataType::Int32,
+                            column_id: ColumnId::new(0),
+                            name: ROWID_NAME.to_string(),
+                            field_descs: vec![],
+                            type_name: String::new()
+                        },
+                        is_hidden: true,
+                    },
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: DataType::Struct {
+                                fields: vec![DataType::Varchar, DataType::Varchar].into()
+                            },
+                            column_id: ColumnId::new(1),
+                            name: "country".to_string(),
+                            field_descs: vec![
+                                ColumnDesc {
+                                    data_type: DataType::Varchar,
+                                    column_id: ColumnId::new(2),
+                                    name: "country.address".to_string(),
+                                    field_descs: vec![],
+                                    type_name: String::new(),
+                                },
+                                ColumnDesc {
+                                    data_type: DataType::Varchar,
+                                    column_id: ColumnId::new(3),
+                                    name: "country.zipcode".to_string(),
+                                    field_descs: vec![],
+                                    type_name: String::new(),
+                                }
+                            ],
+                            type_name: ".test.Country".to_string()
+                        },
+                        is_hidden: false
+                    }
+                ],
+                pk_desc: vec![OrderedColumnDesc {
+                    column_desc: ColumnDesc {
+                        data_type: DataType::Int32,
+                        column_id: ColumnId::new(0),
+                        name: ROWID_NAME.to_string(),
+                        field_descs: vec![],
+                        type_name: String::new()
+                    },
+                    order: OrderType::Ascending
+                }]
+            }
+        );
     }
 }

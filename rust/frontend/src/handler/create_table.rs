@@ -55,12 +55,16 @@ pub async fn handle_create_table(
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
             name: ROWID_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         });
         for (i, column) in columns.into_iter().enumerate() {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
                 name: column.name.value,
+                field_descs: vec![],
+                type_name: "".to_string(),
             });
         }
         column_descs
@@ -122,6 +126,7 @@ pub async fn handle_create_table(
                 column_type: c.data_type.to_protobuf().into(),
                 column_id: c.column_id.get_id(),
                 name: c.name,
+                ..Default::default()
             }
             .into(),
             is_hidden: i == 0,

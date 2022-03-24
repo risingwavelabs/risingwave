@@ -82,6 +82,7 @@ impl ToBatchProst for BatchSeqScan {
                 column_type: field.data_type().to_protobuf().into(),
                 column_id: column_id.get_id(),
                 name: field.name.clone(),
+                ..Default::default()
             })
             .collect();
 

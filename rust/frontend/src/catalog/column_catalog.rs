@@ -16,7 +16,7 @@ use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
