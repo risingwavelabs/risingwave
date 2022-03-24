@@ -41,6 +41,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
     };
 
     let (plan, pg_descs) = {
+        // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
         let plan = Planner::new(Rc::new(RefCell::new(context)))
             .plan(bound)?
             .gen_batch_query_plan();
