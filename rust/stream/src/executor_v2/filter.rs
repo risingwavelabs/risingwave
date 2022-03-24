@@ -20,10 +20,21 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::BoxedExpression;
 
-use super::{ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper};
+use super::{Executor, ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper};
 use crate::executor::PkIndicesRef;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
+
+impl FilterExecutor {
+    pub fn new(input: Box<dyn Executor>, expr: BoxedExpression, executor_id: u64) -> Self {
+        let info = input.info();
+
+        SimpleExecutorWrapper {
+            input,
+            inner: SimpleFilterExecutor::new(info, expr, executor_id),
+        }
+    }
+}
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a boolean array on whether each item should be retained. And then,
@@ -145,5 +156,108 @@ impl SimpleExecutor for SimpleFilterExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::StreamExt;
+    use itertools::Itertools;
+    use risingwave_common::array::{I64Array, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_common::expr::InputRefExpression;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::super::test_utils::MockSource;
+    use super::super::*;
+    use super::*;
+
+    #[tokio::test]
+    async fn test_filter() {
+        let chunk1 = StreamChunk::new(
+            vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete],
+            vec![
+                column_nonnull! { I64Array, [1, 5, 6, 7] },
+                column_nonnull! { I64Array, [4, 2, 6, 5] },
+            ],
+            None,
+        );
+        let chunk2 = StreamChunk::new(
+            vec![
+                Op::UpdateDelete, // true -> true
+                Op::UpdateInsert, // expect UpdateDelete, UpdateInsert
+                Op::UpdateDelete, // true -> false
+                Op::UpdateInsert, // expect Delete
+                Op::UpdateDelete, // false -> true
+                Op::UpdateInsert, // expect Insert
+                Op::UpdateDelete, // false -> false
+                Op::UpdateInsert, // expect nothing
+            ],
+            vec![
+                column_nonnull! { I64Array, [5, 7, 5, 3, 3, 5, 3, 4] },
+                column_nonnull! { I64Array, [3, 5, 3, 5, 5, 3, 5, 6] },
+            ],
+            None,
+        );
+        let schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ],
+        };
+        let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
+
+        let left_expr = InputRefExpression::new(DataType::Int64, 0);
+        let right_expr = InputRefExpression::new(DataType::Int64, 1);
+        let test_expr = new_binary_expr(
+            Type::GreaterThan,
+            DataType::Boolean,
+            Box::new(left_expr),
+            Box::new(right_expr),
+        );
+        let filter = Box::new(FilterExecutor::new(Box::new(source), test_expr, 1));
+        let mut filter = filter.execute();
+
+        if let Message::Chunk(chunk) = filter.next().await.unwrap().unwrap() {
+            assert_eq!(
+                chunk.ops(),
+                vec![Op::Insert, Op::Insert, Op::Insert, Op::Delete]
+            );
+            assert_eq!(chunk.columns().len(), 2);
+            assert_eq!(
+                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
+                vec![false, true, false, true]
+            );
+        } else {
+            unreachable!();
+        }
+
+        if let Message::Chunk(chunk) = filter.next().await.unwrap().unwrap() {
+            assert_eq!(chunk.columns().len(), 2);
+            assert_eq!(
+                chunk.visibility().as_ref().unwrap().iter().collect_vec(),
+                vec![true, true, true, false, false, true, false, false]
+            );
+            assert_eq!(
+                chunk.ops(),
+                vec![
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                    Op::Delete,
+                    Op::UpdateInsert,
+                    Op::UpdateDelete,
+                    Op::Insert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                ]
+            );
+        } else {
+            unreachable!();
+        }
+
+        assert!(filter.next().await.unwrap().unwrap().is_terminate());
     }
 }
