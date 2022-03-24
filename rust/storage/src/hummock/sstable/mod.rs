@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Hummock state store's SST builder, format and iterator
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.

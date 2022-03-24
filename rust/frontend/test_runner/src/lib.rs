@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 //! Data-driven tests.
 #![feature(let_chains)]
@@ -236,7 +235,7 @@ impl TestCase {
 
             // Only generate batch_plan_proto if it is specified in test case
             if self.batch_plan_proto.is_some() {
-                ret.batch_plan_proto = Some(serde_json::to_string_pretty(
+                ret.batch_plan_proto = Some(serde_yaml::to_string(
                     &batch_plan.to_batch_prost_identity(false),
                 )?);
             }
@@ -259,7 +258,7 @@ impl TestCase {
 
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(serde_json::to_string_pretty(
+                ret.stream_plan_proto = Some(serde_yaml::to_string(
                     &stream_plan.to_stream_prost_identity(false),
                 )?);
             }

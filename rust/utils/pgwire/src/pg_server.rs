@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::error::Error;
 use std::io;
+use std::result::Result;
 use std::sync::Arc;
 
 use log::{error, info};
@@ -25,7 +26,7 @@ use crate::pg_response::PgResponse;
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
-    fn connect(&self) -> Arc<dyn Session>;
+    fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
@@ -97,8 +98,11 @@ mod tests {
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
-        fn connect(&self) -> Arc<dyn super::Session> {
-            Arc::new(TestSession {})
+        fn connect(
+            &self,
+            _database: &str,
+        ) -> Result<Arc<dyn super::Session>, Box<dyn Error + Send + Sync>> {
+            Ok(Arc::new(TestSession {}))
         }
     }
 
