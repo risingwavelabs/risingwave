@@ -403,7 +403,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, Datum};
     use risingwave_pb::expr::expr_node::Type;
 

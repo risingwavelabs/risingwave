@@ -249,8 +249,8 @@ mod tests {
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin,
-        LogicalScan, PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
+        PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;

@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
@@ -22,7 +21,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
-use crate::catalog::{ColumnId};
+use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
 use crate::session::QueryContextRef;
