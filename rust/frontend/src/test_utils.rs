@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::error::Error;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};

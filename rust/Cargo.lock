@@ -3675,6 +3675,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "maplit",
  "parking_lot 0.12.0",
  "paste",
  "pgwire",

@@ -86,7 +86,7 @@ pub async fn handle_create_mv(
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name(session.database(), &schema_name, &table_name)?;
+        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
     let plan = gen_create_mv_plan(&session, &mut planner, *query)?.to_stream_prost();
 

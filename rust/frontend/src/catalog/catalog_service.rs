@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
@@ -62,6 +62,8 @@ pub trait CatalogWriter: Send + Sync {
     ) -> Result<()>;
 
     async fn create_source(&self, source: ProstSource) -> Result<()>;
+
+    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -124,6 +126,14 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn create_source(&self, source: ProstSource) -> Result<()> {
         let (_id, version) = self.meta_client.create_source(source).await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_source(source_id, table_id)
+            .await?;
         self.wait_version(version).await
     }
 }
