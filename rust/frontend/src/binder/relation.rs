@@ -47,8 +47,7 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub cell_based_desc: TableDesc,
-    pub columns: Vec<ColumnDesc>,
+    pub table_desc: TableDesc,
 }
 
 #[derive(Debug)]
@@ -166,7 +165,7 @@ impl Binder {
                 .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
         let table_id = table_catalog.id();
-        let cell_based_desc = table_catalog.cell_based_table();
+        let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
         let columns = columns
@@ -180,9 +179,8 @@ impl Binder {
 
         Ok(BoundBaseTable {
             name: table_name,
-            cell_based_desc,
+            table_desc,
             table_id,
-            columns,
         })
     }
 

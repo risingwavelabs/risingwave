@@ -48,7 +48,7 @@ impl TableCatalog {
     }
 
     /// Get a TableDesc of the table.
-    pub fn cell_based_table(&self) -> TableDesc {
+    pub fn table_desc(&self) -> TableDesc {
         TableDesc {
             table_id: self.id,
             pk: self.pk_desc.clone(),
