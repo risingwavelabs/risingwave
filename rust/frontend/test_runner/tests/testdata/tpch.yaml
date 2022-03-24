@@ -131,7 +131,7 @@
                     BatchFilter { predicate:  }
                       BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], column_id: [#0, #1, #2, #3, #4, #5], pk_indices: [0, 2, 3] }
+    StreamMaterialize { column_orders: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [0, 2, 3] }
       StreamProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
           StreamProject { exprs: [$4, $1, $2, ($5 * (1:Int32 - $6)), $3, $0], expr_alias: [ ,  ,  ,  ,  ,  ] }
@@ -172,7 +172,7 @@
               BatchFilter { predicate: ($0 < 24:Int32) }
                 BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
       StreamProject { exprs: [$0], expr_alias: [revenue] }
         StreamSimpleAgg { aggs: [sum($0)] }
           StreamProject { exprs: [($1 * $2), $0], expr_alias: [ ,  ] }

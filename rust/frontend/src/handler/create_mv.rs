@@ -91,7 +91,7 @@ pub fn gen_create_mv_plan(
 
     let mut column_orders = bound_query.order.clone();
 
-    let mut column_catalog = bound_query
+    let column_catalog = bound_query
         .gen_create_mv_column_desc()
         .into_iter()
         .map(|column_desc| ColumnCatalog {
@@ -105,25 +105,12 @@ pub fn gen_create_mv_plan(
     let plan = logical.gen_create_mv_plan();
 
     // Compute pk and column orders that needs to be materialized.
-
     let pks = plan.pk_indices();
     let ordered_ids: HashSet<usize> = column_orders.iter().map(|x| x.index).collect();
-
-    // For pk columns, start their column id from the last one from catalog.
-    let mut column_id = column_catalog.len();
 
     for pk in pks {
         if !ordered_ids.contains(pk) {
             column_orders.push(FieldOrder::ascending(*pk));
-            column_catalog.push(ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: plan.schema()[*pk].data_type(),
-                    column_id: ColumnId::new(column_id as i32),
-                    name: format!("_pk_{}", pk),
-                },
-                is_hidden: true,
-            });
-            column_id += 1;
         }
     }
 
