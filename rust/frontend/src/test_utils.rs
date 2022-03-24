@@ -16,6 +16,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
 use std::mem;
+use std::net::ToSocketAddrs;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
@@ -74,9 +75,15 @@ impl SessionManager for LocalFrontend {
 
 impl LocalFrontend {
     pub async fn new(opts: FrontendOpts) -> Self {
+        let frontend_address = opts
+            .client_address()
+            .to_socket_addrs()
+            .unwrap()
+            .next()
+            .unwrap();
         let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
         let (env, observer_join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::with_meta_client(meta_client, &opts)
+            FrontendEnv::with_meta_client(meta_client, &opts, frontend_address)
                 .await
                 .unwrap();
         Self {

@@ -15,11 +15,9 @@
 use std::net::SocketAddr;
 
 pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
-    let peer_ip = peer_addr.ip();
-    if peer_ip.is_loopback() || peer_ip.is_unspecified() || (peer_addr.ip() == server_addr.ip()) {
-        return peer_addr.port() == server_addr.port();
-    }
-    false
+    // We only compare client address, which must be specified,
+    // so there is no need to consider loopback and unspecified addresses.
+    server_addr.ip() == peer_addr.ip() && server_addr.port() == peer_addr.port()
 }
 
 #[cfg(test)]
@@ -28,12 +26,16 @@ mod tests {
 
     #[test]
     fn test_is_local_address() {
-        let check_local = |a: &str, b: &str| {
-            assert!(is_local_address(&a.parse().unwrap(), &b.parse().unwrap()));
+        let check_local = |a: &str, b: &str, result: bool| {
+            assert_eq!(
+                is_local_address(&a.parse().unwrap(), &b.parse().unwrap()),
+                result
+            );
         };
-        check_local("127.0.0.1:3456", "0.0.0.0:3456");
-        check_local("10.11.12.13:3456", "10.11.12.13:3456");
-        check_local("10.11.12.13:3456", "0.0.0.0:3456");
-        check_local("10.11.12.13:3456", "127.0.0.1:3456");
+        check_local("127.0.0.1:3456", "127.0.0.1:3456", true);
+        check_local("10.11.12.13:3456", "10.11.12.13:3456", true);
+        check_local("10.11.12.13:3456", "0.0.0.0:3456", false);
+        check_local("10.11.12.13:3456", "127.0.0.1:3456", false);
+        check_local("10.11.12.13:3456", "10.11.12.13:3467", false);
     }
 }

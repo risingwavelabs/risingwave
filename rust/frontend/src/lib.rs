@@ -40,8 +40,13 @@ use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
+    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
+
+    // Optional, we will use listen_address if not specified.
+    #[clap(long)]
+    pub client_address: Option<String>,
 
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
@@ -54,6 +59,14 @@ pub struct FrontendOpts {
 impl Default for FrontendOpts {
     fn default() -> Self {
         FrontendOpts::parse_from(iter::empty::<OsString>())
+    }
+}
+
+impl FrontendOpts {
+    pub fn client_address(&self) -> String {
+        self.client_address
+            .clone()
+            .unwrap_or_else(|| self.host.clone())
     }
 }
 
