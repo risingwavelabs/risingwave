@@ -145,9 +145,26 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(ui_path));
     }
+
+    let catalog_manager_ref = Arc::new(
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
+            .await
+            .unwrap(),
+    );
+    let catalog_manager_v2_ref = Arc::new(
+        CatalogManager::new(
+            meta_store_ref.clone(),
+            env.id_gen_manager_ref(),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
+        catalog_manager_v2_ref.clone(),
         fragment_manager.clone(),
         epoch_generator_ref.clone(),
         hummock_manager.clone(),
@@ -165,20 +182,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             fragment_manager.clone(),
             barrier_manager_ref.clone(),
             cluster_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
-    let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
-            .await
-            .unwrap(),
-    );
-    let catalog_manager_v2_ref = Arc::new(
-        CatalogManager::new(
-            meta_store_ref.clone(),
-            env.id_gen_manager_ref(),
-            notification_manager.clone(),
         )
         .await
         .unwrap(),

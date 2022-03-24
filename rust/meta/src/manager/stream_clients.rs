@@ -67,10 +67,6 @@ impl StreamClients {
                 ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
             })
     }
-
-    pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
-        self.clients.get(node_id)
-    }
 }
 
 pub type StreamClientsRef = Arc<StreamClients>;

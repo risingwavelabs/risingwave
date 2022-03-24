@@ -18,6 +18,7 @@ use std::sync::Arc;
 use risingwave_common::config::StreamingConfig;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub(crate) type WorkerNodeId = u32;
 
@@ -39,6 +40,9 @@ pub struct StreamEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Shutdown sender for current stream service.
+    shutdown_sender: Option<UnboundedSender<()>>,
 }
 
 impl StreamEnvironment {
@@ -48,6 +52,7 @@ impl StreamEnvironment {
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        shutdown_sender: UnboundedSender<()>,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -55,6 +60,7 @@ impl StreamEnvironment {
             config,
             worker_id,
             state_store,
+            shutdown_sender: Some(shutdown_sender),
         }
     }
 
@@ -72,6 +78,7 @@ impl StreamEnvironment {
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            shutdown_sender: None,
         }
     }
 
@@ -97,5 +104,9 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn shutdown(&self) {
+        self.shutdown_sender.as_ref().unwrap().send(()).unwrap();
     }
 }
