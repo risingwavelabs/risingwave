@@ -182,6 +182,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_manager.clone(),
         Box::new(insert_inner),
         0,
+        false,
     );
 
     tokio::spawn(async move {

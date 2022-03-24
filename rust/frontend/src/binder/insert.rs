@@ -15,23 +15,24 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
-use crate::binder::{Binder, BoundBaseTable, BoundQuery};
+use crate::binder::{Binder, BoundQuery, BoundTableSource};
 
 #[derive(Debug)]
 pub struct BoundInsert {
-    pub table: BoundBaseTable,
+    pub table_source: BoundTableSource,
     pub source: BoundQuery,
 }
 
 impl Binder {
     pub(super) fn bind_insert(
         &mut self,
-        table_name: ObjectName,
+        source_name: ObjectName,
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
+        // TODO: validate & add casts here
         Ok(BoundInsert {
-            table: self.bind_table(table_name)?,
+            table_source: self.bind_table_source(source_name)?,
             source: self.bind_query(source)?,
         })
     }

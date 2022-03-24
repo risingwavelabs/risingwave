@@ -140,12 +140,47 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use itertools::Itertools;
+    #[cfg(not(feature = "blockv2"))]
     use risingwave_pb::hummock::checksum;
     use HummockValue::Put;
 
     use super::*;
+    #[cfg(feature = "blockv2")]
+    use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
     use crate::hummock::SSTableBuilderOptions;
+    #[cfg(feature = "blockv2")]
+    use crate::hummock::DEFAULT_RESTART_INTERVAL;
+
+    #[tokio::test]
+    async fn test_empty() {
+        let next_id = AtomicU64::new(1001);
+        let block_size = 1 << 10;
+        let table_capacity = 4 * block_size;
+        let get_id_and_builder = || async {
+            Ok((
+                next_id.fetch_add(1, SeqCst),
+                #[cfg(not(feature = "blockv2"))]
+                SSTableBuilder::new(SSTableBuilderOptions {
+                    table_capacity,
+                    block_size,
+                    bloom_false_positive: 0.1,
+                    checksum_algo: checksum::Algorithm::XxHash64,
+                }),
+                #[cfg(feature = "blockv2")]
+                SSTableBuilder::new(SSTableBuilderOptions {
+                    capacity: table_capacity,
+                    block_capacity: block_size,
+                    restart_interval: DEFAULT_RESTART_INTERVAL,
+                    bloom_false_positive: 0.1,
+                    compression_algorithm: CompressionAlgorithm::None,
+                }),
+            ))
+        };
+        let builder = CapacitySplitTableBuilder::new(get_id_and_builder);
+        let results = builder.finish();
+        assert!(results.is_empty());
+    }
 
     #[tokio::test]
     async fn test_lots_of_tables() {
@@ -156,19 +191,28 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
+                #[cfg(not(feature = "blockv2"))]
                 SSTableBuilder::new(SSTableBuilderOptions {
                     table_capacity,
                     block_size,
                     bloom_false_positive: 0.1,
                     checksum_algo: checksum::Algorithm::XxHash64,
                 }),
+                #[cfg(feature = "blockv2")]
+                SSTableBuilder::new(SSTableBuilderOptions {
+                    capacity: table_capacity,
+                    block_capacity: block_size,
+                    restart_interval: DEFAULT_RESTART_INTERVAL,
+                    bloom_false_positive: 0.1,
+                    compression_algorithm: CompressionAlgorithm::None,
+                }),
             ))
         };
         let mut builder = CapacitySplitTableBuilder::new(get_id_and_builder);
 
-        for _ in 0..table_capacity {
+        for i in 0..table_capacity {
             builder
-                .add_user_key(b"key".to_vec(), Put(b"value"), 233)
+                .add_user_key(b"key".to_vec(), Put(b"value"), (table_capacity - i) as u64)
                 .await
                 .unwrap();
         }
@@ -187,11 +231,13 @@ mod tests {
                 SSTableBuilder::new(default_builder_opt_for_test()),
             ))
         });
+        let mut epoch = 100;
 
         macro_rules! add {
             () => {
+                epoch -= 1;
                 builder
-                    .add_user_key(b"k".to_vec(), Put(b"v"), 233)
+                    .add_user_key(b"k".to_vec(), Put(b"v"), epoch)
                     .await
                     .unwrap();
             };

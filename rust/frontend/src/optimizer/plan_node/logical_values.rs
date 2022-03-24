@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
 use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
@@ -26,7 +27,7 @@ use crate::session::QueryContextRef;
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     pub base: PlanBase,
-    rows: Vec<Vec<ExprImpl>>,
+    rows: Arc<[Vec<ExprImpl>]>,
 }
 
 impl LogicalValues {
@@ -38,7 +39,10 @@ impl LogicalValues {
             }
         }
         let base = PlanBase::new_logical(ctx, schema, vec![]);
-        Self { rows, base }
+        Self {
+            rows: rows.into(),
+            base,
+        }
     }
 
     /// Create a LogicalValues node. Used by planner.
