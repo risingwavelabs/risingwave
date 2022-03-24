@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::fmt;
+use std::hash::Hash;
+use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
@@ -30,38 +33,56 @@ use crate::utils::ColIndexMapping;
 pub struct LogicalScan {
     pub base: PlanBase,
     table_name: String, // explain-only
-    table_id: TableId,
-    columns: Vec<ColumnId>,
+    required_col_idx: Vec<usize>,
+    table_desc: Rc<TableDesc>,
 }
 
 impl LogicalScan {
     /// Create a LogicalScan node. Used internally by optimizer.
     pub fn new(
-        table_name: String,
-        table_id: TableId,
-        columns: Vec<ColumnId>,
-        schema: Schema,
+        table_name: String,           // explain-only
+        required_col_idx: Vec<usize>, // the column index in the table
+        table_desc: Rc<TableDesc>,
         ctx: QueryContextRef,
     ) -> Self {
-        // TODO: get pk
-        let base = PlanBase::new_logical(ctx, schema, vec![0] /* TODO get the pk */);
+        let (fields, col_ids): (Vec<Field>, Vec<ColumnId>) = required_col_idx
+            .iter()
+            .map(|idx| {
+                let col = &table_desc.columns[*idx];
+                (col.into(), col.column_id)
+            })
+            .unzip();
+        let id_to_idx: HashMap<_, _> =
+            HashMap::from_iter(col_ids.into_iter().enumerate().map(|(idx, id)| (id, idx)));
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|c| id_to_idx.get(&c.column_desc.column_id).map(|x| *x))
+            .collect::<Option<Vec<_>>>()
+            .unwrap_or_default();
+        let schema = Schema { fields };
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
-            table_name,
-            table_id,
-            columns,
             base,
+            table_name,
+            required_col_idx,
+            table_desc,
         }
     }
 
     /// Create a LogicalScan node. Used by planner.
     pub fn create(
-        table_name: String,
-        table_id: TableId,
-        columns: Vec<ColumnId>,
-        schema: Schema,
+        table_name: String, // explain-only
+        table_desc: Rc<TableDesc>,
         ctx: QueryContextRef,
     ) -> Result<PlanRef> {
-        Ok(Self::new(table_name, table_id, columns, schema, ctx).into())
+        Ok(Self::new(
+            table_name,
+            (0..table_desc.columns.len()).into_iter().collect(),
+            table_desc,
+            ctx,
+        )
+        .into())
     }
 
     pub(super) fn column_names(&self) -> Vec<String> {
@@ -71,17 +92,8 @@ impl LogicalScan {
             .map(|f| f.name.clone())
             .collect()
     }
-
-    pub fn table_id(&self) -> u32 {
-        self.table_id.table_id
-    }
-
     pub fn table_name(&self) -> &str {
         &self.table_name
-    }
-
-    pub fn columns(&self) -> &[ColumnId] {
-        &self.columns
     }
 }
 
@@ -101,17 +113,15 @@ impl fmt::Display for LogicalScan {
 impl ColPrunable for LogicalScan {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
-
-        let (columns, fields) = required_cols
+        let required_col_idx = required_cols
             .ones()
-            .map(|id| (self.columns[id], self.schema().fields[id].clone()))
-            .unzip();
+            .map(|i| self.required_col_idx[i])
+            .collect();
 
         Self::new(
             self.table_name.clone(),
-            self.table_id,
-            columns,
-            Schema { fields },
+            required_col_idx,
+            self.table_desc,
             self.base.ctx.clone(),
         )
         .into()
