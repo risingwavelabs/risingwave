@@ -3828,6 +3828,7 @@ dependencies = [
  "async-trait",
  "futures 0.3.21",
  "log",
+ "paste",
  "risingwave_common",
  "risingwave_pb",
  "tokio",

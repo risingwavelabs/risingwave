@@ -75,7 +75,7 @@
               BatchProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
                 BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC, $1 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 1] }
+    StreamMaterialize { column_orders: [$0 ASC, $1 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 1] }
       StreamProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
         StreamHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
           StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
@@ -131,7 +131,7 @@
                     BatchFilter { predicate:  }
                       BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [0, 2, 3] }
+    StreamMaterialize { column_orders: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [0, 2, 3] }
       StreamProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
           StreamProject { exprs: [$4, $1, $2, ($5 * (1:Int32 - $6)), $3, $0], expr_alias: [ ,  ,  ,  ,  ,  ] }
@@ -172,7 +172,7 @@
               BatchFilter { predicate: ($0 < 24:Int32) }
                 BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { table_id: 0, column_order: [$0 ASC], column_id: [#0], pk_indices: [0] }
+    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
       StreamProject { exprs: [$0], expr_alias: [revenue] }
         StreamSimpleAgg { aggs: [sum($0)] }
           StreamProject { exprs: [($1 * $2), $0], expr_alias: [ ,  ] }

@@ -21,7 +21,7 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use super::create_mv::gen_create_mv_plan;
+use super::create_mv::{gen_create_mv_plan, MvInfo};
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
@@ -41,8 +41,17 @@ pub(super) fn handle_explain(
             or_replace: false,
             materialized: true,
             query,
+            name,
             ..
-        } => gen_create_mv_plan(&*session, &mut planner, *query)?,
+        } => {
+            gen_create_mv_plan(
+                &*session,
+                &mut planner,
+                *query,
+                MvInfo::with_name(name.to_string()),
+            )?
+            .0
+        }
         stmt => {
             let bound = {
                 let mut binder = Binder::new(

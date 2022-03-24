@@ -27,10 +27,8 @@ use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{LogicalProject, StreamMaterialize};
-use self::property::FieldOrder;
+use self::plan_node::LogicalProject;
 use self::rule::*;
-use crate::catalog::{ColumnId, TableId};
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
@@ -144,7 +142,7 @@ impl PlanRoot {
         plan
     }
 
-    /// optimize and generate a batch query plan.
+    /// Optimize and generate a batch query plan.
     /// Currently only used by test runner (Have distributed plan but not schedule yet).
     /// Will be removed after dist execution.
     pub fn gen_dist_batch_query_plan(&self) -> PlanRef {
@@ -153,12 +151,11 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// optimize and generate a create materialize view plan
-    pub fn gen_create_mv_plan(
-        &mut self,
-        order: Vec<FieldOrder>,
-        column_ids: Vec<ColumnId>,
-    ) -> PlanRef {
+    /// Iptimize and generate a create materialize view plan.
+    ///
+    /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
+    /// `gen_create_mv_plan`.
+    pub fn gen_create_mv_plan(&mut self) -> PlanRef {
         let mut plan = self.gen_optimized_logical_plan();
         plan = {
             let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
@@ -172,23 +169,8 @@ impl PlanRoot {
         // TODO: need more thinking and refactor.
 
         // Convert to physical plan node, using distribution of the input node
-        let plan = plan.to_stream_with_dist_required(plan.distribution());
-
-        // TODO: get the correct table id
-
-        // FIXME: add a Streaming Project for the Plan to remove the unnecessary column in the
-        // result.
-        // TODO: do a final column pruning after add the streaming project, but now
-        // the column pruning is not used in streaming node, need to think.
-
-        StreamMaterialize::new(
-            self.logical_plan.ctx(),
-            plan,
-            TableId::new(0),
-            order,
-            column_ids,
-        )
-        .into()
+        // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
+        plan.to_stream_with_dist_required(plan.distribution())
     }
 }
 

@@ -212,10 +212,7 @@ impl Binder {
             .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
             .collect();
 
-        self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
-            source_name.clone(),
-        )?;
+        // Note(bugen): do not bind context here.
 
         Ok(BoundTableSource {
             name: source_name,
@@ -250,7 +247,7 @@ impl Binder {
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name: {}",
+                "Duplicated table name while binding context: {}",
                 table_name
             ))
             .into()),
