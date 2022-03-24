@@ -24,7 +24,7 @@ use risingwave_sqlparser::ast::Statement;
 use uuid::Uuid;
 
 use crate::binder::Binder;
-use crate::handler::util::{get_pg_field_descs, to_pg_rows};
+use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::session::QueryContext;
 
@@ -39,12 +39,17 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         );
         binder.bind(stmt)?
     };
-    let pg_descs = get_pg_field_descs(&bound)?;
 
-    let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
-        .gen_batch_query_plan()
-        .to_batch_prost();
+    let (plan, pg_descs) = {
+        // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
+        let plan = Planner::new(Rc::new(RefCell::new(context)))
+            .plan(bound)?
+            .gen_batch_query_plan();
+
+        let pg_descs = plan.schema().fields().iter().map(to_pg_field).collect();
+
+        (plan.to_batch_prost(), pg_descs)
+    };
 
     // Choose the first node by WorkerNodeManager.
     let manager = session.env().worker_node_manager();
