@@ -4,16 +4,16 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "14"
+    operatorId: "17"
     input:
-      - operatorId: "13"
+      - operatorId: "16"
         input:
-          - operatorId: "11"
+          - operatorId: "14"
             input:
-              - operatorId: "9"
+              - operatorId: "12"
                 input:
                   - mergeNode: {}
-                  - operatorId: "8"
+                  - operatorId: "11"
                     pkIndices:
                       - 0
                     batchPlanNode:
@@ -87,14 +87,14 @@
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "9"
+    operatorId: "11"
     input:
-      - operatorId: "8"
+      - operatorId: "10"
         input:
-          - operatorId: "6"
+          - operatorId: "8"
             input:
               - mergeNode: {}
-              - operatorId: "5"
+              - operatorId: "7"
                 pkIndices:
                   - 0
                 batchPlanNode:
@@ -146,14 +146,14 @@
     select v1 from t;
   stream_plan_proto: |
     ---
-    operatorId: "9"
+    operatorId: "11"
     input:
-      - operatorId: "8"
+      - operatorId: "10"
         input:
-          - operatorId: "6"
+          - operatorId: "8"
             input:
               - mergeNode: {}
-              - operatorId: "5"
+              - operatorId: "7"
                 pkIndices:
                   - 0
                 batchPlanNode:
@@ -194,18 +194,18 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "19"
+    operatorId: "24"
     input:
-      - operatorId: "18"
+      - operatorId: "23"
         input:
-          - operatorId: "16"
+          - operatorId: "21"
             input:
-              - operatorId: "14"
+              - operatorId: "19"
                 input:
-                  - operatorId: "12"
+                  - operatorId: "17"
                     input:
                       - mergeNode: {}
-                      - operatorId: "11"
+                      - operatorId: "16"
                         pkIndices:
                           - 0
                         batchPlanNode:
@@ -268,20 +268,20 @@
     select sum(v1) from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "21"
+    operatorId: "26"
     input:
-      - operatorId: "20"
+      - operatorId: "25"
         input:
-          - operatorId: "18"
+          - operatorId: "23"
             input:
-              - operatorId: "16"
+              - operatorId: "21"
                 input:
-                  - operatorId: "14"
+                  - operatorId: "19"
                     input:
-                      - operatorId: "13"
+                      - operatorId: "18"
                         input:
                           - mergeNode: {}
-                          - operatorId: "12"
+                          - operatorId: "17"
                             pkIndices:
                               - 0
                             batchPlanNode:
@@ -348,6 +348,8 @@
                   returnType:
                     typeName: INT64
                     isNullable: true
+        pkIndices:
+          - 1
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -356,6 +358,20 @@
                 isNullable: true
               inputRef:
                 columnIdx: 1
+            - exprType: INPUT_REF
+              returnType:
+                typeName: INT32
+                isNullable: true
+              inputRef: {}
+    pkIndices:
+      - 1
     materializeNode:
+      columnOrders:
+        - orderType: ASCENDING
+          inputRef:
+            columnIdx: 1
+          returnType:
+            typeName: INT32
+            isNullable: true
       columnIds:
         - 0

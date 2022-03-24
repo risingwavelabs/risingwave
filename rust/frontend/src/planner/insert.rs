@@ -25,8 +25,13 @@ impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
         let input = self.plan_query(insert.source)?.as_subplan();
         // `columns` not used by backend yet.
-        let plan: PlanRef =
-            LogicalInsert::create(input, insert.table.name, insert.table.table_id, vec![])?.into();
+        let plan: PlanRef = LogicalInsert::create(
+            input,
+            insert.table_source.name,
+            insert.table_source.source_id,
+            vec![],
+        )?
+        .into();
         let order = Order::any().clone();
         // For insert, frontend will only schedule one task so do not need this to be single.
         let dist = Distribution::Any;
