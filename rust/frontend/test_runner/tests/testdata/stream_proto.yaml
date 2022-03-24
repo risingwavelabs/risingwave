@@ -18,7 +18,7 @@
                       - 0
                     batchPlanNode:
                       tableRefId:
-                        tableId: 5
+                        tableId: 1
                       columnDescs:
                         - columnType:
                             typeName: INT64
@@ -99,7 +99,7 @@
                   - 0
                 batchPlanNode:
                   tableRefId:
-                    tableId: 5
+                    tableId: 1
                   columnDescs:
                     - columnType:
                         typeName: INT64
@@ -158,7 +158,7 @@
                   - 0
                 batchPlanNode:
                   tableRefId:
-                    tableId: 5
+                    tableId: 1
                   columnDescs:
                     - columnType:
                         typeName: INT32
@@ -210,7 +210,7 @@
                           - 0
                         batchPlanNode:
                           tableRefId:
-                            tableId: 5
+                            tableId: 1
                           columnDescs:
                             - columnType:
                                 typeName: INT32
@@ -286,7 +286,7 @@
                               - 0
                             batchPlanNode:
                               tableRefId:
-                                tableId: 5
+                                tableId: 1
                               columnDescs:
                                 - columnType:
                                     typeName: INT32
