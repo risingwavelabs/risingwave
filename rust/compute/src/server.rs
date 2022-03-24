@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,6 +22,7 @@ use prometheus::{Encoder, Registry, TextEncoder};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -55,7 +56,7 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
-    client_addr: SocketAddr,
+    client_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
@@ -66,7 +67,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(client_addr, WorkerType::ComputeNode)
+        .register(client_addr.clone(), WorkerType::ComputeNode)
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -107,7 +108,7 @@ pub async fn compute_node_serve(
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
     let stream_mgr = Arc::new(StreamManager::new(
-        client_addr,
+        client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
     ));
@@ -118,7 +119,7 @@ pub async fn compute_node_serve(
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
-        client_addr,
+        client_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -128,7 +129,7 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let stream_env = StreamEnvironment::new(
         source_mgr,
-        client_addr,
+        client_addr.clone(),
         stream_config,
         worker_id,
         state_store,
@@ -172,7 +173,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(client_addr).await.unwrap();
+    meta_client.activate(client_addr.clone()).await.unwrap();
 
     (join_handle, shutdown_send)
 }
@@ -186,8 +187,7 @@ impl MetricsManager {
                 "Prometheus listener for Prometheus is set up on http://{}",
                 listen_addr
             );
-            let listen_socket_addr: SocketAddr =
-                listen_addr.to_socket_addrs().unwrap().next().unwrap();
+            let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
             let service = ServiceBuilder::new()
                 .layer(AddExtensionLayer::new(registry))
                 .service_fn(Self::metrics_service);

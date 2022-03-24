@@ -478,7 +478,7 @@ mod tests {
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
             let mut remote_input =
-                RemoteInput::create(ComputeClient::new(&addr).await.unwrap(), (0, 0), tx)
+                RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
                     .await
                     .unwrap();
             remote_input.run().await

@@ -46,6 +46,8 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+
+// TODO: substitute with `HostAddr`
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 

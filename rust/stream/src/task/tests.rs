@@ -32,8 +32,8 @@ fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
     ActorInfo {
         actor_id,
         host: Some(HostAddress {
-            host: LOCAL_TEST_ADDR.ip().to_string(),
-            port: LOCAL_TEST_ADDR.port() as i32,
+            host: LOCAL_TEST_ADDR.host.clone(),
+            port: LOCAL_TEST_ADDR.port as i32,
         }),
     }
 }

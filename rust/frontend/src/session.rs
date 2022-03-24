@@ -15,7 +15,6 @@
 use std::cell::RefCell;
 use std::error::Error;
 use std::fmt::Formatter;
-use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -25,8 +24,8 @@ use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -101,10 +100,9 @@ pub struct FrontendEnv {
 impl FrontendEnv {
     pub async fn init(
         opts: &FrontendOpts,
-        frontend_address: SocketAddr,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let meta_client = MetaClient::new(opts.meta_addr.clone().as_str()).await?;
-        Self::with_meta_client(meta_client, opts, frontend_address).await
+        Self::with_meta_client(meta_client, opts).await
     }
 
     #[cfg(test)]
@@ -125,14 +123,20 @@ impl FrontendEnv {
     pub async fn with_meta_client(
         mut meta_client: MetaClient,
         opts: &FrontendOpts,
-        frontend_address: SocketAddr,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let config = load_config(opts);
         tracing::info!("Starting compute node with config {:?}", config);
 
+        // TODO: refactor this when we have a separate port option
+        let frontend_address: HostAddr = opts
+            .client_address
+            .as_ref()
+            .unwrap_or(&opts.host)
+            .parse()
+            .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client
-            .register(frontend_address, WorkerType::Frontend)
+            .register(frontend_address.clone(), WorkerType::Frontend)
             .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
@@ -149,7 +153,7 @@ impl FrontendEnv {
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
-            frontend_address,
+            frontend_address.clone(),
             worker_node_manager,
             catalog,
             catalog_updated_tx,
@@ -157,7 +161,7 @@ impl FrontendEnv {
         .await;
         let observer_join_handle = observer_manager.start().await;
 
-        meta_client.activate(frontend_address).await?;
+        meta_client.activate(frontend_address.clone()).await?;
 
         Ok((
             Self {
@@ -234,19 +238,8 @@ impl SessionManager for SessionManagerImpl {
 
 impl SessionManagerImpl {
     pub async fn new(opts: &FrontendOpts) -> Result<Self> {
-        let frontend_address = opts
-            .client_address()
-            .to_socket_addrs()
-            .unwrap()
-            .next()
-            .unwrap();
-        if frontend_address.ip().is_unspecified() {
-            return Err(RwError::from(InternalError(
-                "client address is unspecified".to_string(),
-            )));
-        }
         let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::init(opts, frontend_address).await?;
+            FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
             observer_join_handle: join_handle,

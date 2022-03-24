@@ -13,11 +13,90 @@
 // limitations under the License.
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 
-pub fn is_local_address(server_addr: &SocketAddr, peer_addr: &SocketAddr) -> bool {
-    // We only compare client address, which must be specified,
-    // so there is no need to consider loopback and unspecified addresses.
-    server_addr.ip() == peer_addr.ip() && server_addr.port() == peer_addr.port()
+use risingwave_pb::common::HostAddress as ProstHostAddress;
+
+use crate::error::{ErrorCode, Result, RwError};
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HostAddr {
+    pub host: String,
+    pub port: u16,
+}
+
+impl std::fmt::Display for HostAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
+    }
+}
+
+impl From<SocketAddr> for HostAddr {
+    fn from(addr: SocketAddr) -> Self {
+        HostAddr {
+            host: addr.ip().to_string(),
+            port: addr.port(),
+        }
+    }
+}
+
+impl TryFrom<&str> for HostAddr {
+    type Error = crate::error::RwError;
+
+    fn try_from(s: &str) -> Result<Self> {
+        let mut parts = s.split(':');
+        let host = parts.next().ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError("Invalid host address".into()))
+        })?;
+        let port = parts.next().ok_or_else(|| {
+            RwError::from(ErrorCode::InternalError("Invalid host address".into()))
+        })?;
+        let port = port
+            .parse::<u16>()
+            .map_err(|_| RwError::from(ErrorCode::InternalError("Invalid host address".into())))?;
+        Ok(HostAddr {
+            host: host.to_string(),
+            port,
+        })
+    }
+}
+
+impl TryFrom<&String> for HostAddr {
+    type Error = crate::error::RwError;
+
+    fn try_from(s: &String) -> Result<Self> {
+        Self::try_from(s.as_str())
+    }
+}
+
+impl FromStr for HostAddr {
+    type Err = crate::error::RwError;
+
+    fn from_str(s: &str) -> Result<Self> {
+        Self::try_from(s)
+    }
+}
+
+impl From<&ProstHostAddress> for HostAddr {
+    fn from(addr: &ProstHostAddress) -> Self {
+        HostAddr {
+            host: addr.get_host().to_string(),
+            port: addr.get_port() as u16,
+        }
+    }
+}
+
+impl HostAddr {
+    pub fn to_protobuf(&self) -> ProstHostAddress {
+        ProstHostAddress {
+            host: self.host.clone(),
+            port: self.port as i32,
+        }
+    }
+}
+
+pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
+    server_addr == peer_addr
 }
 
 #[cfg(test)]
@@ -32,10 +111,10 @@ mod tests {
                 result
             );
         };
-        check_local("127.0.0.1:3456", "127.0.0.1:3456", true);
+        check_local("localhost:3456", "localhost:3456", true);
         check_local("10.11.12.13:3456", "10.11.12.13:3456", true);
-        check_local("10.11.12.13:3456", "0.0.0.0:3456", false);
-        check_local("10.11.12.13:3456", "127.0.0.1:3456", false);
-        check_local("10.11.12.13:3456", "10.11.12.13:3467", false);
+        check_local("some.host.in.k8s:3456", "some.host.in.k8s:3456", true);
+        check_local("some.host.in.k8s:3456", "other.host.in.k8s:3456", false);
+        check_local("some.host.in.k8s:3456", "some.host.in.k8s:4567", true);
     }
 }

@@ -32,8 +32,6 @@ extern crate log;
 pub mod rpc;
 pub mod server;
 
-use std::net::ToSocketAddrs;
-
 use clap::Parser;
 
 /// Command-line arguments for compute-node.
@@ -46,6 +44,10 @@ pub struct ComputeNodeOpts {
     // Optional, we will use listen_address if not specified.
     #[clap(long)]
     pub client_address: Option<String>,
+
+    // TODO: This is currently unused.
+    #[clap(long)]
+    pub port: Option<u16>,
 
     #[clap(long, default_value = "in-memory")]
     pub state_store: String,
@@ -68,34 +70,21 @@ pub struct ComputeNodeOpts {
     pub enable_jaeger_tracing: bool,
 }
 
-impl ComputeNodeOpts {
-    pub fn client_address(&self) -> String {
-        self.client_address
-            .clone()
-            .unwrap_or_else(|| self.host.clone())
-    }
-}
-
 use crate::server::compute_node_serve;
 
 /// Start compute node
 pub async fn start(opts: ComputeNodeOpts) {
     tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    let listen_address = opts.host.to_socket_addrs().unwrap().next().unwrap();
+    let listen_address = opts.host.parse().unwrap();
     tracing::info!("Server Listening at {}", listen_address);
 
     let client_address = opts
-        .client_address()
-        .to_socket_addrs()
-        .unwrap()
-        .next()
+        .client_address
+        .as_ref()
+        .unwrap_or(&opts.host)
+        .parse()
         .unwrap();
-
-    if client_address.ip().is_unspecified() {
-        error!("Client address is not specified");
-        return;
-    }
     tracing::info!("Starting server at {}", client_address);
 
     let (join_handle, _shutdown_send) =

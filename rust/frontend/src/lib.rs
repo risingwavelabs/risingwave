@@ -48,6 +48,10 @@ pub struct FrontendOpts {
     #[clap(long)]
     pub client_address: Option<String>,
 
+    // TODO: This is currently unused.
+    #[clap(long)]
+    pub port: Option<u16>,
+
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
 
@@ -59,14 +63,6 @@ pub struct FrontendOpts {
 impl Default for FrontendOpts {
     fn default() -> Self {
         FrontendOpts::parse_from(iter::empty::<OsString>())
-    }
-}
-
-impl FrontendOpts {
-    pub fn client_address(&self) -> String {
-        self.client_address
-            .clone()
-            .unwrap_or_else(|| self.host.clone())
     }
 }
 

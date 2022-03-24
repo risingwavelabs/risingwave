@@ -42,7 +42,6 @@ pub mod storage;
 mod stream;
 pub mod test_utils;
 
-use std::net::ToSocketAddrs;
 use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
@@ -83,7 +82,7 @@ pub struct MetaNodeOpts {
 
 /// Start meta node
 pub async fn start(opts: MetaNodeOpts) {
-    let addr = opts.host.to_socket_addrs().unwrap().next().unwrap();
+    let addr = opts.host.parse().unwrap();
     let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
     let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
     let backend = match opts.backend {
