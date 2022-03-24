@@ -36,7 +36,7 @@ impl BatchSort {
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
-        BatchSort { input, base }
+        BatchSort { base, input }
     }
 }
 

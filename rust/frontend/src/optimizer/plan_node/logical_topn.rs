@@ -38,10 +38,10 @@ impl LogicalTopN {
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalTopN {
+            base,
             input,
             limit,
             offset,
-            base,
             order,
         }
     }

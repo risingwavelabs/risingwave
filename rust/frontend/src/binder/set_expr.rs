@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::SetExpr;
 use crate::binder::{Binder, BoundSelect, BoundValues};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
-/// BoundSetExprs via set operators (e.g. union).
+/// `BoundSetExprs` via set operators (e.g. union).
 #[derive(Debug)]
 pub enum BoundSetExpr {
     Select(Box<BoundSelect>),

@@ -47,7 +47,7 @@ impl BatchSeqScan {
             Order::any().clone(),
         );
 
-        Self { logical, base }
+        Self { base, logical }
     }
 }
 

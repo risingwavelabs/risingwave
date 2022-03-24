@@ -22,7 +22,7 @@ use crate::optimizer::property::Convention;
 macro_rules! def_visitor {
     ([], $({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
-        /// and leaf node returns R::default()
+        /// and leaf node returns `R::default()`
         pub trait PlanVisitor<R:Default> {
             fn check_convention(&self, _convention: Convention) -> bool {
                 return true;

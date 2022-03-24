@@ -44,7 +44,7 @@ impl StreamFilter {
             dist,
             logical.input().append_only(),
         );
-        StreamFilter { logical, base }
+        StreamFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {

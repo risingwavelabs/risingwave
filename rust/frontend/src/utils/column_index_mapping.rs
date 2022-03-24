@@ -41,7 +41,7 @@ impl ColIndexMapping {
             Some(target_max) => target_max + 1,
             None => 0,
         };
-        Self { map, target_size }
+        Self { target_size, map }
     }
 
     /// Create a partial mapping which maps from the subscripts range `(0..map.len())` to
@@ -50,7 +50,7 @@ impl ColIndexMapping {
         if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
             assert!(target_max < target_size)
         };
-        Self { map, target_size }
+        Self { target_size, map }
     }
     pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
         (self.map, self.target_size)
@@ -161,7 +161,7 @@ impl ColIndexMapping {
         Self::with_target_size(map, following.target_size())
     }
 
-    /// union two mapping, the result mapping target_size and source size will be the max size of
+    /// union two mapping, the result mapping `target_size` and source size will be the max size of
     /// the two mappings
     /// # Panics
     ///
@@ -226,7 +226,7 @@ impl ColIndexMapping {
     }
 
     pub fn rewrite_order(&self, mut order: Order) -> Order {
-        for field in order.field_order.iter_mut() {
+        for field in &mut order.field_order {
             field.index = self.map(field.index)
         }
         order
@@ -235,7 +235,7 @@ impl ColIndexMapping {
     pub fn rewrite_distribution(&mut self, dist: Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(mut col_idxes) => {
-                for idx in col_idxes.iter_mut() {
+                for idx in &mut col_idxes {
                     *idx = self.map(*idx);
                 }
                 Distribution::HashShard(col_idxes)

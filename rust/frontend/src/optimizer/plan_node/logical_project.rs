@@ -48,10 +48,10 @@ impl LogicalProject {
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
-            input,
             base,
             exprs,
             expr_alias,
+            input,
         }
     }
 

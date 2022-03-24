@@ -42,7 +42,7 @@ use crate::planner::Planner;
 use crate::session::{FrontendEnv, QueryContext, SessionImpl};
 use crate::FrontendOpts;
 
-/// LocalFrontend is an embedded frontend without starting meta and without
+/// `LocalFrontend` is an embedded frontend without starting meta and without
 /// starting frontend as a tcp server.
 pub struct LocalFrontend {
     pub opts: FrontendOpts,

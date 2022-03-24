@@ -21,7 +21,7 @@ fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
     match expr {
         ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
             let (_, exprs, _) = func_call.decompose();
-            for expr in exprs.into_iter() {
+            for expr in exprs {
                 to_conjunctions_inner(expr, rets);
             }
         }
@@ -39,8 +39,8 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     rets
 }
 
-/// give a expression, and get all columns in its input_ref expressions.
-/// **Panics** if **bit** is out of bounds of the FixedBitSet.
+/// give a expression, and get all columns in its `input_ref` expressions.
+/// **Panics** if **bit** is out of bounds of the `FixedBitSet`.
 pub fn get_inputs_col_index(expr: &ExprImpl, cols: &mut FixedBitSet) {
     match expr {
         ExprImpl::FunctionCall(func_call) => {
@@ -57,7 +57,7 @@ pub fn get_inputs_col_index(expr: &ExprImpl, cols: &mut FixedBitSet) {
         _ => {}
     }
 }
-/// give a expression, and check all columns in its input_ref expressions less than the input
+/// give a expression, and check all columns in its `input_ref` expressions less than the input
 /// column number.
 pub fn assert_input_ref(expr: &ExprImpl, input_col_num: usize) {
     let mut cols = FixedBitSet::with_capacity(input_col_num);

@@ -37,7 +37,7 @@ impl BatchHashAgg {
             Distribution::any().clone(),
             Order::any().clone(),
         );
-        BatchHashAgg { logical, base }
+        BatchHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()

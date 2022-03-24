@@ -28,13 +28,13 @@ use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes}
 ///   join with hash-key(a,b) and the plan is required hash-distributed by (a,b,c). you can
 ///   implement `to_stream_with_dist_required`, and implement `to_stream` with
 ///   `to_stream_with_dist_required(Distribution::any())`. you can see
-///   (`LogicalProject`)[LogicalProject] as an example.
+///   (`LogicalProject`)[`LogicalProject`] as an example.
 pub trait ToStream {
-    /// `logical_rewrite_for_stream` will rewrite the logical node, and return (new_plan_node,
-    /// col_mapping), the col_mapping is for original columns have been changed into some other
+    /// `logical_rewrite_for_stream` will rewrite the logical node, and return (`new_plan_node`,
+    /// `col_mapping`), the `col_mapping` is for original columns have been changed into some other
     /// position.
     /// now it is used to 1. ensure every plan node's output having pk column
-    /// 2. (todo) add row_count() in every Agg
+    /// 2. (todo) add `row_count`() in every Agg
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping);
     /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
     fn to_stream(&self) -> PlanRef;
@@ -53,7 +53,7 @@ pub trait ToStream {
 /// - Or, if the required order is given, there will be a better plan. For example a join with
 ///   join-key(a,b) and the plan is required sorted by (a,b,c), a sort merge join is better. you can
 ///   implement `to_batch_with_order_required`, and implement `to_batch` with
-///   `to_batch_with_order_required(Order::any())`. you can see (`LogicalJoin`)[LogicalJoin] as an
+///   `to_batch_with_order_required(Order::any())`. you can see (`LogicalJoin`)[`LogicalJoin`] as an
 ///   example.
 pub trait ToBatch {
     /// `to_batch` is equivalent to `to_batch_with_order_required(Order::any())`
@@ -91,7 +91,7 @@ pub trait ToDistributedBatch {
     }
 }
 
-/// Implement ToBatch for batch and streaming node.
+/// Implement `ToBatch` for batch and streaming node.
 macro_rules! impl_to_batch {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
@@ -106,7 +106,7 @@ macro_rules! impl_to_batch {
 for_batch_plan_nodes! { impl_to_batch }
 for_stream_plan_nodes! { impl_to_batch }
 
-/// Implement ToStream for batch and streaming node.
+/// Implement `ToStream` for batch and streaming node.
 macro_rules! impl_to_stream {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
@@ -125,7 +125,7 @@ macro_rules! impl_to_stream {
 for_batch_plan_nodes! { impl_to_stream }
 for_stream_plan_nodes! { impl_to_stream }
 
-/// impl ToDistributedBatch  for logical and streaming node.
+/// impl `ToDistributedBatch`  for logical and streaming node.
 macro_rules! ban_to_distributed {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{

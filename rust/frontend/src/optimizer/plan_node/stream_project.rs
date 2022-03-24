@@ -64,7 +64,7 @@ impl StreamProject {
             distribution,
             logical.input().append_only(),
         );
-        StreamProject { logical, base }
+        StreamProject { base, logical }
     }
 }
 

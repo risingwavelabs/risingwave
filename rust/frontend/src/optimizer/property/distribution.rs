@@ -117,7 +117,7 @@ impl Distribution {
 }
 
 pub trait WithDistribution {
-    /// the distribution property of the PlanNode's output
+    /// the distribution property of the `PlanNode`'s output
     fn distribution(&self) -> &Distribution;
 }
 
