@@ -1,3 +1,4 @@
 disallowed-methods = [
-    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." }
+    { path = "std::iter::Iterator::zip", reason = "Please use Itertools::zip_eq instead." },
+    { path = "fixedbitset::FixedBitSet::from_iter", reason = "Please create a FixedBitSet with capacity." }
 ]
