@@ -30,7 +30,7 @@ use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
-    CreateSourceResponse,
+    CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -201,6 +201,20 @@ impl MetaClient {
         let resp = self.inner.create_materialized_source(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.source_id, resp.version))
+    }
+
+    pub async fn drop_materialized_source(
+        &self,
+        source_id: u32,
+        table_id: TableId,
+    ) -> Result<CatalogVersion> {
+        let request = DropMaterializedSourceRequest {
+            source_id,
+            table_id: table_id.table_id(),
+        };
+
+        let resp = self.inner.drop_materialized_source(request).await?;
+        Ok(resp.version)
     }
 
     /// Unregister the current node to the cluster.
@@ -385,6 +399,13 @@ pub trait MetaClientInner: Send + Sync {
         &self,
         _req: CreateMaterializedSourceRequest,
     ) -> Result<CreateMaterializedSourceResponse> {
+        unimplemented!()
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        _req: DropMaterializedSourceRequest,
+    ) -> Result<DropMaterializedSourceResponse> {
         unimplemented!()
     }
 
@@ -632,6 +653,19 @@ impl MetaClientInner for GrpcMetaClient {
             .ddl_client
             .to_owned()
             .create_materialized_source(req)
+            .await
+            .to_rw_result()?
+            .into_inner())
+    }
+
+    async fn drop_materialized_source(
+        &self,
+        req: DropMaterializedSourceRequest,
+    ) -> Result<DropMaterializedSourceResponse> {
+        Ok(self
+            .ddl_client
+            .to_owned()
+            .drop_materialized_source(req)
             .await
             .to_rw_result()?
             .into_inner())

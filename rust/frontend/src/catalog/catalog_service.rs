@@ -16,12 +16,11 @@ use std::sync::Arc;
 
 use parking_lot::lock_api::ArcRwLockReadGuard;
 use parking_lot::{RawRwLock, RwLock};
-use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
-    TableSourceInfo,
 };
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_rpc_client::MetaClient;
@@ -108,36 +107,6 @@ impl CatalogWriter {
         self.wait_version(version).await
     }
 
-    // TODO: it just change the catalog, just to unit test,will be deprecated soon
-    pub async fn create_materialized_table_source_workaround(
-        &self,
-        table: ProstTable,
-    ) -> Result<()> {
-        let table_clone = table.clone();
-        let table_source = ProstSource {
-            id: 0,
-            schema_id: table_clone.schema_id,
-            database_id: table_clone.database_id,
-            name: table_clone.name,
-            info: Some(risingwave_pb::catalog::source::Info::TableSource(
-                TableSourceInfo {
-                    columns: table_clone.columns,
-                },
-            )),
-        };
-        let (_, _, version) = self
-            .meta_client
-            .create_materialized_source(
-                table_source,
-                table,
-                StreamNode {
-                    ..Default::default()
-                },
-            )
-            .await?;
-        self.wait_version(version).await
-    }
-
     pub async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -147,6 +116,14 @@ impl CatalogWriter {
         let (_, _, version) = self
             .meta_client
             .create_materialized_source(source, table, plan)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    pub async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+        let version = self
+            .meta_client
+            .drop_materialized_source(source_id, table_id)
             .await?;
         self.wait_version(version).await
     }
