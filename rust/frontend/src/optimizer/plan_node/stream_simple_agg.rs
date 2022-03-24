@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -31,11 +31,13 @@ impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
+        // Simple agg executor might change the append-only behavior of the stream.
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             pk_indices,
             Distribution::any().clone(),
+            false,
         );
         StreamSimpleAgg { logical, base }
     }

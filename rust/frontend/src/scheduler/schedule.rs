@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
@@ -206,11 +206,11 @@ impl BatchScheduler {
 }
 
 /// `WorkerNodeManager` manages live worker nodes.
-pub(crate) struct WorkerNodeManager {
+pub struct WorkerNodeManager {
     worker_nodes: RwLock<Vec<WorkerNode>>,
 }
 
-pub(crate) type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
+pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
 impl WorkerNodeManager {
     pub async fn new(client: MetaClient) -> Result<Self> {

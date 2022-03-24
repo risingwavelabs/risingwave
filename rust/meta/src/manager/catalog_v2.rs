@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -107,6 +107,11 @@ where
     pub async fn get_catalog(&self) -> Result<Catalog> {
         let core = self.core.lock().await;
         core.get_catalog().await
+    }
+
+    pub async fn list_sources(&self) -> Result<Vec<Source>> {
+        let core = self.core.lock().await;
+        Source::list(&*core.meta_store_ref).await
     }
 
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {

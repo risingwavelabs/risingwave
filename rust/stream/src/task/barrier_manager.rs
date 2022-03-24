@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::error::Result;
@@ -86,7 +86,6 @@ impl LocalBarrierManager {
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
-    // TODO: async collect barrier flush state from hummock.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::iter::once;
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,16 +36,21 @@ use crate::storage::MemStore;
 
 async fn get_hummock_meta_client() -> MockHummockMetaClient {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(
-        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
+    let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
+    let cluster_manager = Arc::new(
+        StoredClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
             .await
             .unwrap(),
     );
-    let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
-    let cluster_manager =
-        StoredClusterManager::new(env, notification_manager, Duration::from_secs(3600))
-            .await
-            .unwrap();
+    let hummock_manager = Arc::new(
+        HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            Arc::new(MetaMetrics::new()),
+        )
+        .await
+        .unwrap(),
+    );
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port: 80,

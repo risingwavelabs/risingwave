@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use drop_stream::*;
 use drop_table::*;
 use filter::*;
@@ -57,6 +57,7 @@ mod insert;
 mod join;
 mod limit;
 mod merge_sort_exchange;
+pub mod monitor;
 mod order_by;
 mod projection;
 mod row_seq_scan;

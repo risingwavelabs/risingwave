@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use futures::future::try_join_all;
@@ -186,6 +186,10 @@ where
                 self.fragment_manager
                     .drop_table_fragments(&table_id)
                     .await?;
+
+                // TODO: delete downstream actor infos from upstream actors:
+                // 1. resolve chain nodes, find upstream actors and table id.
+                // 2. delete downstream actor infos from upstream actors in depended table.
             }
 
             Command::CreateMaterializedView {

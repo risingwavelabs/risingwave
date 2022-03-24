@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -116,11 +116,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
-    let hummock_manager = Arc::new(
-        hummock::HummockManager::new(env.clone(), meta_metrics.clone())
-            .await
-            .unwrap(),
-    );
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
     let notification_manager = Arc::new(NotificationManager::new(epoch_generator_ref.clone()));
@@ -132,6 +127,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
         .await
         .unwrap(),
+    );
+    let hummock_manager = Arc::new(
+        hummock::HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+            .await
+            .unwrap(),
     );
 
     if let Some(dashboard_addr) = dashboard_addr {
@@ -145,9 +145,26 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(ui_path));
     }
+
+    let catalog_manager_ref = Arc::new(
+        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
+            .await
+            .unwrap(),
+    );
+    let catalog_manager_v2_ref = Arc::new(
+        CatalogManager::new(
+            meta_store_ref.clone(),
+            env.id_gen_manager_ref(),
+            notification_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
     let barrier_manager_ref = Arc::new(BarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
+        catalog_manager_v2_ref.clone(),
         fragment_manager.clone(),
         epoch_generator_ref.clone(),
         hummock_manager.clone(),
@@ -165,20 +182,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             fragment_manager.clone(),
             barrier_manager_ref.clone(),
             cluster_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
-    let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
-            .await
-            .unwrap(),
-    );
-    let catalog_manager_v2_ref = Arc::new(
-        CatalogManager::new(
-            meta_store_ref.clone(),
-            env.id_gen_manager_ref(),
-            notification_manager.clone(),
         )
         .await
         .unwrap(),

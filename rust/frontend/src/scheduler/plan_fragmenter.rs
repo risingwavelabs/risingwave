@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -276,7 +276,7 @@ mod tests {
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
             TableId::default(),
-            vec![],
+            vec![0.into(), 1.into()],
             Schema {
                 fields: fields.clone(),
             },
@@ -286,13 +286,13 @@ mod tests {
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::HashShard(vec![0, 1, 2]),
+            Distribution::HashShard(vec![0, 1]),
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::HashShard(vec![0, 1, 2]),
+            Distribution::HashShard(vec![0, 1]),
         )
         .into();
         let hash_join_node: PlanRef = BatchHashJoin::new(

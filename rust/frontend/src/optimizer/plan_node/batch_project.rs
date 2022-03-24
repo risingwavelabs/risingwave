@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -36,11 +36,25 @@ pub struct BatchProject {
 impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
+        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
+        let distribution = match logical.input().distribution() {
+            Distribution::HashShard(dists) => {
+                let new_dists = dists
+                    .iter()
+                    .map(|hash_col| i2o.try_map(*hash_col))
+                    .collect::<Option<Vec<_>>>();
+                match new_dists {
+                    Some(new_dists) => Distribution::HashShard(new_dists),
+                    None => Distribution::AnyShard,
+                }
+            }
+            dist => dist.clone(),
+        };
+        // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,
             logical.schema().clone(),
-            Distribution::any().clone(),
+            distribution,
             Order::any().clone(),
         );
         BatchProject { logical, base }

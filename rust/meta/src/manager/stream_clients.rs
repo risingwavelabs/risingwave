@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -66,10 +66,6 @@ impl StreamClients {
             .map_err(|e| {
                 ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
             })
-    }
-
-    pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
-        self.clients.get(node_id)
     }
 }
 

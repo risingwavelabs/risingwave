@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::VecDeque;
 use std::iter::once;
 use std::sync::Arc;
@@ -19,7 +19,8 @@ use std::time::Duration;
 
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -31,15 +32,18 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::{StoredClusterManager, StoredClusterManagerRef};
+use crate::cluster::StoredClusterManagerRef;
 use crate::hummock::HummockManager;
-use crate::manager::{EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH};
+use crate::manager::{
+    CatalogManagerRef, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 mod command;
 mod info;
+mod recovery;
 
 #[derive(Debug, Default)]
 struct Notifier {
@@ -140,6 +144,18 @@ impl ScheduledBarriers {
             }
         }
     }
+
+    /// Clear all buffered scheduled barriers, and notify their subscribers with failed as aborted.
+    async fn abort(&self) {
+        let mut buffer = self.buffer.write().await;
+        while let Some((_, mut notifiers)) = buffer.pop_front() {
+            notifiers.iter_mut().for_each(|notify| {
+                notify.notify_failed(RwError::from(ErrorCode::InternalError(
+                    "Scheduled barrier abort.".to_string(),
+                )))
+            })
+        }
+    }
 }
 
 /// [`BarrierManager`] sends barriers to all registered compute nodes and collect them, with
@@ -150,9 +166,11 @@ impl ScheduledBarriers {
 /// [`BarrierManager`] provides a set of interfaces like a state machine, accepting [`Command`] that
 /// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
-/// manager transactionally using [`Command`].
+/// manager transactional using [`Command`].
 pub struct BarrierManager<S> {
     cluster_manager: StoredClusterManagerRef<S>,
+
+    catalog_manager: CatalogManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
@@ -167,19 +185,21 @@ pub struct BarrierManager<S> {
     metrics: Arc<MetaMetrics>,
 }
 
-// TODO: Persist barrier manager states in meta store including
-// previous epoch number, current epoch number and barrier collection progress
+// TODO: Persist barrier manager states in meta store including previous epoch number, current epoch
+// number and barrier collection progress
 impl<S> BarrierManager<S>
 where
     S: MetaStore,
 {
     const INTERVAL: Duration =
         Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
+    const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
     /// Create a new [`BarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager: StoredClusterManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
         hummock_manager: Arc<HummockManager<S>>,
@@ -187,6 +207,7 @@ where
     ) -> Self {
         Self {
             cluster_manager,
+            catalog_manager,
             fragment_manager,
             epoch_generator,
             clients: env.stream_clients_ref(),
@@ -211,32 +232,20 @@ where
             }
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
-
-            let info = {
-                let all_nodes = self
-                    .cluster_manager
-                    .list_worker_node(WorkerType::ComputeNode, Some(Running))
-                    .await;
-                let all_actor_infos = self
-                    .fragment_manager
-                    .load_all_actors(command.creating_table_id())
-                    .await;
-                BarrierActorInfo::resolve(all_nodes, all_actor_infos)
-            };
-
+            let info = self.resolve_actor_info(command.creating_table_id()).await;
             let new_epoch = self.epoch_generator.generate().into_inner();
-            let command_context = CommandContext::new(
+            let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.clients.clone(),
                 &info,
                 prev_epoch,
                 new_epoch,
-                command,
+                command.clone(),
             );
 
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
-            match self.run_inner(&command_context).await {
+            match self.run_inner(&command_ctx).await {
                 Ok(_) => {
                     prev_epoch = new_epoch;
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
@@ -245,13 +254,42 @@ where
                     notifiers
                         .iter_mut()
                         .for_each(|notify| notify.notify_failed(e.clone()));
+                    // If failed, enter recovery mode.
+                    prev_epoch = self.recovery(prev_epoch, &command).await.into_inner();
                 }
             }
         }
     }
 
-    /// running a scheduled command.
+    /// Running a scheduled command.
     async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
+        let timer = self.metrics.barrier_latency.start_timer();
+
+        // Wait for all barriers collected
+        let collect_result = self.inject_barrier(command_context).await;
+        // Commit this epoch to Hummock
+        if command_context.prev_epoch != INVALID_EPOCH {
+            match collect_result {
+                Ok(_) => {
+                    self.hummock_manager
+                        .commit_epoch(command_context.prev_epoch)
+                        .await?;
+                }
+                Err(_) => {
+                    self.hummock_manager
+                        .abort_epoch(command_context.prev_epoch)
+                        .await?;
+                }
+            };
+        }
+        collect_result?;
+
+        timer.observe_duration();
+        command_context.post_collect().await // do some post stuffs
+    }
+
+    /// Inject barrier to all computer nodes.
+    async fn inject_barrier<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
 
@@ -299,29 +337,21 @@ where
             }
         });
 
-        // Wait for all barriers collected
-        let timer = self.metrics.barrier_latency.start_timer();
+        try_join_all(collect_futures).await?;
+        Ok(())
+    }
 
-        let collect_result = try_join_all(collect_futures).await;
-        // Commit this epoch to Hummock
-        if command_context.prev_epoch != INVALID_EPOCH {
-            match collect_result {
-                Ok(_) => {
-                    self.hummock_manager
-                        .commit_epoch(command_context.prev_epoch)
-                        .await?
-                }
-                Err(_) => {
-                    self.hummock_manager
-                        .abort_epoch(command_context.prev_epoch)
-                        .await?
-                }
-            };
-        }
-        collect_result?;
-
-        timer.observe_duration();
-        command_context.post_collect().await // do some post stuffs
+    /// Resolve actor information from cluster and fragment manager.
+    async fn resolve_actor_info(&self, creating_table_id: Option<TableId>) -> BarrierActorInfo {
+        let all_nodes = self
+            .cluster_manager
+            .list_worker_node(WorkerType::ComputeNode, Some(Running))
+            .await;
+        let all_actor_infos = self
+            .fragment_manager
+            .load_all_actors(creating_table_id)
+            .await;
+        BarrierActorInfo::resolve(all_nodes, all_actor_infos)
     }
 }
 
@@ -342,7 +372,7 @@ where
         self.do_schedule(command, Default::default()).await
     }
 
-    /// Schedule a command and return when its coresponding barrier is about to sent.
+    /// Schedule a command and return when its corresponding barrier is about to sent.
     #[allow(dead_code)]
     pub async fn issue_command(&self, command: Command) -> Result<()> {
         let (tx, rx) = oneshot::channel();

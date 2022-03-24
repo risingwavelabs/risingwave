@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -22,7 +22,8 @@ use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, SstableMeta}
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder, SSTableBuilderOptions,
+    CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder,
+    SSTableBuilderOptions,
 };
 
 use crate::cluster::StoredClusterManager;
@@ -87,11 +88,20 @@ pub fn generate_test_tables(
     table_ids: Vec<u64>,
 ) -> (Vec<SstableInfo>, Vec<(SstableMeta, Bytes)>) {
     // Tables to add
+    #[cfg(not(feature = "blockv2"))]
     let opt = SSTableBuilderOptions {
         bloom_false_positive: 0.1,
         block_size: 4096,
         table_capacity: 0,
         checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+    };
+    #[cfg(feature = "blockv2")]
+    let opt = SSTableBuilderOptions {
+        capacity: 64 * 1024 * 1024,
+        block_capacity: 4096,
+        restart_interval: 16,
+        bloom_false_positive: 0.1,
+        compression_algorithm: CompressionAlgorithm::None,
     };
 
     let mut sst_info = vec![];
@@ -99,8 +109,8 @@ pub fn generate_test_tables(
     for (i, table_id) in table_ids.into_iter().enumerate() {
         let mut b = SSTableBuilder::new(opt.clone());
         let kv_pairs = vec![
-            (i, HummockValue::Put(b"test".as_slice())),
-            (i * 10, HummockValue::Put(b"test".as_slice())),
+            (i + 1, HummockValue::Put(b"test".as_slice())),
+            ((i + 1) * 10, HummockValue::Put(b"test".as_slice())),
         ];
         for kv in kv_pairs {
             b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1);
@@ -152,16 +162,20 @@ pub async fn setup_compute_env(
     WorkerNode,
 ) {
     let env = MetaSrvEnv::for_test().await;
-    let hummock_manager = Arc::new(
-        HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
-            .await
-            .unwrap(),
-    );
     let cluster_manager = Arc::new(
         StoredClusterManager::new(
             env.clone(),
             Arc::new(NotificationManager::new(env.epoch_generator_ref())),
             Duration::from_secs(1),
+        )
+        .await
+        .unwrap(),
+    );
+    let hummock_manager = Arc::new(
+        HummockManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            Arc::new(MetaMetrics::new()),
         )
         .await
         .unwrap(),

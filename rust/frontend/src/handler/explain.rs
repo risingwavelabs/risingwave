@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -21,6 +21,7 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
+use super::create_mv::{gen_create_mv_plan, MvInfo};
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
@@ -40,17 +41,16 @@ pub(super) fn handle_explain(
             or_replace: false,
             materialized: true,
             query,
+            name,
             ..
         } => {
-            let bound = {
-                let mut binder = Binder::new(
-                    session.env().catalog_reader().read_guard(),
-                    session.database().to_string(),
-                );
-                binder.bind_query(query.as_ref().clone())?
-            };
-            let logical = planner.plan_query(bound)?;
-            logical.gen_create_mv_plan()
+            gen_create_mv_plan(
+                &*session,
+                &mut planner,
+                *query,
+                MvInfo::with_name(name.to_string()),
+            )?
+            .0
         }
         stmt => {
             let bound = {

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -117,7 +117,11 @@ mod handlers {
     ) -> Result<Json<Vec<ActorLocation>>> {
         use risingwave_pb::common::WorkerType;
 
-        let node_actors = srv.fragment_manager.all_node_actors().await.map_err(err)?;
+        let node_actors = srv
+            .fragment_manager
+            .all_node_actors(true)
+            .await
+            .map_err(err)?;
         let nodes = srv
             .cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None)

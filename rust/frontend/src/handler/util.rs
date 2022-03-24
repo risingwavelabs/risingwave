@@ -11,16 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
+use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
-
-use crate::binder::{BoundSetExpr, BoundStatement};
-use crate::expr::Expr;
 
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
     chunk
@@ -35,31 +32,9 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .collect_vec()
 }
 
-pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
-    if let BoundStatement::Query(query) = bound {
-        let pg_descs = match &query.body {
-            BoundSetExpr::Select(select) => select
-                .select_items
-                .iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    let name = select.aliases[i].clone().unwrap_or(format!("{:?}", e));
-                    PgFieldDescriptor::new(name, data_type_to_type_oid(e.return_type()))
-                })
-                .collect(),
-            BoundSetExpr::Values(v) => v
-                .schema
-                .fields()
-                .iter()
-                .map(|f| {
-                    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
-                })
-                .collect(),
-        };
-        Ok(pg_descs)
-    } else {
-        panic!("get_pg_field_descs only supports query bound_statement")
-    }
+/// Convert from [`Field`] to [`PgFieldDescriptor`].
+pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
+    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
 }
 
 pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
@@ -85,63 +60,19 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use pgwire::pg_field_descriptor::TypeOid;
     use risingwave_common::array::*;
     use risingwave_common::{column, column_nonnull};
 
-    use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr, BoundStatement};
-    use crate::expr::ExprImpl;
-    use crate::handler::util::{get_pg_field_descs, to_pg_rows};
+    use super::*;
 
     #[test]
-    fn test_get_pg_field_descs() {
-        let select = BoundSelect {
-            distinct: false,
-            select_items: vec![
-                ExprImpl::literal_int(1),
-                ExprImpl::literal_int(2),
-                ExprImpl::literal_bool(true),
-            ],
-            aliases: vec![
-                Some("column1".to_string()),
-                None,
-                Some("column3".to_string()),
-            ],
-            from: None,
-            where_clause: None,
-            group_by: vec![],
-        };
-        let bound = BoundStatement::Query(
-            BoundQuery {
-                body: BoundSetExpr::Select(select.into()),
-                order: vec![],
-            }
-            .into(),
-        );
-        let pg_descs = get_pg_field_descs(&bound).unwrap();
+    fn test_to_pg_field() {
+        let field = Field::with_name(DataType::Int32, "v1");
+        let pg_field = to_pg_field(&field);
+        assert_eq!(pg_field.get_name(), "v1");
         assert_eq!(
-            pg_descs
-                .clone()
-                .into_iter()
-                .map(|p| { p.get_name().to_string() })
-                .collect_vec(),
-            [
-                "column1".to_string(),
-                "2:Int32".to_string(),
-                "column3".to_string()
-            ]
-        );
-        assert_eq!(
-            pg_descs
-                .into_iter()
-                .map(|p| { p.get_type_oid().as_number() })
-                .collect_vec(),
-            [
-                TypeOid::Int.as_number(),
-                TypeOid::Int.as_number(),
-                TypeOid::Boolean.as_number()
-            ]
+            pg_field.get_type_oid().as_number(),
+            TypeOid::Int.as_number()
         );
     }
 

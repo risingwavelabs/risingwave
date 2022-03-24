@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -27,7 +27,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
-use crate::utils::{ColIndexMapping, Substitute};
+use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -39,21 +39,8 @@ pub struct LogicalProject {
 }
 
 impl LogicalProject {
-    fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
         let ctx = input.ctx();
-        // Merge contiguous Project nodes.
-        if let Some(input) = input.as_logical_project() {
-            let mut subst = Substitute {
-                mapping: input.exprs.clone(),
-            };
-            let exprs = exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            return LogicalProject::new(input.input(), exprs, expr_alias);
-        }
-
         let schema = Self::derive_schema(&exprs, &expr_alias);
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
@@ -175,6 +162,20 @@ impl LogicalProject {
             )
             .finish()
     }
+
+    pub fn is_identity(&self) -> bool {
+        self.schema().len() == self.input.schema().len()
+            && self
+                .exprs
+                .iter()
+                .zip_eq(self.expr_alias.iter())
+                .zip_eq(self.input.schema().fields())
+                .enumerate()
+                .all(|(i, ((expr, alias), field))| {
+                    alias.as_ref().map(|alias| alias == &field.name).unwrap_or(true) &&
+                    matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
+                })
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {
@@ -183,6 +184,22 @@ impl PlanTreeNodeUnary for LogicalProject {
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
+    }
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        mut input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let exprs = self
+            .exprs
+            .clone()
+            .into_iter()
+            .map(|expr| input_col_change.rewrite_expr(expr))
+            .collect();
+        let proj = Self::new(input, exprs, self.expr_alias().to_vec());
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identical_map(proj.schema().len());
+        (proj, out_col_change)
     }
 }
 
@@ -243,6 +260,32 @@ impl ToStream for LogicalProject {
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        // TODO: add row_count() aggCall for StreamAgg here
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
+        let input_pk = input.pk_indices();
+        let i2o = Self::i2o_col_mapping(input.schema().len(), proj.exprs());
+        let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
+        let input_schema = input.schema();
+        let (exprs, expr_alias) = proj
+            .exprs()
+            .iter()
+            .cloned()
+            .zip_eq(proj.expr_alias().iter().cloned())
+            .map(|(a, b)| (a, b))
+            .chain(col_need_to_add.map(|idx| {
+                (
+                    InputRef::new(idx, input_schema.fields[idx].data_type.clone()).into(),
+                    None,
+                )
+            }))
+            .unzip();
+        let proj = Self::new(input, exprs, expr_alias);
+        // the added columns is at the end, so it will not change the exists column index
+        (proj.into(), out_col_change)
+    }
 }
 #[cfg(test)]
 mod tests {
@@ -257,69 +300,6 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
     use crate::session::QueryContext;
-
-    #[tokio::test]
-    async fn test_contiguous_project() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let ty = DataType::Int32;
-        let fields: Vec<Field> = (1..4)
-            .map(|i| Field {
-                data_type: ty.clone(),
-                name: format!("v{}", i),
-            })
-            .collect();
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema { fields },
-            ctx,
-        );
-        let inner = LogicalProject::new(
-            table_scan.into(),
-            vec![
-                FunctionCall::new(
-                    Type::Equal,
-                    vec![
-                        InputRef::new(1, ty.clone()).into(),
-                        InputRef::new(2, ty.clone()).into(),
-                    ],
-                )
-                .unwrap()
-                .into(),
-                InputRef::new(0, ty.clone()).into(),
-            ],
-            vec![Some("aa".to_string()), Some("bb".to_string())],
-        );
-
-        let outer = LogicalProject::new(
-            inner.into(),
-            vec![
-                InputRef::new(1, ty.clone()).into(),
-                Literal::new(None, ty.clone()).into(),
-                InputRef::new(0, DataType::Boolean).into(),
-            ],
-            vec![None; 3],
-        );
-
-        assert!(outer.input().as_logical_scan().is_some());
-        assert_eq!(outer.exprs().len(), 3);
-        assert_eq_input_ref!(&outer.exprs()[0], 0);
-        match outer.exprs()[2].clone() {
-            ExprImpl::FunctionCall(call) => {
-                assert_eq_input_ref!(&call.inputs()[0], 1);
-                assert_eq_input_ref!(&call.inputs()[1], 2);
-            }
-            _ => panic!("Expected function call"),
-        }
-
-        let outermost =
-            LogicalProject::new(outer.into(), vec![InputRef::new(0, ty).into()], vec![None]);
-
-        assert!(outermost.input().as_logical_scan().is_some());
-        assert_eq!(outermost.exprs().len(), 1);
-        assert_eq_input_ref!(&outermost.exprs()[0], 0);
-    }
 
     #[tokio::test]
     /// Pruning
