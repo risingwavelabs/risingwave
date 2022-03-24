@@ -150,7 +150,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::{LogicalScan, LogicalValues};
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
@@ -173,15 +173,7 @@ mod tests {
             Field::with_name(DataType::Int32, "v2"),
             Field::with_name(DataType::Int32, "v3"),
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
@@ -192,7 +184,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);
@@ -252,15 +244,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
@@ -271,7 +256,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);

@@ -409,7 +409,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::{LogicalScan, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::{LogicalScan, LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
     use crate::session::QueryContext;
 
@@ -436,19 +436,15 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let left = LogicalScan::new(
-            "left".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let left = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[0..3].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
-        let right = LogicalScan::new(
-            "right".to_string(),
-            TableId::new(0),
-            vec![4.into(), 5.into(), 6.into()],
+        let right = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[3..6].to_vec(),
             },
@@ -526,19 +522,15 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let left = LogicalScan::new(
-            "left".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let left = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[0..3].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
-        let right = LogicalScan::new(
-            "right".to_string(),
-            TableId::new(0),
-            vec![4.into(), 5.into(), 6.into()],
+        let right = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[3..6].to_vec(),
             },
@@ -611,19 +603,15 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let left = LogicalScan::new(
-            "left".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let left = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[0..3].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
-        let right = LogicalScan::new(
-            "right".to_string(),
-            TableId::new(0),
-            vec![4.into(), 5.into(), 6.into()],
+        let right = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[3..6].to_vec(),
             },
@@ -699,19 +687,15 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let left = LogicalScan::new(
-            "left".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let left = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[0..3].to_vec(),
             },
-            ctx.clone(),
+            ctx,
         );
-        let right = LogicalScan::new(
-            "right".to_string(),
-            TableId::new(0),
-            vec![4.into(), 5.into(), 6.into()],
+        let right = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields[3..6].to_vec(),
             },

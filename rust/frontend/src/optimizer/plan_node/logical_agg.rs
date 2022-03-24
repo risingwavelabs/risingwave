@@ -487,7 +487,7 @@ mod tests {
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
     };
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::{LogicalScan, LogicalValues};
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
@@ -509,14 +509,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema { fields },
-            ctx,
-        );
-        let input = Rc::new(table_scan);
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let input = Rc::new(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
         let input_ref_3 = InputRef::new(2, ty.clone());
@@ -649,15 +643,7 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
@@ -667,7 +653,7 @@ mod tests {
             vec![agg_call],
             vec![Some("min".to_string())],
             vec![1],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune
@@ -719,15 +705,7 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
@@ -737,7 +715,7 @@ mod tests {
             vec![agg_call],
             vec![Some("min".to_string())],
             vec![1],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune
@@ -797,15 +775,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+
         let agg_calls = vec![
             PlanAggCall {
                 agg_kind: AggKind::Min,
@@ -822,7 +793,7 @@ mod tests {
             agg_calls,
             vec![Some("min".to_string()), Some("max".to_string())],
             vec![1, 2],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune

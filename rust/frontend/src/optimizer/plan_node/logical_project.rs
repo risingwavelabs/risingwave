@@ -298,7 +298,7 @@ mod tests {
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::{LogicalScan, LogicalValues};
     use crate::session::QueryContext;
 
     #[tokio::test]
@@ -311,15 +311,10 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema { fields },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+
         let inner = LogicalProject::new(
-            table_scan.into(),
+            values.into(),
             vec![
                 FunctionCall::new(
                     Type::Equal,
@@ -392,17 +387,9 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema {
-                fields: fields.clone(),
-            },
-            ctx,
-        );
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let project = LogicalProject::new(
-            table_scan.into(),
+            values.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
                 InputRef::new(2, ty.clone()).into(),
