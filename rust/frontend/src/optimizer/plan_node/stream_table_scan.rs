@@ -49,7 +49,7 @@ impl StreamTableScan {
             logical.schema().clone(),
             vec![0], // TODO
             Distribution::Single,
-            true, // TODO: determine the `append-only` field of table scan
+            false, // TODO: determine the `append-only` field of table scan
         );
         Self {
             logical,
