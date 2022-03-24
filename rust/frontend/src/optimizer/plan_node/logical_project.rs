@@ -27,7 +27,7 @@ use crate::expr::{
 };
 use crate::optimizer::plan_node::CollectInputRef;
 use crate::optimizer::property::{Distribution, WithSchema};
-use crate::utils::{ColIndexMapping, Substitute};
+use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
 #[derive(Debug, Clone)]
@@ -39,21 +39,8 @@ pub struct LogicalProject {
 }
 
 impl LogicalProject {
-    fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
+    pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
         let ctx = input.ctx();
-        // Merge contiguous Project nodes.
-        if let Some(input) = input.as_logical_project() {
-            let mut subst = Substitute {
-                mapping: input.exprs.clone(),
-            };
-            let exprs = exprs
-                .iter()
-                .cloned()
-                .map(|expr| subst.rewrite_expr(expr))
-                .collect();
-            return LogicalProject::new(input.input(), exprs, expr_alias);
-        }
-
         let schema = Self::derive_schema(&exprs, &expr_alias);
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
@@ -313,69 +300,6 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalScan;
     use crate::session::QueryContext;
-
-    #[tokio::test]
-    async fn test_contiguous_project() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let ty = DataType::Int32;
-        let fields: Vec<Field> = (1..4)
-            .map(|i| Field {
-                data_type: ty.clone(),
-                name: format!("v{}", i),
-            })
-            .collect();
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema { fields },
-            ctx,
-        );
-        let inner = LogicalProject::new(
-            table_scan.into(),
-            vec![
-                FunctionCall::new(
-                    Type::Equal,
-                    vec![
-                        InputRef::new(1, ty.clone()).into(),
-                        InputRef::new(2, ty.clone()).into(),
-                    ],
-                )
-                .unwrap()
-                .into(),
-                InputRef::new(0, ty.clone()).into(),
-            ],
-            vec![Some("aa".to_string()), Some("bb".to_string())],
-        );
-
-        let outer = LogicalProject::new(
-            inner.into(),
-            vec![
-                InputRef::new(1, ty.clone()).into(),
-                Literal::new(None, ty.clone()).into(),
-                InputRef::new(0, DataType::Boolean).into(),
-            ],
-            vec![None; 3],
-        );
-
-        assert!(outer.input().as_logical_scan().is_some());
-        assert_eq!(outer.exprs().len(), 3);
-        assert_eq_input_ref!(&outer.exprs()[0], 0);
-        match outer.exprs()[2].clone() {
-            ExprImpl::FunctionCall(call) => {
-                assert_eq_input_ref!(&call.inputs()[0], 1);
-                assert_eq_input_ref!(&call.inputs()[1], 2);
-            }
-            _ => panic!("Expected function call"),
-        }
-
-        let outermost =
-            LogicalProject::new(outer.into(), vec![InputRef::new(0, ty).into()], vec![None]);
-
-        assert!(outermost.input().as_logical_scan().is_some());
-        assert_eq!(outermost.exprs().len(), 1);
-        assert_eq_input_ref!(&outermost.exprs()[0], 0);
-    }
 
     #[tokio::test]
     /// Pruning

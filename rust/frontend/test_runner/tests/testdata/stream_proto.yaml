@@ -273,20 +273,20 @@
     select sum(v1) as sum_v1 from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "33"
+    operatorId: "35"
     input:
-      - operatorId: "32"
+      - operatorId: "34"
         input:
-          - operatorId: "30"
+          - operatorId: "32"
             input:
-              - operatorId: "28"
+              - operatorId: "30"
                 input:
-                  - operatorId: "26"
+                  - operatorId: "28"
                     input:
-                      - operatorId: "25"
+                      - operatorId: "27"
                         input:
                           - mergeNode: {}
-                          - operatorId: "24"
+                          - operatorId: "26"
                             pkIndices:
                               - 0
                             batchPlanNode:
