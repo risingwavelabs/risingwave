@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -62,7 +62,7 @@ pub struct MvInfo {
 }
 
 impl MvInfo {
-    /// Generate MvInfo when the table name. Note that this cannot be used to actually create an MV.
+    /// Generate MvInfo with the table name. Note that this cannot be used to actually create an MV.
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {
             table_name: name.into(),
@@ -91,36 +91,75 @@ pub fn gen_create_mv_plan(
 
     let mut column_orders = bound_query.order.clone();
 
-    let column_catalog = bound_query
+    // The `column_catalog` stores mapping of the position of materialize node's input to column
+    // catalog. column catalog currently only contains the column selected by users.
+    let mut column_catalog: HashMap<usize, ColumnCatalog> = bound_query
         .gen_create_mv_column_desc()
         .into_iter()
-        .map(|column_desc| ColumnCatalog {
-            column_desc,
-            is_hidden: false,
+        .enumerate()
+        .map(|(idx, column_desc)| {
+            (
+                idx,
+                ColumnCatalog {
+                    column_desc,
+                    is_hidden: false,
+                },
+            )
         })
-        .collect_vec();
+        .collect();
 
     let mut logical = planner.plan_query(bound_query)?;
 
     let plan = logical.gen_create_mv_plan();
 
-    // Compute pk and column orders that needs to be materialized.
     let pks = plan.pk_indices();
+
+    // Now we will need to add the pks (which might not be explicitly selected by users) into the
+    // final table. We add pk into column orders and column catalogs.
+
     let ordered_ids: HashSet<usize> = column_orders.iter().map(|x| x.index).collect();
+    let mut pk_column_id = column_catalog.len();
 
     for pk in pks {
+        // If pk isn't contained in column catalog, we append it into column catalog.
+        if !column_catalog.contains_key(pk) {
+            column_catalog.insert(
+                *pk,
+                ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: plan.schema()[*pk].data_type(),
+                        column_id: ColumnId::new(pk_column_id as i32),
+                        name: format!("_pk_{}", pk),
+                    },
+                    is_hidden: true,
+                },
+            );
+            pk_column_id += 1;
+        }
+
+        // If pk isn't contained in column orders, we append it into column orders, so that pk will
+        // appear at the end of the materialize state's key.
         if !ordered_ids.contains(pk) {
-            column_orders.push(FieldOrder::ascending(*pk));
+            column_orders.push(FieldOrder::ascending(
+                column_catalog
+                    .get(pk)
+                    .expect("pk not in catalog")
+                    .column_id()
+                    .get_id() as usize,
+            ));
         }
     }
 
-    // Add a materialize node upon the original stream plan
-    let plan = StreamMaterialize::new(
-        plan.ctx(),
-        plan,
-        column_orders.clone(),
-        column_catalog.iter().map(|x| x.column_id()).collect(),
+    let mut column_catalog = column_catalog.into_values().collect_vec();
+    column_catalog.sort_by_key(|x| x.column_id().get_id());
+    let column_ids = column_catalog.iter().map(|x| x.column_id()).collect_vec();
+    assert!(
+        column_ids[0].get_id() == 0
+            && column_ids.last().unwrap().get_id() == column_ids.len() as i32 - 1
     );
+
+    // Add a materialize node upon the original stream plan
+    let plan = StreamMaterialize::new(plan.ctx(), plan, column_orders.clone(), column_ids);
 
     let plan: PlanRef = plan.into();
 
