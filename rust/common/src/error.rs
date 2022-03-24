@@ -14,6 +14,7 @@
 
 use std::alloc::Layout;
 use std::backtrace::Backtrace;
+use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
@@ -163,6 +164,12 @@ impl From<std::io::Error> for RwError {
 impl From<std::net::AddrParseError> for RwError {
     fn from(addr_parse_error: std::net::AddrParseError) -> Self {
         ErrorCode::InternalError(format!("failed to resolve address: {}", addr_parse_error)).into()
+    }
+}
+
+impl From<Infallible> for RwError {
+    fn from(x: Infallible) -> Self {
+        match x {}
     }
 }
 

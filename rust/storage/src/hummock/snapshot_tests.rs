@@ -27,8 +27,6 @@ use crate::hummock::test_utils::{
 use crate::hummock::value::HummockValue;
 use crate::object::{InMemObjectStore, ObjectStore};
 
-const TEST_KEY_TABLE_ID: u64 = 233;
-
 async fn gen_and_upload_table(
     object_store: Arc<dyn ObjectStore>,
     remote_dir: &str,
@@ -51,12 +49,9 @@ async fn gen_and_upload_table(
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
         table_id,
-        kv_pairs.into_iter().map(|(key, value)| {
-            (
-                iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, key, epoch),
-                value,
-            )
-        }),
+        kv_pairs
+            .into_iter()
+            .map(|(key, value)| (iterator_test_key_of_epoch(key, epoch), value)),
         sstable_store,
     )
     .await;
@@ -94,12 +89,9 @@ async fn gen_and_upload_table_with_sstable_store(
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
         table_id,
-        kv_pairs.into_iter().map(|(key, value)| {
-            (
-                iterator_test_key_of_epoch(TEST_KEY_TABLE_ID, key, epoch),
-                value,
-            )
-        }),
+        kv_pairs
+            .into_iter()
+            .map(|(key, value)| (iterator_test_key_of_epoch(key, epoch), value)),
         sstable_store,
     )
     .await;
@@ -275,7 +267,7 @@ async fn test_snapshot_range_scan() {
 
     macro_rules! key {
         ($idx:expr) => {
-            user_key(&iterator_test_key_of(TEST_KEY_TABLE_ID, $idx)).to_vec()
+            user_key(&iterator_test_key_of($idx)).to_vec()
         };
     }
 
@@ -330,7 +322,7 @@ async fn test_snapshot_reverse_range_scan() {
 
     macro_rules! key {
         ($idx:expr) => {
-            user_key(&iterator_test_key_of(TEST_KEY_TABLE_ID, $idx)).to_vec()
+            user_key(&iterator_test_key_of($idx)).to_vec()
         };
     }
 
