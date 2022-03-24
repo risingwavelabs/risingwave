@@ -127,6 +127,15 @@ impl PlanRoot {
         // Prune Columns
         plan = plan.prune_col(&self.out_fields);
 
+        plan = {
+            let rules = vec![
+                ProjectMergeRule::create(), // merge should be applied before eliminate
+                ProjectEliminateRule::create(),
+            ];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         plan
     }
 
