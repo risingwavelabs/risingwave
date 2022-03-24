@@ -50,8 +50,13 @@ impl StreamSource {
             .collect_vec();
 
         let fields = col_descs.iter().map(Field::from).collect();
-        let base =
-            PlanBase::new_stream(ctx, Schema { fields }, pk_idx, Distribution::any().clone());
+        let base = PlanBase::new_stream(
+            ctx,
+            Schema { fields },
+            pk_idx,
+            Distribution::any().clone(),
+            false, // TODO: determine the `append-only` field of source
+        );
         Self {
             base,
             source_catalog,

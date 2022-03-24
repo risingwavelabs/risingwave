@@ -9,12 +9,11 @@
           LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
           LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2, $3, $4, $5, $6, $7], expr_alias: [_row_id, v1, v2, v3, _row_id, v1, v2, v3] }
-      LogicalJoin { type: Inner, on: ($1 = $6) }
-        LogicalFilter { predicate: ($1 > 1:Int32) }
-          LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
-        LogicalFilter { predicate: ($2 > 2:Int32) }
-          LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
+    LogicalJoin { type: Inner, on: ($1 = $6) }
+      LogicalFilter { predicate: ($1 > 1:Int32) }
+        LogicalScan { table: t1, columns: [_row_id, v1, v2, v3] }
+      LogicalFilter { predicate: ($2 > 2:Int32) }
+        LogicalScan { table: t2, columns: [_row_id, v1, v2, v3] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) where v2 > 1;
@@ -24,9 +23,8 @@
         LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
           LogicalScan { table: t, columns: [_row_id, v1, v2] }
   optimized_logical_plan: |
-    LogicalProject { exprs: [$0, $1, $2], expr_alias: [_row_id, v1, v2] }
-      LogicalFilter { predicate: ($2 > 1:Int32) }
-        LogicalScan { table: t, columns: [_row_id, v1, v2] }
+    LogicalFilter { predicate: ($2 > 1:Int32) }
+      LogicalScan { table: t, columns: [_row_id, v1, v2] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select v1 from (select v2, v1 from t) where v2 > 1;
@@ -53,3 +51,19 @@
       LogicalFilter { predicate: ($1 > 1:Int32) }
         LogicalFilter { predicate: ($0 > 2:Int32) }
           LogicalScan { table: t, columns: [v1, v2] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int, v4 int);
+    select * from (select v1, min(v2) as min from t group by v1) where v1 > 1 and min > 1 and 1 > 0 and v1 > min;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [v1, min] }
+      LogicalFilter { predicate: ($0 > 1:Int32) AND ($1 > 1:Int32) AND (1:Int32 > 0:Int32) AND ($0 > $1) }
+        LogicalProject { exprs: [$0, $1], expr_alias: [v1, min] }
+          LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+            LogicalProject { exprs: [$1, $2], expr_alias: [ ,  ] }
+              LogicalScan { table: t, columns: [_row_id, v1, v2, v3, v4] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$0, $1], expr_alias: [v1, min] }
+      LogicalFilter { predicate: ($1 > 1:Int32) AND ($0 > $1) }
+        LogicalAgg { group_keys: [0], agg_calls: [min($1)] }
+          LogicalFilter { predicate: ($0 > 1:Int32) AND (1:Int32 > 0:Int32) }
+            LogicalScan { table: t, columns: [v1, v2] }

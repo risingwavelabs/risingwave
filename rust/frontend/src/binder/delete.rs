@@ -15,23 +15,29 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
-use super::{Binder, BoundBaseTable};
+use super::{Binder, BoundBaseTable, BoundTableSource};
 use crate::expr::ExprImpl;
 
 #[derive(Debug)]
 pub struct BoundDelete {
+    /// Used for injecting deletion chunks to the source.
+    pub table_source: BoundTableSource,
+
+    /// Used for scanning the records to delete with the `selection`.
     pub table: BoundBaseTable,
+
     pub selection: Option<ExprImpl>,
 }
 
 impl Binder {
     pub(super) fn bind_delete(
         &mut self,
-        table_name: ObjectName,
+        source_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
         let delete = BoundDelete {
-            table: self.bind_table(table_name)?,
+            table_source: self.bind_table_source(source_name.clone())?,
+            table: self.bind_table(source_name)?,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
         };
 

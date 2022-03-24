@@ -79,6 +79,15 @@ impl ColumnDesc {
             name: String::new(),
         }
     }
+
+    /// Convert to proto
+    pub fn to_protobuf(&self) -> ProstColumnDesc {
+        ProstColumnDesc {
+            column_type: Some(self.data_type.to_protobuf()),
+            column_id: self.column_id.get_id(),
+            name: self.name.clone(),
+        }
+    }
 }
 
 impl From<ProstColumnDesc> for ColumnDesc {

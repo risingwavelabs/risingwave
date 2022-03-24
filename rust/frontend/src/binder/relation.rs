@@ -16,7 +16,9 @@ use std::collections::hash_map::Entry;
 
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
+use risingwave_pb::catalog::source::Info;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };
@@ -53,6 +55,13 @@ pub struct BoundBaseTable {
 #[derive(Debug)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+}
+
+#[derive(Debug)]
+pub struct BoundTableSource {
+    pub name: String,       // explain-only
+    pub source_id: TableId, // TODO: refactor to source id
+    pub columns: Vec<ColumnDesc>,
 }
 
 impl Binder {
@@ -158,6 +167,7 @@ impl Binder {
 
         Ok((schema_name, table_name))
     }
+
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let table_catalog =
@@ -181,6 +191,31 @@ impl Binder {
             name: table_name,
             table_desc,
             table_id,
+        })
+    }
+
+    pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
+        let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let source = self
+            .catalog
+            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+
+        let source_id = TableId::new(source.id);
+        let table_source_info = try_match_expand!(source.get_info()?, Info::TableSource)?;
+
+        let columns: Vec<ColumnDesc> = table_source_info
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
+            .collect();
+
+        // Note(bugen): do not bind context here.
+
+        Ok(BoundTableSource {
+            name: source_name,
+            source_id,
+            columns,
         })
     }
 
@@ -210,7 +245,7 @@ impl Binder {
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name: {}",
+                "Duplicated table name while binding context: {}",
                 table_name
             ))
             .into()),

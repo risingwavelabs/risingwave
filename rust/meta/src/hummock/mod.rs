@@ -39,6 +39,7 @@ pub use vacuum::*;
 
 use crate::storage::MetaStore;
 
+/// Start hummock's background workers.
 pub fn start_hummock_workers<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
@@ -118,18 +119,12 @@ where
 mod tests {
     use std::sync::Arc;
 
-    use crate::hummock::{start_compaction_trigger, CompactorManager, HummockManager};
-    use crate::manager::MetaSrvEnv;
-    use crate::rpc::metrics::MetaMetrics;
+    use crate::hummock::test_utils::setup_compute_env;
+    use crate::hummock::{start_compaction_trigger, CompactorManager};
 
     #[tokio::test]
     async fn test_shutdown_compaction_trigger() {
-        let env = MetaSrvEnv::for_test().await;
-        let hummock_manager_ref = Arc::new(
-            HummockManager::new(env.clone(), Arc::new(MetaMetrics::new()))
-                .await
-                .unwrap(),
-        );
+        let (_, hummock_manager_ref, _, _) = setup_compute_env(80).await;
         let compactor_manager_ref = Arc::new(CompactorManager::new());
         let (join_handle, shutdown_sender) =
             start_compaction_trigger(hummock_manager_ref, compactor_manager_ref);

@@ -23,15 +23,15 @@ use crate::optimizer::{PlanRef, PlanRoot};
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<PlanRoot> {
-        let table_name = delete.table.name.clone();
-        let table_id = delete.table.table_id;
+        let name = delete.table_source.name.clone();
+        let source_id = delete.table_source.source_id;
         let scan = self.plan_base_table(delete.table)?;
         let input = if let Some(expr) = delete.selection {
             LogicalFilter::create(scan, expr)?
         } else {
             scan
         };
-        let plan: PlanRef = LogicalDelete::create(input, table_name, table_id)?.into();
+        let plan: PlanRef = LogicalDelete::create(input, name, source_id)?.into();
 
         let order = Order::any().clone();
         // For delete, frontend will only schedule one task so do not need this to be single.

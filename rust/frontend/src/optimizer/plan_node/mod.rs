@@ -64,6 +64,9 @@ pub trait PlanNode:
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
 }
 
 impl_downcast!(PlanNode);

@@ -294,13 +294,13 @@ mod tests {
         let batch_exchange_node1: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::HashShard(vec![0, 1, 2]),
+            Distribution::HashShard(vec![0, 1]),
         )
         .into();
         let batch_exchange_node2: PlanRef = BatchExchange::new(
             batch_plan_node.clone(),
             Order::default(),
-            Distribution::HashShard(vec![0, 1, 2]),
+            Distribution::HashShard(vec![0, 1]),
         )
         .into();
         let hash_join_node: PlanRef = BatchHashJoin::new(
