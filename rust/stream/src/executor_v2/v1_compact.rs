@@ -21,7 +21,11 @@ use risingwave_common::error::Result;
 
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 
+/// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
+///
+/// With this wrapper, we can migrate our executors from v1 to v2 step by step.
 pub struct StreamExecutorV1 {
+    /// The wrapped stream.
     pub(super) stream: BoxedMessageStream,
 
     pub(super) schema: Schema,

@@ -19,8 +19,10 @@ use risingwave_common::error::{Result, RwError};
 
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
 
+/// Executor which can handle [`StreamChunk`]s one by one.
 pub trait SimpleExecutor: Send + 'static {
     /// convert a single chunk to another chunk.
+    // TODO: How about use `map_filter_chunk` and output chunk optionally?
     fn map_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
 
     /// See [`super::Executor::schema`].
@@ -33,6 +35,7 @@ pub trait SimpleExecutor: Send + 'static {
     fn identity(&self) -> &str;
 }
 
+/// The struct wraps a [`SimpleExecutor`], and implements the interface of [`Executor`].
 pub struct SimpleExecutorWrapper<E> {
     input: BoxedExecutor,
     inner: E,

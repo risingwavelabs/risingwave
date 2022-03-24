@@ -30,13 +30,19 @@ pub use v1_compact::StreamExecutorV1;
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, Result<Message>>;
 
+/// `Executor` supports handling of control messages.
 pub trait Executor: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
+    /// Return the schema of the OUTPUT of the executor.
     fn schema(&self) -> &Schema;
 
+    /// Return the primary key indices of the OUTPUT of the executor.
+    /// Schema is used by both OLAP and streaming, therefore
+    /// pk indices are maintained independently.
     fn pk_indices(&self) -> PkIndicesRef;
 
+    /// Identity of the executor.
     fn identity(&self) -> &str;
 
     /// Return an Executor which satisfied [`ExecutorV1`].
