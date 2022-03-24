@@ -112,6 +112,16 @@ impl From<&ProstColumnDesc> for ColumnDesc {
     }
 }
 
+impl From<&ColumnDesc> for ProstColumnDesc {
+    fn from(c: &ColumnDesc) -> Self {
+        Self {
+            column_type: c.data_type.to_protobuf().into(),
+            column_id: c.column_id.into(),
+            name: c.name.clone(),
+        }
+    }
+}
+
 impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
     fn from(prost: ProstOrderedColumnDesc) -> Self {
         Self {
