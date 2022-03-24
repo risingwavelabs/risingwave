@@ -11,7 +11,7 @@
                   - mergeNode: {}
                   - batchPlanNode:
                       tableRefId:
-                        tableId: 5
+                        tableId: 1
                       columnDescs:
                         - columnType:
                             typeName: INT64
@@ -78,7 +78,7 @@
               - mergeNode: {}
               - batchPlanNode:
                   tableRefId:
-                    tableId: 5
+                    tableId: 1
                   columnDescs:
                     - columnType:
                         typeName: INT64
@@ -125,7 +125,7 @@
               - mergeNode: {}
               - batchPlanNode:
                   tableRefId:
-                    tableId: 5
+                    tableId: 1
                   columnDescs:
                     - columnType:
                         typeName: INT32
@@ -164,7 +164,7 @@
                           - mergeNode: {}
                           - batchPlanNode:
                               tableRefId:
-                                tableId: 5
+                                tableId: 1
                               columnDescs:
                                 - columnType:
                                     typeName: INT32
@@ -230,7 +230,7 @@
                               - mergeNode: {}
                               - batchPlanNode:
                                   tableRefId:
-                                    tableId: 5
+                                    tableId: 1
                                   columnDescs:
                                     - columnType:
                                         typeName: INT32

@@ -14,7 +14,6 @@
 
 use std::cell::RefCell;
 use std::error::Error;
-use std::mem;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
