@@ -27,7 +27,7 @@ mod scheduler;
 pub mod session;
 pub mod utils;
 extern crate log;
-mod meta;
+mod meta_client;
 pub mod test_utils;
 extern crate risingwave_common;
 

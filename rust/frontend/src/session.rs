@@ -35,7 +35,7 @@ use tokio::task::JoinHandle;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
-use crate::meta::{FrontendMetaClient, FrontendMetaClientImpl};
+use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::scheduler::schedule::WorkerNodeManager;
