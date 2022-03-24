@@ -132,7 +132,7 @@
                     BatchFilter { predicate:  }
                       BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { table_id: 0 }
+    StreamMaterialize { table_id: 0, column_order: [$1 DESC, $2 ASC, $0 ASC, $3 ASC], column_id: [#0, #1, #2, #3], pk_indices: [0, 2, 3] }
       StreamProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamExchange { dist: Single }
           StreamHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
@@ -145,13 +145,13 @@
                         StreamProject { exprs: [$0], expr_alias: [ ] }
                           StreamExchange { dist: HashShard([0]) }
                             StreamFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
-                              StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment] }
+                              StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment], pk_indices: [0] }
                         StreamExchange { dist: HashShard([2]) }
                           StreamFilter { predicate:  }
-                            StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
+                            StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority], pk_indices: [0] }
                   StreamExchange { dist: HashShard([3]) }
                     StreamFilter { predicate:  }
-                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount] }
+                      StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount], pk_indices: [0] }
 - id: tpch_q6
   before:
     - create_tables
