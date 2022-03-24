@@ -64,6 +64,10 @@ where
         };
         Ok(monitored)
     }
+
+    pub fn stats(&self) -> Arc<StateStoreMetrics> {
+        self.stats.clone()
+    }
 }
 
 #[async_trait]

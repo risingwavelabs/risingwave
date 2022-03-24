@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,6 +23,7 @@ use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTable
 // use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 
+use super::monitor::BatchMetrics;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
@@ -36,6 +39,8 @@ pub struct RowSeqScanExecutor<S: StateStore> {
     identity: String,
 
     epoch: u64,
+
+    stats: Arc<BatchMetrics>,
 }
 
 impl<S: StateStore> RowSeqScanExecutor<S> {
@@ -45,6 +50,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         primary: bool,
         identity: String,
         epoch: u64,
+        stats: Arc<BatchMetrics>,
     ) -> Self {
         let schema = table.schema().clone();
 
@@ -56,6 +62,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
             schema,
             identity,
             epoch,
+            stats,
         }
     }
 
@@ -90,14 +97,17 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         dispatch_state_store!(source.global_batch_env().state_store(), state_store, {
-            let keyspace = Keyspace::table_root(state_store, &table_id);
-            let table = CellBasedTable::new_adhoc(keyspace, column_descs);
+            let keyspace = Keyspace::table_root(state_store.clone(), &table_id);
+            let storage_stats = state_store.stats();
+            let batch_stats = source.global_batch_env().stats();
+            let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
                 RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
                 source.task_id.task_id == 0,
                 source.plan_node().get_identity().clone(),
                 source.epoch,
+                batch_stats,
             )))
         })
     }
@@ -116,13 +126,18 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
+        let timer = self.stats.row_seq_scan_next_duration.start_timer();
         if self.should_ignore() {
             return Ok(None);
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-        iter.collect_data_chunk(&self.table, Some(self.chunk_size))
-            .await
+        let result = iter
+            .collect_data_chunk(&self.table, Some(self.chunk_size))
+            .await;
+        timer.observe_duration();
+
+        result
     }
 
     async fn close(&mut self) -> Result<()> {
