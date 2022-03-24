@@ -15,8 +15,6 @@
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use crate::catalog::schema_catalog::SchemaCatalog;
-
 mod bind_context;
 mod delete;
 pub(crate) mod expr;
@@ -67,9 +65,6 @@ impl Binder {
         self.bind_statement(stmt)
     }
 
-    fn get_schema_by_name(&self, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.catalog.get_schema_by_name(&self.db_name, schema_name)
-    }
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
         self.upper_contexts.push(new_context);

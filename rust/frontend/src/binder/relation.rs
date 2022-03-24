@@ -161,15 +161,9 @@ impl Binder {
     }
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let table_catalog = {
-            let schema_catalog = self
-                .get_schema_by_name(&schema_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
-            schema_catalog
-                .get_table_by_name(&table_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
-                .clone()
-        };
+        let table_catalog =
+            self.catalog
+                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
         let table_id = table_catalog.id();
         let cell_based_desc = table_catalog.cell_based_table();
