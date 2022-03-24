@@ -362,6 +362,9 @@ impl PlanTreeNodeUnary for LogicalAgg {
                 .for_each(|i| *i = InputRef::new(input_col_change.map(i.index()), i.return_type()));
             agg_call
         }));
+        let mut agg_call_alias = vec![None];
+        agg_call_alias.extend(self.agg_call_alias().iter().cloned());
+
         let group_keys: Vec<usize> = self
             .group_keys
             .iter()
@@ -370,11 +373,13 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .collect();
 
         // The index of agg_call should be incremented by 1 due to the insertion of RowCountAgg.
-        let mut map: Vec<usize> = (0..group_keys.len()).collect();
-        map.extend((0..agg_calls.len()).into_iter().map(|index| index + 1));
+        let group_len = group_keys.len();
+        let total_len = group_len + agg_calls.len();
+        let mut map: Vec<usize> = (0..group_len).collect();
+        map.extend((group_len..total_len).into_iter().map(|index| index + 1));
         let out_col_change = ColIndexMapping::new(map.into_iter().map(Some).collect());
 
-        let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
+        let agg = Self::new(agg_calls, agg_call_alias, group_keys, input);
 
         (agg, out_col_change)
     }
