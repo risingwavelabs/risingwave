@@ -429,7 +429,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_delete() {
         let sstable_store = mock_sstable_store();
-        // key=[sort_index, idx, epoch], value
+        // key=[idx, epoch], value
         let kv_pairs = vec![
             (2, 300, HummockValue::Delete),
             (1, 100, HummockValue::Put(iterator_test_value_of(1))),
@@ -471,7 +471,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[sort_index, idx, epoch], value
+        // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::Delete),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
@@ -554,7 +554,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range() {
         let sstable_store = mock_sstable_store();
-        // key=[sort_index, idx, epoch], value
+        // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::Delete),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
@@ -634,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_to_inclusive() {
         let sstable_store = mock_sstable_store();
-        // key=[sort_index, idx, epoch], value
+        // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::Delete),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
@@ -713,7 +713,7 @@ mod tests {
     #[tokio::test]
     async fn test_reverse_user_range_from() {
         let sstable_store = mock_sstable_store();
-        // key=[sort_index, idx, epoch], value
+        // key=[idx, epoch], value
         let kv_pairs = vec![
             (0, 200, HummockValue::Delete),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
