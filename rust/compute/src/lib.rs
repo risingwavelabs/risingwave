@@ -33,6 +33,8 @@ extern crate log;
 pub mod rpc;
 pub mod server;
 
+use std::net::ToSocketAddrs;
+
 use clap::Parser;
 
 /// Command-line arguments for compute-node.
@@ -68,7 +70,7 @@ use crate::server::compute_node_serve;
 pub async fn start(opts: ComputeNodeOpts) {
     tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    let addr = opts.host.parse().unwrap();
+    let addr = opts.host.to_socket_addrs().unwrap().next().unwrap();
     tracing::info!("Starting server at {}", addr);
 
     let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;

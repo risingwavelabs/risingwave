@@ -14,6 +14,7 @@
 //
 use std::cell::RefCell;
 use std::fmt::Formatter;
+use std::net::ToSocketAddrs;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -125,7 +126,7 @@ impl FrontendEnv {
         let config = load_config(opts);
         tracing::info!("Starting compute node with config {:?}", config);
 
-        let host = opts.host.parse().unwrap();
+        let host = opts.host.to_socket_addrs().unwrap().next().unwrap();
 
         // Register in meta by calling `AddWorkerNode` RPC.
         meta_client.register(host, WorkerType::Frontend).await?;

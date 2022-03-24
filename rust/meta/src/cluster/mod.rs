@@ -546,7 +546,7 @@ mod tests {
         let worker_count = 5usize;
         for i in 0..worker_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             let (worker_node, _) = cluster_manager
@@ -563,7 +563,7 @@ mod tests {
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             cluster_manager

@@ -295,7 +295,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
-    use std::net::SocketAddr;
+    use std::net::ToSocketAddrs;
     use std::sync::{Arc, Mutex};
     use std::thread::sleep;
     use std::time::Duration;
@@ -428,7 +428,7 @@ mod tests {
 
     impl MockServices {
         async fn start(host: &str, port: u16) -> Result<Self> {
-            let addr = SocketAddr::new(host.parse().unwrap(), port);
+            let addr = (host, port).to_socket_addrs().unwrap().next().unwrap();
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
                 actor_ids: Mutex::new(HashSet::new()),

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -180,7 +180,8 @@ impl MetricsManager {
                 "Prometheus listener for Prometheus is set up on http://{}",
                 listen_addr
             );
-            let listen_socket_addr: SocketAddr = listen_addr.parse().unwrap();
+            let listen_socket_addr: SocketAddr =
+                listen_addr.to_socket_addrs().unwrap().next().unwrap();
             let service = ServiceBuilder::new()
                 .layer(AddExtensionLayer::new(registry))
                 .service_fn(Self::metrics_service);
