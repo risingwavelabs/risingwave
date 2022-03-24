@@ -36,7 +36,14 @@ impl StreamFilter {
         let input = logical.input();
         let pk_indices = logical.base.pk_indices.to_vec();
         let dist = input.distribution().clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
+        // Filter executor won't change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            dist,
+            logical.input().append_only(),
+        );
         StreamFilter { logical, base }
     }
 
