@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use itertools::Itertools;
@@ -26,6 +26,7 @@ use crate::optimizer::property::{Distribution, WithSchema};
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to MView
 /// creation request.
+// TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
 pub struct StreamTableScan {
     pub base: PlanBase,
@@ -40,7 +41,7 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             vec![0], // TODO
-            Distribution::any().clone(),
+            Distribution::Single,
         );
         Self { logical, base }
     }
@@ -70,9 +71,10 @@ impl fmt::Display for StreamTableScan {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamTableScan {{ table: {}, columns: [{}] }}",
+            "StreamTableScan {{ table: {}, columns: [{}], pk_indices: {:?} }}",
             self.logical.table_name(),
-            self.logical.column_names().join(", ")
+            self.logical.column_names().join(", "),
+            self.base.pk_indices
         )
     }
 }

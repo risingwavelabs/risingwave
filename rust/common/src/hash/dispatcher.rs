@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
 use crate::hash;
 use crate::types::{DataSize, DataType};

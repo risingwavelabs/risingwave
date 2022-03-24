@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Template macro to generate code for unary/binary/ternary expression.
 
 use std::fmt;
@@ -214,7 +214,6 @@ macro_rules! eval_nullable {
     }
 }
 
-#[allow(dead_code, unused_macros)]
 macro_rules! gen_expr_nullable {
     ($ty_name:ident, { $($arg:ident),* }, { $($lt:lifetime),* }) => {
         paste! {

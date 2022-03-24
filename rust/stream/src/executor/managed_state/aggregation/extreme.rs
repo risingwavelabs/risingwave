@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -22,6 +22,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::*;
+use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -292,8 +293,8 @@ where
                 .await?;
 
             for (raw_key, raw_value) in all_data {
-                let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
-                let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
+                let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+                let value = deserialize_cell(&mut deserializer, &self.data_type)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
                 self.top_n.insert((key, pks), value);
@@ -326,10 +327,7 @@ where
 
             match v.into_option() {
                 Some(v) => {
-                    let mut serializer = memcomparable::Serializer::new(vec![]);
-                    serialize_datum_into(&v, &mut serializer)?;
-                    let value = serializer.into_inner();
-                    local.put(key_encoded, value);
+                    local.put(key_encoded, serialize_cell(&v)?);
                 }
                 None => {
                     local.delete(key_encoded);
@@ -386,8 +384,8 @@ where
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
-            let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
-            let value = deserialize_datum_from(&self.data_type, &mut deserializer)?;
+            let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+            let value = deserialize_cell(&mut deserializer, &self.data_type)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;
             result.push((key, pks));

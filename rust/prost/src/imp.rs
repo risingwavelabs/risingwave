@@ -7,11 +7,14 @@ impl crate::common::HostAddress {
     /// `HostAddress.host` may be a host name or an IP address.
     pub fn to_socket_addr(&self) -> Result<SocketAddr, std::io::Error> {
         match (self.host.clone(), self.port as u16).to_socket_addrs() {
-            Ok(mut addrs) => { 
+            Ok(mut addrs) => {
                 if let Some(addr) = addrs.next() {
                     Ok(addr)
                 } else {
-                    Err(std::io::Error::new(std::io::ErrorKind::Other, "Invalid address"))
+                    Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Invalid address",
+                    ))
                 }
             }
             Err(err) => Err(err),
@@ -57,7 +60,6 @@ impl crate::catalog::Source {
         )
     }
 }
-
 
 mod tests {
 
