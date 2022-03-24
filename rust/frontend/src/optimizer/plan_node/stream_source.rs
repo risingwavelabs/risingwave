@@ -74,11 +74,16 @@ impl ToStreamProst for StreamSource {
         ProstStreamNode::SourceNode(SourceNode {
             // TODO: Refactor this id
             table_ref_id: TableRefId {
-                table_id: self.logical.table_id() as i32,
+                table_id: self.logical.table_desc().table_id.table_id as i32,
                 ..Default::default()
             }
             .into(),
-            column_ids: self.logical.columns().iter().map(|c| c.get_id()).collect(),
+            column_ids: self
+                .logical
+                .column_descs()
+                .iter()
+                .map(|c| c.column_id.into())
+                .collect(),
             source_type: self.source_type as i32,
         })
     }

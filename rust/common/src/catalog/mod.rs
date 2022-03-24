@@ -85,6 +85,11 @@ impl From<u32> for TableId {
         Self::new(id)
     }
 }
+impl Into<u32> for TableId {
+    fn into(self) -> u32 {
+        self.table_id
+    }
+}
 
 impl fmt::Display for TableId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

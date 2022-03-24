@@ -74,10 +74,10 @@ impl ToBatchProst for BatchSeqScan {
         // TODO(Bowen): Fix this serialization.
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_id(),
+                table_id: self.logical.table_desc().table_id.into(),
                 pk: vec![],
             }),
-            ..Default::default()
+            column_descs: vec![],
         })
     }
 }

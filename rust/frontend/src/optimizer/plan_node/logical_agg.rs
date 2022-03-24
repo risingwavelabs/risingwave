@@ -509,7 +509,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
         let input = Rc::new(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
@@ -643,7 +649,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
@@ -672,9 +684,9 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 
     #[tokio::test]
@@ -705,7 +717,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
         let agg_call = PlanAggCall {
             agg_kind: AggKind::Min,
             return_type: ty.clone(),
@@ -741,10 +759,9 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
-        assert_eq!(scan.id().0, 2);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 
     #[tokio::test]
@@ -775,7 +792,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
 
         let agg_calls = vec![
             PlanAggCall {
@@ -818,8 +841,8 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![0]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 }

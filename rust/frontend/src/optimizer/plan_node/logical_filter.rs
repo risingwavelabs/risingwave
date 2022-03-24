@@ -173,7 +173,13 @@ mod tests {
             Field::with_name(DataType::Int32, "v2"),
             Field::with_name(DataType::Int32, "v3"),
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
@@ -207,13 +213,11 @@ mod tests {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
         }
-
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
-        assert_eq!(scan.id().0, 2);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 
     #[tokio::test]
@@ -244,7 +248,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
 
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
@@ -274,10 +284,10 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

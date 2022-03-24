@@ -311,7 +311,13 @@ mod tests {
                 name: format!("v{}", i),
             })
             .collect();
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
 
         let inner = LogicalProject::new(
             values.into(),
@@ -340,7 +346,7 @@ mod tests {
             vec![None; 3],
         );
 
-        assert!(outer.input().as_logical_scan().is_some());
+        assert!(outer.input().as_logical_values().is_some());
         assert_eq!(outer.exprs().len(), 3);
         assert_eq_input_ref!(&outer.exprs()[0], 0);
         match outer.exprs()[2].clone() {
@@ -354,7 +360,7 @@ mod tests {
         let outermost =
             LogicalProject::new(outer.into(), vec![InputRef::new(0, ty).into()], vec![None]);
 
-        assert!(outermost.input().as_logical_scan().is_some());
+        assert!(outermost.input().as_logical_values().is_some());
         assert_eq!(outermost.exprs().len(), 1);
         assert_eq_input_ref!(&outermost.exprs()[0], 0);
     }
@@ -387,7 +393,13 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let values = LogicalValues::new(
+            vec![],
+            Schema {
+                fields: fields.clone(),
+            },
+            ctx,
+        );
         let project = LogicalProject::new(
             values.into(),
             vec![
@@ -422,10 +434,10 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let scan = project.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[0]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
+        let values = project.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[0]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

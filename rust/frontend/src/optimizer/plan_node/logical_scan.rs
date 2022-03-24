@@ -18,7 +18,7 @@ use std::hash::Hash;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::catalog::{Field, Schema, TableDesc};
+use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
@@ -95,6 +95,21 @@ impl LogicalScan {
     pub fn table_name(&self) -> &str {
         &self.table_name
     }
+
+    /// Get a reference to the logical scan's table desc.
+    #[must_use]
+    pub fn table_desc(&self) -> &TableDesc {
+        self.table_desc.as_ref()
+    }
+
+    /// Get a reference to the logical scan's table desc.
+    #[must_use]
+    pub fn column_descs(&self) -> Vec<ColumnDesc> {
+        self.required_col_idx
+            .iter()
+            .map(|i| self.table_desc.columns[*i].clone())
+            .collect()
+    }
 }
 
 impl_plan_tree_node_for_leaf! {LogicalScan}
@@ -121,7 +136,7 @@ impl ColPrunable for LogicalScan {
         Self::new(
             self.table_name.clone(),
             required_col_idx,
-            self.table_desc,
+            self.table_desc.clone(),
             self.base.ctx.clone(),
         )
         .into()

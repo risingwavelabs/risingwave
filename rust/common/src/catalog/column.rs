@@ -48,7 +48,11 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
-
+impl Into<i32> for ColumnId {
+    fn into(self) -> i32 {
+        self.0
+    }
+}
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

@@ -355,6 +355,7 @@ impl BatchScheduler {
                 cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         }
+        dbg!(cur_stage_worker_nodes.clone());
 
         self.do_stage_execution(Arc::new(AugmentedStage::new_with_query_stage(
             query_stage_ref,

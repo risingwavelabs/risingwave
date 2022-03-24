@@ -240,7 +240,7 @@ mod tests {
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc, TableId};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{
         HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
@@ -249,8 +249,8 @@ mod tests {
     use risingwave_pb::plan::JoinType;
 
     use crate::optimizer::plan_node::{
-        BatchExchange, BatchHashJoin, BatchSeqScan, EqJoinPredicate, LogicalJoin, LogicalScan,
-        PlanNodeType,
+        BatchExchange, BatchHashJoin, BatchSeqScan, BatchValues, EqJoinPredicate, LogicalJoin,
+        LogicalScan, LogicalValues, PlanNodeType,
     };
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
@@ -269,17 +269,25 @@ mod tests {
         //   Scan  Scan
         //
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let fields = vec![
-            Field::unnamed(DataType::Int32),
-            Field::unnamed(DataType::Float64),
-        ];
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
-            TableId::default(),
-            vec![],
-            Schema {
-                fields: fields.clone(),
-            },
+            vec![0, 1],
+            Rc::new(TableDesc {
+                table_id: 0.into(),
+                pk: vec![],
+                columns: vec![
+                    ColumnDesc {
+                        data_type: DataType::Int32,
+                        column_id: 0.into(),
+                        name: "a".to_string(),
+                    },
+                    ColumnDesc {
+                        data_type: DataType::Float64,
+                        column_id: 1.into(),
+                        name: "b".to_string(),
+                    },
+                ],
+            }),
             ctx,
         ))
         .into();

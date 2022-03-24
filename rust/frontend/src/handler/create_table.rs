@@ -66,103 +66,104 @@ pub async fn handle_create_table(
         column_descs
     };
 
-    let plan = {
-        let context = Rc::new(RefCell::new(context));
+    // let plan = {
+    //     let context = Rc::new(RefCell::new(context));
 
-        let source_node = {
-            let (columns, fields) = column_descs
-                .iter()
-                .map(|c| {
-                    (
-                        c.column_id,
-                        Field::with_name(c.data_type.clone(), c.name.clone()),
-                    )
-                })
-                .unzip();
-            let schema = Schema::new(fields);
-            let logical_scan = LogicalScan::new(
-                table_name.clone(),
-                TableId::placeholder(),
-                columns,
-                schema,
-                context.clone(),
-            );
-            StreamSource::new(logical_scan, SourceType::Table)
-        };
+    //     let source_node = {
+    //         let (columns, fields) = column_descs
+    //             .iter()
+    //             .map(|c| {
+    //                 (
+    //                     c.column_id,
+    //                     Field::with_name(c.data_type.clone(), c.name.clone()),
+    //                 )
+    //             })
+    //             .unzip();
+    //         let schema = Schema::new(fields);
+    //         let logical_scan = LogicalScan::new(
+    //             table_name.clone(),
+    //             TableId::placeholder(),
+    //             columns,
+    //             schema,
+    //             context.clone(),
+    //         );
+    //         StreamSource::new(logical_scan, SourceType::Table)
+    //     };
 
-        let exchange_node =
-            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
+    //     let exchange_node =
+    //         { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
 
-        let materialize_node = {
-            StreamMaterialize::new(
-                context,
-                exchange_node.into(),
-                TableId::placeholder(),
-                vec![
-                    // RowId column as key
-                    FieldOrder {
-                        index: 0,
-                        direct: Direction::Asc,
-                    },
-                ],
-                column_descs.iter().map(|x| x.column_id).collect(),
-            )
-        };
+    //     let materialize_node = {
+    //         StreamMaterialize::new(
+    //             context,
+    //             exchange_node.into(),
+    //             TableId::placeholder(),
+    //             vec![
+    //                 // RowId column as key
+    //                 FieldOrder {
+    //                     index: 0,
+    //                     direct: Direction::Asc,
+    //                 },
+    //             ],
+    //             column_descs.iter().map(|x| x.column_id).collect(),
+    //         )
+    //     };
 
-        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
-    };
+    //     (Rc::new(materialize_node) as PlanRef).to_stream_prost()
+    // };
 
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
+    // let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    // log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
-    let columns = column_descs
-        .into_iter()
-        .enumerate()
-        .map(|(i, c)| ColumnCatalog {
-            column_desc: ProstColumnDesc {
-                column_type: c.data_type.to_protobuf().into(),
-                column_id: c.column_id.get_id(),
-                name: c.name,
-            }
-            .into(),
-            is_hidden: i == 0,
-        })
-        .collect_vec();
+    // let columns = column_descs
+    //     .into_iter()
+    //     .enumerate()
+    //     .map(|(i, c)| ColumnCatalog {
+    //         column_desc: ProstColumnDesc {
+    //             column_type: c.data_type.to_protobuf().into(),
+    //             column_id: c.column_id.get_id(),
+    //             name: c.name,
+    //         }
+    //         .into(),
+    //         is_hidden: i == 0,
+    //     })
+    //     .collect_vec();
 
-    let source = ProstSource {
-        id: TableId::placeholder().table_id(),
-        schema_id,
-        database_id,
-        name: table_name.clone(),
-        info: Info::TableSource(TableSourceInfo {
-            columns: columns.clone(),
-        })
-        .into(),
-    };
+    // let source = ProstSource {
+    //     id: TableId::placeholder().table_id(),
+    //     schema_id,
+    //     database_id,
+    //     name: table_name.clone(),
+    //     info: Info::TableSource(TableSourceInfo {
+    //         columns: columns.clone(),
+    //     })
+    //     .into(),
+    // };
 
-    let table = ProstTable {
-        id: TableId::placeholder().table_id(),
-        schema_id,
-        database_id,
-        name: table_name,
-        columns,
-        pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending as i32],
-        dependent_relations: vec![],
-        optional_associated_source_id: None,
-    };
+    // let table = ProstTable {
+    //     id: TableId::placeholder().table_id(),
+    //     schema_id,
+    //     database_id,
+    //     name: table_name,
+    //     columns,
+    //     pk_column_ids: vec![0],
+    //     pk_orders: vec![OrderType::Ascending as i32],
+    //     dependent_relations: vec![],
+    //     optional_associated_source_id: None,
+    // };
 
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .create_materialized_source(source, table, plan)
-        .await?;
+    // let catalog_writer = session.env().catalog_writer();
+    // catalog_writer
+    //     .create_materialized_source(source, table, plan)
+    //     .await?;
 
-    Ok(PgResponse::new(
-        StatementType::CREATE_TABLE,
-        0,
-        vec![],
-        vec![],
-    ))
+    // Ok(PgResponse::new(
+    //     StatementType::CREATE_TABLE,
+    //     0,
+    //     vec![],
+    //     vec![],
+    // ))
+    todo!()
 }
 
 #[cfg(test)]

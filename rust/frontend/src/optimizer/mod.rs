@@ -191,26 +191,24 @@ mod tests {
 
     use super::*;
     use crate::catalog::{ColumnId, TableId};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::session::QueryContext;
 
     #[tokio::test]
     async fn test_as_subplan() {
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let scan = LogicalScan::create(
-            "test_table".into(),
-            TableId::new(3),
-            vec![ColumnId::new(2), ColumnId::new(7)],
+        let values = LogicalValues::new(
+            vec![],
             Schema::new(vec![
                 Field::with_name(DataType::Int32, "v1"),
                 Field::with_name(DataType::Varchar, "v2"),
             ]),
             ctx,
         )
-        .unwrap();
+        .into();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
         let root = PlanRoot::new(
-            scan,
+            values,
             Distribution::any().clone(),
             Order::any().clone(),
             out_fields,

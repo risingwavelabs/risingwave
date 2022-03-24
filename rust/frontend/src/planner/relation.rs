@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 
@@ -30,24 +32,7 @@ impl Planner {
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: BoundBaseTable) -> Result<PlanRef> {
-        let (column_ids, fields) = base_table
-            .columns
-            .iter()
-            .map(|c| {
-                (
-                    c.column_id,
-                    Field::with_name(c.data_type.clone(), c.name.clone()),
-                )
-            })
-            .unzip();
-        let schema = Schema::new(fields);
-        LogicalScan::create(
-            base_table.name,
-            base_table.table_id,
-            column_ids,
-            schema,
-            self.ctx(),
-        )
+        LogicalScan::create(base_table.name, Rc::new(base_table.table_desc), self.ctx())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
