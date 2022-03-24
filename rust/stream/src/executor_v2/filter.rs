@@ -23,6 +23,7 @@ use risingwave_common::expr::BoxedExpression;
 use super::{BoxedExecutor, Executor, SimpleExecutor, SimpleExecutorWrapper};
 use crate::executor::PkIndicesRef;
 
+#[allow(dead_code)]
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
 /// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
