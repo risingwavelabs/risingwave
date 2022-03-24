@@ -20,9 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan::{
-    ColumnCatalog, ColumnDesc as ProstColumnDesc, ColumnDesc, RowFormatType,
-};
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, RowFormatType};
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
@@ -30,19 +28,27 @@ use crate::binder::expr::bind_data_type;
 use crate::handler::create_table::ROWID_NAME;
 use crate::session::QueryContext;
 
-fn extract_protobuf_table_schema(
-    schema: &ProtobufSchema,
-) -> Result<(StreamSourceInfo, Vec<ProstColumnDesc>)> {
+fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
-    let info = StreamSourceInfo {
-        // append_only: true,
-        row_format: RowFormatType::Protobuf as i32,
-        row_schema_location: schema.row_schema_location.0.clone(),
-        ..Default::default()
-    };
 
-    Ok((info, column_descs))
+    iter::once(Ok(ColumnCatalog {
+        column_desc: Some(ColumnDesc {
+            column_id: 0,
+            name: ROWID_NAME.to_string(),
+            column_type: Some(DataType::Int32.to_protobuf()),
+            field_descs: vec![],
+            type_name: "".to_string(),
+        }),
+        is_hidden: true,
+    }))
+    .chain(column_descs.into_iter().map(|col| {
+        Ok(ColumnCatalog {
+            column_desc: Some(col),
+            is_hidden: false,
+        })
+    }))
+    .collect::<Result<_>>()
 }
 
 pub(super) async fn handle_create_source(
@@ -86,19 +92,23 @@ pub(super) async fn handle_create_source(
         .read_guard()
         .check_relation_name_duplicated(session.database(), schema_name, &source_name)?;
 
-    let (source, _columns) = match &stmt.source_schema {
-        SourceSchema::Protobuf(protobuf_schema) => extract_protobuf_table_schema(protobuf_schema)?,
-        SourceSchema::Json => (
-            StreamSourceInfo {
-                properties: HashMap::from(stmt.with_properties),
-                row_format: RowFormatType::Json as i32,
-                row_schema_location: "".to_string(),
-                row_id_index: 0,
-                columns: column_catalogs,
-                pk_column_ids: vec![0],
-            },
-            vec![],
-        ),
+    let source = match &stmt.source_schema {
+        SourceSchema::Protobuf(protobuf_schema) => StreamSourceInfo {
+            properties: HashMap::from(stmt.with_properties),
+            row_format: RowFormatType::Protobuf as i32,
+            row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+            row_id_index: 0,
+            columns: extract_protobuf_table_schema(protobuf_schema)?,
+            pk_column_ids: vec![0],
+        },
+        SourceSchema::Json => StreamSourceInfo {
+            properties: HashMap::from(stmt.with_properties),
+            row_format: RowFormatType::Json as i32,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            columns: column_catalogs,
+            pk_column_ids: vec![0],
+        },
     };
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
@@ -119,66 +129,84 @@ pub(super) async fn handle_create_source(
     ))
 }
 
-// TODO: with a good MockMeta and then we can open the tests.
-// #[cfg(test)]
-// mod tests {
-//     use std::collections::HashMap;
-//     use std::io::Write;
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::io::Write;
 
-//     use risingwave_common::types::DataType;
-//     use tempfile::NamedTempFile;
+    use itertools::Itertools;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+    use tempfile::NamedTempFile;
 
-//     use crate::catalog::table_catalog::ROWID_NAME;
-//     use crate::test_utils::LocalFrontend;
+    use super::*;
+    use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::test_utils::LocalFrontend;
 
-//     /// Returns the file.
-//     /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
-//     fn create_proto_file() -> NamedTempFile {
-//         static PROTO_FILE_DATA: &str = r#"
-//     syntax = "proto3";
-//     package test;
-//     message TestRecord {
-//         int32 id = 1;
-//         string city = 3;
-//         int64 zipcode = 4;
-//         float rate = 5;
-//     }"#;
-//         let temp_file = tempfile::Builder::new()
-//             .prefix("temp")
-//             .suffix(".proto")
-//             .rand_bytes(5)
-//             .tempfile()
-//             .unwrap();
-//         let mut file = temp_file.as_file();
-//         file.write_all(PROTO_FILE_DATA.as_ref()).unwrap();
-//         temp_file
-//     }
+    /// Returns the file.
+    /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
+    fn create_proto_file() -> NamedTempFile {
+        static PROTO_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+        int32 id = 1;
+        string city = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+    }"#;
+        let temp_file = tempfile::Builder::new()
+            .prefix("temp")
+            .suffix(".proto")
+            .rand_bytes(5)
+            .tempfile()
+            .unwrap();
+        let mut file = temp_file.as_file();
+        file.write_all(PROTO_FILE_DATA.as_ref()).unwrap();
+        temp_file
+    }
 
-//     #[tokio::test]
-//     async fn handle_create_source() {
-//         let proto_file = create_proto_file();
-//         let sql = format!(
-//             r#"CREATE SOURCE t
-//     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
-//     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
-//             proto_file.path().to_str().unwrap()
-//         );
-//         let frontend = LocalFrontend::new().await;
-//         frontend.run_sql(sql).await.unwrap();
+    #[tokio::test]
+    async fn test_create_source_handler() {
+        let proto_file = create_proto_file();
+        let sql = format!(
+            r#"CREATE SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
 
-//         let catalog_manager = frontend.session().env().catalog_mgr();
-//         let table = catalog_manager.get_table("dev", "dev", "t").unwrap();
-//         let columns = table
-//             .columns()
-//             .iter()
-//             .map(|col| (col.name().into(), col.data_type()))
-//             .collect::<HashMap<String, DataType>>();
-//         let mut expected_map = HashMap::new();
-//         expected_map.insert(ROWID_NAME.to_string(), DataType::Int64);
-//         expected_map.insert("id".to_string(), DataType::Int32);
-//         expected_map.insert("city".to_string(), DataType::Varchar);
-//         expected_map.insert("zipcode".to_string(), DataType::Int64);
-//         expected_map.insert("rate".to_string(), DataType::Float32);
-//         assert_eq!(columns, expected_map);
-//     }
-// }
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        // Check source exists.
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .unwrap()
+            .clone();
+        assert_eq!(source.name, "t");
+
+        if let Info::StreamSource(info) = source.info.as_ref().unwrap() {
+            let catalogs: Vec<ColumnCatalog> = info
+                .columns
+                .iter()
+                .map(|col| col.clone().into())
+                .collect_vec();
+            let columns = catalogs
+                .iter()
+                .map(|col| (col.name(), col.data_type().clone()))
+                .collect::<HashMap<&str, DataType>>();
+            let expected_columns = maplit::hashmap! {
+                ROWID_NAME => DataType::Int32,
+                "id" => DataType::Int32,
+                "city" => DataType::Varchar,
+                "zipcode" => DataType::Int64,
+                "rate" => DataType::Float32,
+            };
+            assert_eq!(columns, expected_columns);
+        }
+    }
+}
