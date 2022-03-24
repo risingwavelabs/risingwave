@@ -39,6 +39,7 @@ use crate::handler::handle;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::scheduler::query_manager::QueryManager;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
@@ -123,6 +124,7 @@ pub struct FrontendEnv {
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
     worker_node_manager: Arc<WorkerNodeManager>,
+    query_manager: QueryManager,
 }
 
 impl FrontendEnv {
@@ -140,11 +142,13 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let query_manager = QueryManager::new(worker_node_manager.clone());
         Self {
             catalog_writer,
             catalog_reader,
             worker_node_manager,
             meta_client: Arc::new(MockFrontendMetaClient {}),
+            query_manager,
         }
     }
 
@@ -181,6 +185,7 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let query_manager = QueryManager::new(worker_node_manager.clone());
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
@@ -200,6 +205,7 @@ impl FrontendEnv {
                 catalog_writer,
                 worker_node_manager,
                 meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
+                query_manager,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -223,6 +229,14 @@ impl FrontendEnv {
 
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
+    }
+
+    pub fn meta_client_ref(&self) -> Arc<dyn FrontendMetaClient> {
+        self.meta_client.clone()
+    }
+
+    pub fn query_manager(&self) -> &QueryManager {
+        &self.query_manager
     }
 }
 
