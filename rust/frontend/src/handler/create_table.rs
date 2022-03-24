@@ -134,7 +134,6 @@ pub async fn handle_create_table(
         dependent_relations: vec![],
         optional_associated_source_id: None,
     };
-    dbg!(table.clone());
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_source(source, table, plan)

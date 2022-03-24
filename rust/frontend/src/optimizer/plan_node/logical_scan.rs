@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanNode, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::WithSchema;
+use crate::optimizer::property::{WithContext, WithSchema};
 use crate::session::QueryContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -44,19 +45,21 @@ impl LogicalScan {
         table_desc: Rc<TableDesc>,
         ctx: QueryContextRef,
     ) -> Self {
-        let (fields, col_ids): (Vec<Field>, Vec<ColumnId>) = required_col_idx
+        let mut id_to_op_idx = HashMap::new();
+
+        let fields = required_col_idx
             .iter()
-            .map(|idx| {
-                let col = &table_desc.columns[*idx];
-                (col.into(), col.column_id)
+            .enumerate()
+            .map(|(op_idx, tb_idx)| {
+                let col = &table_desc.columns[*tb_idx];
+                id_to_op_idx.insert(col.column_id, op_idx);
+                col.into()
             })
-            .unzip();
-        let id_to_idx: HashMap<_, _> =
-            HashMap::from_iter(col_ids.into_iter().enumerate().map(|(idx, id)| (id, idx)));
+            .collect();
         let pk_indices = table_desc
             .pk
             .iter()
-            .map(|c| id_to_idx.get(&c.column_desc.column_id).copied())
+            .map(|c| id_to_op_idx.get(&c.column_desc.column_id).copied())
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default();
         let schema = Schema { fields };
@@ -154,10 +157,38 @@ impl ToStream for LogicalScan {
     }
 
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        // TODO: add pk here
-        (
-            self.clone().into(),
-            ColIndexMapping::identical_map(self.schema().len()),
-        )
+        match self.base.pk_indices.is_empty() {
+            true => {
+                let mut col_ids = HashSet::new();
+
+                for idx in &self.required_col_idx {
+                    col_ids.insert(self.table_desc.columns[*idx].column_id);
+                }
+                let col_need_to_add = self
+                    .table_desc
+                    .pk
+                    .iter()
+                    .enumerate()
+                    .filter(|(idx, c)| !col_ids.contains(&c.column_desc.column_id))
+                    .map(|(idx, c)| idx)
+                    .collect_vec();
+                let mut required_col_idx = self.required_col_idx.clone();
+                required_col_idx.extend(col_need_to_add);
+                (
+                    Self::new(
+                        self.table_name.clone(),
+                        required_col_idx,
+                        self.table_desc.clone(),
+                        self.base.ctx.clone(),
+                    )
+                    .into(),
+                    ColIndexMapping::identical_map(self.schema().len()),
+                )
+            }
+            false => (
+                self.clone().into(),
+                ColIndexMapping::identical_map(self.schema().len()),
+            ),
+        }
     }
 }
