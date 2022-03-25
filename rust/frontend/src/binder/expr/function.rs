@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -22,34 +23,23 @@ use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        let mut inputs = vec![];
-        f.args
+        let inputs = f
+            .args
             .into_iter()
-            .try_for_each(|arg| match self.bind_function_arg(arg) {
-                Ok(exprs) => {
-                    inputs.extend(exprs.into_iter());
-                    Ok(())
-                }
-                Err(err) => Err(err),
-            })?;
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
 
         if f.name.0.len() == 1 {
             let function_name = f.name.0.get(0).unwrap();
             let agg_kind = match function_name.value.as_str() {
-                "count" => {
-                    if self.context.wildcard {
-                        Some(AggKind::RowCount)
-                    } else {
-                        Some(AggKind::Count)
-                    }
-                }
+                "count" => Some(AggKind::Count),
                 "sum" => Some(AggKind::Sum),
                 "min" => Some(AggKind::Min),
                 "max" => Some(AggKind::Max),
                 "avg" => Some(AggKind::Avg),
                 _ => None,
             };
-            self.context.wildcard = false;
             if let Some(kind) = agg_kind {
                 self.ensure_aggregate_allowed()?;
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
@@ -108,10 +98,7 @@ impl Binder {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
-            FunctionArgExpr::Wildcard => {
-                self.context.wildcard = true;
-                Ok(vec![])
-            }
+            FunctionArgExpr::Wildcard => Ok(vec![]),
         }
     }
 

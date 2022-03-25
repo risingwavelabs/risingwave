@@ -62,10 +62,6 @@ pub struct BindContext {
     pub range_of: HashMap<String, (usize, usize)>,
     // `clause` identifies in what clause we are binding.
     pub clause: Option<Clause>,
-    // `wildcard` indicates whether we have wildcard or not.
-    // Currently, we only use it help detecting count(*).
-    // TODO: we may use it report errors like sum(*).
-    pub wildcard: bool,
 }
 
 impl BindContext {
@@ -112,7 +108,6 @@ impl BindContext {
             indexs_of: HashMap::new(),
             range_of: HashMap::new(),
             clause: None,
-            wildcard: false,
         }
     }
 }

@@ -55,7 +55,6 @@ impl AggCall {
             AggKind::Avg => inputs.get(0).unwrap().return_type(),
             AggKind::Sum => DataType::Int64,
             AggKind::Count => DataType::Int64,
-            AggKind::RowCount => DataType::Int64,
             _ => todo!(),
         }; // should be derived from inputs
         Ok(AggCall {

@@ -351,7 +351,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
         // For StreamAgg, we need to insert a RowCountAgg at the beginning of `agg_calls`, and it is
         // invisible to the LogicalProject above the LogicalAgg.
         let mut agg_calls = vec![PlanAggCall {
-            agg_kind: AggKind::RowCount,
+            agg_kind: AggKind::Count,
             return_type: DataType::Int64,
             inputs: vec![],
         }];
