@@ -1,6 +1,3 @@
-use std::collections::HashMap;
-use std::iter;
-
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,6 +11,9 @@ use std::iter;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use std::collections::HashMap;
+
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
@@ -32,23 +32,13 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCa
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
 
-    iter::once(Ok(ColumnCatalog {
-        column_desc: Some(ColumnDesc {
-            column_id: 0,
-            name: ROWID_NAME.to_string(),
-            column_type: Some(DataType::Int32.to_protobuf()),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        }),
-        is_hidden: true,
-    }))
-    .chain(column_descs.into_iter().map(|col| {
-        Ok(ColumnCatalog {
+    Ok(column_descs
+        .into_iter()
+        .map(|col| ColumnCatalog {
             column_desc: Some(col),
             is_hidden: false,
         })
-    }))
-    .collect::<Result<_>>()
+        .collect_vec())
 }
 
 pub(super) async fn handle_create_source(
@@ -56,13 +46,12 @@ pub(super) async fn handle_create_source(
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    // fix: there is no schema name?
+
     let schema_name = DEFAULT_SCHEMA_NAME;
     let source_name = stmt.source_name.value.clone();
 
-    let columns = stmt.columns;
-
-    let column_catalogs = iter::once(Ok(ColumnCatalog {
+    // pre add row_id catalog
+    let mut column_catalogs = vec![ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
             name: ROWID_NAME.to_string(),
@@ -71,20 +60,7 @@ pub(super) async fn handle_create_source(
             type_name: "".to_string(),
         }),
         is_hidden: true,
-    }))
-    .chain(columns.into_iter().enumerate().map(|(idx, col)| {
-        Ok(ColumnCatalog {
-            column_desc: Some(ColumnDesc {
-                column_id: (idx + 1) as i32,
-                name: col.name.to_string(),
-                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            }),
-            is_hidden: false,
-        })
-    }))
-    .collect::<Result<_>>()?;
+    }];
 
     let (database_id, schema_id) = session
         .env()
@@ -93,22 +69,46 @@ pub(super) async fn handle_create_source(
         .check_relation_name_duplicated(session.database(), schema_name, &source_name)?;
 
     let source = match &stmt.source_schema {
-        SourceSchema::Protobuf(protobuf_schema) => StreamSourceInfo {
-            properties: HashMap::from(stmt.with_properties),
-            row_format: RowFormatType::Protobuf as i32,
-            row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-            row_id_index: 0,
-            columns: extract_protobuf_table_schema(protobuf_schema)?,
-            pk_column_ids: vec![0],
-        },
-        SourceSchema::Json => StreamSourceInfo {
-            properties: HashMap::from(stmt.with_properties),
-            row_format: RowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: 0,
-            columns: column_catalogs,
-            pk_column_ids: vec![0],
-        },
+        SourceSchema::Protobuf(protobuf_schema) => {
+            column_catalogs.append(&mut extract_protobuf_table_schema(protobuf_schema)?);
+            StreamSourceInfo {
+                properties: HashMap::from(stmt.with_properties),
+                row_format: RowFormatType::Protobuf as i32,
+                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
+                row_id_index: 0,
+                columns: column_catalogs,
+                pk_column_ids: vec![0],
+            }
+        }
+        SourceSchema::Json => {
+            column_catalogs.append(
+                &mut stmt
+                    .columns
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, col)| {
+                        Ok(ColumnCatalog {
+                            column_desc: Some(ColumnDesc {
+                                column_id: (idx + 1) as i32,
+                                name: col.name.to_string(),
+                                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
+                                field_descs: vec![],
+                                type_name: "".to_string(),
+                            }),
+                            is_hidden: false,
+                        })
+                    })
+                    .collect::<Result<Vec<ColumnCatalog>>>()?,
+            );
+            StreamSourceInfo {
+                properties: HashMap::from(stmt.with_properties),
+                row_format: RowFormatType::Json as i32,
+                row_schema_location: "".to_string(),
+                row_id_index: 0,
+                columns: column_catalogs,
+                pk_column_ids: vec![0],
+            }
+        }
     };
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
