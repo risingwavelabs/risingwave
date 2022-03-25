@@ -139,7 +139,7 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_materialized_source(
         &self,
-        mut source: ProstSource,
+        source: ProstSource,
         mut table: ProstTable,
         plan: StreamNode,
     ) -> Result<()> {
@@ -150,7 +150,7 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, mut source: ProstSource) -> Result<()> {
+    async fn create_source(&self, source: ProstSource) -> Result<()> {
         self.create_source_inner(source).map(|_| ())
     }
 
