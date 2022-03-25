@@ -101,7 +101,7 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
     T: FromStr,
-    <T as FromStr>::Err: std::fmt::Display
+    <T as FromStr>::Err: std::fmt::Display,
 {
     elem.parse().map_err(|e| {
         RwError::from(InternalError(format!(
@@ -168,7 +168,7 @@ pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
 pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
-    <T1 as TryInto<T2>>::Error: std::fmt::Display
+    <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
     elem.try_into().map_err(|e| {
         RwError::from(InternalError(format!(
