@@ -57,7 +57,7 @@ pub mod tikv;
 #[path = "tikv_mock.rs"]
 pub mod tikv;
 
-pub use keyspace::{Keyspace, Segment};
+pub use keyspace::Keyspace;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 
