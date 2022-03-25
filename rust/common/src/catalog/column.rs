@@ -49,7 +49,11 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
-
+impl From<ColumnId> for i32 {
+    fn from(id: ColumnId) -> i32 {
+        id.0
+    }
+}
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
@@ -64,6 +68,7 @@ pub struct ColumnDesc {
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
 }
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
@@ -181,6 +186,18 @@ impl From<ProstColumnDesc> for ColumnDesc {
 impl From<&ProstColumnDesc> for ColumnDesc {
     fn from(prost: &ProstColumnDesc) -> Self {
         prost.clone().into()
+    }
+}
+
+impl From<&ColumnDesc> for ProstColumnDesc {
+    fn from(c: &ColumnDesc) -> Self {
+        Self {
+            column_type: c.data_type.to_protobuf().into(),
+            column_id: c.column_id.into(),
+            name: c.name.clone(),
+            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
+            type_name: c.type_name.clone(),
+        }
     }
 }
 

@@ -236,11 +236,10 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::rc::Rc;
     use std::sync::Arc;
 
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::types::DataType;
     use risingwave_pb::common::{
         HostAddress, ParallelUnit, ParallelUnitType, WorkerNode, WorkerType,
@@ -268,18 +267,31 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let fields = vec![
-            Field::unnamed(DataType::Int32),
-            Field::unnamed(DataType::Float64),
-        ];
+        let ctx = QueryContext::mock().await;
+
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
-            TableId::default(),
-            vec![0.into(), 1.into()],
-            Schema {
-                fields: fields.clone(),
-            },
+            vec![0, 1],
+            Rc::new(TableDesc {
+                table_id: 0.into(),
+                pk: vec![],
+                columns: vec![
+                    ColumnDesc {
+                        data_type: DataType::Int32,
+                        column_id: 0.into(),
+                        name: "a".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
+                    ColumnDesc {
+                        data_type: DataType::Float64,
+                        column_id: 1.into(),
+                        name: "b".to_string(),
+                        type_name: String::new(),
+                        field_descs: vec![],
+                    },
+                ],
+            }),
             ctx,
         ))
         .into();

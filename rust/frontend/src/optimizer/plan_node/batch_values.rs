@@ -41,7 +41,7 @@ impl BatchValues {
             Distribution::Broadcast,
             Order::any().clone(),
         );
-        BatchValues { logical, base }
+        BatchValues { base, logical }
     }
 }
 

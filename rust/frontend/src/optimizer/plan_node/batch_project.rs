@@ -57,7 +57,7 @@ impl BatchProject {
             distribution,
             Order::any().clone(),
         );
-        BatchProject { logical, base }
+        BatchProject { base, logical }
     }
 }
 
@@ -90,6 +90,34 @@ impl ToDistributedBatch for BatchProject {
             .input()
             .to_distributed_with_required(self.input_order_required(), Distribution::any());
         self.clone_with_input(new_input).into()
+    }
+    fn to_distributed_with_required(
+        &self,
+        required_order: &Order,
+        required_dist: &Distribution,
+    ) -> PlanRef {
+        let o2i =
+            LogicalProject::o2i_col_mapping(self.input().schema().len(), self.logical.exprs());
+        let input_dist = match required_dist {
+            Distribution::HashShard(dists) => {
+                let input_dists = dists
+                    .iter()
+                    .map(|hash_col| o2i.try_map(*hash_col))
+                    .collect::<Option<Vec<_>>>();
+                match input_dists {
+                    Some(input_dists) => Distribution::HashShard(input_dists),
+                    None => Distribution::AnyShard,
+                }
+            }
+            dist => dist.clone(),
+        };
+        let new_input = self
+            .input()
+            .to_distributed_with_required(required_order, &input_dist);
+        let new_logical = self.logical.clone_with_input(new_input);
+        let batch_plan = BatchProject::new(new_logical);
+        let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into());
+        required_dist.enforce_if_not_satisfies(batch_plan, required_order)
     }
 }
 

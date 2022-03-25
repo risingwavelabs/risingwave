@@ -31,9 +31,9 @@ use self::plan_node::LogicalProject;
 use self::rule::*;
 use crate::expr::InputRef;
 
-/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with LogicalNode and
-/// required distribution and order. And `PlanRoot` can generate corresponding streaming or batch
-/// Plan with optimization. the required Order and Distribution columns might be more than the
+/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with [`LogicalNode`]
+/// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
+/// batch Plan with optimization. the required Order and Distribution columns might be more than the
 /// output columns. for example:
 /// ```SQL
 ///    select v1 from t order by id;
@@ -89,8 +89,9 @@ impl PlanRoot {
         &self.schema
     }
 
-    /// Transform the PlanRoot back to a PlanRef suitable to be used as a subplan, for example as
-    /// insert source or subquery. This ignores Order but retains post-Order pruning (`out_fields`).
+    /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
+    /// example as insert source or subquery. This ignores Order but retains post-Order pruning
+    /// (`out_fields`).
     pub fn as_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
             return self.logical_plan;
@@ -164,7 +165,7 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// Iptimize and generate a create materialize view plan.
+    /// Optimize and generate a create materialize view plan.
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
@@ -189,34 +190,29 @@ impl PlanRoot {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::catalog::{ColumnId, TableId};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::session::QueryContext;
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        let scan = LogicalScan::create(
-            "test_table".into(),
-            TableId::new(3),
-            vec![ColumnId::new(2), ColumnId::new(7)],
+        let ctx = QueryContext::mock().await;
+        let values = LogicalValues::new(
+            vec![],
             Schema::new(vec![
                 Field::with_name(DataType::Int32, "v1"),
                 Field::with_name(DataType::Varchar, "v2"),
             ]),
             ctx,
         )
-        .unwrap();
+        .into();
         let out_fields = FixedBitSet::with_capacity_and_blocks(2, [1]);
         let root = PlanRoot::new(
-            scan,
+            values,
             Distribution::any().clone(),
             Order::any().clone(),
             out_fields,

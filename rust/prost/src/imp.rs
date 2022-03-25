@@ -22,6 +22,14 @@ impl<'a> TryInto<SocketAddr> for &'a HostAddress {
     }
 }
 
+impl TryInto<SocketAddr> for HostAddress {
+    type Error = AddrParseError;
+
+    fn try_into(self) -> Result<SocketAddr, AddrParseError> {
+        self.to_socket_addr()
+    }
+}
+
 impl crate::meta::Table {
     pub fn is_materialized_view(&self) -> bool {
         matches!(

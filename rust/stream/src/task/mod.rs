@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 
 use futures::channel::mpsc::{Receiver, Sender};
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::addr::HostAddr;
 
 use crate::executor::Message;
 
@@ -68,13 +68,13 @@ pub struct SharedContext {
     /// It is used to test whether an actor is local or not,
     /// thus determining whether we should setup local channel only or remote rpc connection
     /// between two actors/actors.
-    pub(crate) addr: SocketAddr,
+    pub(crate) addr: HostAddr,
 
     pub(crate) barrier_manager: Mutex<LocalBarrierManager>,
 }
 
 impl SharedContext {
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(addr: HostAddr) -> Self {
         Self {
             channel_map: Mutex::new(HashMap::new()),
             addr,
@@ -86,7 +86,7 @@ impl SharedContext {
     pub fn for_test() -> Self {
         Self {
             channel_map: Mutex::new(HashMap::new()),
-            addr: *LOCAL_TEST_ADDR,
+            addr: LOCAL_TEST_ADDR.clone(),
             barrier_manager: Mutex::new(LocalBarrierManager::for_test()),
         }
     }

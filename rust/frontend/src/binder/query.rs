@@ -22,7 +22,7 @@ use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
-/// An example of its relationship with BoundSetExpr and BoundSelect can be found here: https://bit.ly/3GQwgPz
+/// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
 #[derive(Debug)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,

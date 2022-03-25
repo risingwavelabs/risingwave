@@ -16,13 +16,14 @@ use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement};
 
 use crate::session::{QueryContext, SessionImpl};
 
 mod create_mv;
 mod create_source;
 pub mod create_table;
+pub mod drop_mv;
 pub mod drop_table;
 mod explain;
 mod flush;
@@ -45,9 +46,21 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         // Since table and source both have source info, use same handler.
         Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
         Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
-        Statement::Drop(drop_statement) => {
-            let table_object_name = ObjectName(vec![drop_statement.name]);
+        Statement::Drop(DropStatement {
+            object_type: ObjectType::Table,
+            name,
+            ..
+        }) => {
+            let table_object_name = ObjectName(vec![name]);
             drop_table::handle_drop_table(context, table_object_name).await
+        }
+        Statement::Drop(DropStatement {
+            object_type: ObjectType::MaterializedView,
+            name,
+            ..
+        }) => {
+            let table_object_name = ObjectName(vec![name]);
+            drop_mv::handle_drop_mv(context, table_object_name).await
         }
         Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
             query::handle_query(context, stmt).await

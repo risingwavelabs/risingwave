@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::error::Error;
 use std::fmt::Formatter;
+use std::marker::Sync;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,6 +25,7 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -38,44 +39,70 @@ use crate::handler::handle;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
+use crate::scheduler::query_manager::QueryManager;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
 pub struct QueryContext {
     pub session_ctx: Arc<SessionImpl>,
-    pub next_id: i32,
+    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    pub next_id: AtomicI32,
 }
-/// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
-/// so we use `RefCell` here.
-pub type QueryContextRef = Rc<RefCell<QueryContext>>;
+
+#[derive(Clone, Debug)]
+pub struct QueryContextRef {
+    inner: Arc<QueryContext>,
+}
+
+impl !Sync for QueryContextRef {}
+
+impl From<QueryContext> for QueryContextRef {
+    fn from(inner: QueryContext) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+}
+
+impl QueryContextRef {
+    pub fn inner(&self) -> &QueryContext {
+        &self.inner
+    }
+
+    pub fn next_plan_node_id(&self) -> PlanNodeId {
+        // It's safe to use `fetch_add` and `Relaxed` ordering since we have marked
+        // `QueryContextRef` not `Sync`.
+        let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        PlanNodeId(next_id)
+    }
+}
 
 impl QueryContext {
     pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
         Self {
             session_ctx,
-            next_id: 0,
+            next_id: AtomicI32::new(0),
         }
-    }
-
-    pub fn get_id(&mut self) -> PlanNodeId {
-        let ret = PlanNodeId(self.next_id);
-        self.next_id += 1;
-        ret
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    pub async fn mock() -> Self {
+    pub async fn mock() -> QueryContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
-            next_id: 0,
+            next_id: AtomicI32::new(0),
         }
+        .into()
     }
 }
 
 impl std::fmt::Debug for QueryContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QueryContext {{ current id = {} }}", self.next_id)
+        write!(
+            f,
+            "QueryContext {{ current id = {} }}",
+            self.next_id.load(Ordering::Relaxed)
+        )
     }
 }
 
@@ -97,6 +124,7 @@ pub struct FrontendEnv {
     catalog_writer: Arc<dyn CatalogWriter>,
     catalog_reader: CatalogReader,
     worker_node_manager: Arc<WorkerNodeManager>,
+    query_manager: QueryManager,
 }
 
 impl FrontendEnv {
@@ -114,11 +142,13 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
+        let query_manager = QueryManager::new(worker_node_manager.clone());
         Self {
             catalog_writer,
             catalog_reader,
             worker_node_manager,
             meta_client: Arc::new(MockFrontendMetaClient {}),
+            query_manager,
         }
     }
 
@@ -129,10 +159,17 @@ impl FrontendEnv {
         let config = load_config(opts);
         tracing::info!("Starting compute node with config {:?}", config);
 
-        let host = opts.host.parse().unwrap();
-
+        // TODO: refactor this when we have a separate port option
+        let frontend_address: HostAddr = opts
+            .client_address
+            .as_ref()
+            .unwrap_or(&opts.host)
+            .parse()
+            .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
-        meta_client.register(host, WorkerType::Frontend).await?;
+        meta_client
+            .register(frontend_address.clone(), WorkerType::Frontend)
+            .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -148,10 +185,11 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
+        let query_manager = QueryManager::new(worker_node_manager.clone());
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
-            host,
+            frontend_address.clone(),
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
@@ -159,7 +197,7 @@ impl FrontendEnv {
         .await;
         let observer_join_handle = observer_manager.start().await;
 
-        meta_client.activate(host).await?;
+        meta_client.activate(frontend_address.clone()).await?;
 
         Ok((
             Self {
@@ -167,6 +205,7 @@ impl FrontendEnv {
                 catalog_writer,
                 worker_node_manager,
                 meta_client: Arc::new(FrontendMetaClientImpl(meta_client)),
+                query_manager,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -190,6 +229,14 @@ impl FrontendEnv {
 
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
         &*self.meta_client
+    }
+
+    pub fn meta_client_ref(&self) -> Arc<dyn FrontendMetaClient> {
+        self.meta_client.clone()
+    }
+
+    pub fn query_manager(&self) -> &QueryManager {
+        &self.query_manager
     }
 }
 
@@ -313,3 +360,16 @@ impl Session for SessionImpl {
 //         meta.stop().await;
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use assert_impl::assert_impl;
+
+    use crate::session::QueryContextRef;
+
+    #[test]
+    fn check_query_context_ref() {
+        assert_impl!(Send: QueryContextRef);
+        assert_impl!(!Sync: QueryContextRef);
+    }
+}

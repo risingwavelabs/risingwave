@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
@@ -64,7 +62,8 @@ pub struct MvInfo {
 }
 
 impl MvInfo {
-    /// Generate MvInfo with the table name. Note that this cannot be used to actually create an MV.
+    /// Generate [`MvInfo`] with the table name. Note that this cannot be used to actually create an
+    /// MV.
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {
             table_name: name.into(),
@@ -182,7 +181,7 @@ pub fn gen_create_mv_plan(
         // The pk of the corresponding table of MV is order column + upstream pk
         pk_column_ids,
         pk_orders: pk_orders.into_iter().map(|x| x.into()).collect(),
-        dependent_relations: vec![],
+        dependent_relations: vec![], // placeholder for meta
         optional_associated_source_id: None,
     };
 
@@ -197,7 +196,7 @@ pub async fn handle_create_mv(
     let session = context.session_ctx.clone();
 
     let (table, plan) = {
-        let mut planner = Planner::new(Rc::new(RefCell::new(context)));
+        let mut planner = Planner::new(context.into());
 
         let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
         let (database_id, schema_id) = session

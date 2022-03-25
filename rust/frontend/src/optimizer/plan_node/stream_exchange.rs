@@ -41,7 +41,7 @@ impl StreamExchange {
             dist,
             input.append_only(),
         );
-        StreamExchange { input, base }
+        StreamExchange { base, input }
     }
 }
 

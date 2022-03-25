@@ -33,6 +33,7 @@ pub enum StatementType {
     CREATE_MATERIALIZED_VIEW,
     CREATE_SOURCE,
     DROP_TABLE,
+    DROP_MATERIALIZED_VIEW,
     DROP_STREAM,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.

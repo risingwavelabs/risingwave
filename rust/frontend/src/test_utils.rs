@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -25,6 +23,7 @@ use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_meta::manager::SchemaId;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -42,8 +41,7 @@ use crate::planner::Planner;
 use crate::session::{FrontendEnv, QueryContext, SessionImpl};
 use crate::FrontendOpts;
 
-/// LocalFrontend is an embedded frontend without starting meta and without
-/// starting frontend as a tcp server.
+/// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
     env: FrontendEnv,
@@ -86,12 +84,10 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Ok(
-                Planner::new(Rc::new(RefCell::new(QueryContext::new(session))))
-                    .plan(bound)
-                    .unwrap()
-                    .gen_batch_query_plan(),
-            )
+            Ok(Planner::new(QueryContext::new(session).into())
+                .plan(bound)
+                .unwrap()
+                .gen_batch_query_plan())
         } else {
             unreachable!()
         }
@@ -130,17 +126,6 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_source(
-        &self,
-        source: ProstSource,
-        table: ProstTable,
-        plan: StreamNode,
-    ) -> Result<()> {
-        self.create_source(source).await?;
-        self.create_materialized_view(table, plan).await?;
-        Ok(())
-    }
-
     async fn create_materialized_view(
         &self,
         mut table: ProstTable,
@@ -152,11 +137,21 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_source(&self, mut source: ProstSource) -> Result<()> {
-        source.id = self.gen_id();
-        self.catalog.write().create_source(source.clone());
-        self.add_id(source.id, source.database_id, source.schema_id);
+    async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        mut table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
+        let source_id = self.create_source_inner(source)?;
+        table.optional_associated_source_id =
+            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
+        self.create_materialized_view(table, plan).await?;
         Ok(())
+    }
+
+    async fn create_source(&self, source: ProstSource) -> Result<()> {
+        self.create_source_inner(source).map(|_| ())
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -168,6 +163,15 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(table_id.table_id);
+        self.drop_id(table_id.table_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, table_id);
         Ok(())
     }
 }
@@ -202,6 +206,15 @@ impl MockCatalogWriter {
 
     fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
         self.id_to_schema_id.write().remove(&id).unwrap()
+    }
+}
+
+impl MockCatalogWriter {
+    fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
+        source.id = self.gen_id();
+        self.catalog.write().create_source(source.clone());
+        self.add_id(source.id, source.database_id, source.schema_id);
+        Ok(source.id)
     }
 }
 

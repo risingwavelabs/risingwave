@@ -82,15 +82,22 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
 
+    use crate::handler::create_source::tests::create_proto_file;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
     async fn test_show_source_handler() {
-        let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
+        let proto_file = create_proto_file();
+        let sql = format!(
+            r#"CREATE SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+            proto_file.path().to_str().unwrap()
+        );
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "show table t";
+        let sql = "show source t";
         let pg_response = frontend.run_sql(sql).await.unwrap();
 
         let columns = pg_response
@@ -104,11 +111,15 @@ mod tests {
             .collect::<HashMap<&str, &str>>();
 
         let expected_columns = maplit::hashmap! {
-            "v1" => "Int16",
-            "v2" => "Int32",
-            "v3" => "Int64",
-            "v4" => "Float64",
-            "v5" => "Float64",
+            "id" => "Int32",
+            "country.zipcode" => "Varchar",
+            "zipcode" => "Int64",
+            "country.city.address" => "Varchar",
+            "country.address" => "Varchar",
+            "country.city" => ".test.City",
+            "country.city.zipcode" => "Varchar",
+            "rate" => "Float32",
+            "country" => ".test.Country",
         };
 
         assert_eq!(columns, expected_columns);

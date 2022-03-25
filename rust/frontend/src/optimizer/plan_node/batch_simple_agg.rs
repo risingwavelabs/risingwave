@@ -15,6 +15,8 @@
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
@@ -35,7 +37,7 @@ impl BatchSimpleAgg {
             Distribution::any().clone(),
             Order::any().clone(),
         );
-        BatchSimpleAgg { logical, base }
+        BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -76,4 +78,15 @@ impl ToDistributedBatch for BatchSimpleAgg {
     }
 }
 
-impl ToBatchProst for BatchSimpleAgg {}
+impl ToBatchProst for BatchSimpleAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::SortAgg(SortAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            group_keys: vec![],
+        })
+    }
+}

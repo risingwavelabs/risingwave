@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_rpc_client::{MetaClient, NotificationStream};
@@ -40,7 +40,7 @@ pub(crate) struct ObserverManager {
 impl ObserverManager {
     pub async fn new(
         client: MetaClient,
-        addr: SocketAddr,
+        addr: HostAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,

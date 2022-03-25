@@ -19,6 +19,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::Condition;
@@ -40,7 +41,7 @@ impl BatchFilter {
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );
-        BatchFilter { logical, base }
+        BatchFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {

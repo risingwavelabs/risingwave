@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::WithSchema;
 use crate::utils::Condition;
@@ -44,7 +45,7 @@ impl StreamFilter {
             dist,
             logical.input().append_only(),
         );
-        StreamFilter { logical, base }
+        StreamFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {

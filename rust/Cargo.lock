@@ -74,6 +74,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 
 [[package]]
+name = "assert-impl"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3464313de0c867016e3e69d7e1e9ae3499bcc4c18e12283d381359ed38b5b9e"
+
+[[package]]
 name = "assert-json-diff"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1497,11 +1503,33 @@ dependencies = [
 [[package]]
 name = "futures-async-stream"
 version = "0.2.5"
-source = "git+https://github.com/taiki-e/futures-async-stream?rev=944f407#944f407c90f5ec86f4d90fdca1dc0cf6b20d47dc"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b492e1173b06145d9324d105cca85fb9249f48676800a2c085138f0d9bae19e6"
 dependencies = [
- "futures-async-stream-macro",
+ "futures-async-stream-macro 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-core",
  "pin-project",
+]
+
+[[package]]
+name = "futures-async-stream"
+version = "0.2.5"
+source = "git+https://github.com/taiki-e/futures-async-stream?rev=944f407#944f407c90f5ec86f4d90fdca1dc0cf6b20d47dc"
+dependencies = [
+ "futures-async-stream-macro 0.2.5 (git+https://github.com/taiki-e/futures-async-stream?rev=944f407)",
+ "futures-core",
+ "pin-project",
+]
+
+[[package]]
+name = "futures-async-stream-macro"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6716fcdbbcebe690099a18cad71b61fbba10a0a3f8a8c0c1ed36583b42b06590"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3667,6 +3695,7 @@ dependencies = [
 name = "risingwave_frontend"
 version = "0.1.3"
 dependencies = [
+ "assert-impl",
  "async-trait",
  "byteorder",
  "bytes",
@@ -3674,6 +3703,8 @@ dependencies = [
  "downcast-rs",
  "dyn-clone",
  "fixedbitset 0.4.1",
+ "futures 0.3.21",
+ "futures-async-stream 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools",
  "lazy_static",
  "log",
@@ -3891,13 +3922,25 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "0.1.3"
 dependencies = [
- "anyhow",
  "itertools",
  "log",
  "matches",
  "risingwave_common",
+ "risingwave_sqlparser_test_runner",
  "serde",
  "serde_json",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_sqlparser_test_runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "risingwave_sqlparser",
+ "serde_yaml",
+ "tempfile",
  "walkdir",
  "workspace-hack",
 ]
@@ -3973,7 +4016,7 @@ dependencies = [
  "either",
  "farmhash",
  "futures 0.3.21",
- "futures-async-stream",
+ "futures-async-stream 0.2.5 (git+https://github.com/taiki-e/futures-async-stream?rev=944f407)",
  "hyper",
  "itertools",
  "lazy_static",

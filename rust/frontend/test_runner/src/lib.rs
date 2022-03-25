@@ -16,8 +16,6 @@
 #![feature(let_chains)]
 
 mod resolve_id;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
@@ -156,7 +154,7 @@ impl TestCase {
                         if result.is_some() {
                             panic!("two queries in one test case");
                         }
-                        let ret = self.apply_query(&stmt, Rc::new(RefCell::new(context)))?;
+                        let ret = self.apply_query(&stmt, context.into())?;
                         if do_check_result {
                             check_result(self, &ret)?;
                         }
@@ -178,7 +176,7 @@ impl TestCase {
     }
 
     fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
-        let session = context.borrow().session_ctx.clone();
+        let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {
@@ -250,7 +248,7 @@ impl TestCase {
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
                 ret.stream_plan_proto = Some(
-                    serde_yaml::to_string(&stream_plan.to_stream_prost_identity(false))?
+                    serde_yaml::to_string(&stream_plan.to_stream_prost_auto_fields(false))?
                         + &serde_yaml::to_string(&table)?,
                 );
             }

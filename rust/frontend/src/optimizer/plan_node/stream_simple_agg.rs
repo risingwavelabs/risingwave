@@ -39,7 +39,7 @@ impl StreamSimpleAgg {
             Distribution::any().clone(),
             false,
         );
-        StreamSimpleAgg { logical, base }
+        StreamSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()

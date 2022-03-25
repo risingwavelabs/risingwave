@@ -39,7 +39,7 @@ pub struct PlanBase {
 }
 impl PlanBase {
     pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
-        let id = ctx.borrow_mut().get_id();
+        let id = ctx.next_plan_node_id();
         Self {
             id,
             ctx,
@@ -59,7 +59,7 @@ impl PlanBase {
         append_only: bool,
     ) -> Self {
         // assert!(!pk_indices.is_empty()); TODO: reopen it when ensure the pk for stream op
-        let id = ctx.borrow_mut().get_id();
+        let id = ctx.next_plan_node_id();
         Self {
             id,
             ctx,
@@ -76,7 +76,7 @@ impl PlanBase {
         dist: Distribution,
         order: Order,
     ) -> Self {
-        let id = ctx.borrow_mut().get_id();
+        let id = ctx.next_plan_node_id();
         Self {
             id,
             ctx,

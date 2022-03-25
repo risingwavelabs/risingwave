@@ -12,36 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc, OrderType};
-use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::plan::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
+use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::QueryContext;
+use crate::session::{QueryContext, QueryContextRef, SessionImpl};
 
 pub const ROWID_NAME: &str = "_row_id";
 
-pub async fn handle_create_table(
-    context: QueryContext,
+pub fn gen_create_table_plan(
+    session: &SessionImpl,
+    context: QueryContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-) -> Result<PgResponse> {
-    let session = context.session_ctx.clone();
-
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let (database_id, schema_id) = session
         .env()
@@ -51,6 +49,7 @@ pub async fn handle_create_table(
 
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
+        // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
@@ -58,6 +57,7 @@ pub async fn handle_create_table(
             field_descs: vec![],
             type_name: "".to_string(),
         });
+        // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
@@ -70,66 +70,12 @@ pub async fn handle_create_table(
         column_descs
     };
 
-    let plan = {
-        let context = Rc::new(RefCell::new(context));
-
-        let source_node = {
-            let (columns, fields) = column_descs
-                .iter()
-                .map(|c| {
-                    (
-                        c.column_id,
-                        Field::with_name(c.data_type.clone(), c.name.clone()),
-                    )
-                })
-                .unzip();
-            let schema = Schema::new(fields);
-            let logical_scan = LogicalScan::new(
-                table_name.clone(),
-                TableId::placeholder(),
-                columns,
-                schema,
-                context.clone(),
-            );
-            StreamSource::new(logical_scan, SourceType::Table)
-        };
-
-        let exchange_node =
-            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
-
-        let materialize_node = {
-            StreamMaterialize::new(
-                context,
-                exchange_node.into(),
-                vec![
-                    // RowId column as key
-                    FieldOrder {
-                        index: 0,
-                        direct: Direction::Asc,
-                    },
-                ],
-                column_descs.iter().map(|x| x.column_id).collect(),
-            )
-        };
-
-        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
-    };
-
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
-
-    let columns = column_descs
+    let columns_catalog = column_descs
         .into_iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
-            column_desc: ProstColumnDesc {
-                column_type: c.data_type.to_protobuf().into(),
-                column_id: c.column_id.get_id(),
-                name: c.name,
-                ..Default::default()
-            }
-            .into(),
-            is_hidden: i == 0,
+            column_desc: c.to_protobuf().into(),
+            is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
 
@@ -139,9 +85,40 @@ pub async fn handle_create_table(
         database_id,
         name: table_name.clone(),
         info: Info::TableSource(TableSourceInfo {
-            columns: columns.clone(),
+            columns: columns_catalog.clone(),
         })
         .into(),
+    };
+
+    // Manually assemble the materialization plan for the table.
+    let plan: PlanRef = {
+        let source_node = StreamSource::create(
+            context.clone(),
+            vec![0], // row id column as pk
+            source.clone(),
+        );
+
+        let exchange_node = StreamExchange::new(
+            source_node.into(),
+            Distribution::HashShard(vec![0]), // hash shard on the row id column
+        );
+
+        let materialize_node = {
+            StreamMaterialize::new(
+                context,
+                exchange_node.into(),
+                vec![FieldOrder {
+                    index: 0, // row id column as key
+                    direct: Direction::Asc,
+                }],
+                columns_catalog
+                    .iter()
+                    .map(|x| x.column_desc.as_ref().unwrap().column_id.into())
+                    .collect(),
+            )
+        };
+
+        Rc::new(materialize_node)
     };
 
     let table = ProstTable {
@@ -149,12 +126,33 @@ pub async fn handle_create_table(
         schema_id,
         database_id,
         name: table_name,
-        columns,
-        pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending as i32],
-        dependent_relations: vec![],
-        optional_associated_source_id: None,
+        columns: columns_catalog,
+        pk_column_ids: vec![0], // row id column as pk
+        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+        dependent_relations: vec![],         // placeholder for meta
+        optional_associated_source_id: None, // placeholder for meta
     };
+
+    Ok((plan, source, table))
+}
+
+pub async fn handle_create_table(
+    context: QueryContext,
+    table_name: ObjectName,
+    columns: Vec<ColumnDef>,
+) -> Result<PgResponse> {
+    let session = context.session_ctx.clone();
+
+    let (plan, source, table) = {
+        let (plan, source, table) =
+            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let plan = plan.to_stream_prost();
+
+        (plan, source, table)
+    };
+
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

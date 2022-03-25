@@ -1779,7 +1779,7 @@ impl Parser {
     pub fn parse_data_type(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
-                Keyword::BOOLEAN => Ok(DataType::Boolean),
+                Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
                 Keyword::FLOAT => Ok(DataType::Float(self.parse_optional_precision()?)),
                 Keyword::REAL => Ok(DataType::Real),
                 Keyword::DOUBLE => {
@@ -2340,7 +2340,7 @@ impl Parser {
 
     // If first word is table or source, return show table or show source
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
-        println!("{:?}",self.peek_token());
+        println!("{:?}", self.peek_token());
         if let Token::Word(w) = self.peek_token() {
             match w.keyword {
                 Keyword::TABLE => {
