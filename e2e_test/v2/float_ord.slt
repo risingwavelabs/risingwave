@@ -40,11 +40,6 @@ insert into t values (('-NaN')::real);
 statement ok
 flush;
 
-query I
-select count(*) from t;
-----
-8
-
 query TI rowsort
 select v1, count(*) from t group by v1;
 ----
