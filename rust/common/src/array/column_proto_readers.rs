@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::io::{Cursor, Read};
+use std::io::{self, Cursor, Read};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
@@ -20,13 +20,14 @@ use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, NaiveDateArrayBuilder,
-    NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, IntervalArrayBuilder,
+    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::types::interval::IntervalUnit;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
@@ -100,6 +101,22 @@ fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper
     }
 }
 
+fn read_intervalunit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
+    {
+        let months = cursor.read_i32::<BigEndian>()?;
+        let days = cursor.read_i32::<BigEndian>()?;
+        let ms = cursor.read_i64::<BigEndian>()?;
+
+        Ok(IntervalUnit::new(months, days, ms))
+    }
+    .map_err(|e: io::Error| {
+        RwError::from(InternalError(format!(
+            "Failed to read IntervalUnit from buffer: {}",
+            e
+        )))
+    })
+}
+
 macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
         paste! {
@@ -131,6 +148,7 @@ macro_rules! read_one_value_array {
 }
 
 read_one_value_array! {
+    { IntervalUnit, IntervalArrayBuilder },
     { bool, BoolArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
