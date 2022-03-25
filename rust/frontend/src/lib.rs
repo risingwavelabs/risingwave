@@ -24,6 +24,7 @@
 #![deny(unused_must_use)]
 #![feature(map_try_insert)]
 #![feature(let_chains)]
+#![feature(negative_impls)]
 
 #[macro_use]
 pub mod catalog;

@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
@@ -198,7 +196,7 @@ pub async fn handle_create_mv(
     let session = context.session_ctx.clone();
 
     let (table, plan) = {
-        let mut planner = Planner::new(Rc::new(RefCell::new(context)));
+        let mut planner = Planner::new(context.into());
 
         let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
         let (database_id, schema_id) = session

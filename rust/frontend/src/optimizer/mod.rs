@@ -190,8 +190,6 @@ impl PlanRoot {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
@@ -203,7 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let scan = LogicalScan::create(
             "test_table".into(),
             TableId::new(3),

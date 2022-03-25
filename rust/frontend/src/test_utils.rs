@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::error::Error;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -85,12 +83,10 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Ok(
-                Planner::new(Rc::new(RefCell::new(QueryContext::new(session))))
-                    .plan(bound)
-                    .unwrap()
-                    .gen_batch_query_plan(),
-            )
+            Ok(Planner::new(QueryContext::new(session).into())
+                .plan(bound)
+                .unwrap()
+                .gen_batch_query_plan())
         } else {
             unreachable!()
         }

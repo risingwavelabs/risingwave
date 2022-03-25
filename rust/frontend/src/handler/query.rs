@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -42,7 +39,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
 
     let (plan, pg_descs) = {
         // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-        let plan = Planner::new(Rc::new(RefCell::new(context)))
+        let plan = Planner::new(context.into())
             .plan(bound)?
             .gen_batch_query_plan();
 

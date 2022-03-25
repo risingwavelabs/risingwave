@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
@@ -31,10 +28,9 @@ pub(super) fn handle_explain(
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
-    let context = Rc::new(RefCell::new(context));
-    let session = context.borrow().session_ctx.clone();
+    let session = context.session_ctx.clone();
     // bind, plan, optimize, and serialize here
-    let mut planner = Planner::new(context);
+    let mut planner = Planner::new(context.into());
 
     let plan = match stmt {
         Statement::CreateView {
