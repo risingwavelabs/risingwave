@@ -42,7 +42,7 @@ pub async fn handle_drop_mv(context: QueryContext, table_name: ObjectName) -> Re
     catalog_writer.drop_materialized_view(table_id).await?;
 
     Ok(PgResponse::new(
-        StatementType::DROP_TABLE,
+        StatementType::DROP_MATERIALIZED_VIEW,
         0,
         vec![],
         vec![],
