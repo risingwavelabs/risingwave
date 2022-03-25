@@ -2338,15 +2338,29 @@ impl Parser {
         }
     }
 
+    // If first word is table or source, return show table or show source
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
-        if self.parse_keyword(Keyword::TABLE) {
-            let table_name = self.parse_object_name()?;
-            Ok(Statement::ShowTable { name: table_name })
-        } else {
-            Ok(Statement::ShowVariable {
-                variable: self.parse_identifiers()?,
-            })
+        println!("{:?}",self.peek_token());
+        if let Token::Word(w) = self.peek_token() {
+            match w.keyword {
+                Keyword::TABLE => {
+                    self.next_token();
+                    return Ok(Statement::ShowTable {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                Keyword::SOURCE => {
+                    self.next_token();
+                    return Ok(Statement::ShowSource {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                _ => {}
+            }
         }
+        Ok(Statement::ShowVariable {
+            variable: self.parse_identifiers()?,
+        })
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {

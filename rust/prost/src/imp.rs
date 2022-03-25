@@ -59,6 +59,18 @@ impl crate::catalog::Source {
             crate::catalog::source::Info::TableSource(_)
         )
     }
+
+    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+        let catalogs = match self.get_info().unwrap() {
+            crate::catalog::source::Info::StreamSource(info) => &info.columns,
+            crate::catalog::source::Info::TableSource(info) => &info.columns,
+        };
+        catalogs
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap())
+            .collect()
+    }
 }
 
 impl crate::plan::ColumnDesc {

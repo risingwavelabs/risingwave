@@ -743,6 +743,11 @@ pub enum Statement {
         /// Table name
         name: ObjectName,
     },
+    /// SHOW SOURCE
+    ShowSource {
+        /// Table name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -879,6 +884,10 @@ impl fmt::Display for Statement {
             }
             Statement::ShowTable { name } => {
                 write!(f, "SHOW TABLE {}", name)?;
+                Ok(())
+            }
+            Statement::ShowSource { name } => {
+                write!(f, "SHOW SOURCE {}", name)?;
                 Ok(())
             }
             Statement::Insert {

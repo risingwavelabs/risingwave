@@ -24,24 +24,28 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::binder::Binder;
 use crate::session::QueryContext;
 
-pub async fn handle_show_table(
+pub async fn handle_show_source(
     context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
+    let (schema_name, source_name) = Binder::resolve_table_name(table_name)?;
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
-    let catalogs = catalog_reader
-        .get_table_by_name(session.database(), &schema_name, &table_name)?
-        .columns();
+    // Get column descs from source info
+    let columns: Vec<ColumnDesc> = catalog_reader
+        .get_source_by_name(session.database(), &schema_name, &source_name)?
+        .get_column_descs()
+        .iter()
+        .map(|c| c.into())
+        .collect_vec();
 
+    // Get all column descs and convert to row
     let mut rows = vec![];
-    for catalog in catalogs {
+    for col in columns {
         rows.append(
-            &mut catalog
-                .column_desc
+            &mut col
                 .get_column_descs()
                 .into_iter()
                 .map(col_desc_to_row)
@@ -50,7 +54,7 @@ pub async fn handle_show_table(
     }
 
     Ok(PgResponse::new(
-        StatementType::SHOW_TABLE,
+        StatementType::SHOW_SOURCE,
         rows.len() as i32,
         rows,
         vec![
@@ -81,7 +85,7 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    async fn test_show_table_handler() {
+    async fn test_show_source_handler() {
         let sql = "create table t (v1 smallint, v2 int, v3 bigint, v4 float, v5 double);";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
@@ -100,7 +104,6 @@ mod tests {
             .collect::<HashMap<&str, &str>>();
 
         let expected_columns = maplit::hashmap! {
-            "_row_id" => "Int64",
             "v1" => "Int16",
             "v2" => "Int32",
             "v3" => "Int64",

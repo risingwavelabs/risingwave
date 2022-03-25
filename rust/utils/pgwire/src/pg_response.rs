@@ -39,7 +39,7 @@ pub enum StatementType {
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
-    SHOW_TABLE,
+    SHOW_SOURCE,
     FLUSH,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
@@ -101,7 +101,7 @@ impl PgResponse {
     pub fn is_query(&self) -> bool {
         matches!(
             self.stmt_type,
-            StatementType::SELECT | StatementType::EXPLAIN | StatementType::SHOW_TABLE
+            StatementType::SELECT | StatementType::EXPLAIN | StatementType::SHOW_SOURCE
         )
     }
 
