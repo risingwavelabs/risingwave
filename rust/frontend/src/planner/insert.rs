@@ -23,7 +23,7 @@ use crate::planner::Planner;
 
 impl Planner {
     pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
-        let input = self.plan_query(insert.source)?.as_subplan();
+        let input = self.plan_set_expr(insert.source)?;
         // `columns` not used by backend yet.
         let plan: PlanRef = LogicalInsert::create(
             input,
