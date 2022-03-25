@@ -34,6 +34,8 @@ impl Binder {
         values: Values,
         expected_types: Option<Vec<DataType>>,
     ) -> Result<BoundValues> {
+        assert!(!values.0.is_empty());
+
         self.context.clause = Some(Clause::Values);
         let vec2d = values.0;
         let bound = vec2d
@@ -46,9 +48,11 @@ impl Binder {
         let types = match expected_types {
             Some(types) => {
                 if types.len() != bound[0].len() {
-                    return Err(ErrorCode::InvalidInputSyntax(
-                        "values length mismatched".to_owned(),
-                    )
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "values length mismatched: expected {}, given {}",
+                        types.len(),
+                        bound[0].len(),
+                    ))
                     .into());
                 }
                 types
