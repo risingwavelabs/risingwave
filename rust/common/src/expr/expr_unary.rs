@@ -18,6 +18,7 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::*;
+use crate::error::{ErrorCode, Result};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
@@ -59,7 +60,11 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "CAST({:?} AS {:?}) not supported yet!",
+                    $child.return_type(), $ret
+                ))
+                .into());
             }
         }
     };
@@ -159,7 +164,11 @@ macro_rules! gen_neg_impl {
                 ),
             )*
             _ => {
-                unimplemented!("Neg is not supported on {:?}", $child.return_type())
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "Neg is not supported on {:?}",
+                    $child.return_type()
+                ))
+                .into());
             }
         }
     };
@@ -184,10 +193,10 @@ pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
     child_expr: BoxedExpression,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
 
-    match (expr_type, return_type.clone(), child_expr.return_type()) {
+    let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
         (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
         (ProstType::Not, _, _) => {
             Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
@@ -245,10 +254,17 @@ pub fn new_unary_expr(
             gen_neg! { child_expr, return_type }
         }
         (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
+
         (expr, ret, child) => {
-            unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
+            return Err(ErrorCode::NotImplementedError(format!(
+                "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
+                expr, child, ret
+            ))
+            .into());
         }
-    }
+    };
+
+    Ok(expr)
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
