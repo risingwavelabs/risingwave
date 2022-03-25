@@ -120,7 +120,7 @@ pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper>
 
 /// Define the cast function to primitive types.
 ///
-/// Due to the orphan rule, some data can't implement TryFrom trait for basic type.
+/// Due to the orphan rule, some data can't implement `TryFrom` trait for basic type.
 /// We can only use [`ToPrimitive`] trait.
 ///
 /// Note: this might be lossy according to the docs from [`ToPrimitive`]:
