@@ -52,6 +52,11 @@ impl TryFrom<&str> for HostAddr {
         let port = parts.next().ok_or_else(|| {
             RwError::from(ErrorCode::InternalError("Invalid host address".into()))
         })?;
+        if parts.next().is_some() {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "Invalid host address".into(),
+            )));
+        }
         let port = port
             .parse::<u16>()
             .map_err(|_| RwError::from(ErrorCode::InternalError("Invalid host address".into())))?;
@@ -102,7 +107,7 @@ pub fn is_local_address(server_addr: &HostAddr, peer_addr: &HostAddr) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::util::addr::is_local_address;
+    use crate::util::addr::{is_local_address, HostAddr};
 
     #[test]
     fn test_is_local_address() {
@@ -117,5 +122,33 @@ mod tests {
         check_local("some.host.in.k8s:3456", "some.host.in.k8s:3456", true);
         check_local("some.host.in.k8s:3456", "other.host.in.k8s:3456", false);
         check_local("some.host.in.k8s:3456", "some.host.in.k8s:4567", false);
+    }
+
+    #[test]
+    fn test_host_addr_convert() {
+        let addr = "1.2.3.4:567";
+        assert_eq!(
+            addr.parse::<HostAddr>().unwrap(),
+            HostAddr {
+                host: String::from("1.2.3.4"),
+                port: 567
+            }
+        );
+        let addr = "test.test:12345";
+        assert_eq!(
+            addr.parse::<HostAddr>().unwrap(),
+            HostAddr {
+                host: String::from("test.test"),
+                port: 12345
+            }
+        );
+        let addr = "test.test";
+        assert!(addr.parse::<HostAddr>().is_err());
+        let addr = "test.test:65537";
+        assert!(addr.parse::<HostAddr>().is_err());
+        let addr = "test.test:";
+        assert!(addr.parse::<HostAddr>().is_err());
+        let addr = "test.test:12345:12345";
+        assert!(addr.parse::<HostAddr>().is_err());
     }
 }

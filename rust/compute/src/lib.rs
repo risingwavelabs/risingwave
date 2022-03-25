@@ -86,7 +86,7 @@ pub async fn start(opts: ComputeNodeOpts) {
         .unwrap_or(&opts.host)
         .parse()
         .unwrap();
-    tracing::info!("Starting server at {}", client_address);
+    tracing::info!("Client address is {}", client_address);
 
     let (join_handle, _shutdown_send) =
         compute_node_serve(listen_address, client_address, opts).await;
