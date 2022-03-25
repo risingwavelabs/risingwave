@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc};
+use risingwave_pb::plan::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
@@ -49,6 +49,7 @@ pub fn gen_create_table_plan(
 
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
+        // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
@@ -56,6 +57,7 @@ pub fn gen_create_table_plan(
             field_descs: vec![],
             type_name: "".to_string(),
         });
+        // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
@@ -72,14 +74,8 @@ pub fn gen_create_table_plan(
         .into_iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
-            column_desc: ProstColumnDesc {
-                column_type: c.data_type.to_protobuf().into(),
-                column_id: c.column_id.get_id(),
-                name: c.name,
-                ..Default::default()
-            }
-            .into(),
-            is_hidden: i == 0,
+            column_desc: c.to_protobuf().into(),
+            is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
 
@@ -94,25 +90,27 @@ pub fn gen_create_table_plan(
         .into(),
     };
 
+    // Manually assemble the materialization plan for the table.
     let plan: PlanRef = {
-        let context: QueryContextRef = context;
+        let source_node = StreamSource::create(
+            context.clone(),
+            vec![0], // row id column as pk
+            source.clone(),
+        );
 
-        let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
-
-        let exchange_node =
-            StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0]));
+        let exchange_node = StreamExchange::new(
+            source_node.into(),
+            Distribution::HashShard(vec![0]), // hash shard on the row id column
+        );
 
         let materialize_node = {
             StreamMaterialize::new(
                 context,
                 exchange_node.into(),
-                vec![
-                    // RowId column as key
-                    FieldOrder {
-                        index: 0,
-                        direct: Direction::Asc,
-                    },
-                ],
+                vec![FieldOrder {
+                    index: 0, // row id column as key
+                    direct: Direction::Asc,
+                }],
                 columns_catalog
                     .iter()
                     .map(|x| x.column_desc.as_ref().unwrap().column_id.into())
@@ -129,10 +127,10 @@ pub fn gen_create_table_plan(
         database_id,
         name: table_name,
         columns: columns_catalog,
-        pk_column_ids: vec![0],
+        pk_column_ids: vec![0], // row id column as pk
         pk_orders: vec![OrderType::Ascending.to_prost() as i32],
-        dependent_relations: vec![], // placeholder for meta
-        optional_associated_source_id: None,
+        dependent_relations: vec![],         // placeholder for meta
+        optional_associated_source_id: None, // placeholder for meta
     };
 
     Ok((plan, source, table))
