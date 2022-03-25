@@ -44,7 +44,7 @@ impl QueryManager {
         let session = context.session();
         let worker_node = self.worker_node_manager.next_random();
         let compute_client: ComputeClient =
-            ComputeClient::new(worker_node.host.clone().unwrap()).await?;
+            ComputeClient::new(worker_node.host.as_ref().unwrap().into()).await?;
 
         // Build task id and task sink id
         let task_id = TaskId {
@@ -81,7 +81,7 @@ impl QueryResultFetcher {
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn run(self) {
         let compute_client: ComputeClient =
-            ComputeClient::new(self.gather_task_node.host.unwrap()).await?;
+            ComputeClient::new(self.gather_task_node.host.as_ref().unwrap().into()).await?;
 
         let mut source = compute_client.get_data(self.task_output_id).await?;
         while let Some(chunk) = source.take_data().await? {
