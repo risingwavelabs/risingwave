@@ -39,16 +39,22 @@ create materialized view ddl_mv as select v2 from ddl_t;
 statement error
 drop table ddl_t;
 
-# TODO: enable this after dropping MV is implemented.
+# We're not allowed to drop the mview using `DROP TABLE`.
+statement error
+drop table ddl_mv;
 
-# # Drop the mview.
-# statement ok;
-# drop materialized view ddl_mv;
+# Drop the mview.
+statement ok
+drop materialized view ddl_mv;
 
-# # Drop it again.
-# statement error
-# drop materialized view ddl_mv;
+# Drop it again.
+statement error
+drop materialized view ddl_mv;
 
-# # Then, we can drop the base table.
-# statement ok
-# drop table ddl_t;
+# We're not allowed to drop the table using `DROP MATERIALIZED VIEW`.
+statement error
+drop materialized view ddl_t;
+
+# Now, we can drop the base table.
+statement ok
+drop table ddl_t;

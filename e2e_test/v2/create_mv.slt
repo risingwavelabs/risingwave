@@ -30,8 +30,8 @@ select v1, v2, v3 from create_mv_mv1;
 3 4 4
 4 3 5
 
-# statement ok
-# drop materialized view create_mv_mv1
+statement ok
+drop materialized view create_mv_mv1;
 
-# statement ok
-# drop table create_mv_t1
+statement ok
+drop table create_mv_t1;

@@ -2947,6 +2947,18 @@ fn parse_drop_view() {
 }
 
 #[test]
+fn parse_materialized_drop_view() {
+    let sql = "DROP MATERIALIZED VIEW mymview";
+    match verified_stmt(sql) {
+        Statement::Drop(stmt) => {
+            assert_eq!(Ident::new("mymview"), stmt.name);
+            assert_eq!(ObjectType::MaterializedView, stmt.object_type);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
     assert_eq!(
