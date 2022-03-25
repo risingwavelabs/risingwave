@@ -30,6 +30,7 @@ use crate::util::value_encoding::serialize_cell;
 
 /// The special `cell_id` reserved for a whole null row is `i32::MIN`.
 pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
+pub const NOT_NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -148,7 +149,15 @@ pub fn serialize_pk_and_row(
         ]
         .concat();
         result.push((key, None));
+    } else {
+        let key = [
+            pk_buf,
+            serialize_column_id(&NOT_NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
+        ]
+        .concat();
+        result.push((key, None));
     }
+
     for (index, column_id) in column_ids.iter().enumerate() {
         let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
         match row {
