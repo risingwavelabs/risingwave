@@ -108,6 +108,8 @@ impl StreamTableScan {
                     column_type: Some(field.data_type().to_protobuf()),
                     column_id: col.column_id.into(),
                     name: column_name.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
                 })
                 .collect(),
         };

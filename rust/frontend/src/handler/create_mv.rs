@@ -47,6 +47,8 @@ impl BoundQuery {
                 data_type: data_type.clone(),
                 column_id: ColumnId::new(i as i32),
                 name: name.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
             });
         }
 
@@ -130,6 +132,8 @@ pub fn gen_create_mv_plan(
                         data_type: plan.schema()[*pk].data_type(),
                         column_id: ColumnId::new(pk_column_id as i32),
                         name: format!("_pk_{}", pk),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
                     },
                     is_hidden: true,
                 },
