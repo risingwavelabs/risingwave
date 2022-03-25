@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
@@ -30,7 +30,14 @@ pub async fn handle_drop_table(
 
     let source_id = catalog_reader
         .read_guard()
-        .get_source_by_name(session.database(), &schema_name, &table_name)?
+        .get_source_by_name(session.database(), &schema_name, &table_name)
+        .map_err::<RwError, _>(|e| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "{}. Hint: Use `DROP MATERIALIZED VIEW` to drop a materialized view.",
+                e
+            ))
+            .into()
+        })?
         .id;
 
     let table_id = catalog_reader

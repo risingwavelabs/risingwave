@@ -293,8 +293,13 @@
                 - 0
         pkIndices:
           - 0
+          - 1
         globalSimpleAggNode:
           aggCalls:
+            - type: COUNT
+              returnType:
+                typeName: INT64
+                isNullable: true
             - type: SUM
               args:
                 - input: {}
@@ -306,6 +311,7 @@
                 isNullable: true
     pkIndices:
       - 0
+      - 1
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -313,8 +319,15 @@
           returnType:
             typeName: INT64
             isNullable: true
+        - orderType: ASCENDING
+          inputRef:
+            columnIdx: 1
+          returnType:
+            typeName: INT64
+            isNullable: true
       columnIds:
         - 0
+        - 1
     ---
     id: 4294967294
     schemaId: 4294967295
@@ -326,9 +339,18 @@
             typeName: INT64
             isNullable: true
           name: "?column?"
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 1
+          name: _pk_1
+        isHidden: true
     pkColumnIds:
       - 0
+      - 1
     pkOrders:
+      - ASCENDING
       - ASCENDING
 - sql: |
     /* test simple agg */
@@ -432,6 +454,10 @@
               groupKeys:
                 - {}
               aggCalls:
+                - type: COUNT
+                  returnType:
+                    typeName: INT64
+                    isNullable: true
                 - type: SUM
                   args:
                     - input:
@@ -451,7 +477,7 @@
                 typeName: INT64
                 isNullable: true
               inputRef:
-                columnIdx: 1
+                columnIdx: 2
             - exprType: INPUT_REF
               returnType:
                 typeName: INT32

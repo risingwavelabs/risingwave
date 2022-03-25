@@ -165,7 +165,7 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
-    /// Iptimize and generate a create materialize view plan.
+    /// Optimize and generate a create materialize view plan.
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.

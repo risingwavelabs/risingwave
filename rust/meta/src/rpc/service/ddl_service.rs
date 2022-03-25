@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+use std::collections::HashSet;
+
 use futures::future::try_join_all;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
@@ -233,6 +235,7 @@ where
         let mut mview = req.get_materialized_view().map_err(tonic_err)?.clone();
         let stream_node = req.get_stream_node().map_err(tonic_err)?.clone();
 
+        // 0. Generate an id from mview.
         let id = self
             .id_gen_manager
             .generate::<{ IdCategory::Table }>()
@@ -240,13 +243,45 @@ where
             .map_err(tonic_err)? as u32;
         mview.id = id;
 
-        // 1. Mark current mview as "creating" and add reference count to dependent tables
+        // 1. Resolve the dependent relations.
+        {
+            // TODO: distinguish SourceId and TableId
+            fn resolve_dependent_relations(
+                stream_node: &StreamNode,
+                dependent_relations: &mut HashSet<TableId>,
+            ) -> RwResult<()> {
+                match stream_node.node.as_ref().unwrap() {
+                    Node::SourceNode(source_node) => {
+                        dependent_relations.insert(source_node.get_table_ref_id()?.table_id as u32);
+                    }
+                    Node::ChainNode(chain_node) => {
+                        dependent_relations.insert(chain_node.get_table_ref_id()?.table_id as u32);
+                    }
+                    _ => {}
+                }
+                for child in &stream_node.input {
+                    resolve_dependent_relations(child, dependent_relations)?;
+                }
+                Ok(())
+            }
+
+            let mut dependent_relations = Default::default();
+            resolve_dependent_relations(&stream_node, &mut dependent_relations)
+                .map_err(tonic_err)?;
+            assert!(
+                !dependent_relations.is_empty(),
+                "there should be at lease 1 dependent relation when creating materialized view"
+            );
+            mview.dependent_relations = dependent_relations.into_iter().collect();
+        }
+
+        // 2. Mark current mview as "creating" and add reference count to dependent relations.
         self.catalog_manager
             .start_create_table_procedure(&mview)
             .await
             .map_err(tonic_err)?;
 
-        // 2. Create mview in stream manager
+        // 3. Create mview in stream manager. The id in stream node will be filled.
         if let Err(e) = self.create_mview_on_compute_node(stream_node, id).await {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
@@ -255,7 +290,7 @@ where
             return Err(e.to_grpc_status());
         }
 
-        // Finally, update the catalog.
+        // 4. Finally, update the catalog.
         let version = self
             .catalog_manager
             .finish_create_table_procedure(&mview)
