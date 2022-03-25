@@ -15,7 +15,7 @@
 use std::io::Write;
 use std::ops::{Add, Sub};
 
-use byteorder::{WriteBytesExt, BigEndian};
+use byteorder::{BigEndian, WriteBytesExt};
 use num_traits::{CheckedAdd, CheckedSub};
 use serde::{Deserialize, Serialize};
 
