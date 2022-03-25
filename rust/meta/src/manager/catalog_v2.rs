@@ -280,8 +280,8 @@ where
             match core.get_ref_count(table_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete table {} because {} other table(s) depends on it.",
-                        table_id,
+                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                        table.name,
                         ref_count
                     )
                     .into(),
@@ -385,8 +385,8 @@ where
             match core.get_ref_count(source_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete source {} because {} other table(s) depends on it.",
-                        source_id,
+                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                        source.name,
                         ref_count
                     )
                     .into(),
@@ -527,8 +527,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete table {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                            mview.name,
                             ref_count
                         )
                         .into(),
@@ -538,8 +538,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(source_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete source {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                            source.name,
                             ref_count
                         )
                         .into(),
