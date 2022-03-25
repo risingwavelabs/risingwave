@@ -22,6 +22,7 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(path_file_prefix)]
 
 mod opts;

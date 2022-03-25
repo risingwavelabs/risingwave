@@ -59,9 +59,9 @@ impl StreamMaterialize {
 
         Self {
             base,
-            input,
             column_orders,
             column_ids,
+            input,
         }
     }
 }

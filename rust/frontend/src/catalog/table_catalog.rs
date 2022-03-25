@@ -47,7 +47,7 @@ impl TableCatalog {
         self.pk_desc.as_ref()
     }
 
-    /// Get a CellBasedTableDesc of the table.
+    /// Get a [`CellBasedTableDesc`] of the table.
     pub fn cell_based_table(&self) -> CellBasedTableDesc {
         CellBasedTableDesc {
             table_id: self.id,

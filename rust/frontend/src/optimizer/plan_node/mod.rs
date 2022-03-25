@@ -17,7 +17,7 @@
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
 //! it has been created. If you want to modify the node, such as rewriting the expression in a
-//! ProjectNode or changing a node's input node, you need to create a new node. We use Rc as the
+//! `ProjectNode` or changing a node's input node, you need to create a new node. We use Rc as the
 //! node's reference, and a node just storage its inputs' reference, so change a node just need
 //! create one new node but not the entire sub-tree.
 //!
@@ -353,7 +353,7 @@ macro_rules! for_stream_plan_nodes {
     };
 }
 
-/// impl PlanNodeType fn for each node.
+/// impl [`PlanNodeType`] fn for each node.
 macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
@@ -376,7 +376,7 @@ macro_rules! enum_plan_node_type {
 }
 for_all_plan_nodes! { enum_plan_node_type }
 
-/// impl fn plan_ref for each node.
+/// impl fn `plan_ref` for each node.
 macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{

@@ -24,7 +24,7 @@ use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
-/// to chain + merge node (for upstream materialize) + batch table scan when converting to MView
+/// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
 // TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
@@ -48,8 +48,8 @@ impl StreamTableScan {
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
-            logical,
             base,
+            logical,
             batch_plan_id,
         }
     }

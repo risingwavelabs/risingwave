@@ -41,7 +41,7 @@ impl StreamHashAgg {
             Distribution::HashShard(logical.group_keys().to_vec()),
             false,
         );
-        StreamHashAgg { logical, base }
+        StreamHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()

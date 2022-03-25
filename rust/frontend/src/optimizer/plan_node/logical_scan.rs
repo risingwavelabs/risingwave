@@ -35,7 +35,7 @@ pub struct LogicalScan {
 }
 
 impl LogicalScan {
-    /// Create a LogicalScan node. Used internally by optimizer.
+    /// Create a `LogicalScan` node. Used internally by optimizer.
     pub fn new(
         table_name: String,
         table_id: TableId,
@@ -46,14 +46,14 @@ impl LogicalScan {
         // TODO: get pk
         let base = PlanBase::new_logical(ctx, schema, vec![0] /* TODO get the pk */);
         Self {
+            base,
             table_name,
             table_id,
             columns,
-            base,
         }
     }
 
-    /// Create a LogicalScan node. Used by planner.
+    /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String,
         table_id: TableId,

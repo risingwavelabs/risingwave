@@ -217,11 +217,11 @@ impl LogicalAgg {
         };
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
+            base,
             agg_calls,
+            agg_call_alias,
             group_keys,
             input,
-            base,
-            agg_call_alias,
         }
     }
 

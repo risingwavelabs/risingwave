@@ -57,7 +57,7 @@ impl BatchProject {
             distribution,
             Order::any().clone(),
         );
-        BatchProject { logical, base }
+        BatchProject { base, logical }
     }
 }
 

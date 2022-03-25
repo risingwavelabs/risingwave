@@ -43,8 +43,8 @@ impl StreamSource {
             false, // TODO: determine the `append-only` field of source
         );
         Self {
-            logical,
             base,
+            logical,
             source_type,
         }
     }
