@@ -19,6 +19,7 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_mv::{gen_create_mv_plan, MvInfo};
+use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::QueryContext;
@@ -48,6 +49,11 @@ pub(super) fn handle_explain(
             )?
             .0
         }
+
+        Statement::CreateTable { name, columns, .. } => {
+            gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0
+        }
+
         stmt => {
             let bound = {
                 let mut binder = Binder::new(

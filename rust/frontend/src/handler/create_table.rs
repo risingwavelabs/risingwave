@@ -30,17 +30,16 @@ use crate::binder::Binder;
 use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::{QueryContext, QueryContextRef};
+use crate::session::{QueryContext, QueryContextRef, SessionImpl};
 
 pub const ROWID_NAME: &str = "_row_id";
 
-pub async fn handle_create_table(
-    context: QueryContext,
+pub fn gen_create_table_plan(
+    session: &SessionImpl,
+    context: QueryContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
-) -> Result<PgResponse> {
-    let session = context.session_ctx.clone();
-
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
     let (database_id, schema_id) = session
         .env()
@@ -95,13 +94,13 @@ pub async fn handle_create_table(
         .into(),
     };
 
-    let plan = {
+    let plan: PlanRef = {
         let context: QueryContextRef = context.into();
 
         let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
 
         let exchange_node =
-            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
+            StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0]));
 
         let materialize_node = {
             StreamMaterialize::new(
@@ -121,11 +120,8 @@ pub async fn handle_create_table(
             )
         };
 
-        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
+        Rc::new(materialize_node)
     };
-
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let table = ProstTable {
         id: TableId::placeholder().table_id(),
@@ -138,6 +134,28 @@ pub async fn handle_create_table(
         dependent_relations: vec![], // placeholder for meta
         optional_associated_source_id: None,
     };
+
+    Ok((plan, source, table))
+}
+
+pub async fn handle_create_table(
+    context: QueryContext,
+    table_name: ObjectName,
+    columns: Vec<ColumnDef>,
+) -> Result<PgResponse> {
+    let session = context.session_ctx.clone();
+
+    let (plan, source, table) = {
+        let (plan, source, table) =
+            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let plan = plan.to_stream_prost();
+
+        (plan, source, table)
+    };
+
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
+
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_source(source, table, plan)
