@@ -44,6 +44,13 @@ impl LogicalScan {
         table_desc: Rc<TableDesc>,
         ctx: QueryContextRef,
     ) -> Self {
+        // here we have 3 concepts
+        // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
+        // 2. table_idx: usize, column index in the TableDesc or tableCatalog.
+        // 3. operator_idx: usize,  column index in the ScanOperator's schema.
+        // in a query we get the same version of catalog, so the mapping from column_id and
+        // table_idx will not changes. and the `required_col_idx is the `table_idx` of the
+        // required columns, in other word, is the mapping from operator_idx to table_idx
         let mut id_to_op_idx = HashMap::new();
 
         let fields = required_col_idx
