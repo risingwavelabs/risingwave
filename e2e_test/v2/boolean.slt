@@ -23,7 +23,7 @@ select not TRUE, not NULL;
 ----
 f NULL
 
-query BBBBBBBB
+query BBBB
 select 'true'::bool is true,
        'true'::bool IS NOT TRUE,
        'true'::bool IS FALSE,
