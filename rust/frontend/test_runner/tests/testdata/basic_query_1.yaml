@@ -55,8 +55,8 @@
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { column_orders: [$1 ASC], column_id: [#0, #1], pk_indices: [1] }
-      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $0], expr_alias: [ ,  ] }
-        StreamTableScan { table: t, columns: [v1], pk_indices: [0] }
+      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $1], expr_alias: [ ,  ] }
+        StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |

@@ -198,7 +198,7 @@ impl PlanTreeNodeUnary for LogicalProject {
             .collect();
         let proj = Self::new(input, exprs, self.expr_alias().to_vec());
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(proj.schema().len());
+        let out_col_change = ColIndexMapping::identical_map(self.schema().len());
         (proj, out_col_change)
     }
 }
@@ -290,13 +290,13 @@ impl ToStream for LogicalProject {
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::session::QueryContext;
 
     #[tokio::test]
@@ -327,17 +327,15 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
             ctx,
         );
         let project = LogicalProject::new(
-            table_scan.into(),
+            values.into(),
             vec![
                 ExprImpl::Literal(Box::new(Literal::new(None, ty.clone()))),
                 InputRef::new(2, ty.clone()).into(),
@@ -370,10 +368,10 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let scan = project.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[0]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
+        let values = project.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[0]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

@@ -16,18 +16,18 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc, OrderType};
-use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
+use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
 use crate::session::{QueryContext, QueryContextRef};
@@ -69,55 +69,7 @@ pub async fn handle_create_table(
         column_descs
     };
 
-    let plan = {
-        let context: QueryContextRef = context.into();
-
-        let source_node = {
-            let (columns, fields) = column_descs
-                .iter()
-                .map(|c| {
-                    (
-                        c.column_id,
-                        Field::with_name(c.data_type.clone(), c.name.clone()),
-                    )
-                })
-                .unzip();
-            let schema = Schema::new(fields);
-            let logical_scan = LogicalScan::new(
-                table_name.clone(),
-                TableId::placeholder(),
-                columns,
-                schema,
-                context.clone(),
-            );
-            StreamSource::new(logical_scan, SourceType::Table)
-        };
-
-        let exchange_node =
-            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
-
-        let materialize_node = {
-            StreamMaterialize::new(
-                context,
-                exchange_node.into(),
-                vec![
-                    // RowId column as key
-                    FieldOrder {
-                        index: 0,
-                        direct: Direction::Asc,
-                    },
-                ],
-                column_descs.iter().map(|x| x.column_id).collect(),
-            )
-        };
-
-        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
-    };
-
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
-
-    let columns = column_descs
+    let columns_catalog = column_descs
         .into_iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
@@ -138,23 +90,54 @@ pub async fn handle_create_table(
         database_id,
         name: table_name.clone(),
         info: Info::TableSource(TableSourceInfo {
-            columns: columns.clone(),
+            columns: columns_catalog.clone(),
         })
         .into(),
     };
+
+    let plan = {
+        let context: QueryContextRef = context.into();
+
+        let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
+
+        let exchange_node =
+            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
+
+        let materialize_node = {
+            StreamMaterialize::new(
+                context,
+                exchange_node.into(),
+                vec![
+                    // RowId column as key
+                    FieldOrder {
+                        index: 0,
+                        direct: Direction::Asc,
+                    },
+                ],
+                columns_catalog
+                    .iter()
+                    .map(|x| x.column_desc.as_ref().unwrap().column_id.into())
+                    .collect(),
+            )
+        };
+
+        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
+    };
+
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let table = ProstTable {
         id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name,
-        columns,
+        columns: columns_catalog,
         pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending as i32],
+        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
         dependent_relations: vec![],
         optional_associated_source_id: None,
     };
-
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_source(source, table, plan)

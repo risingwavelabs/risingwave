@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::HashMap;
 
 use itertools::Itertools;
@@ -70,7 +71,7 @@ pub(super) async fn handle_create_source(
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            column_catalogs.append(&mut extract_protobuf_table_schema(protobuf_schema)?);
+            column_catalogs.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
                 properties: HashMap::from(stmt.with_properties),
                 row_format: RowFormatType::Protobuf as i32,
