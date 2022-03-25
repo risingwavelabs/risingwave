@@ -29,6 +29,8 @@ pub struct BoundValues {
 }
 
 impl Binder {
+    /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
+    /// all rows will be used.
     pub(super) fn bind_values(
         &mut self,
         values: Values,
@@ -81,6 +83,7 @@ impl Binder {
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
+
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
         Ok(BoundValues { rows, schema })
     }

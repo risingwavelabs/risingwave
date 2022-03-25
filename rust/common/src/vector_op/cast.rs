@@ -120,7 +120,6 @@ pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper>
 
 // Due to the orphan rule, some data can't implement TryFrom trait for basic type.
 // We can only use ToPrimitive Trait
-
 macro_rules! define_cast_to_primitive {
     ($ty:ty) => {
         paste::paste! {

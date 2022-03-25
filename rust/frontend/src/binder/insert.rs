@@ -35,7 +35,7 @@ impl Binder {
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
 
-        let data_types = table_source
+        let expected_types = table_source
             .columns
             .iter()
             .map(|c| c.data_type.clone())
@@ -43,7 +43,7 @@ impl Binder {
 
         let source = match source.body {
             SetExpr::Values(values) => {
-                let values = self.bind_values(values, Some(data_types))?;
+                let values = self.bind_values(values, Some(expected_types))?;
                 let body = BoundSetExpr::Values(values.into());
                 BoundQuery {
                     body,
