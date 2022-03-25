@@ -265,7 +265,8 @@ impl ToStream for LogicalProject {
                     None => Distribution::AnyShard,
                 }
             }
-            dist => dist.clone(),
+            Distribution::AnyShard => Distribution::AnyShard,
+            _ => Distribution::Any,
         };
         let new_input = self.input().to_stream_with_dist_required(&input_dist);
         let new_logical = self.clone_with_input(new_input);
