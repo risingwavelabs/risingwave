@@ -25,6 +25,8 @@
 #![feature(map_try_insert)]
 #![feature(let_chains)]
 #![feature(negative_impls)]
+#![feature(generators)]
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
 #[macro_use]
 pub mod catalog;
