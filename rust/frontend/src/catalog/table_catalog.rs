@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 
@@ -26,6 +27,7 @@ use crate::catalog::TableId;
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
     id: TableId,
+    associated_source_id: Option<TableId>, // TODO: use SourceId
     name: String,
     columns: Vec<ColumnCatalog>,
     pk_desc: Vec<OrderedColumnDesc>,
@@ -35,6 +37,12 @@ impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    /// Get the table catalog's associated source id.
+    #[must_use]
+    pub fn associated_source_id(&self) -> Option<TableId> {
+        self.associated_source_id
     }
 
     /// Get a reference to the table catalog's columns.
@@ -65,6 +73,9 @@ impl TableCatalog {
 impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
+        let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
+            OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
+        });
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
@@ -93,8 +104,10 @@ impl From<ProstTable> for TableCatalog {
                 order,
             })
             .collect();
+
         Self {
             id: id.into(),
+            associated_source_id: associated_source_id.map(Into::into),
             name,
             pk_desc,
             columns,
@@ -112,6 +125,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
@@ -161,7 +175,8 @@ mod tests {
             pk_column_ids: vec![0],
             pk_orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
-            optional_associated_source_id: None,
+            optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
+                .into(),
         }
         .into();
 
@@ -169,6 +184,7 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
+                associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
                     ColumnCatalog {

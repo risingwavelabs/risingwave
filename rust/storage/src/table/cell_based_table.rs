@@ -122,138 +122,35 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get(&self, pk: Row, column: &ColumnDesc, epoch: u64) -> Result<Option<Datum>> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
-        let state_store_get_res = self
-            .keyspace
-            .state_store()
-            .get(&key.clone(), epoch)
-            .await
-            .unwrap();
-        let column_id = column.column_id.get_id() as usize;
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        match pk_and_row {
-            Some(pk_row) => {
-                return Ok(Some(pk_row.1.index(column_id).clone()));
-            }
-            None => Ok(None),
-        }
+    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Option<Row>> {
+        // get row by state_store muti get
+        todo!()
     }
 
-    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Row> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
-        let state_store_get_res = self
-            .keyspace
-            .state_store()
-            .get(&key.clone(), epoch)
-            .await
-            .unwrap();
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
-    }
-
-    pub async fn insert_row(
-        &mut self,
+    pub async fn get_row_scan(
+        &self,
         pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
+        column: &[ColumnDesc],
         epoch: u64,
-    ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        for (key, value) in bytes {
-            match value {
-                Some(val) => local.put(key, val),
-                None => local.delete(key),
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+    ) -> Result<Option<Row>> {
+        // get row by state_store scan
+        todo!()
     }
 
     pub async fn delete_row(&mut self, pk: Row, epoch: u64) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = self.column_ids.clone();
-        let cell_value = None;
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        for (key, value) in bytes {
-            local.delete(key);
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!()
     }
 
-    pub async fn update_row(
-        &mut self,
-        pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
-        epoch: u64,
-    ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        // delete original kv_pairs in state_store
-        for (key, value) in bytes.clone() {
-            local.delete(key);
-        }
-        // write updated kv_pairs in state_store
-        for (key, value) in bytes {
-            match value {
-                Some(val) => local.put(key, val),
-                None => local.delete(key),
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+    pub async fn update_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
+        todo!()
     }
 
-    pub async fn batch_insert_row(
+    pub async fn batch_write_rows(
         &mut self,
         rows: Vec<(Row, Option<Row>)>,
-        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let column_ids = generate_column_id(column_descs);
-        for (pk, cell_values) in rows {
-            let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, column_ids.clone())
-                .unwrap();
-            for (key, value) in bytes {
-                match value {
-                    Some(val) => local.put(key, val),
-                    None => local.delete(key),
-                }
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!();
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
@@ -315,11 +212,7 @@ fn generate_column_id_to_column_index_mapping(
 }
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
-    let mut column_ids = Vec::with_capacity(column_descs.len());
-    for (index, column_desc) in column_descs.iter().enumerate() {
-        column_ids.push(column_desc.column_id);
-    }
-    column_ids
+    column_descs.iter().map(|d| d.column_id).collect()
 }
 // (st1page): May be we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now

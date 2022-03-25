@@ -277,7 +277,6 @@ impl ToStream for LogicalProject {
     }
 
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        // TODO: add row_count() aggCall for StreamAgg here
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let input_pk = input.pk_indices();

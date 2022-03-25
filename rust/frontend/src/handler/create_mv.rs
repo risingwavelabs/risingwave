@@ -181,7 +181,7 @@ pub fn gen_create_mv_plan(
         // The pk of the corresponding table of MV is order column + upstream pk
         pk_column_ids,
         pk_orders: pk_orders.into_iter().map(|x| x.into()).collect(),
-        dependent_relations: vec![],
+        dependent_relations: vec![], // placeholder for meta
         optional_associated_source_id: None,
     };
 

@@ -242,14 +242,11 @@ impl WorkerNodeManager {
 
     /// Get a random worker node.
     pub fn next_random(&self) -> WorkerNode {
+        let current_nodes = self.worker_nodes.read().unwrap();
         let mut rng = rand::thread_rng();
-        let die = Uniform::from(0..self.worker_nodes.read().unwrap().len());
-        self.worker_nodes
-            .read()
-            .unwrap()
-            .get(die.sample(&mut rng))
-            .unwrap()
-            .clone()
+
+        let die = Uniform::from(0..current_nodes.len());
+        current_nodes.get(die.sample(&mut rng)).unwrap().clone()
     }
 }
 

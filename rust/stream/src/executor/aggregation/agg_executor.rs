@@ -21,7 +21,6 @@ use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, S
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
 
@@ -306,15 +305,12 @@ pub async fn generate_agg_state<S: StateStore>(
     for (idx, agg_call) in agg_calls.iter().enumerate() {
         // TODO: in pure in-memory engine, we should not do this serialization.
 
-        // The prefix of the state is <(group key) / state id />
-        let keyspace = {
-            let mut ks = keyspace.clone();
-            if let Some(key) = key {
-                let bytes = key.serialize().unwrap();
-                ks.push(Segment::VariantLength(bytes));
-            }
-            ks.push(Segment::u16(idx as u16));
-            ks
+        // The prefix of the state is `agg_call_idx / [group_key]`
+        let keyspace = if let Some(key) = key {
+            let bytes = key.serialize().unwrap();
+            keyspace.append_u16(idx as u16).append(bytes)
+        } else {
+            keyspace.append_u16(idx as u16)
         };
 
         let mut managed_state = ManagedStateImpl::create_managed_state(

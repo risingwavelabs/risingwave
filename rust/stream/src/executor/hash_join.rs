@@ -22,7 +22,6 @@ use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
@@ -53,8 +52,8 @@ mod SideType {
     pub const Right: SideTypePrimitive = 1;
 }
 
-const JOIN_LEFT_PATH: &[u8] = b"l";
-const JOIN_RIGHT_PATH: &[u8] = b"r";
+const JOIN_LEFT_PATH: u8 = b'l';
+const JOIN_RIGHT_PATH: u8 = b'r';
 
 const fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
@@ -278,8 +277,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
 
-        let ks_l = keyspace.with_segment(Segment::FixedLength(JOIN_LEFT_PATH.to_vec()));
-        let ks_r = keyspace.with_segment(Segment::FixedLength(JOIN_RIGHT_PATH.to_vec()));
+        let ks_l = keyspace.append_u8(JOIN_LEFT_PATH);
+        let ks_r = keyspace.append_u8(JOIN_RIGHT_PATH);
         Self {
             aligner: BarrierAligner::new(input_l, input_r),
             output_data_types,

@@ -328,6 +328,15 @@ impl LogicalAgg {
     pub fn group_keys(&self) -> &[usize] {
         self.group_keys.as_ref()
     }
+
+    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<Option<String>>, Vec<usize>, PlanRef) {
+        (
+            self.agg_calls,
+            self.agg_call_alias,
+            self.group_keys,
+            self.input,
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -470,10 +479,38 @@ impl ToStream for LogicalAgg {
     }
 
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
-        // TODO: add row_count() aggCall for StreamAgg here
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (agg.into(), out_col_change)
+
+        // To rewrite StreamAgg, there are two things to do:
+        // 1. insert a RowCount(Count with zero argument) at the beginning of agg_calls of
+        // LogicalAgg.
+        // 2. increment the index of agg_calls in `out_col_change` by 1 due to
+        // the insertion of RowCount, and it will be used to rewrite LogicalProject above this
+        // LogicalAgg.
+        // Please note that the index of group keys need not be changed.
+        let (mut agg_calls, mut agg_call_alias, group_keys, input) = agg.decompose();
+        agg_calls.insert(
+            0,
+            PlanAggCall {
+                agg_kind: AggKind::Count,
+                return_type: DataType::Int64,
+                inputs: vec![],
+            },
+        );
+        agg_call_alias.insert(0, None);
+
+        let (mut map, _) = out_col_change.into_parts();
+        map.iter_mut().skip(group_keys.len()).for_each(|index| {
+            if let Some(i) = *index {
+                *index = Some(i + 1);
+            }
+        });
+
+        (
+            LogicalAgg::new(agg_calls, agg_call_alias, group_keys, input).into(),
+            ColIndexMapping::new(map),
+        )
     }
 }
 

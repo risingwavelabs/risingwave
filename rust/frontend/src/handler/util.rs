@@ -17,7 +17,16 @@ use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarRefImpl};
+
+/// Format scalars according to postgres convention.
+fn pg_value_format(d: ScalarRefImpl) -> String {
+    if let ScalarRefImpl::Bool(b) = d {
+        if b { "t" } else { "f" }.to_string()
+    } else {
+        d.to_string()
+    }
+}
 
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
     chunk
@@ -25,7 +34,7 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .map(|r| {
             Row::new(
                 r.0.into_iter()
-                    .map(|data| data.map(|d| d.to_string()))
+                    .map(|data| data.map(pg_value_format))
                     .collect_vec(),
             )
         })
