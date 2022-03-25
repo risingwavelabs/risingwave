@@ -305,10 +305,10 @@ pub async fn generate_agg_state<S: StateStore>(
     for (idx, agg_call) in agg_calls.iter().enumerate() {
         // TODO: in pure in-memory engine, we should not do this serialization.
 
-        // The prefix of the state is `[group_key] / agg_call_idx`
+        // The prefix of the state is `agg_call_idx / [group_key]`
         let keyspace = if let Some(key) = key {
             let bytes = key.serialize().unwrap();
-            keyspace.append(bytes).append_u16(idx as u16)
+            keyspace.append_u16(idx as u16).append(bytes)
         } else {
             keyspace.append_u16(idx as u16)
         };
