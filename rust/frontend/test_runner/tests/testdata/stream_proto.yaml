@@ -346,7 +346,7 @@
                       strategy:
                         type: HASH
                         columnIndices:
-                          - 0
+                          - 1
                 pkIndices:
                   - 2
                 projectNode:

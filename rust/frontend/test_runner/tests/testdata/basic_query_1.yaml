@@ -43,15 +43,15 @@
     create table t ();
     select (((((false is not true) is true) is not false) is false) is not null) is null from t;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
+    BatchProject { exprs: [IsNull(IsNotNull(IsFalse(IsNotFalse(IsTrue(IsNotTrue(false:Boolean))))))], expr_alias: [ ] }
+      BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [] }
 - sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
+    BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
+      BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { column_orders: [$1 ASC], column_id: [#0, #1], pk_indices: [1] }
@@ -60,14 +60,14 @@
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [((Length(Rtrim("12":Varchar, "1":Varchar)) + Length(Ltrim("23":Varchar, "2":Varchar))) + Length(Trim("34":Varchar, "3":Varchar)))], expr_alias: [ ] }
+    BatchProject { exprs: [((Length(Rtrim("12":Varchar, "1":Varchar)) + Length(Ltrim("23":Varchar, "2":Varchar))) + Length(Trim("34":Varchar, "3":Varchar)))], expr_alias: [ ] }
+      BatchExchange { order: [], dist: Single }
         BatchValues { rows: [[]] }
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Position(Replace("1":Varchar, "1":Varchar, "2":Varchar), "123":Varchar)], expr_alias: [ ] }
+    BatchProject { exprs: [Position(Replace("1":Varchar, "1":Varchar, "2":Varchar), "123":Varchar)], expr_alias: [ ] }
+      BatchExchange { order: [], dist: Single }
         BatchFilter { predicate: Like("12":Varchar, "%1":Varchar) }
           BatchValues { rows: [[]] }
 - sql: |
