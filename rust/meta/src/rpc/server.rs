@@ -229,7 +229,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger_ref.clone(),
     );
     let notification_srv = NotificationServiceImpl::new(
-        notification_manager,
+        notification_manager.clone(),
         catalog_manager_v2_ref,
         cluster_manager.clone(),
         epoch_generator_ref.clone(),
@@ -244,11 +244,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
             .await,
     ];
-    sub_tasks.extend(hummock::start_hummock_workers(
-        hummock_manager,
-        compactor_manager,
-        vacuum_trigger_ref,
-    ));
+    sub_tasks.extend(
+        hummock::start_hummock_workers(
+            hummock_manager,
+            compactor_manager,
+            vacuum_trigger_ref,
+            notification_manager.clone(),
+        )
+        .await,
+    );
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
