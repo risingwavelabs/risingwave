@@ -42,7 +42,7 @@ impl<S: StateStore> Keyspace<S> {
         let prefix = {
             let mut buf = BytesMut::with_capacity(9);
             buf.put_u8(b's');
-            buf.put_slice(&operator_id.to_be_bytes());
+            buf.put_u64(operator_id);
             buf.to_vec()
         };
         Self { store, prefix }
@@ -53,7 +53,7 @@ impl<S: StateStore> Keyspace<S> {
         let prefix = {
             let mut buf = BytesMut::with_capacity(9);
             buf.put_u8(b'e');
-            buf.put_slice(&executor_id.to_be_bytes());
+            buf.put_u64(executor_id);
             buf.to_vec()
         };
         Self { store, prefix }
@@ -64,7 +64,7 @@ impl<S: StateStore> Keyspace<S> {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
             buf.put_u8(b't');
-            buf.put_slice(&id.table_id.to_be_bytes());
+            buf.put_u32(id.table_id);
             buf.to_vec()
         };
         Self { store, prefix }
