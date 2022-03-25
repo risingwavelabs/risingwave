@@ -77,7 +77,7 @@ impl<S: StateStore> Keyspace<S> {
         prefix.append(&mut bytes);
         Self {
             store: self.store.clone(),
-            prefix: prefix,
+            prefix,
         }
     }
 
