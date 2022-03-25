@@ -165,6 +165,26 @@ pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
 }
 
 #[inline(always)]
+pub fn deci_to_f32(elem: Decimal) -> Result<OrderedF32> {
+    // Postgres defines f32 as 6 decimal digits precision
+    Ok(elem
+        .round_dp(6)
+        .to_f32()
+        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to f32", elem))))?
+        .into())
+}
+
+#[inline(always)]
+pub fn deci_to_f64(elem: Decimal) -> Result<OrderedF64> {
+    // Postgres defines f32 as 15 decimal digits precision
+    Ok(elem
+        .round_dp(15)
+        .to_f64()
+        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to f32", elem))))?
+        .into())
+}
+
+#[inline(always)]
 pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,

@@ -1,0 +1,59 @@
+query T
+values ('Inf'::real)
+----
+Infinity
+
+query T
+values ('-Inf'::real)
+----
+-Infinity
+
+query T
+values (('NaN')::real);
+----
+NaN
+
+query T
+values (('-NaN')::real);
+----
+NaN
+
+statement ok
+create table t (v1 real not null);
+
+statement ok
+insert into t values ((+0.0)::real), ((-0.0)::real), (1.0::real), ((-1.0)::real);
+
+statement ok
+insert into t values (('Inf')::real);
+
+statement ok
+insert into t values (('-Inf')::real);
+
+statement ok
+insert into t values (('NaN')::real);
+
+statement ok
+insert into t values (('-NaN')::real);
+
+# Flush all the insertions.
+statement ok
+flush;
+
+query I
+select count(*) from t;
+----
+8
+
+query TI rowsort
+select v1, count(*) from t group by v1;
+----
+-1 1
+-Infinity 1
+0 2
+1 1
+Infinity 1
+NaN 2
+
+statement ok
+drop table t;

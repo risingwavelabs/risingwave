@@ -129,6 +129,8 @@ macro_rules! gen_cast {
             { decimal, int16, deci_to_i16 },
             { decimal, int32, deci_to_i32 },
             { decimal, int64, deci_to_i64 },
+            { decimal, float32, deci_to_f32 },
+            { decimal, float64, deci_to_f64 },
 
             { date, timestamp, date_to_timestamp }
         }

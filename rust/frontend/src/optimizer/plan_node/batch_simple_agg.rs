@@ -14,7 +14,10 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
@@ -76,4 +79,16 @@ impl ToDistributedBatch for BatchSimpleAgg {
     }
 }
 
-impl ToBatchProst for BatchSimpleAgg {}
+impl ToBatchProst for BatchSimpleAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::SortAgg(SortAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
+            // We treat simple agg as a special sort agg without group keys.
+            group_keys: vec![],
+        })
+    }
+}

@@ -14,13 +14,13 @@
 
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
 
 mod binary_op;
 mod column;
@@ -86,8 +86,10 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let func_type = match op {
-            UnaryOperator::Minus => ExprType::Neg,
             UnaryOperator::Not => ExprType::Not,
+            UnaryOperator::Plus | UnaryOperator::Minus => {
+                return self.rewrite_pos_neg(op, expr);
+            }
             _ => {
                 return Err(ErrorCode::NotImplementedError(format!(
                     "unsupported expression: {:?}",
@@ -102,6 +104,26 @@ impl Binder {
             ErrorCode::NotImplementedError(format!("{:?} {:?}", op, return_type)).into()
         })
     }
+
+    /// Rewrite `+1.0` to `Int16(0) + 1.0`, `-1.0` to `Int16(0) - 1.0`.
+    /// This is a trick as all numerics added with Int16(0) remain its original type.
+    fn rewrite_pos_neg(&mut self, op: UnaryOperator, expr: Expr) -> Result<FunctionCall> {
+        let func_type = match op {
+            UnaryOperator::Minus => ExprType::Subtract,
+            UnaryOperator::Plus => ExprType::Add,
+            _ => unreachable!(),
+        };
+        let expr = self.bind_expr(expr)?;
+        let return_type = expr.return_type();
+        if !return_type.is_numeric() {
+            return Err(ErrorCode::InvalidInputSyntax(format!("{} {:?}", op, return_type)).into());
+        }
+        let zero = Literal::new(Some(ScalarImpl::Int16(0)), DataType::Int16).into();
+        FunctionCall::new(func_type, vec![zero, expr]).ok_or_else(|| {
+            ErrorCode::NotImplementedError(format!("{} {:?}", op, return_type)).into()
+        })
+    }
+
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,

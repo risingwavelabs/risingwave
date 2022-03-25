@@ -16,6 +16,8 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
@@ -91,4 +93,15 @@ impl ToDistributedBatch for BatchHashAgg {
     }
 }
 
-impl ToBatchProst for BatchHashAgg {}
+impl ToBatchProst for BatchHashAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::HashAgg(HashAggNode {
+            group_keys: self.group_keys().iter().map(|k| *k as u32).collect_vec(),
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(|c| c.to_protobuf())
+                .collect_vec(),
+        })
+    }
+}
