@@ -19,7 +19,7 @@ use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::{Keyspace, Segment};
+use risingwave_storage::Keyspace;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
 use super::*;
@@ -271,11 +271,7 @@ impl<S: StateStore> LookupExecutor<S> {
             key_prefix
         };
 
-        let arrange_keyspace = self
-            .arrangement
-            .keyspace
-            .with_segment(Segment::raw(key_prefix));
-
+        let arrange_keyspace = self.arrangement.keyspace.append(key_prefix);
         let all_cells = arrange_keyspace
             .scan_strip_prefix(None, lookup_epoch)
             .await?;
