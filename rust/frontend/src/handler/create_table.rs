@@ -135,7 +135,7 @@ pub async fn handle_create_table(
         columns: columns_catalog,
         pk_column_ids: vec![0],
         pk_orders: vec![OrderType::Ascending.to_prost() as i32],
-        dependent_relations: vec![],
+        dependent_relations: vec![], // placeholder for meta
         optional_associated_source_id: None,
     };
     let catalog_writer = session.env().catalog_writer();
