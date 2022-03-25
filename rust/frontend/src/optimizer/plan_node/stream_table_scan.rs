@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
-use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -43,7 +42,7 @@ impl StreamTableScan {
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            vec![0], // TODO
+            logical.base.pk_indices.clone(),
             Distribution::Single,
             false, // TODO: determine the `append-only` field of table scan
         );
@@ -54,16 +53,8 @@ impl StreamTableScan {
         }
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.logical.table_id()
-    }
-
     pub fn table_name(&self) -> &str {
         self.logical.table_name()
-    }
-
-    pub fn columns(&self) -> &[ColumnId] {
-        self.logical.columns()
     }
 }
 
@@ -100,18 +91,18 @@ impl StreamTableScan {
 
         let batch_plan_node = BatchPlanNode {
             table_ref_id: Some(TableRefId {
-                table_id: self.logical.table_id() as i32,
+                table_id: self.logical.table_desc().table_id.table_id as i32,
                 schema_ref_id: Default::default(),
             }),
             column_descs: self
                 .schema()
                 .fields()
                 .iter()
-                .zip_eq(self.logical.columns().iter())
+                .zip_eq(self.logical.column_descs().iter())
                 .zip_eq(self.logical.column_names().iter())
-                .map(|((field, column_id), column_name)| ColumnDesc {
+                .map(|((field, col), column_name)| ColumnDesc {
                     column_type: Some(field.data_type().to_protobuf()),
-                    column_id: column_id.get_id(),
+                    column_id: col.column_id.into(),
                     name: column_name.clone(),
                     field_descs: vec![],
                     type_name: "".to_string(),

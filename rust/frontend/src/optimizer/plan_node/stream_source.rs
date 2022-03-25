@@ -14,45 +14,68 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
-use super::{LogicalScan, PlanBase, ToStreamProst};
+use super::{PlanBase, ToStreamProst};
 use crate::optimizer::property::{Distribution, WithSchema};
+use crate::session::QueryContextRef;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
 pub struct StreamSource {
     pub base: PlanBase,
-    logical: LogicalScan,
+    source_catalog: ProstSource,
+    col_descs: Vec<ColumnDesc>,
     source_type: SourceType,
 }
 
 impl StreamSource {
-    pub fn new(logical: LogicalScan, source_type: SourceType) -> Self {
-        let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
+    pub fn create(ctx: QueryContextRef, pk_idx: Vec<usize>, source_catalog: ProstSource) -> Self {
+        let (source_type, prost_columns) = match &source_catalog.info {
+            Some(Info::StreamSource(source)) => (SourceType::Source, source.columns.clone()),
+            Some(Info::TableSource(source)) => (SourceType::Table, source.columns.clone()),
+            None => unreachable!(),
+        };
+        let col_descs = prost_columns
+            .iter()
+            .map(|c| c.column_desc.as_ref().unwrap())
+            .map(ColumnDesc::from)
+            .collect_vec();
+
+        let fields = col_descs.iter().map(Field::from).collect();
         let base = PlanBase::new_stream(
             ctx,
-            logical.schema().clone(),
-            vec![0], // TODO
+            Schema { fields },
+            pk_idx,
             Distribution::any().clone(),
             false, // TODO: determine the `append-only` field of source
         );
         Self {
             base,
-            logical,
+            source_catalog,
+            col_descs,
             source_type,
         }
+    }
+    pub fn column_names(&self) -> Vec<String> {
+        self.schema()
+            .fields()
+            .iter()
+            .map(|f| f.name.clone())
+            .collect()
     }
 }
 
 impl WithSchema for StreamSource {
     fn schema(&self) -> &Schema {
-        self.logical.schema()
+        &self.base.schema
     }
 }
 
@@ -62,10 +85,9 @@ impl fmt::Display for StreamSource {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamSource {{ source: {}, type: {:?}, columns: [{}] }}",
-            self.logical.table_name(),
-            self.source_type,
-            self.logical.column_names().join(", ")
+            "StreamSource {{ source: {},  columns: [{}] }}",
+            self.source_catalog.name,
+            self.column_names().join(", ")
         )
     }
 }
@@ -75,11 +97,11 @@ impl ToStreamProst for StreamSource {
         ProstStreamNode::SourceNode(SourceNode {
             // TODO: Refactor this id
             table_ref_id: TableRefId {
-                table_id: self.logical.table_id() as i32,
+                table_id: self.source_catalog.id as i32,
                 ..Default::default()
             }
             .into(),
-            column_ids: self.logical.columns().iter().map(|c| c.get_id()).collect(),
+            column_ids: self.col_descs.iter().map(|c| c.column_id.into()).collect(),
             source_type: self.source_type as i32,
         })
     }

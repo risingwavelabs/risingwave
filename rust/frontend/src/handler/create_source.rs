@@ -70,7 +70,7 @@ pub(super) async fn handle_create_source(
 
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            column_catalogs.append(&mut extract_protobuf_table_schema(protobuf_schema)?);
+            column_catalogs.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
                 properties: HashMap::from(stmt.with_properties),
                 row_format: RowFormatType::Protobuf as i32,

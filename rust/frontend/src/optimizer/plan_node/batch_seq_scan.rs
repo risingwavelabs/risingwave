@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, RowSeqScanNode};
@@ -75,21 +74,15 @@ impl ToBatchProst for BatchSeqScan {
         // TODO(bugen): directly store `ColumnDesc`s in logical scan.
         let column_descs = self
             .logical
-            .columns()
+            .column_descs()
             .iter()
-            .zip_eq(self.logical.schema().fields())
-            .map(|(column_id, field)| ProstColumnDesc {
-                column_type: field.data_type().to_protobuf().into(),
-                column_id: column_id.get_id(),
-                name: field.name.clone(),
-                ..Default::default()
-            })
+            .map(ProstColumnDesc::from)
             .collect();
 
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_id(),
-                pk: vec![], // not used
+                table_id: self.logical.table_desc().table_id.into(),
+                pk: vec![], // TODO:
             }),
             column_descs,
         })
