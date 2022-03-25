@@ -79,7 +79,7 @@
       StreamProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
         StreamHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
           StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2, $6], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([0, 1]) }
+            StreamExchange { dist: HashShard([4, 5]) }
               StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, _row_id], pk_indices: [6] }
 - id: tpch_q3
   before:
@@ -135,10 +135,10 @@
       StreamProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
           StreamProject { exprs: [$5, $1, $2, ($6 * (1:Int32 - $7)), $3, $4, $8], expr_alias: [ ,  ,  ,  ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([0, 1, 2]) }
+            StreamExchange { dist: HashShard([5, 1, 2]) }
               StreamHashJoin { type: Inner, predicate: $0 = $5 }
                 StreamProject { exprs: [$2, $4, $5, $1, $6], expr_alias: [ ,  ,  ,  ,  ] }
-                  StreamExchange { dist: HashShard([0]) }
+                  StreamExchange { dist: HashShard([2]) }
                     StreamHashJoin { type: Inner, predicate: $0 = $3 }
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
