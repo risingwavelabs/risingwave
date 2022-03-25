@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -28,7 +29,11 @@ pub struct BoundValues {
 }
 
 impl Binder {
-    pub(super) fn bind_values(&mut self, values: Values) -> Result<BoundValues> {
+    pub(super) fn bind_values(
+        &mut self,
+        values: Values,
+        expected_types: Option<Vec<DataType>>,
+    ) -> Result<BoundValues> {
         self.context.clause = Some(Clause::Values);
         let vec2d = values.0;
         let bound = vec2d
@@ -37,22 +42,38 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
-        // calc column type and insert casts here
-        let mut types = bound[0]
-            .iter()
-            .map(|expr| expr.return_type())
-            .collect::<Vec<DataType>>();
-        for vec in &bound {
-            for (i, expr) in vec.iter().enumerate() {
-                types[i] = Self::find_compat(types[i].clone(), expr.return_type())?
+        // Calculate column types.
+        let types = match expected_types {
+            Some(types) => {
+                if types.len() != bound[0].len() {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "values length mismatched".to_owned(),
+                    )
+                    .into());
+                }
+                types
             }
-        }
+            None => {
+                let mut types = bound[0]
+                    .iter()
+                    .map(|expr| expr.return_type())
+                    .collect::<Vec<DataType>>();
+                for vec in &bound {
+                    for (expr, ty) in vec.iter().zip_eq(types.iter_mut()) {
+                        *ty = Self::find_compat(ty.clone(), expr.return_type())?
+                    }
+                }
+                types
+            }
+        };
+
+        // Insert casts.
         let rows = bound
             .into_iter()
             .map(|vec| {
                 vec.into_iter()
-                    .enumerate()
-                    .map(|(i, expr)| Self::ensure_type(expr, types[i].clone()))
+                    .zip_eq(types.iter().cloned())
+                    .map(|(expr, ty)| Self::ensure_type(expr, ty))
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
@@ -111,7 +132,7 @@ mod tests {
         let expr1 = Expr::Value(Value::Number("1".to_string(), false));
         let expr2 = Expr::Value(Value::Number("1.1".to_string(), false));
         let values = Values(vec![vec![expr1], vec![expr2]]);
-        let res = binder.bind_values(values).unwrap();
+        let res = binder.bind_values(values, None).unwrap();
 
         let types = vec![DataType::Decimal];
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
