@@ -95,7 +95,7 @@ pub fn gen_create_table_plan(
     };
 
     let plan: PlanRef = {
-        let context: QueryContextRef = context.into();
+        let context: QueryContextRef = context;
 
         let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
 
