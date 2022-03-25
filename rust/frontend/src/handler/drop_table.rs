@@ -35,9 +35,11 @@ pub async fn handle_drop_table(
         // If associated source is `None`, then it is a normal mview.
         match table.associated_source_id() {
             Some(source_id) => (source_id, table.id()),
-            None => return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
-            ))),
+            None => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                )))
+            }
         }
     };
 

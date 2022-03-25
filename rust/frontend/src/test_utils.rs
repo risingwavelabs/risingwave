@@ -23,6 +23,7 @@ use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
 use risingwave_meta::manager::SchemaId;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
@@ -138,20 +139,19 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn create_materialized_source(
         &self,
-        source: ProstSource,
-        table: ProstTable,
+        mut source: ProstSource,
+        mut table: ProstTable,
         plan: StreamNode,
     ) -> Result<()> {
-        self.create_source(source).await?;
+        let source_id = self.create_source_inner(source)?;
+        table.optional_associated_source_id =
+            Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         self.create_materialized_view(table, plan).await?;
         Ok(())
     }
 
     async fn create_source(&self, mut source: ProstSource) -> Result<()> {
-        source.id = self.gen_id();
-        self.catalog.write().create_source(source.clone());
-        self.add_id(source.id, source.database_id, source.schema_id);
-        Ok(())
+        self.create_source_inner(source).map(|_| ())
     }
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
@@ -206,6 +206,15 @@ impl MockCatalogWriter {
 
     fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
         self.id_to_schema_id.write().remove(&id).unwrap()
+    }
+}
+
+impl MockCatalogWriter {
+    fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
+        source.id = self.gen_id();
+        self.catalog.write().create_source(source.clone());
+        self.add_id(source.id, source.database_id, source.schema_id);
+        Ok(source.id)
     }
 }
 
