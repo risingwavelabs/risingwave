@@ -58,7 +58,6 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    #[ignore]
     async fn test_drop_table_handler() {
         let sql_create_table = "create table t (v1 smallint);";
         let sql_drop_table = "drop table t;";
