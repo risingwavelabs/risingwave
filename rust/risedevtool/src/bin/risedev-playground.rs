@@ -28,7 +28,7 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use console::style;
 use indicatif::{MultiProgress, ProgressBar};
-use risedev::util::complete_spin;
+use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService,
     ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService, JaegerService,
@@ -389,8 +389,23 @@ fn main() -> Result<()> {
     ));
     let join_handle = manager.spawn();
     let task_result = task_main(&mut manager, &steps, &services);
-    p.set_message(format!("done bootstrapping {}", task_name));
-    complete_spin(&p);
+
+    match task_result {
+        Ok(_) => {
+            p.set_message(format!(
+                "done bootstrapping with config {}",
+                style(task_name).bold()
+            ));
+            complete_spin(&p);
+        }
+        Err(_) => {
+            p.set_message(format!(
+                "failed to bootstrap with config {}",
+                style(task_name).bold()
+            ));
+            fail_spin(&p);
+        }
+    }
     manager.finish_all();
     join_handle.join().unwrap()?;
 
@@ -425,7 +440,15 @@ fn main() -> Result<()> {
             Ok(())
         }
         Err(err) => {
-            println!("* Failed to start: {}", err.root_cause().to_string().trim(),);
+            println!(
+                "{} - Failed to start: {}",
+                style("ERROR").red().bold(),
+                err.root_cause().to_string().trim(),
+            );
+            println!(
+                "* Use `{}` to enable new compoenents, if they are missing.",
+                style("./risedev configure").blue().bold(),
+            );
             println!(
                 "* Use `{}` to view logs, or visit `{}`",
                 style("./risedev l").blue().bold(),
