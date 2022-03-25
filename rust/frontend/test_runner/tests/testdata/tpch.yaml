@@ -71,15 +71,15 @@
       BatchSort { order: [$0 ASC, $1 ASC] }
         BatchProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
           BatchHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
-            BatchExchange { order: [], dist: HashShard([0, 1]) }
-              BatchProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
+            BatchProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([4, 5]) }
                 BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus] }
   stream_plan: |
     StreamMaterialize { column_orders: [$0 ASC, $1 ASC], column_id: [#0, #1, #2, #3, #4, #5, #6, #7, #8], pk_indices: [0, 1] }
       StreamProject { exprs: [$0, $1, $2, $3, $4, $5, ($6 / $7), ($8 / $9), ($10 / $11)], expr_alias: [l_returnflag, l_linestatus, sum_qty, sum_base_price, sum_disc_price, sum_charge, avg_qty, avg_price, avg_disc] }
         StreamHashAgg { group_keys: [$0, $1], aggs: [sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8)] }
           StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([0, 1]) }
+            StreamExchange { dist: HashShard([4, 5]) }
               StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus], pk_indices: [0] }
 - id: tpch_q3
   before:
@@ -114,14 +114,14 @@
       BatchSort { order: [$1 DESC, $2 ASC] }
         BatchProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
           BatchHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
-            BatchExchange { order: [], dist: HashShard([0, 1, 2]) }
-              BatchProject { exprs: [$3, $1, $2, ($4 * (1:Int32 - $5))], expr_alias: [ ,  ,  ,  ] }
+            BatchProject { exprs: [$3, $1, $2, ($4 * (1:Int32 - $5))], expr_alias: [ ,  ,  ,  ] }
+              BatchExchange { order: [], dist: HashShard([3, 1, 2]) }
                 BatchHashJoin { type: Inner, predicate: $0 = $3 }
-                  BatchExchange { order: [], dist: HashShard([0]) }
-                    BatchProject { exprs: [$1, $3, $4], expr_alias: [ ,  ,  ] }
+                  BatchProject { exprs: [$1, $3, $4], expr_alias: [ ,  ,  ] }
+                    BatchExchange { order: [], dist: HashShard([1]) }
                       BatchHashJoin { type: Inner, predicate: $0 = $2 }
-                        BatchExchange { order: [], dist: HashShard([0]) }
-                          BatchProject { exprs: [$0], expr_alias: [ ] }
+                        BatchProject { exprs: [$0], expr_alias: [ ] }
+                          BatchExchange { order: [], dist: HashShard([0]) }
                             BatchFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
                         BatchExchange { order: [], dist: HashShard([2]) }
@@ -135,10 +135,10 @@
       StreamProject { exprs: [$0, $3, $1, $2], expr_alias: [l_orderkey, revenue, o_orderdate, o_shippriority] }
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [sum($3)] }
           StreamProject { exprs: [$4, $1, $2, ($5 * (1:Int32 - $6)), $3, $0], expr_alias: [ ,  ,  ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([0, 1, 2]) }
+            StreamExchange { dist: HashShard([4, 1, 2]) }
               StreamHashJoin { type: Inner, predicate: $0 = $4 }
                 StreamProject { exprs: [$1, $3, $4, $0], expr_alias: [ ,  ,  ,  ] }
-                  StreamExchange { dist: HashShard([0]) }
+                  StreamExchange { dist: HashShard([1]) }
                     StreamHashJoin { type: Inner, predicate: $0 = $2 }
                       StreamProject { exprs: [$0], expr_alias: [ ] }
                         StreamExchange { dist: HashShard([0]) }
@@ -164,11 +164,11 @@
       and l_discount between 0.08 - 0.01 and 0.08 + 0.01
       and */ l_quantity < 24;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [revenue] }
+    BatchProject { exprs: [$0], expr_alias: [revenue] }
+      BatchExchange { order: [], dist: Single }
         BatchSimpleAgg { aggs: [sum($0)] }
-          BatchExchange { order: [], dist: Single }
-            BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
+          BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
+            BatchExchange { order: [], dist: Single }
               BatchFilter { predicate: ($0 < 24:Int32) }
                 BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
   stream_plan: |

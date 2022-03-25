@@ -26,7 +26,7 @@ use crate::expr::{
     as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
@@ -253,9 +253,24 @@ impl ToBatch for LogicalProject {
 
 impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
-        let new_input = self.input().to_stream_with_dist_required(required_dist);
+        let o2i = LogicalProject::o2i_col_mapping(self.input().schema().len(), self.exprs());
+        let input_dist = match required_dist {
+            Distribution::HashShard(dists) => {
+                let input_dists = dists
+                    .iter()
+                    .map(|hash_col| o2i.try_map(*hash_col))
+                    .collect::<Option<Vec<_>>>();
+                match input_dists {
+                    Some(input_dists) => Distribution::HashShard(input_dists),
+                    None => Distribution::AnyShard,
+                }
+            }
+            dist => dist.clone(),
+        };
+        let new_input = self.input().to_stream_with_dist_required(&input_dist);
         let new_logical = self.clone_with_input(new_input);
-        StreamProject::new(new_logical).into()
+        let stream_plan = StreamProject::new(new_logical);
+        required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())
