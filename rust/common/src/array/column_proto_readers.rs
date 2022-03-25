@@ -71,7 +71,7 @@ fn read_bool(cursor: &mut Cursor<&[u8]>) -> Result<bool> {
     Ok(v != 0)
 }
 
-fn read_naivedate(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
+fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
     match cursor.read_i32::<BigEndian>() {
         Ok(days) => NaiveDateWrapper::from_protobuf(days),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -81,7 +81,7 @@ fn read_naivedate(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
     }
 }
 
-fn read_naivetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
+fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -91,7 +91,7 @@ fn read_naivetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
     }
 }
 
-fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
+fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -101,7 +101,7 @@ fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper
     }
 }
 
-fn read_intervalunit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
+fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
     {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
@@ -121,7 +121,7 @@ macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
         paste! {
             $(
-            pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+            pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
                 ensure!(
                     array.get_values().len() == 1,
                     "Must have only 1 buffer in a {} array", stringify!($type)
@@ -134,7 +134,7 @@ macro_rules! read_one_value_array {
                 let mut cursor = Cursor::new(buf);
                 for not_null in bitmap.iter() {
                     if not_null {
-                        builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
+                        builder.append(Some([<read_ $type:snake>](&mut cursor)?))?;
                     } else {
                         builder.append(None)?;
                     }
