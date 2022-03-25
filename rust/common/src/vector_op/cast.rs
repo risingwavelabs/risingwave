@@ -122,29 +122,34 @@ pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper>
 // We can only use ToPrimitive Trait
 macro_rules! define_cast_to_primitive {
     ($ty:ty) => {
+        define_cast_to_primitive! { $ty, $ty }
+    };
+    ($ty:ty, $wrapper_ty:ty) => {
         paste::paste! {
             #[inline(always)]
-            pub fn [<to_ $ty>]<T>(elem: T) -> Result<$ty>
+            pub fn [<to_ $ty>]<T>(elem: T) -> Result<$wrapper_ty>
             where
                 T: ToPrimitive + std::fmt::Debug,
             {
-                elem.[<to_ $ty>]().ok_or_else(|| {
-                    RwError::from(InternalError(format!(
-                        "Can't cast {:?} to {}",
-                        elem,
-                        std::any::type_name::<$ty>()
-                    )))
-                })
+                elem.[<to_ $ty>]()
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "Can't cast {:?} to {}",
+                            elem,
+                            std::any::type_name::<$ty>()
+                        )))
+                    })
+                    .map(Into::into)
             }
         }
     };
 }
 
-define_cast_to_primitive!(i16);
-define_cast_to_primitive!(i32);
-define_cast_to_primitive!(i64);
-define_cast_to_primitive!(f32);
-define_cast_to_primitive!(f64);
+define_cast_to_primitive! { i16 }
+define_cast_to_primitive! { i32 }
+define_cast_to_primitive! { i64 }
+define_cast_to_primitive! { f32, OrderedF32 }
+define_cast_to_primitive! { f64, OrderedF64 }
 
 // In postgresSql, the behavior of casting decimal to integer is rounding.
 // We should write them separately
@@ -161,16 +166,6 @@ pub fn dec_to_i32(elem: Decimal) -> Result<i32> {
 #[inline(always)]
 pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
-}
-
-#[inline(always)]
-pub fn dec_to_f32(elem: Decimal) -> Result<OrderedF32> {
-    to_f32(elem).map(Into::into)
-}
-
-#[inline(always)]
-pub fn dec_to_f64(elem: Decimal) -> Result<OrderedF64> {
-    to_f64(elem).map(Into::into)
 }
 
 #[inline(always)]
