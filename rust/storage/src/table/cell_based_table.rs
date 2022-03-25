@@ -139,9 +139,8 @@ impl<S: StateStore> CellBasedTable<S> {
         }
 
         for (key, value) in state_store_range_scan_res {
-            let key_vec = key.to_vec();
-            if key_vec.len() > 4 {
-                let column_id_bytes = &key_vec[key_vec.len() - 4..];
+            if key.len() > 4 {
+                let column_id_bytes = &key[key.len() - 4..];
                 let column_id = deserialize_column_id(column_id_bytes)?;
                 if column_id == NULL_ROW_SPECIAL_CELL_ID {
                     break;
@@ -152,7 +151,9 @@ impl<S: StateStore> CellBasedTable<S> {
                     .expect("column id not found");
                 let mut de = value_encoding::Deserializer::new(value.to_bytes());
                 let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-                row[column_id.get_id() as usize] = cell;
+                row[*column_index] = cell;
+            } else {
+                // panic or report err
             }
         }
 
