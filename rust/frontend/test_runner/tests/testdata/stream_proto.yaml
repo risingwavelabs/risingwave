@@ -4,15 +4,11 @@
     select * from t where v1<1;
   stream_plan_proto: |
     ---
-    operatorId: "18"
     input:
-      - operatorId: "17"
-        input:
-          - operatorId: "15"
-            input:
+      - input:
+          - input:
               - mergeNode: {}
-              - operatorId: "14"
-                pkIndices:
+              - pkIndices:
                   - 0
                 batchPlanNode:
                   tableRefId:
@@ -29,7 +25,22 @@
                       name: v1
             pkIndices:
               - 0
-            chainNode: {}
+            chainNode:
+              tableRefId:
+                schemaRefId: {}
+                tableId: 1
+              upstreamFields:
+                - dataType:
+                    typeName: INT64
+                    isNullable: true
+                  name: _row_id
+                - dataType:
+                    typeName: INT32
+                    isNullable: true
+                  name: v1
+              columnIds:
+                - 0
+                - 1
         pkIndices:
           - 0
         filterNode:
@@ -91,13 +102,10 @@
     select * from t;
   stream_plan_proto: |
     ---
-    operatorId: "10"
     input:
-      - operatorId: "9"
-        input:
+      - input:
           - mergeNode: {}
-          - operatorId: "8"
-            pkIndices:
+          - pkIndices:
               - 0
             batchPlanNode:
               tableRefId:
@@ -114,7 +122,22 @@
                   name: v1
         pkIndices:
           - 0
-        chainNode: {}
+        chainNode:
+          tableRefId:
+            schemaRefId: {}
+            tableId: 1
+          upstreamFields:
+            - dataType:
+                typeName: INT64
+                isNullable: true
+              name: _row_id
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+          columnIds:
+            - 0
+            - 1
     pkIndices:
       - 0
     materializeNode:
@@ -154,13 +177,10 @@
     select v1 from t;
   stream_plan_proto: |
     ---
-    operatorId: "11"
     input:
-      - operatorId: "10"
-        input:
+      - input:
           - mergeNode: {}
-          - operatorId: "9"
-            pkIndices:
+          - pkIndices:
               - 1
             batchPlanNode:
               tableRefId:
@@ -177,7 +197,27 @@
                   name: _row_id
         pkIndices:
           - 1
-        chainNode: {}
+        chainNode:
+          tableRefId:
+            schemaRefId: {}
+            tableId: 1
+          upstreamFields:
+            - dataType:
+                typeName: INT64
+                isNullable: true
+              name: _row_id
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v1
+            - dataType:
+                typeName: INT32
+                isNullable: true
+              name: v2
+          columnIds:
+            - 0
+            - 1
+            - 2
     pkIndices:
       - 1
     materializeNode:
@@ -219,15 +259,11 @@
     select sum(v1) from t;
   stream_plan_proto: |
     ---
-    operatorId: "24"
     input:
-      - operatorId: "23"
-        input:
-          - operatorId: "21"
-            input:
+      - input:
+          - input:
               - mergeNode: {}
-              - operatorId: "20"
-                pkIndices:
+              - pkIndices:
                   - 1
                 batchPlanNode:
                   tableRefId:
@@ -244,7 +280,22 @@
                       name: _row_id
             pkIndices:
               - 1
-            chainNode: {}
+            chainNode:
+              tableRefId:
+                schemaRefId: {}
+                tableId: 1
+              upstreamFields:
+                - dataType:
+                    typeName: INT64
+                    isNullable: true
+                  name: _row_id
+                - dataType:
+                    typeName: INT32
+                    isNullable: true
+                  name: v1
+              columnIds:
+                - 0
+                - 1
         pkIndices:
           - 0
         globalSimpleAggNode:
@@ -290,21 +341,14 @@
     select sum(v1) as sum_v1 from t group by v2;
   stream_plan_proto: |
     ---
-    operatorId: "36"
     input:
-      - operatorId: "35"
-        input:
-          - operatorId: "33"
-            input:
-              - operatorId: "31"
-                input:
-                  - operatorId: "29"
-                    input:
-                      - operatorId: "28"
-                        input:
+      - input:
+          - input:
+              - input:
+                  - input:
+                      - input:
                           - mergeNode: {}
-                          - operatorId: "27"
-                            pkIndices:
+                          - pkIndices:
                               - 2
                             batchPlanNode:
                               tableRefId:
@@ -326,7 +370,27 @@
                                   name: _row_id
                         pkIndices:
                           - 2
-                        chainNode: {}
+                        chainNode:
+                          tableRefId:
+                            schemaRefId: {}
+                            tableId: 1
+                          upstreamFields:
+                            - dataType:
+                                typeName: INT64
+                                isNullable: true
+                              name: _row_id
+                            - dataType:
+                                typeName: INT32
+                                isNullable: true
+                              name: v1
+                            - dataType:
+                                typeName: INT32
+                                isNullable: true
+                              name: v2
+                          columnIds:
+                            - 0
+                            - 1
+                            - 2
                     pkIndices:
                       - 2
                     exchangeNode:
