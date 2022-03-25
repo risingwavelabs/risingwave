@@ -215,9 +215,8 @@
                 isNullable: true
               name: v2
           columnIds:
-            - 0
             - 1
-            - 2
+            - 0
     pkIndices:
       - 1
     materializeNode:
@@ -294,8 +293,8 @@
                     isNullable: true
                   name: v1
               columnIds:
-                - 0
                 - 1
+                - 0
         pkIndices:
           - 0
         globalSimpleAggNode:
@@ -388,9 +387,9 @@
                                 isNullable: true
                               name: v2
                           columnIds:
-                            - 0
                             - 1
                             - 2
+                            - 0
                     pkIndices:
                       - 2
                     exchangeNode:

@@ -136,6 +136,7 @@ impl StreamTableScan {
                     table_id: self.logical.table_desc().table_id.table_id as i32,
                     schema_ref_id: Some(SchemaRefId::default()), // TODO: fill schema ref id
                 }),
+                // The fields from upstream
                 upstream_fields: self
                     .logical
                     .table_desc()
@@ -146,10 +147,10 @@ impl StreamTableScan {
                         name: x.name.clone(),
                     })
                     .collect(),
+                // The column idxs need to be forwarded to the downstream
                 column_ids: self
                     .logical
-                    .table_desc()
-                    .columns
+                    .column_descs()
                     .iter()
                     .map(|x| x.column_id.get_id())
                     .collect(),
