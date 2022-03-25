@@ -107,20 +107,12 @@
                 BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
-<<<<<<< HEAD
-      StreamProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [v1,  ] }
-        StreamHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($3)] }
+      StreamProject { exprs: [$0, ($2 + ($3 * $4))], expr_alias: [v1,  ] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($3)] }
           StreamExchange { dist: HashShard([0]) }
             StreamProject { exprs: [$0, $1, $2, $0, $3], expr_alias: [ ,  ,  ,  ,  ] }
               StreamExchange { dist: HashShard([0]) }
                 StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
-=======
-      StreamProject { exprs: [$0, ($2 + ($3 * $4))], expr_alias: [v1,  ] }
-        StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($3)] }
-          StreamProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
->>>>>>> 3efc874c (Fix tests.)
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) from t;
@@ -134,7 +126,7 @@
     StreamMaterialize { column_orders: [$1 ASC, $2 ASC, $3 ASC, $4 ASC], column_id: [#0, #1, #2, #3, #4], pk_indices: [1, 2, 3, 4] }
       StreamProject { exprs: [($1 + ($2 * $3)), $0, $1, $2, $3], expr_alias: [ ,  ,  ,  ,  ] }
         StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
-          StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+          StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -153,6 +145,6 @@
     StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
       StreamProject { exprs: [$0, ($2 * ($3 / $4))], expr_alias: [v3,  ] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), sum($2), count($2)] }
-          StreamProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
-            StreamExchange { dist: HashShard([0]) }
-              StreamTableScan { table: t, columns: [v1, v2, v3], pk_indices: [0] }
+          StreamProject { exprs: [$2, $0, ($0 + $1), $3], expr_alias: [ ,  ,  ,  ] }
+            StreamExchange { dist: HashShard([2]) }
+              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }

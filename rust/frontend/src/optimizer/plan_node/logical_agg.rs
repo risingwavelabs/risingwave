@@ -328,6 +328,15 @@ impl LogicalAgg {
     pub fn group_keys(&self) -> &[usize] {
         self.group_keys.as_ref()
     }
+
+    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<Option<String>>, Vec<usize>, PlanRef) {
+        (
+            self.agg_calls,
+            self.agg_call_alias,
+            self.group_keys,
+            self.input,
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -348,39 +357,26 @@ impl PlanTreeNodeUnary for LogicalAgg {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        // For StreamAgg, we need to insert a RowCountAgg at the beginning of `agg_calls`, and it is
-        // invisible to the LogicalProject above the LogicalAgg.
-        let mut agg_calls = vec![PlanAggCall {
-            agg_kind: AggKind::Count,
-            return_type: DataType::Int64,
-            inputs: vec![],
-        }];
-        agg_calls.extend(self.agg_calls.iter().cloned().map(|mut agg_call| {
-            agg_call
-                .inputs
-                .iter_mut()
-                .for_each(|i| *i = InputRef::new(input_col_change.map(i.index()), i.return_type()));
-            agg_call
-        }));
-        let mut agg_call_alias = vec![None];
-        agg_call_alias.extend(self.agg_call_alias().iter().cloned());
-
-        let group_keys: Vec<usize> = self
+        let agg_calls = self
+            .agg_calls
+            .iter()
+            .cloned()
+            .map(|mut agg_call| {
+                agg_call.inputs.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                agg_call
+            })
+            .collect();
+        let group_keys = self
             .group_keys
             .iter()
             .cloned()
             .map(|key| input_col_change.map(key))
             .collect();
-
-        // The index of agg_call should be incremented by 1 due to the insertion of RowCountAgg.
-        let group_len = group_keys.len();
-        let total_len = group_len + agg_calls.len();
-        let mut map: Vec<usize> = (0..group_len).collect();
-        map.extend((group_len..total_len).into_iter().map(|index| index + 1));
-        let out_col_change = ColIndexMapping::new(map.into_iter().map(Some).collect());
-
-        let agg = Self::new(agg_calls, agg_call_alias, group_keys, input);
-
+        let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identical_map(agg.schema().len());
         (agg, out_col_change)
     }
 }
@@ -485,7 +481,36 @@ impl ToStream for LogicalAgg {
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        (agg.into(), out_col_change)
+
+        // To rewrite StreamAgg, there are two things to do:
+        // 1. insert a RowCount(Count with zero argument) at the beginning of agg_calls of
+        // LogicalAgg.
+        // 2. increment the index of agg_calls in `out_col_change` by 1 due to
+        // the insertion of RowCount, and it will be used to rewrite LogicalProject above this
+        // LogicalAgg.
+        // Please note that the index of group keys need not be changed.
+        let (mut agg_calls, mut agg_call_alias, group_keys, input) = agg.decompose();
+        agg_calls.insert(
+            0,
+            PlanAggCall {
+                agg_kind: AggKind::Count,
+                return_type: DataType::Int64,
+                inputs: vec![],
+            },
+        );
+        agg_call_alias.insert(0, None);
+
+        let (mut map, _) = out_col_change.into_parts();
+        map.iter_mut().skip(group_keys.len()).for_each(|index| {
+            if let Some(i) = *index {
+                *index = Some(i + 1);
+            }
+        });
+
+        (
+            LogicalAgg::new(agg_calls, agg_call_alias, group_keys, input).into(),
+            ColIndexMapping::new(map),
+        )
     }
 }
 
