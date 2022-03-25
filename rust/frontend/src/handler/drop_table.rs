@@ -28,26 +28,22 @@ pub async fn handle_drop_table(
 
     let catalog_reader = session.env().catalog_reader();
 
-    let source_id = catalog_reader
-        .read_guard()
-        .get_source_by_name(session.database(), &schema_name, &table_name)
-        .map_err::<RwError, _>(|e| {
-            ErrorCode::InvalidInputSyntax(format!(
-                "{}. Hint: Use `DROP MATERIALIZED VIEW` to drop a materialized view.",
-                e
-            ))
-            .into()
-        })?
-        .id;
+    let (source_id, table_id) = {
+        let reader = catalog_reader.read_guard();
+        let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
 
-    let table_id = catalog_reader
-        .read_guard()
-        .get_table_by_name(session.database(), &schema_name, &table_name)?
-        .id();
+        // If associated source is `None`, then it is a normal mview.
+        match table.associated_source_id() {
+            Some(source_id) => (source_id, table.id()),
+            None => Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+            )))?,
+        }
+    };
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
-        .drop_materialized_source(source_id, table_id)
+        .drop_materialized_source(source_id.table_id(), table_id)
         .await?;
 
     Ok(PgResponse::new(
