@@ -37,11 +37,7 @@ impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
 
-        let batch_plan_id;
-        {
-            let mut ctx = ctx.borrow_mut();
-            batch_plan_id = ctx.get_id();
-        }
+        let batch_plan_id = ctx.next_plan_node_id();
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,

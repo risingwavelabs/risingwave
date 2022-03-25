@@ -479,7 +479,7 @@ impl ToStream for LogicalAgg {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+
     use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
@@ -496,7 +496,7 @@ mod tests {
     #[tokio::test]
     async fn test_create() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -630,7 +630,7 @@ mod tests {
     ///  TableScan(v2, v3)
     async fn test_prune_all() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -697,7 +697,7 @@ mod tests {
     ///   Agg(max(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
     async fn test_prune_group_key() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -773,7 +773,7 @@ mod tests {
     ///     TableScan(v2, v3)
     async fn test_prune_agg() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),

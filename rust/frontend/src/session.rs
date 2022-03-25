@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::error::Error;
 use std::fmt::Formatter;
+use std::marker::Sync;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,39 +43,64 @@ use crate::FrontendOpts;
 
 pub struct QueryContext {
     pub session_ctx: Arc<SessionImpl>,
-    pub next_id: i32,
+    // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
+    pub next_id: AtomicI32,
 }
-/// The reference of `QueryContext`, our system assumes that frontend will not parallel for a query,
-/// so we use `RefCell` here.
-pub type QueryContextRef = Rc<RefCell<QueryContext>>;
+
+#[derive(Clone, Debug)]
+pub struct QueryContextRef {
+    inner: Arc<QueryContext>,
+}
+
+impl !Sync for QueryContextRef {}
+
+impl From<QueryContext> for QueryContextRef {
+    fn from(inner: QueryContext) -> Self {
+        Self {
+            inner: Arc::new(inner),
+        }
+    }
+}
+
+impl QueryContextRef {
+    pub fn inner(&self) -> &QueryContext {
+        &self.inner
+    }
+
+    pub fn next_plan_node_id(&self) -> PlanNodeId {
+        // It's safe to use `fetch_add` and `Relaxed` ordering since we have marked
+        // `QueryContextRef` not `Sync`.
+        let next_id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
+        PlanNodeId(next_id)
+    }
+}
 
 impl QueryContext {
     pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
         Self {
             session_ctx,
-            next_id: 0,
+            next_id: AtomicI32::new(0),
         }
-    }
-
-    pub fn get_id(&mut self) -> PlanNodeId {
-        let ret = PlanNodeId(self.next_id);
-        self.next_id += 1;
-        ret
     }
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    pub async fn mock() -> Self {
+    pub async fn mock() -> QueryContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
-            next_id: 0,
+            next_id: AtomicI32::new(0),
         }
+        .into()
     }
 }
 
 impl std::fmt::Debug for QueryContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "QueryContext {{ current id = {} }}", self.next_id)
+        write!(
+            f,
+            "QueryContext {{ current id = {} }}",
+            self.next_id.load(Ordering::Relaxed)
+        )
     }
 }
 
@@ -313,3 +338,16 @@ impl Session for SessionImpl {
 //         meta.stop().await;
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use assert_impl::assert_impl;
+
+    use crate::session::QueryContextRef;
+
+    #[test]
+    fn check_query_context_ref() {
+        assert_impl!(Send: QueryContextRef);
+        assert_impl!(!Sync: QueryContextRef);
+    }
+}

@@ -289,8 +289,6 @@ impl ToStream for LogicalProject {
 }
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
@@ -314,7 +312,7 @@ mod tests {
     /// ```
     async fn test_prune_project() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),

@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -31,7 +30,7 @@ use crate::binder::Binder;
 use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::QueryContext;
+use crate::session::{QueryContext, QueryContextRef};
 
 pub const ROWID_NAME: &str = "_row_id";
 
@@ -97,7 +96,7 @@ pub async fn handle_create_table(
     };
 
     let plan = {
-        let context = Rc::new(RefCell::new(context));
+        let context: QueryContextRef = context.into();
 
         let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
 

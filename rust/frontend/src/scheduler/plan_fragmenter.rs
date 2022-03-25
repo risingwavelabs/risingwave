@@ -236,8 +236,7 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+
     use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
@@ -269,6 +268,11 @@ mod tests {
         //   Scan  Scan
         //
         let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let fields = vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Float64),
+        ];
+
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),
             vec![0, 1],
