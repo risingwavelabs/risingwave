@@ -49,7 +49,7 @@ impl Planner {
         }
     }
 
-    /// Helper to create a dummy node as child of `LogicalProject`.
+    /// Helper to create a dummy node as child of [`LogicalProject`].
     /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[]])`.
     fn create_dummy_values(&self) -> Result<PlanRef> {
         Ok(LogicalValues::create(

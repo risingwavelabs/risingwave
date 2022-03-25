@@ -64,7 +64,7 @@ pub struct MvInfo {
 }
 
 impl MvInfo {
-    /// Generate `MvInfo` with the table name. Note that this cannot be used to actually create an
+    /// Generate [`MvInfo`] with the table name. Note that this cannot be used to actually create an
     /// MV.
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {

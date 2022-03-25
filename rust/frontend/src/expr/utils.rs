@@ -40,7 +40,7 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 }
 
 /// give a expression, and get all columns in its `input_ref` expressions.
-/// **Panics** if **bit** is out of bounds of the `FixedBitSet`.
+/// **Panics** if **bit** is out of bounds of the [`FixedBitSet`].
 pub fn get_inputs_col_index(expr: &ExprImpl, cols: &mut FixedBitSet) {
     match expr {
         ExprImpl::FunctionCall(func_call) => {

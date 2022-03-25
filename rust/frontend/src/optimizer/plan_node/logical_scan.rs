@@ -53,7 +53,7 @@ impl LogicalScan {
         }
     }
 
-    /// Create a `LogicalScan` node. Used by planner.
+    /// Create a [`LogicalScan`] node. Used by planner.
     pub fn create(
         table_name: String,
         table_id: TableId,

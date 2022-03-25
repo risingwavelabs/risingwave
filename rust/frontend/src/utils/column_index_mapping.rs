@@ -161,8 +161,9 @@ impl ColIndexMapping {
         Self::with_target_size(map, following.target_size())
     }
 
-    /// union two mapping, the result mapping `target_size` and source size will be the max size of
-    /// the two mappings
+    /// Union two mapping, the result mapping `target_size` and source size will be the max size
+    /// ofthe two mappings.
+    ///
     /// # Panics
     ///
     /// Will panic if a source appears in both to mapping

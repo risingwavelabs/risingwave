@@ -221,7 +221,7 @@ impl Binder {
         })
     }
 
-    /// Fill the `BindContext` for table.
+    /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType)>,

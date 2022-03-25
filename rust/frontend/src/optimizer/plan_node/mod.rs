@@ -353,7 +353,7 @@ macro_rules! for_stream_plan_nodes {
     };
 }
 
-/// impl `PlanNodeType` fn for each node.
+/// impl [`PlanNodeType`] fn for each node.
 macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
