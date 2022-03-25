@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc::UnboundedSender;
@@ -27,7 +27,7 @@ pub(crate) type WorkerNodeId = u32;
 #[derive(Clone, Debug)]
 pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
 
     /// Reference to the source manager.
     source_manager: SourceManagerRef,
@@ -48,7 +48,7 @@ pub struct StreamEnvironment {
 impl StreamEnvironment {
     pub fn new(
         source_manager: SourceManagerRef,
-        server_addr: SocketAddr,
+        server_addr: HostAddr,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
@@ -71,7 +71,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
 
         StreamEnvironment {
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: Arc::new(MemSourceManager::new()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
@@ -82,7 +82,7 @@ impl StreamEnvironment {
         }
     }
 
-    pub fn server_address(&self) -> &SocketAddr {
+    pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
 

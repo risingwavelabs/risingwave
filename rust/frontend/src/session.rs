@@ -25,6 +25,7 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -154,10 +155,17 @@ impl FrontendEnv {
         let config = load_config(opts);
         tracing::info!("Starting compute node with config {:?}", config);
 
-        let host = opts.host.parse().unwrap();
-
+        // TODO: refactor this when we have a separate port option
+        let frontend_address: HostAddr = opts
+            .client_address
+            .as_ref()
+            .unwrap_or(&opts.host)
+            .parse()
+            .unwrap();
         // Register in meta by calling `AddWorkerNode` RPC.
-        meta_client.register(host, WorkerType::Frontend).await?;
+        meta_client
+            .register(frontend_address.clone(), WorkerType::Frontend)
+            .await?;
 
         let (heartbeat_join_handle, heartbeat_shutdown_sender) = MetaClient::start_heartbeat_loop(
             meta_client.clone(),
@@ -176,7 +184,7 @@ impl FrontendEnv {
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),
-            host,
+            frontend_address.clone(),
             worker_node_manager.clone(),
             catalog,
             catalog_updated_tx,
@@ -184,7 +192,7 @@ impl FrontendEnv {
         .await;
         let observer_join_handle = observer_manager.start().await;
 
-        meta_client.activate(host).await?;
+        meta_client.activate(frontend_address.clone()).await?;
 
         Ok((
             Self {

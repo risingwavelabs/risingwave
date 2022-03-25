@@ -23,6 +23,7 @@ use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -55,7 +56,8 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
-    addr: SocketAddr,
+    listen_addr: SocketAddr,
+    client_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
@@ -67,7 +69,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(addr, WorkerType::ComputeNode)
+        .register(client_addr.clone(), WorkerType::ComputeNode)
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -111,7 +113,7 @@ pub async fn compute_node_serve(
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
     let stream_mgr = Arc::new(StreamManager::new(
-        addr,
+        client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
     ));
@@ -122,7 +124,7 @@ pub async fn compute_node_serve(
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
-        addr,
+        client_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
@@ -133,7 +135,7 @@ pub async fn compute_node_serve(
     let stream_config = Arc::new(config.streaming.clone());
     let stream_env = StreamEnvironment::new(
         source_mgr,
-        addr,
+        client_addr.clone(),
         stream_config,
         worker_id,
         state_store,
@@ -150,7 +152,7 @@ pub async fn compute_node_serve(
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
-            .serve_with_shutdown(addr, async move {
+            .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = shutdown_recv.recv() => {
@@ -177,7 +179,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(addr).await.unwrap();
+    meta_client.activate(client_addr.clone()).await.unwrap();
 
     (join_handle, shutdown_send)
 }

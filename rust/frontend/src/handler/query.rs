@@ -57,7 +57,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         .host
         .as_ref()
         .ok_or_else(|| RwError::from(InternalError("host address not found".to_string())))?
-        .to_socket_addr()?;
+        .into();
     let compute_client: ComputeClient = ComputeClient::new(address).await?;
 
     // Build task id and task sink id
