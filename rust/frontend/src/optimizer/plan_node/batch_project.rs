@@ -110,7 +110,7 @@ impl ToDistributedBatch for BatchProject {
                 }
             }
             Distribution::AnyShard => Distribution::AnyShard,
-            dist => Distribution::Any,
+            _ => Distribution::Any,
         };
         let new_input = self
             .input()
