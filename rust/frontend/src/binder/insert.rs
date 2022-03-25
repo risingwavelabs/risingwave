@@ -15,7 +15,7 @@
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
-use super::BoundSetExpr;
+use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
 
 #[derive(Debug)]
@@ -23,7 +23,7 @@ pub struct BoundInsert {
     /// Used for injecting deletion chunks to the source.
     pub table_source: BoundTableSource,
 
-    pub source: BoundSetExpr,
+    pub source: BoundQuery,
 }
 
 impl Binder {
@@ -44,11 +44,15 @@ impl Binder {
         let source = match source.body {
             SetExpr::Values(values) => {
                 let values = self.bind_values(values, Some(data_types))?;
-                BoundSetExpr::Values(values.into())
+                let body = BoundSetExpr::Values(values.into());
+                BoundQuery {
+                    body,
+                    order: vec![],
+                }
             }
 
             // TODO: insert type cast for select exprs
-            SetExpr::Select(_) => self.bind_set_expr(source.body)?,
+            SetExpr::Select(_) => self.bind_query(source)?,
 
             _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", source.body)).into()),
         };
