@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::Debug;
 
 use anyhow::{anyhow, Result};
@@ -33,6 +33,12 @@ pub trait SourceState: Debug + Clone {
 #[derive(Clone)]
 pub struct SourceStateHandler<S: StateStore> {
     keyspace: Keyspace<S>,
+}
+
+impl<S: StateStore> Debug for SourceStateHandler<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceStateHandler").finish()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -142,7 +148,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                         .state_identifier
                         .eq(&state_identifier.clone())
                     {
-                        restore_values.push((stored_key.epoch, pair.1))
+                        restore_values.push((stored_key.epoch, pair.1.to_bytes()))
                     }
                 }
                 Ok(restore_values)

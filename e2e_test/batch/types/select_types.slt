@@ -88,6 +88,17 @@ select '2008-01-01'::DATE;
 ----
 2008-01-01
 
+# Make sure we use proleptic Gregorian calendar.
+query T
+select '1582-10-14'::DATE;
+----
+1582-10-14
+
+query T
+select '1582-10-04'::DATE;
+----
+1582-10-04
+
 query T
 select date '1997-07-01' + interval '3' month;
 ----

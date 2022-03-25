@@ -101,7 +101,7 @@ cd java
 For Rust code, please run:
 
 ```shell
-./risedev check
+./risedev c # shortcut for ./risedev check
 ```
 
 If a new dependency is added to `Cargo.toml`, you may also run:

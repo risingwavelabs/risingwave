@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
@@ -42,6 +42,7 @@ enum DataTypeName {
     Timestampz,
     Interval,
     Struct,
+    List,
 }
 
 fn name_of(ty: &DataType) -> DataTypeName {
@@ -61,6 +62,7 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Decimal => DataTypeName::Decimal,
         DataType::Interval => DataTypeName::Interval,
         DataType::Struct { .. } => DataTypeName::Struct,
+        DataType::List { .. } => DataTypeName::List,
     }
 }
 
@@ -87,6 +89,9 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Interval => DataType::Interval,
         DataTypeName::Struct => DataType::Struct {
             fields: Arc::new([]),
+        },
+        DataTypeName::List => DataType::List {
+            datatype: Box::new(DataType::Int32),
         },
     })
 }
@@ -226,6 +231,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         );
     }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
+    build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
     build_binary_funcs(
         &mut map,
         &cmp_exprs,

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![feature(let_chains)]
 
 use std::collections::HashMap;
@@ -408,13 +408,18 @@ fn main() -> Result<()> {
             print!("{}", log_buffer);
 
             println!(
-                "* You may find logs using `{}` command",
+                "* You may find logs using {} command",
                 style("./risedev l").blue().bold()
             );
 
             println!(
                 "* Run {} to kill cluster.",
                 style("./risedev k").blue().bold()
+            );
+
+            println!(
+                "* Run {} to run `risedev` anywhere!",
+                style("./risedev install").blue().bold()
             );
 
             Ok(())

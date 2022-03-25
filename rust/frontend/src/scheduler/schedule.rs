@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
@@ -206,11 +206,11 @@ impl BatchScheduler {
 }
 
 /// `WorkerNodeManager` manages live worker nodes.
-pub(crate) struct WorkerNodeManager {
+pub struct WorkerNodeManager {
     worker_nodes: RwLock<Vec<WorkerNode>>,
 }
 
-pub(crate) type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
+pub type WorkerNodeManagerRef = Arc<WorkerNodeManager>;
 
 impl WorkerNodeManager {
     pub async fn new(client: MetaClient) -> Result<Self> {
@@ -242,14 +242,11 @@ impl WorkerNodeManager {
 
     /// Get a random worker node.
     pub fn next_random(&self) -> WorkerNode {
+        let current_nodes = self.worker_nodes.read().unwrap();
         let mut rng = rand::thread_rng();
-        let die = Uniform::from(0..self.worker_nodes.read().unwrap().len());
-        self.worker_nodes
-            .read()
-            .unwrap()
-            .get(die.sample(&mut rng))
-            .unwrap()
-            .clone()
+
+        let die = Uniform::from(0..current_nodes.len());
+        current_nodes.get(die.sample(&mut rng)).unwrap().clone()
     }
 }
 
@@ -355,7 +352,6 @@ impl BatchScheduler {
                 cur_stage_worker_nodes.push(self.worker_manager.next_random());
             }
         }
-
         self.do_stage_execution(Arc::new(AugmentedStage::new_with_query_stage(
             query_stage_ref,
             &scheduled_children,

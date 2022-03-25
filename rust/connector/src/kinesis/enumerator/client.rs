@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use anyhow::Result;
 use async_trait::async_trait;
 use aws_sdk_kinesis::model::Shard;
@@ -29,7 +29,7 @@ pub struct KinesisSplitEnumerator {
 impl SplitEnumerator for KinesisSplitEnumerator {
     type Split = KinesisSplit;
 
-    async fn list_splits(&mut self) -> Result<Vec<Self::Split>> {
+    async fn list_splits(&mut self) -> Result<Vec<KinesisSplit>> {
         let mut next_token: Option<String> = None;
         let mut shard_collect: Vec<Shard> = Vec::new();
 

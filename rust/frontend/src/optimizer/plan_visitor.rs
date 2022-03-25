@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use paste::paste;
 
 use crate::for_all_plan_nodes;
@@ -22,7 +22,7 @@ use crate::optimizer::property::Convention;
 macro_rules! def_visitor {
     ([], $({ $convention:ident, $name:ident }),*) => {
         /// The visitor for plan nodes. visit all inputs and return the ret value of the left most input,
-        /// and leaf node returns R::default()
+        /// and leaf node returns `R::default()`
         pub trait PlanVisitor<R:Default> {
             fn check_convention(&self, _convention: Convention) -> bool {
                 return true;

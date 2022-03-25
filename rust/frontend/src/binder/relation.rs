@@ -11,12 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::hash_map::Entry;
 
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
+use risingwave_pb::catalog::source::Info;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };
@@ -43,17 +45,23 @@ pub struct BoundJoin {
     pub cond: ExprImpl,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub cell_based_desc: CellBasedTableDesc,
-    pub columns: Vec<ColumnDesc>,
+    pub table_desc: TableDesc,
 }
 
 #[derive(Debug)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+}
+
+#[derive(Debug)]
+pub struct BoundTableSource {
+    pub name: String,       // explain-only
+    pub source_id: TableId, // TODO: refactor to source id
+    pub columns: Vec<ColumnDesc>,
 }
 
 impl Binder {
@@ -144,7 +152,7 @@ impl Binder {
         }
     }
 
-    /// return the (schema_name, table_name)
+    /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
@@ -159,20 +167,15 @@ impl Binder {
 
         Ok((schema_name, table_name))
     }
+
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let table_catalog = {
-            let schema_catalog = self
-                .get_schema_by_name(&schema_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
-            schema_catalog
-                .get_table_by_name(&table_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
-                .clone()
-        };
+        let table_catalog =
+            self.catalog
+                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
         let table_id = table_catalog.id();
-        let cell_based_desc = table_catalog.cell_based_table();
+        let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
         let columns = columns
@@ -186,13 +189,37 @@ impl Binder {
 
         Ok(BoundBaseTable {
             name: table_name,
-            cell_based_desc,
+            table_desc,
             table_id,
+        })
+    }
+
+    pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
+        let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let source = self
+            .catalog
+            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+
+        let source_id = TableId::new(source.id);
+        let table_source_info = try_match_expand!(source.get_info()?, Info::TableSource)?;
+
+        let columns: Vec<ColumnDesc> = table_source_info
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
+            .collect();
+
+        // Note(bugen): do not bind context here.
+
+        Ok(BoundTableSource {
+            name: source_name,
+            source_id,
             columns,
         })
     }
 
-    /// Fill the BindContext for table.
+    /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType)>,
@@ -218,7 +245,7 @@ impl Binder {
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name: {}",
+                "Duplicated table name while binding context: {}",
                 table_name
             ))
             .into()),

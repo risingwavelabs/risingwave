@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use core::default::Default as CoreDefault;
 
 use itertools::Itertools;
@@ -236,6 +236,7 @@ impl<'a> TableBuilder<'a> {
         let insert = InsertNode {
             table_source_ref_id: None,
             column_ids: vec![0; self.col_types.len()],
+            frontend_v2: false,
         };
 
         let tuples = self

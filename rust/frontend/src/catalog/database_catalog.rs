@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
@@ -21,6 +21,7 @@ use crate::catalog::{DatabaseId, SchemaId};
 #[derive(Clone, Debug)]
 pub struct DatabaseCatalog {
     id: DatabaseId,
+    #[allow(dead_code)]
     name: String,
     schema_by_name: HashMap<String, SchemaCatalog>,
     schema_name_by_id: HashMap<SchemaId, String>,

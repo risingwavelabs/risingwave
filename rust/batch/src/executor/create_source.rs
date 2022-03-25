@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::kinesis::config::AwsConfigInfo;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
@@ -33,6 +34,7 @@ use crate::executor::{Executor, ExecutorBuilder};
 
 const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
 const KAFKA_SOURCE: &str = "kafka";
+const KINESIS_SOURCE: &str = "kinesis";
 
 const KAFKA_TOPIC_KEY: &str = "kafka.topic";
 const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
@@ -46,7 +48,7 @@ pub(super) struct CreateSourceExecutor {
     table_id: TableId,
     config: SourceConfig,
     format: SourceFormat,
-    parser: Option<Arc<dyn SourceParser>>,
+    parser: Option<Arc<dyn SourceParser + Send + Sync>>,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
     properties: HashMap<String, String>,
@@ -74,6 +76,11 @@ impl CreateSourceExecutor {
             topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
             properties: Default::default(),
         }))
+    }
+
+    fn extract_kinesis_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
+        let config = AwsConfigInfo::build(properties)?;
+        Ok(SourceConfig::Connector(config))
     }
 }
 
@@ -122,6 +129,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
             KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
+            KINESIS_SOURCE => CreateSourceExecutor::extract_kinesis_config(properties),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
@@ -153,9 +161,9 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 #[async_trait::async_trait]
 impl Executor for CreateSourceExecutor {
     async fn open(&mut self) -> Result<()> {
-        let parser: Arc<dyn SourceParser> = match self.format {
+        let parser: Arc<dyn SourceParser + Send + Sync> = match self.format {
             SourceFormat::Json => {
-                let parser: Arc<dyn SourceParser> = Arc::new(JSONParser {});
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
                 Ok(parser)
             }
             SourceFormat::Protobuf => {
@@ -166,7 +174,7 @@ impl Executor for CreateSourceExecutor {
                     )))
                 })?;
 
-                let parser: Arc<dyn SourceParser> = Arc::new(ProtobufParser::new(
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(ProtobufParser::new(
                     self.schema_location.as_str(),
                     message_name,
                 )?);
@@ -174,7 +182,7 @@ impl Executor for CreateSourceExecutor {
                 Ok(parser)
             }
             SourceFormat::DebeziumJson => {
-                let parser: Arc<dyn SourceParser> = Arc::new(DebeziumJsonParser {});
+                let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
                 Ok(parser)
             }
             _ => Err(RwError::from(InternalError(
@@ -187,14 +195,16 @@ impl Executor for CreateSourceExecutor {
     }
 
     async fn next(&mut self) -> Result<Option<DataChunk>> {
-        self.source_manager.create_source(
-            &self.table_id,
-            self.format.clone(),
-            self.parser.clone().unwrap(),
-            &self.config,
-            self.columns.clone(),
-            self.row_id_index,
-        )?;
+        self.source_manager
+            .create_source(
+                &self.table_id,
+                self.format.clone(),
+                self.parser.clone().unwrap(),
+                &self.config,
+                self.columns.clone(),
+                self.row_id_index,
+            )
+            .await?;
 
         Ok(None)
     }

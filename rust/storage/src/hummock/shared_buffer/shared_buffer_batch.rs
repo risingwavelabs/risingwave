@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -31,7 +31,6 @@ pub struct SharedBufferBatch {
     pub(super) epoch: u64,
 }
 
-#[allow(dead_code)]
 impl SharedBufferBatch {
     pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
         Self {
@@ -60,10 +59,12 @@ impl SharedBufferBatch {
         SharedBufferBatchIterator::<BACKWARD>::new(self.inner.clone())
     }
 
+    #[allow(dead_code)]
     pub fn start_key(&self) -> &[u8] {
         &self.inner.first().unwrap().0
     }
 
+    #[allow(dead_code)]
     pub fn end_key(&self) -> &[u8] {
         &self.inner.last().unwrap().0
     }
@@ -173,15 +174,15 @@ mod tests {
         let epoch = 1;
         let shared_buffer_items = vec![
             (
-                iterator_test_key_of_epoch(0, 0, epoch),
+                iterator_test_key_of_epoch(0, epoch),
                 HummockValue::Put(b"value1".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(0, 1, epoch),
+                iterator_test_key_of_epoch(1, epoch),
                 HummockValue::Put(b"value2".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(0, 2, epoch),
+                iterator_test_key_of_epoch(2, epoch),
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
@@ -208,11 +209,11 @@ mod tests {
             );
         }
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_key_of(0, 3).as_slice()),
+            shared_buffer_batch.get(iterator_test_key_of(3).as_slice()),
             None
         );
         assert_eq!(
-            shared_buffer_batch.get(iterator_test_key_of(1, 0).as_slice()),
+            shared_buffer_batch.get(iterator_test_key_of(4).as_slice()),
             None
         );
 
@@ -246,15 +247,15 @@ mod tests {
         let epoch = 1;
         let shared_buffer_items = vec![
             (
-                iterator_test_key_of_epoch(0, 0, epoch),
+                iterator_test_key_of_epoch(0, epoch),
                 HummockValue::Put(b"value1".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(0, 1, epoch),
+                iterator_test_key_of_epoch(1, epoch),
                 HummockValue::Put(b"value2".to_vec()),
             ),
             (
-                iterator_test_key_of_epoch(0, 2, epoch),
+                iterator_test_key_of_epoch(2, epoch),
                 HummockValue::Put(b"value3".to_vec()),
             ),
         ];
@@ -263,7 +264,7 @@ mod tests {
 
         // Seek to 2nd key with current epoch, expect last two items to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch))
+        iter.seek(&iterator_test_key_of_epoch(1, epoch))
             .await
             .unwrap();
         for item in &shared_buffer_items[1..] {
@@ -276,7 +277,7 @@ mod tests {
 
         // Seek to 2nd key with future epoch, expect last two items to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch + 1))
+        iter.seek(&iterator_test_key_of_epoch(1, epoch + 1))
             .await
             .unwrap();
         for item in &shared_buffer_items[1..] {
@@ -289,7 +290,7 @@ mod tests {
 
         // Seek to 2nd key with old epoch, expect last item to return
         let mut iter = shared_buffer_batch.iter();
-        iter.seek(&iterator_test_key_of_epoch(0, 1, epoch - 1))
+        iter.seek(&iterator_test_key_of_epoch(1, epoch - 1))
             .await
             .unwrap();
         let item = shared_buffer_items.last().unwrap();

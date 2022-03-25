@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
@@ -29,8 +30,16 @@ pub struct StreamSimpleAgg {
 impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), Distribution::any().clone());
-        StreamSimpleAgg { logical, base }
+        let pk_indices = logical.base.pk_indices.to_vec();
+        // Simple agg executor might change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            Distribution::any().clone(),
+            false,
+        );
+        StreamSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -62,4 +71,17 @@ impl WithSchema for StreamSimpleAgg {
     }
 }
 
-impl ToStreamProst for StreamSimpleAgg {}
+impl ToStreamProst for StreamSimpleAgg {
+    fn to_stream_prost_body(&self) -> ProstStreamNode {
+        use risingwave_pb::stream_plan::*;
+
+        // TODO: local or global simple agg?
+        ProstStreamNode::GlobalSimpleAggNode(SimpleAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+        })
+    }
+}

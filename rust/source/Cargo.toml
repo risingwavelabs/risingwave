@@ -20,6 +20,7 @@ log = "0.4"
 maplit = "1"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
+parking_lot = "0.12"
 paste = "1"
 prost = "0.9"
 protobuf = "2"
@@ -27,6 +28,7 @@ protobuf-codegen-pure = "2.25.2"
 rand = "0.8"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_pb = { path = "../prost" }
 risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }

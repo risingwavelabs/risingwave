@@ -11,12 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::*;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
-use itertools::Itertools;
 
 use super::{Block, Header};
 use crate::hummock::version_cmp::VersionedComparator;
@@ -76,58 +75,81 @@ impl BlockIterator {
         let mut entry_data = self.block.raw_entry(i as usize);
 
         let header = Header::decode(&mut entry_data);
+        let diff_key = &entry_data[..header.diff as usize];
 
-        // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
                 &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
             );
+        } else {
+            self.key.truncate(header.overlap as usize);
         }
-        self.perv_overlap = header.overlap;
-
-        let diff_key = &entry_data[..header.diff as usize];
-        self.key.truncate(header.overlap as usize);
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
-
+        self.perv_overlap = header.overlap;
         true
     }
 
+    fn partition_point<F: FnMut(&mut BlockIterator, usize) -> bool>(
+        &mut self,
+        start: usize,
+        end: usize,
+        mut f: F,
+    ) -> usize {
+        let mut lo = start;
+        let mut hi = end;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let ret = f(self, mid);
+            if ret {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo
+    }
+
     /// Seek to the first entry that is equal or greater than key.
-    pub fn seek(&mut self, key: &[u8], whence: SeekPos) {
+    pub fn seek(&mut self, key: &[u8]) {
+        self.seek_from(key, SeekPos::Origin);
+    }
+
+    /// Seek to the first entry that is equal or greater than key.
+    pub fn seek_from(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx as usize,
         };
-        let found_entry_idx = (start_index..self.block.len())
-            // TODO: remove this collect_vec
-            .collect_vec()
-            .partition_point(|idx| {
-                self.set_idx(*idx as isize);
-
-                // compare by version comparator
-                VersionedComparator::compare_key(&self.key, key) == Less
-            })
-            + start_index;
-
+        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
+            iter.set_idx(idx as isize);
+            VersionedComparator::compare_key(&iter.key, key) == Less
+        };
+        let found_entry_idx =
+            self.partition_point(start_index, self.block.len(), is_in_first_partition);
         self.set_idx(found_entry_idx as isize);
     }
 
     /// Seek to the first entry that is equal or less than key.
-    pub fn seek_le(&mut self, key: &[u8], whence: SeekPos) {
+    pub fn seek_le(&mut self, key: &[u8]) {
+        self.seek_le_from(key, SeekPos::Origin);
+    }
+
+    /// Seek to the first entry that is equal or less than key.
+    pub fn seek_le_from(&mut self, key: &[u8], whence: SeekPos) {
         let end_index = match whence {
             SeekPos::Origin => self.block.len(),
             SeekPos::Current => self.idx as usize + 1,
         };
-        let found_entry_idx = (0..end_index).collect_vec().partition_point(|idx| {
-            self.set_idx(*idx as isize);
+        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
+            iter.set_idx(idx as isize);
 
-            let ord = VersionedComparator::compare_key(&self.key, key);
+            let ord = VersionedComparator::compare_key(&iter.key, key);
             ord == Less || ord == Equal
-        });
-        let found_entry_idx = found_entry_idx as isize - 1;
-
+        };
+        let found_entry_idx =
+            self.partition_point(0, end_index, is_in_first_partition) as isize - 1;
         self.set_idx(found_entry_idx);
     }
 
@@ -149,12 +171,14 @@ impl BlockIterator {
         }
     }
 
-    pub fn key(&self) -> Option<&[u8]> {
-        self.data().map(|(k, _v)| k)
+    pub fn key(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.key[..]
     }
 
-    pub fn value(&self) -> Option<&[u8]> {
-        self.data().map(|(_k, v)| v)
+    pub fn value(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.val[..]
     }
 
     /// Check whether the iterator is at the last position
@@ -288,23 +312,23 @@ mod tests {
         }
         assert_eq!(idx, 0);
 
-        blk_iter.seek(&Bytes::from("key_test_4"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_4"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_4"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_9"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_9"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_9"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_99"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_99"), SeekPos::Origin);
         assert!(blk_iter.data().is_none());
 
         blk_iter.set_idx(3);
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Current);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Current);
 
         assert_eq!(BytesMut::from("key_test_3"), blk_iter.key);
     }

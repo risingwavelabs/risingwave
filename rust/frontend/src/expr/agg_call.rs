@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
@@ -34,7 +34,7 @@ impl std::fmt::Debug for AggCall {
                 .field("inputs", &self.inputs)
                 .finish()
         } else {
-            let mut builder = f.debug_tuple(&format!("{:?}", self.agg_kind));
+            let mut builder = f.debug_tuple(&format!("{}", self.agg_kind));
             self.inputs.iter().for_each(|child| {
                 builder.field(child);
             });

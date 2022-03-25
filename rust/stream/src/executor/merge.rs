@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use async_trait::async_trait;
 use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
@@ -478,7 +478,7 @@ mod tests {
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
             let mut remote_input =
-                RemoteInput::create(ComputeClient::new(&addr).await.unwrap(), (0, 0), tx)
+                RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
                     .await
                     .unwrap();
             remote_input.run().await

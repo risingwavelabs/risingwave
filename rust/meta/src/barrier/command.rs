@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use futures::future::try_join_all;
@@ -121,14 +121,15 @@ where
     S: MetaStore,
 {
     /// Generate a mutation for the given command.
-    pub fn to_mutation(&self) -> Result<Mutation> {
+    pub async fn to_mutation(&self) -> Result<Mutation> {
         let mutation = match &self.command {
             Command::Plain(mutation) => mutation.clone(),
 
             Command::DropMaterializedView(table_id) => {
                 let actors = self
                     .fragment_manager
-                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))?;
+                    .get_table_actor_ids(&TableId::from(&Some(table_id.clone())))
+                    .await?;
                 Mutation::Stop(StopMutation { actors })
             }
 
@@ -159,7 +160,7 @@ where
             Command::DropMaterializedView(table_ref_id) => {
                 // Tell compute nodes to drop actors.
                 let table_id = TableId::from(&Some(table_ref_id.clone()));
-                let node_actors = self.fragment_manager.table_node_actors(&table_id)?;
+                let node_actors = self.fragment_manager.table_node_actors(&table_id).await?;
                 let futures = node_actors.iter().map(|(node_id, actors)| {
                     let node = self.info.node_map.get(node_id).unwrap();
                     let request_id = Uuid::new_v4().to_string();
@@ -185,6 +186,10 @@ where
                 self.fragment_manager
                     .drop_table_fragments(&table_id)
                     .await?;
+
+                // TODO: delete downstream actor infos from upstream actors:
+                // 1. resolve chain nodes, find upstream actors and table id.
+                // 2. delete downstream actor infos from upstream actors in depended table.
             }
 
             Command::CreateMaterializedView {

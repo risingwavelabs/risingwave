@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use risingwave_common::error::{ErrorCode, Result};
@@ -22,7 +22,7 @@ use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
-/// An example of its relationship with BoundSetExpr and BoundSelect can be found here: https://bit.ly/3GQwgPz
+/// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
 #[derive(Debug)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,

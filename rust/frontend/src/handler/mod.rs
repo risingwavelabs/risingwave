@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
@@ -28,6 +28,8 @@ mod explain;
 mod flush;
 mod query;
 pub mod util;
+
+pub use create_mv::{gen_create_mv_plan, MvInfo};
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
     let context = QueryContext::new(session.clone());

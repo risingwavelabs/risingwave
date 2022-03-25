@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::max;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -32,6 +32,7 @@ use risingwave_storage::hummock::{
 };
 use tokio::sync::{Mutex, RwLock};
 
+use crate::cluster::StoredClusterManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
@@ -53,6 +54,7 @@ use crate::storage::{Error, MetaStore, Transaction};
 pub struct HummockManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
+    cluster_manager_ref: StoredClusterManagerRef<S>,
     // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
     compaction: Mutex<Compaction>,
@@ -141,7 +143,11 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(env: MetaSrvEnv<S>, metrics: Arc<MetaMetrics>) -> Result<HummockManager<S>> {
+    pub async fn new(
+        env: MetaSrvEnv<S>,
+        cluster_manager_ref: StoredClusterManagerRef<S>,
+        metrics: Arc<MetaMetrics>,
+    ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
             meta_store_ref: env.meta_store_ref(),
             id_gen_manager_ref: env.id_gen_manager_ref(),
@@ -157,9 +163,11 @@ where
                 compact_status: CompactStatus::new(),
             }),
             metrics,
+            cluster_manager_ref,
         };
 
         instance.load_meta_store_state().await?;
+        instance.release_invalid_contexts().await?;
 
         Ok(instance)
     }
@@ -244,14 +252,7 @@ where
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
-            // Get the worker's key in meta store
-            let workers = Worker::list(meta_store_ref)
-                .await?
-                .into_iter()
-                .filter(|worker| worker.worker_id() == context_id)
-                .collect_vec();
-            assert!(workers.len() <= 1);
-            if let Some(worker) = workers.first() {
+            if let Some(worker) = self.cluster_manager_ref.get_worker_by_id(context_id).await {
                 trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
             } else {
                 // The worker is not found in cluster.
@@ -1073,8 +1074,14 @@ where
         Ok(sstable_id)
     }
 
-    pub async fn release_context_resource(&self, context_id: HummockContextId) -> Result<()> {
-        tracing::debug!("context_id {} is released", context_id);
+    /// Release resources pinned by these contexts, including:
+    /// - Version
+    /// - Snapshot
+    /// - TODO: Compact task
+    pub async fn release_contexts(
+        &self,
+        context_ids: impl AsRef<[HummockContextId]>,
+    ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let (mut pinned_versions, mut pinned_snapshots) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
@@ -1083,13 +1090,20 @@ where
         );
 
         let mut to_commit = false;
-        to_commit = pinned_versions.remove(&context_id).is_some() || to_commit;
-        to_commit = pinned_snapshots.remove(&context_id).is_some() || to_commit;
+        for context_id in context_ids.as_ref() {
+            tracing::debug!("Release context {}", *context_id);
+
+            to_commit = pinned_versions.remove(context_id).is_some() || to_commit;
+            to_commit = pinned_snapshots.remove(context_id).is_some() || to_commit;
+        }
+        if !to_commit {
+            return Ok(());
+        }
 
         if to_commit {
-            commit_multi_var!(self, None, pinned_snapshots, pinned_versions)?;
+            commit_multi_var!(self, None, pinned_versions, pinned_snapshots)?;
         } else {
-            abort_multi_var!(pinned_snapshots, pinned_versions);
+            abort_multi_var!(pinned_versions, pinned_snapshots);
         }
 
         #[cfg(test)]
@@ -1252,5 +1266,32 @@ where
         }
 
         Ok(())
+    }
+
+    /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
+    pub async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
+        let active_context_ids = {
+            let versioning_guard = self.versioning.read().await;
+            let mut active_context_ids = HashSet::new();
+            active_context_ids.extend(versioning_guard.pinned_versions.keys());
+            active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
+            active_context_ids
+        };
+
+        let mut invalid_context_ids = vec![];
+        for active_context_id in &active_context_ids {
+            if self
+                .cluster_manager_ref
+                .get_worker_by_id(*active_context_id)
+                .await
+                .is_none()
+            {
+                invalid_context_ids.push(*active_context_id);
+            }
+        }
+
+        self.release_contexts(&invalid_context_ids).await?;
+
+        Ok(invalid_context_ids)
     }
 }

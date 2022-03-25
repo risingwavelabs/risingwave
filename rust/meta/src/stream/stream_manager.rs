@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -51,6 +51,7 @@ pub struct CreateMaterializedViewContext {
 }
 
 /// Stream Manager
+
 pub struct StreamManager<S> {
     /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
@@ -191,6 +192,7 @@ where
             let node = locations.node_locations.get(node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -218,11 +220,11 @@ where
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
-            let client = self
-                .clients
-                .get_by_node_id(&node_id)
-                .expect("client not exists");
+            let node = locations.node_locations.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
+
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -240,6 +242,7 @@ where
             let node = locations.node_locations.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
@@ -308,7 +311,10 @@ mod tests {
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,
     };
-    use risingwave_pb::stream_service::*;
+    use risingwave_pb::stream_service::{
+        BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
+    };
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
     use tonic::{Request, Response, Status};
@@ -317,7 +323,7 @@ mod tests {
     use crate::barrier::BarrierManager;
     use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{MetaSrvEnv, NotificationManager};
+    use crate::manager::{CatalogManager, MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -412,6 +418,13 @@ mod tests {
         ) -> std::result::Result<Response<DropSourceResponse>, Status> {
             unimplemented!()
         }
+
+        async fn shutdown(
+            &self,
+            _request: Request<ShutdownRequest>,
+        ) -> std::result::Result<Response<ShutdownResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {
@@ -448,12 +461,12 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager = Arc::new(NotificationManager::new());
+            let notification_manager =
+                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),
-                    None,
-                    notification_manager,
+                    notification_manager.clone(),
                     Duration::from_secs(3600),
                 )
                 .await?,
@@ -468,12 +481,23 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
+            let catalog_manager = Arc::new(
+                CatalogManager::new(
+                    env.meta_store_ref(),
+                    env.id_gen_manager_ref(),
+                    notification_manager,
+                )
+                .await?,
+            );
             let meta_metrics = Arc::new(MetaMetrics::new());
-            let hummock_manager =
-                Arc::new(HummockManager::new(env.clone(), meta_metrics.clone()).await?);
+            let hummock_manager = Arc::new(
+                HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+                    .await?,
+            );
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
+                catalog_manager,
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
                 hummock_manager,
@@ -591,8 +615,12 @@ mod tests {
 
         let sink_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)?;
-        let actor_ids = services.fragment_manager.get_table_actor_ids(&table_id)?;
+            .get_table_sink_actor_ids(&table_id)
+            .await?;
+        let actor_ids = services
+            .fragment_manager
+            .get_table_actor_ids(&table_id)
+            .await?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
 

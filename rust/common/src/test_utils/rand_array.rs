@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Contains helper methods for generating random arrays in tests.
 //!
 //! Use [`seed_rand_array`] to generate an random array.
@@ -25,7 +25,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
-use crate::array::{Array, ArrayBuilder, ArrayRef, StructValue};
+use crate::array::{Array, ArrayBuilder, ArrayRef, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,
@@ -106,6 +106,12 @@ impl RandValue for bool {
 impl RandValue for StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
         StructValue::new(vec![])
+    }
+}
+
+impl RandValue for ListValue {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        ListValue::new(vec![])
     }
 }
 

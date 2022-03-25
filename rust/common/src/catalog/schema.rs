@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::ops::Index;
 
-#[allow(unused_imports)]
-use risingwave_pb::plan::{ColumnDesc, ExchangeInfo, Field as ProstField};
+use risingwave_pb::plan::Field as ProstField;
 
+use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
 use crate::types::DataType;
@@ -120,15 +120,26 @@ impl Field {
         }
     }
 
-    pub fn from(prost_field: &ProstField) -> Self {
+    pub fn data_type(&self) -> DataType {
+        self.data_type.clone()
+    }
+}
+
+impl From<&ProstField> for Field {
+    fn from(prost_field: &ProstField) -> Self {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
         }
     }
+}
 
-    pub fn data_type(&self) -> DataType {
-        self.data_type.clone()
+impl From<&ColumnDesc> for Field {
+    fn from(desc: &ColumnDesc) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: desc.name.clone(),
+        }
     }
 }
 
@@ -140,7 +151,6 @@ impl Index<usize> for Schema {
     }
 }
 
-#[allow(unused)]
 pub mod test_utils {
     use super::*;
 

@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::fmt;
+
+use std::sync::Arc;
+use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
@@ -26,22 +27,25 @@ use crate::session::QueryContextRef;
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     pub base: PlanBase,
-    rows: Vec<Vec<ExprImpl>>,
+    rows: Arc<[Vec<ExprImpl>]>,
 }
 
 impl LogicalValues {
-    /// Create a LogicalValues node. Used internally by optimizer.
+    /// Create a [`LogicalValues`] node. Used internally by optimizer.
     pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
-        let base = PlanBase::new_logical(ctx, schema);
-        Self { rows, base }
+        let base = PlanBase::new_logical(ctx, schema, vec![]);
+        Self {
+            rows: rows.into(),
+            base,
+        }
     }
 
-    /// Create a LogicalValues node. Used by planner.
+    /// Create a [`LogicalValues`] node. Used by planner.
     pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
         // No additional checks after binder.
         Self::new(rows, schema, ctx).into()
@@ -91,12 +95,14 @@ impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
         unimplemented!("Stream values executor is unimplemented!")
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, Datum};
@@ -119,7 +125,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_prune_filter() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

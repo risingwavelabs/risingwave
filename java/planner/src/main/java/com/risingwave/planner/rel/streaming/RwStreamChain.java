@@ -79,7 +79,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
   @Override
   public StreamNode serialize() {
     ChainNode.Builder builder = ChainNode.newBuilder();
-    builder.setTableRefId(Messages.getTableRefId(tableId)).addAllPkIndices(primaryKeyIndices);
+    builder.setTableRefId(Messages.getTableRefId(tableId));
     columnIds.forEach(c -> builder.addColumnIds(c.getValue()));
     builder.addAllUpstreamFields(upstreamFields);
     ChainNode chainNode = builder.build();
@@ -89,6 +89,7 @@ public class RwStreamChain extends Union implements RisingWaveStreamingRel {
             // Just a placeholder for operator id gen.
             StreamNode.newBuilder().setMergeNode(MergeNode.newBuilder().build()).build())
         .setIdentity(StreamingPlan.getCurrentNodeIdentity(this))
+        .addAllPkIndices(primaryKeyIndices)
         .build();
   }
 

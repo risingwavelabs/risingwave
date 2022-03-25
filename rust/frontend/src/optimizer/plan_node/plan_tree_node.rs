@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use smallvec::SmallVec;
 
 use super::PlanRef;
 use crate::optimizer::property::{Distribution, Order};
+use crate::utils::ColIndexMapping;
 
 /// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
 /// framework. every plan node should impl it.
@@ -63,6 +64,19 @@ pub trait PlanTreeNodeUnary {
     fn input(&self) -> PlanRef;
     #[must_use]
     fn clone_with_input(&self, input: PlanRef) -> Self;
+
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        _input: PlanRef,
+        _input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping)
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
+
     fn input_dist_required(&self) -> &Distribution {
         Distribution::any()
     }
@@ -82,6 +96,19 @@ pub trait PlanTreeNodeBinary {
 
     #[must_use]
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self;
+    #[must_use]
+    fn rewrite_with_left_right(
+        &self,
+        _left: PlanRef,
+        _left_col_change: ColIndexMapping,
+        _right: PlanRef,
+        _right_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping)
+    where
+        Self: Sized,
+    {
+        unimplemented!()
+    }
 
     fn left_dist_required(&self) -> &Distribution {
         Distribution::any()

@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
-use risingwave_pb::plan::{CellBasedTableDesc, RowSeqScanNode};
+use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, RowSeqScanNode};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
@@ -46,7 +46,7 @@ impl BatchSeqScan {
             Order::any().clone(),
         );
 
-        Self { logical, base }
+        Self { base, logical }
     }
 }
 
@@ -71,13 +71,19 @@ impl ToDistributedBatch for BatchSeqScan {
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        // TODO(Bowen): Fix this serialization.
+        let column_descs = self
+            .logical
+            .column_descs()
+            .iter()
+            .map(ProstColumnDesc::from)
+            .collect();
+
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_id(),
-                pk: vec![],
+                table_id: self.logical.table_desc().table_id.into(),
+                pk: vec![], // TODO:
             }),
-            ..Default::default()
+            column_descs,
         })
     }
 }

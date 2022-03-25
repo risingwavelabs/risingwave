@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -35,12 +35,13 @@ impl LogicalTopN {
     fn new(input: PlanRef, limit: usize, offset: usize, order: Order) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
-        let base = PlanBase::new_logical(ctx, schema);
+        let pk_indices = input.pk_indices().to_vec();
+        let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalTopN {
+            base,
             input,
             limit,
             offset,
-            base,
             order,
         }
     }
@@ -57,6 +58,22 @@ impl PlanTreeNodeUnary for LogicalTopN {
     }
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.limit, self.offset, self.order.clone())
+    }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        (
+            Self::new(
+                input,
+                self.limit,
+                self.offset,
+                input_col_change.rewrite_order(self.order.clone()),
+            ),
+            input_col_change,
+        )
     }
 }
 impl_plan_tree_node_for_unary! {LogicalTopN}
@@ -100,7 +117,6 @@ impl ColPrunable for LogicalTopN {
                 top_n,
                 ColIndexMapping::with_remaining_columns(&remaining_columns),
             )
-            .into()
         }
     }
 }
@@ -114,5 +130,10 @@ impl ToBatch for LogicalTopN {
 impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
         todo!()
+    }
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        (top_n.into(), out_col_change)
     }
 }

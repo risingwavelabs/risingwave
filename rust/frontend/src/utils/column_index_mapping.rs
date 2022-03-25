@@ -1,3 +1,4 @@
+use std::cmp::max;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use std::fmt::Debug;
 use std::vec;
 
@@ -20,13 +20,16 @@ use itertools::Itertools;
 use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
 /// It is used in optimizer for transformation of column index.
+#[derive(Clone)]
 pub struct ColIndexMapping {
-    target_upper: usize,
-    /// The source column index is the subscript.
+    /// The size of the target space, i.e. target index is in the range `(0..target_size)`.
+    target_size: usize,
+    /// Each subscript is mapped to the corresponding element.
     map: Vec<Option<usize>>,
 }
 
@@ -34,14 +37,29 @@ impl ColIndexMapping {
     /// Create a partial mapping which maps the subscripts range `(0..map.len())` to the
     /// corresponding element.
     pub fn new(map: Vec<Option<usize>>) -> Self {
-        let target_upper = map
-            .iter()
-            .filter_map(|x| *x)
-            .max_by_key(|x| *x)
-            .unwrap_or(0);
-        Self { map, target_upper }
+        let target_size = match map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
+            Some(target_max) => target_max + 1,
+            None => 0,
+        };
+        Self { target_size, map }
     }
 
+    /// Create a partial mapping which maps from the subscripts range `(0..map.len())` to
+    /// `(0..target_size)`. Each subscript is mapped to the corresponding element.
+    pub fn with_target_size(map: Vec<Option<usize>>, target_size: usize) -> Self {
+        if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
+            assert!(target_max < target_size)
+        };
+        Self { target_size, map }
+    }
+    pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
+        (self.map, self.target_size)
+    }
+
+    pub fn identical_map(target_size: usize) -> Self {
+        let map = (0..target_size).into_iter().map(Some).collect();
+        Self::new(map)
+    }
     /// Create a partial mapping which maps range `(0..source_num)` to range
     /// `(offset..offset+source_num)`.
     ///
@@ -140,7 +158,41 @@ impl ColIndexMapping {
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
         }
-        Self::new(map)
+        Self::with_target_size(map, following.target_size())
+    }
+
+    /// Union two mapping, the result mapping `target_size` and source size will be the max size
+    /// ofthe two mappings.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if a source appears in both to mapping
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        debug!("union {:?} and {:?}", self, other);
+        let target_size = max(self.target_size(), other.target_size());
+        let source_size = max(self.source_size(), other.source_size());
+        let mut map = vec![None; source_size];
+        for (src, dst) in self.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
+        for (src, dst) in other.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
+        Self::with_target_size(map, target_size)
+    }
+
+    /// inverse the mapping, if a target corresponds more than one source, it will choose any one as
+    /// it inverse mapping's target
+    #[must_use]
+    pub fn inverse(&self) -> Self {
+        let mut map = vec![None; self.target_size()];
+        for (src, dst) in self.mapping_pairs() {
+            map[dst] = Some(src);
+        }
+        Self::with_target_size(map, self.source_size())
     }
 
     /// return iter of (src, dst) order by src
@@ -160,12 +212,48 @@ impl ColIndexMapping {
         self.try_map(index).unwrap()
     }
 
-    pub fn target_upper(&self) -> usize {
-        self.target_upper
+    /// Returns the size of the target range. Target index is in the range `(0..target_size)`.
+    pub fn target_size(&self) -> usize {
+        self.target_size
     }
 
-    pub fn source_upper(&self) -> usize {
-        self.map.len() - 1
+    /// Returns the size of the source range. Source index is in the range `(0..source_size)`.
+    pub fn source_size(&self) -> usize {
+        self.map.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.target_size() == 0
+    }
+
+    pub fn rewrite_order(&self, mut order: Order) -> Order {
+        for field in &mut order.field_order {
+            field.index = self.map(field.index)
+        }
+        order
+    }
+
+    pub fn rewrite_distribution(&mut self, dist: Distribution) -> Distribution {
+        match dist {
+            Distribution::HashShard(mut col_idxes) => {
+                for idx in &mut col_idxes {
+                    *idx = self.map(*idx);
+                }
+                Distribution::HashShard(col_idxes)
+            }
+            _ => dist,
+        }
+    }
+
+    pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
+        assert_eq!(bitset.len(), self.source_size());
+        let mut ret = FixedBitSet::with_capacity(self.target_size());
+        for i in bitset.ones() {
+            if let Some(i) = self.try_map(i) {
+                ret.insert(i);
+            }
+        }
+        ret
     }
 }
 
@@ -179,7 +267,9 @@ impl Debug for ColIndexMapping {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "ColIndexMapping({})",
+            "ColIndexMapping(source_size:{}, target_size:{}, mapping:{})",
+            self.source_size(),
+            self.target_size(),
             self.mapping_pairs()
                 .map(|(src, dst)| format!("{}->{}", src, dst))
                 .join(",")

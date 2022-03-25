@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -22,23 +22,28 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
+#![feature(mutex_unlock)]
 
 use std::fmt::Debug;
 
 use async_trait::async_trait;
+use connector_source::ConnectorSource;
 pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
+use risingwave_connector::ConnectorConfig;
 pub use table_v2::*;
 
 pub mod parser;
 
+pub mod connector_source;
 mod high_level_kafka;
 mod manager;
 
@@ -50,6 +55,7 @@ extern crate maplit;
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
+    Connector(ConnectorConfig),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -65,6 +71,7 @@ pub enum SourceFormat {
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
+    Connector(ConnectorSource),
 }
 
 impl SourceImpl {

@@ -11,12 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
@@ -41,6 +41,14 @@ impl ColumnCatalog {
     /// Get a reference to the column desc's name.
     pub fn name(&self) -> &str {
         self.column_desc.name.as_ref()
+    }
+
+    /// Convert column catalog to proto
+    pub fn to_protobuf(&self) -> ProstColumnCatalog {
+        ProstColumnCatalog {
+            column_desc: Some(self.column_desc.to_protobuf()),
+            is_hidden: self.is_hidden,
+        }
     }
 }
 

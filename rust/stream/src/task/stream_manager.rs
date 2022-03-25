@@ -11,21 +11,21 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
 use itertools::Itertools;
+use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
-use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -43,7 +43,7 @@ use crate::task::{
 
 #[cfg(test)]
 lazy_static::lazy_static! {
-    pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
+    pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
 pub type ActorHandle = JoinHandle<()>;
@@ -129,7 +129,7 @@ impl StreamManager {
     }
 
     pub fn new(
-        addr: SocketAddr,
+        addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -149,7 +149,7 @@ impl StreamManager {
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
     ) -> Result<oneshot::Receiver<()>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
             .send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?
@@ -176,7 +176,7 @@ impl StreamManager {
                 // TODO: Handle sync failure by propagating it
                 // back to global barrier manager
                 Err(e) => panic!(
-                    "Failed to sync state store after receving barrier {:?} due to {}",
+                    "Failed to sync state store after receiving barrier {:?} due to {}",
                     barrier, e
                 ),
             }
@@ -191,7 +191,7 @@ impl StreamManager {
     pub fn send_barrier_for_test(&self, barrier: &Barrier) -> Result<()> {
         use std::iter::empty;
 
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         assert!(barrier_manager.is_local_mode());
         barrier_manager.send_barrier(barrier, empty(), empty())?;
@@ -199,7 +199,7 @@ impl StreamManager {
     }
 
     pub fn drop_actor(&self, actors: &[ActorId]) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         for id in actors {
             core.drop_actor(*id);
         }
@@ -218,7 +218,7 @@ impl StreamManager {
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         core.context.take_receiver(&ids)
     }
 
@@ -227,13 +227,13 @@ impl StreamManager {
         actors: &[stream_plan::StreamActor],
         hanging_channels: &[stream_service::HangingChannel],
     ) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.update_actors(actors, hanging_channels)
     }
 
     /// This function was called while [`StreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
-        let handles = self.core.lock().unwrap().take_all_handles()?;
+        let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
             handle.await?;
         }
@@ -242,7 +242,7 @@ impl StreamManager {
 
     #[cfg(test)]
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
-        let handles = self.core.lock().unwrap().remove_actor_handles(actor_ids)?;
+        let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
             handle.await.unwrap();
         }
@@ -254,30 +254,30 @@ impl StreamManager {
         &self,
         req: stream_service::BroadcastActorInfoTableRequest,
     ) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.update_actor_info(req)
     }
 
     /// This function could only be called once during the lifecycle of `StreamManager` for now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.build_actors(actors, env)
     }
 
     #[cfg(test)]
     pub fn take_source(&self) -> futures::channel::mpsc::Sender<Message> {
-        let mut core = self.core.lock().unwrap();
+        let mut core = self.core.lock();
         core.mock_source.0.take().unwrap()
     }
 
     #[cfg(test)]
     pub fn take_sink(&self, ids: UpDownActorIds) -> Receiver<Message> {
-        let core = self.core.lock().unwrap();
+        let core = self.core.lock();
         core.context.take_receiver(&ids).unwrap()
     }
 
     pub fn state_store(&self) -> StateStoreImpl {
-        self.core.lock().unwrap().state_store.clone()
+        self.core.lock().state_store.clone()
     }
 }
 
@@ -315,11 +315,11 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 
 impl StreamManagerCore {
     fn new(
-        addr: SocketAddr,
+        addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let context = SharedContext::new(addr, state_store.clone());
+        let context = SharedContext::new(addr);
         Self::with_store_and_context(state_store, context, streaming_metrics)
     }
 
@@ -375,8 +375,7 @@ impl StreamManagerCore {
             .downstream_actor_id
             .iter()
             .map(|down_id| {
-                let host_addr = self.get_actor_info(down_id)?.get_host()?;
-                let downstream_addr = host_addr.to_socket_addr()?;
+                let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
                 new_output(&self.context, downstream_addr, actor_id, down_id)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -639,9 +638,8 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?;
-                    let upstream_socket_addr = upstream_addr.to_socket_addr()?;
-                    if !is_local_address(&upstream_socket_addr, &self.context.addr) {
+                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
+                    if !is_local_address(&upstream_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
                         // `MergerExecutor`.
@@ -654,7 +652,7 @@ impl StreamManagerCore {
                         tokio::spawn(async move {
                             let init_client = async move {
                                 let remote_input = RemoteInput::create(
-                                    pool.get_client_for_addr(&upstream_socket_addr).await?,
+                                    pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
                                     sender,
                                 )

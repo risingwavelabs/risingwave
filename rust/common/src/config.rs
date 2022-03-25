@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -209,7 +209,7 @@ mod default {
     }
 
     pub fn checksum_algorithm() -> risingwave_pb::hummock::checksum::Algorithm {
-        risingwave_pb::hummock::checksum::Algorithm::Crc32c
+        risingwave_pb::hummock::checksum::Algorithm::XxHash64
     }
 
     pub fn async_checkpoint_enabled() -> bool {

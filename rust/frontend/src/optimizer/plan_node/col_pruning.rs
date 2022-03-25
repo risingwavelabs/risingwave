@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use fixedbitset::FixedBitSet;
 use paste::paste;
 
@@ -35,7 +35,7 @@ pub trait ColPrunable {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef;
 }
 
-/// Implements ColPrunable for batch and streaming node.
+/// Implements [`ColPrunable`] for batch and streaming node.
 macro_rules! impl_prune_col {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{

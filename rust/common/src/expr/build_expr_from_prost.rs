@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{expr_node, ExprNode};
 
@@ -150,7 +150,7 @@ pub fn build_in_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     // Used for literal expression below to generate datum
     let data_chunk = DataChunk::new_dummy(1);
     for child in &children[1..] {
-        let mut literal_expr = expr_build_from_prost(child)?;
+        let literal_expr = expr_build_from_prost(child)?;
         let array = literal_expr.eval(&data_chunk)?;
         let datum = array.value_at(0).to_owned_datum();
         data.push(datum);

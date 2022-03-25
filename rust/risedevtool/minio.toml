@@ -6,7 +6,7 @@ MCLI_DOWNLOAD_BIN = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc"
 MINIO_DOWNLOAD_BIN = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio"
 
 [tasks.download-minio]
-category = "MinIO"
+category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO"
@@ -25,7 +25,7 @@ mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
 '''
 
 [tasks.download-mcli]
-category = "MinIO"
+category = "RiseDev - Components"
 dependencies = ["prepare"]
 condition = { env_set = [ "ENABLE_MINIO" ] }
 description = "Download and extract MinIO Client"

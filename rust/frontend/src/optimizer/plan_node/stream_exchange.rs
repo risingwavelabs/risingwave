@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -32,8 +32,16 @@ pub struct StreamExchange {
 impl StreamExchange {
     pub fn new(input: PlanRef, dist: Distribution) -> Self {
         let ctx = input.ctx();
-        let base = PlanBase::new_stream(ctx, input.schema().clone(), dist);
-        StreamExchange { input, base }
+        let pk_indices = input.pk_indices().to_vec();
+        // Dispatch executor won't change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(
+            ctx,
+            input.schema().clone(),
+            pk_indices,
+            dist,
+            input.append_only(),
+        );
+        StreamExchange { base, input }
     }
 }
 

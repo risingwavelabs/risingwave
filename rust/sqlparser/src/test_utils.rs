@@ -128,7 +128,6 @@ pub fn table(name: impl Into<String>) -> TableFactor {
         name: ObjectName(vec![Ident::new(name.into())]),
         alias: None,
         args: vec![],
-        with_hints: vec![],
     }
 }
 

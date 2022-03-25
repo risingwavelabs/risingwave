@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::mem::size_of_val;
 use std::time::Instant;
 
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
@@ -106,6 +107,10 @@ impl Operations {
                 let mut latencies: Vec<u128> = vec![];
                 for batch in batches {
                     let start = Instant::now();
+                    let batch = batch
+                        .into_iter()
+                        .map(|(k, v)| (k, v.map(StorageValue::from)))
+                        .collect_vec();
                     store.ingest_batch(batch, get_epoch()).await.unwrap();
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);

@@ -155,7 +155,6 @@ fn parse_update_with_table_alias() {
                             columns: vec![]
                         }),
                         args: vec![],
-                        with_hints: vec![],
                     },
                     joins: vec![]
                 },
@@ -2039,39 +2038,6 @@ fn parse_simple_math_expr_minus() {
 }
 
 #[test]
-fn parse_table_function() {
-    let select = verified_only_select("SELECT * FROM TABLE(FUN('1')) AS a");
-
-    match only(select.from).relation {
-        TableFactor::TableFunction { expr, alias } => {
-            let expected_expr = Expr::Function(Function {
-                name: ObjectName(vec![Ident::new("FUN")]),
-                args: vec![FunctionArg::Unnamed(FunctionArgExpr::Expr(Expr::Value(
-                    Value::SingleQuotedString("1".to_owned()),
-                )))],
-                over: None,
-                distinct: false,
-            });
-            assert_eq!(expr, expected_expr);
-            assert_eq!(alias, table_alias("a"))
-        }
-        _ => panic!("Expecting TableFactor::TableFunction"),
-    }
-
-    let res = parse_sql_statements("SELECT * FROM TABLE '1' AS a");
-    assert_eq!(
-        ParserError::ParserError("Expected (, found: \'1\'".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("SELECT * FROM TABLE (FUN(a) AS a");
-    assert_eq!(
-        ParserError::ParserError("Expected ), found: AS".to_string()),
-        res.unwrap_err()
-    );
-}
-
-#[test]
 fn parse_delimited_identifiers() {
     // check that quoted identifiers in any position remain quoted after serialization
     let select = verified_only_select(
@@ -2079,16 +2045,10 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table {
-            name,
-            alias,
-            args,
-            with_hints,
-        } => {
+        TableFactor::Table { name, alias, args } => {
             assert_eq!(vec![Ident::with_quote('"', "a table")], name.0);
             assert_eq!(Ident::with_quote('"', "alias"), alias.unwrap().name);
             assert!(args.is_empty());
-            assert!(with_hints.is_empty());
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2201,12 +2161,6 @@ fn parse_simple_case_expr() {
 }
 
 #[test]
-fn parse_from_advanced() {
-    let sql = "SELECT * FROM fn(1, 2) AS foo, schema.bar AS bar WITH (NOLOCK)";
-    let _select = verified_only_select(sql);
-}
-
-#[test]
 fn parse_implicit_join() {
     let sql = "SELECT * FROM t1, t2";
     let select = verified_only_select(sql);
@@ -2217,7 +2171,6 @@ fn parse_implicit_join() {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
                     args: vec![],
-                    with_hints: vec![],
                 },
                 joins: vec![],
             },
@@ -2226,7 +2179,6 @@ fn parse_implicit_join() {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
                     args: vec![],
-                    with_hints: vec![],
                 },
                 joins: vec![],
             }
@@ -2243,14 +2195,12 @@ fn parse_implicit_join() {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
                     args: vec![],
-                    with_hints: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
                         args: vec![],
-                        with_hints: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2260,14 +2210,12 @@ fn parse_implicit_join() {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
                     args: vec![],
-                    with_hints: vec![],
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
                         args: vec![],
-                        with_hints: vec![],
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2287,7 +2235,6 @@ fn parse_cross_join() {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
                 args: vec![],
-                with_hints: vec![],
             },
             join_operator: JoinOperator::CrossJoin
         },
@@ -2307,7 +2254,6 @@ fn parse_joins_on() {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
                 args: vec![],
-                with_hints: vec![],
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2360,7 +2306,6 @@ fn parse_joins_using() {
                 name: ObjectName(vec![Ident::new(relation.into())]),
                 alias,
                 args: vec![],
-                with_hints: vec![],
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2405,7 +2350,6 @@ fn parse_natural_join() {
                 name: ObjectName(vec![Ident::new("t2")]),
                 alias: None,
                 args: vec![],
-                with_hints: vec![],
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2644,7 +2588,6 @@ fn parse_derived_tables() {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
                     args: vec![],
-                    with_hints: vec![],
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -22,16 +22,27 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 
-mod base;
+pub mod base;
 mod filesystem;
 mod kafka;
-mod kinesis;
+pub mod kinesis;
 mod pulsar;
-mod state;
+mod utils;
+
+pub use base::*;
+pub mod state;
+
+use crate::kinesis::config::AwsConfigInfo;
+
+#[derive(Clone, Debug)]
+pub enum ConnectorConfig {
+    Kinesis(AwsConfigInfo),
+}
 
 #[cfg(test)]
 mod tests {

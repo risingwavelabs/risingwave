@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use risingwave_batch::executor::monitor::BatchMetrics;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +14,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use risingwave_batch::executor::{Executor, RowSeqScanExecutor};
 use risingwave_common::array::{Array, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
@@ -19,8 +21,10 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::monitor::StateStoreMetrics;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::Keyspace;
-use risingwave_stream::executor::{MViewTable, ManagedMViewState};
+use risingwave_stream::executor::ManagedMViewState;
 
 #[tokio::test]
 async fn test_row_seq_scan() -> Result<()> {
@@ -43,10 +47,20 @@ async fn test_row_seq_scan() -> Result<()> {
         ColumnDesc::unnamed(ColumnId::from(1), schema[1].data_type.clone()),
     ];
 
-    let table = MViewTable::new_adhoc(keyspace, column_descs);
+    let table = CellBasedTable::new_adhoc(
+        keyspace,
+        column_descs,
+        Arc::new(StateStoreMetrics::unused()),
+    );
 
-    let mut executor =
-        RowSeqScanExecutor::new(table, 1, true, "RowSeqScanExecutor".to_string(), u64::MAX);
+    let mut executor = RowSeqScanExecutor::new(
+        table,
+        1,
+        true,
+        "RowSeqScanExecutor".to_string(),
+        u64::MAX,
+        Arc::new(BatchMetrics::unused()),
+    );
 
     let epoch: u64 = 0;
     state.put(

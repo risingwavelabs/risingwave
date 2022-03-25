@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -33,8 +33,9 @@ impl BatchExchange {
     pub fn new(input: PlanRef, order: Order, dist: Distribution) -> Self {
         let ctx = input.ctx();
         let schema = input.schema().clone();
+        let _pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
-        BatchExchange { input, base }
+        BatchExchange { base, input }
     }
 }
 

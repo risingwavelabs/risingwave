@@ -35,6 +35,12 @@ message ColumnDesc {
   int32 column_id = 2;
   // we store the column name in column desc now just for debug, but in future we should store it in ColumnCatalog but not here
   string name = 3;
+  // For STRUCT type.
+  repeated ColumnDesc field_descs = 4;
+  // The user-defined type's name. Empty if the column type is a builtin type.
+  // For example, when the type is created from a protobuf schema file,
+  // this field will store the message name.
+  string type_name = 5;
 }
 
 message OrderedColumnDesc {
@@ -97,6 +103,7 @@ message FilterScanNode {
 message InsertNode {
   TableRefId table_source_ref_id = 1;
   repeated int32 column_ids = 2;
+  bool frontend_v2 = 3;
 }
 
 message DeleteNode {

@@ -11,14 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::net::SocketAddr;
+
 use std::sync::Arc;
 
 use risingwave_common::config::BatchConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
+use crate::executor::monitor::BatchMetrics;
 use crate::task::BatchManager;
 
 pub(crate) type WorkerNodeId = u32;
@@ -28,7 +29,7 @@ pub(crate) type WorkerNodeId = u32;
 #[derive(Clone)]
 pub struct BatchEnvironment {
     /// Endpoint the batch task manager listens on.
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
 
     /// Reference to the task manager.
     task_manager: Arc<BatchManager>,
@@ -44,16 +45,20 @@ pub struct BatchEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Statistics.
+    stats: Arc<BatchMetrics>,
 }
 
 impl BatchEnvironment {
     pub fn new(
         source_manager: SourceManagerRef,
         task_manager: Arc<BatchManager>,
-        server_addr: SocketAddr,
+        server_addr: HostAddr,
         config: Arc<BatchConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        stats: Arc<BatchMetrics>,
     ) -> Self {
         BatchEnvironment {
             server_addr,
@@ -62,6 +67,7 @@ impl BatchEnvironment {
             config,
             worker_id,
             state_store,
+            stats,
         }
     }
 
@@ -73,17 +79,18 @@ impl BatchEnvironment {
 
         BatchEnvironment {
             task_manager: Arc::new(BatchManager::new()),
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: std::sync::Arc::new(MemSourceManager::new()),
             config: Arc::new(BatchConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            stats: Arc::new(BatchMetrics::unused()),
         }
     }
 
-    pub fn server_address(&self) -> &SocketAddr {
+    pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
 
@@ -109,5 +116,9 @@ impl BatchEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn stats(&self) -> Arc<BatchMetrics> {
+        self.stats.clone()
     }
 }

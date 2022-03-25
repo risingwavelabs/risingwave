@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 mod column;
 mod physical_table;
 mod schema;
@@ -62,9 +62,17 @@ impl SchemaId {
 pub struct TableId {
     pub table_id: u32,
 }
+
 impl TableId {
     pub const fn new(table_id: u32) -> Self {
         TableId { table_id }
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        TableId {
+            table_id: u32::MAX - 1,
+        }
     }
 
     pub fn table_id(&self) -> u32 {
@@ -75,6 +83,11 @@ impl TableId {
 impl From<u32> for TableId {
     fn from(id: u32) -> Self {
         Self::new(id)
+    }
+}
+impl From<TableId> for u32 {
+    fn from(id: TableId) -> Self {
+        id.table_id
     }
 }
 

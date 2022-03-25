@@ -11,74 +11,54 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::cell::RefCell;
-use std::mem;
-use std::rc::Rc;
+
+use std::collections::HashMap;
+use std::error::Error;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
-use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
-use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
-use risingwave_pb::common::WorkerNode;
-use risingwave_pb::ddl_service::{
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
-    CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
-    CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse,
+use risingwave_meta::manager::SchemaId;
+use risingwave_pb::catalog::{
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
-use risingwave_pb::meta::{
-    ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
-    AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse, ListAllNodesRequest,
-    ListAllNodesResponse, SubscribeRequest, SubscribeResponse,
-};
-use risingwave_rpc_client::{MetaClient, MetaClientInner, NotificationStream};
+use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedSender};
-use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 
 use crate::binder::Binder;
+use crate::catalog::catalog_service::CatalogWriter;
+use crate::catalog::root_catalog::Catalog;
+use crate::catalog::DatabaseId;
+use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{FrontendEnv, QueryContext, SessionImpl};
 use crate::FrontendOpts;
 
-/// LocalFrontend is an embedded frontend without starting meta and without
-/// starting frontend as a tcp server. a mock ['SessionManagerImpl'](super::SessionManagerImpl) for
-/// test
+/// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
     pub opts: FrontendOpts,
-    pub observer_join_handle: JoinHandle<()>,
-    _heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: UnboundedSender<()>,
     env: FrontendEnv,
 }
 
 impl SessionManager for LocalFrontend {
-    fn connect(&self) -> Arc<dyn Session> {
-        self.session_ref()
+    fn connect(
+        &self,
+        _database: &str,
+    ) -> std::result::Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>> {
+        Ok(self.session_ref())
     }
 }
 
 impl LocalFrontend {
     pub async fn new(opts: FrontendOpts) -> Self {
-        let meta_client = MetaClient::mock(FrontendMockMetaClient::new().await);
-        let (env, observer_join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::with_meta_client(meta_client, &opts)
-                .await
-                .unwrap();
-        Self {
-            opts,
-            env,
-            observer_join_handle,
-            _heartbeat_join_handle: heartbeat_join_handle,
-            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
-        }
+        let env = FrontendEnv::mock();
+        Self { opts, env }
     }
 
     pub async fn run_sql(
@@ -103,12 +83,10 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Ok(
-                Planner::new(Rc::new(RefCell::new(QueryContext::new(session))))
-                    .plan(bound)
-                    .unwrap()
-                    .gen_batch_query_plan(),
-            )
+            Ok(Planner::new(QueryContext::new(session).into())
+                .plan(bound)
+                .unwrap()
+                .gen_batch_query_plan())
         } else {
             unreachable!()
         }
@@ -122,268 +100,119 @@ impl LocalFrontend {
     }
 }
 
-pub struct FrontendMockMetaClient {
-    // cluster_srv: ClusterServiceImpl<MemStore>,
-    mock_catalog: Mutex<SingleFrontendMockNotifyService>,
-    // TODO: now every thing use common id generator and may can't trigger some bug.
-    mock_id: AtomicU32,
-}
-
-impl FrontendMockMetaClient {
-    fn gen_id(&self) -> u32 {
-        self.mock_id.fetch_add(1, Ordering::SeqCst)
-    }
-
-    pub async fn new() -> Self {
-        // let meta_store = Arc::new(MemStore::default());
-        // let epoch_generator = Arc::new(MemEpochGenerator::default());
-        // let env = MetaSrvEnv::<MemStore>::new(meta_store.clone(), epoch_generator.clone()).await;
-
-        // let notification_manager = Arc::new(NotificationManager::new());
-
-        // let cluster_manager = Arc::new(
-        //     StoredClusterManager::new(
-        //         env.clone(),
-        //         None,
-        //         notification_manager.clone(),
-        //         Duration::from_secs(3600),
-        //     )
-        //     .await
-        //     .unwrap(),
-        // );
-
-        let meta = Self {
-            // cluster_srv: ClusterServiceImpl::<MemStore>::new(cluster_manager),
-            mock_catalog: Mutex::new(SingleFrontendMockNotifyService::new()),
-            mock_id: AtomicU32::new(1),
-        };
-        let CreateDatabaseResponse {
-            status: _,
-            database_id,
-            version: _,
-        } = meta
-            .create_database(CreateDatabaseRequest {
-                db: Some(ProstDatabase {
-                    id: 0,
-                    name: DEFAULT_DATABASE_NAME.to_string(),
-                }),
-            })
-            .await
-            .unwrap();
-        meta.create_schema(CreateSchemaRequest {
-            schema: Some(ProstSchema {
-                id: 0,
-                name: DEFAULT_SCHEMA_NAME.to_string(),
-                database_id,
-            }),
-        })
-        .await
-        .unwrap();
-
-        meta
-    }
+pub struct MockCatalogWriter {
+    catalog: Arc<RwLock<Catalog>>,
+    id: AtomicU32,
+    id_to_schema_id: RwLock<HashMap<u32, (DatabaseId, SchemaId)>>,
 }
 
 #[async_trait::async_trait]
-impl MetaClientInner for FrontendMockMetaClient {
-    async fn list_all_nodes(&self, _req: ListAllNodesRequest) -> Result<ListAllNodesResponse> {
-        Ok(ListAllNodesResponse::default())
-        // Ok(self
-        //     .cluster_srv
-        //     .list_all_nodes(Request::new(req))
-        //     .await
-        //     .to_rw_result()?
-        //     .into_inner())
+impl CatalogWriter for MockCatalogWriter {
+    async fn create_database(&self, db_name: &str) -> Result<()> {
+        self.catalog.write().create_database(ProstDatabase {
+            name: db_name.to_string(),
+            id: 0,
+        });
+        Ok(())
     }
 
-    async fn add_worker_node(&self, req: AddWorkerNodeRequest) -> Result<AddWorkerNodeResponse> {
-        let node = WorkerNode {
-            id: self.gen_id(),
-            r#type: req.worker_type,
-            host: req.host,
-            ..Default::default()
-        };
-        Ok(AddWorkerNodeResponse {
-            status: None,
-            node: Some(node),
-        })
-        // Ok(self
-        //     .cluster_srv
-        //     .add_worker_node(Request::new(req))
-        //     .await
-        //     .to_rw_result()?
-        //     .into_inner())
-    }
-
-    async fn activate_worker_node(
-        &self,
-        _req: ActivateWorkerNodeRequest,
-    ) -> Result<ActivateWorkerNodeResponse> {
-        Ok(ActivateWorkerNodeResponse::default())
-        // Ok(self
-        //     .cluster_srv
-        //     .activate_worker_node(Request::new(req))
-        //     .await
-        //     .to_rw_result()?
-        //     .into_inner())
-    }
-
-    async fn delete_worker_node(
-        &self,
-        _req: DeleteWorkerNodeRequest,
-    ) -> Result<DeleteWorkerNodeResponse> {
-        Ok(DeleteWorkerNodeResponse::default())
-        // Ok(self
-        //     .cluster_srv
-        //     .delete_worker_node(Request::new(req))
-        //     .await
-        //     .to_rw_result()?
-        //     .into_inner())
-    }
-
-    async fn subscribe(&self, _req: SubscribeRequest) -> Result<Box<dyn NotificationStream>> {
-        Ok(self.mock_catalog.lock().await.subscribe().await)
-    }
-
-    // TODO:
-    async fn create_database(&self, req: CreateDatabaseRequest) -> Result<CreateDatabaseResponse> {
-        let database_id = self.gen_id();
-        let mut db = req.db.unwrap();
-        db.id = database_id;
-        let version = self
-            .mock_catalog
-            .lock()
-            .await
-            .notify(Operation::Add, &Info::DatabaseV2(db))
-            .await;
-        Ok(CreateDatabaseResponse {
-            status: None,
-            database_id,
-            version,
-        })
-    }
-
-    async fn create_schema(&self, req: CreateSchemaRequest) -> Result<CreateSchemaResponse> {
-        let schema_id = self.gen_id();
-        let mut schema = req.schema.unwrap();
-        schema.id = schema_id;
-        let version = self
-            .mock_catalog
-            .lock()
-            .await
-            .notify(Operation::Add, &Info::SchemaV2(schema))
-            .await;
-        Ok(CreateSchemaResponse {
-            status: None,
-            version,
-            schema_id,
-        })
+    async fn create_schema(&self, db_id: DatabaseId, schema_name: &str) -> Result<()> {
+        self.catalog.write().create_schema(ProstSchema {
+            id: 0,
+            name: schema_name.to_string(),
+            database_id: db_id,
+        });
+        Ok(())
     }
 
     async fn create_materialized_source(
         &self,
-        req: CreateMaterializedSourceRequest,
-    ) -> Result<CreateMaterializedSourceResponse> {
-        let CreateMaterializedSourceRequest {
-            source,
-            materialized_view: mv,
-            stream_node: _,
-        } = req;
-        let source_id = self.gen_id();
-        let table_id = self.gen_id();
-        let mut source = source.unwrap();
-        let mut table = mv.unwrap();
-        source.id = source_id;
-        table.id = table_id;
-        self.mock_catalog
-            .lock()
-            .await
-            .notify(Operation::Add, &Info::TableV2(table))
-            .await;
-        let version = self
-            .mock_catalog
-            .lock()
-            .await
-            .notify(Operation::Add, &Info::Source(source))
-            .await;
-        Ok(CreateMaterializedSourceResponse {
-            status: None,
-            source_id,
-            table_id,
-            version,
-        })
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
+        self.create_source(source).await?;
+        self.create_materialized_view(table, plan).await?;
+        Ok(())
     }
 
     async fn create_materialized_view(
         &self,
-        req: CreateMaterializedViewRequest,
-    ) -> Result<CreateMaterializedViewResponse> {
-        let CreateMaterializedViewRequest {
-            materialized_view: mv,
-            stream_node: _,
-        } = req;
-        let table_id = self.gen_id();
-        let mut table = mv.unwrap();
-        table.id = table_id;
-        let version = self
-            .mock_catalog
-            .lock()
-            .await
-            .notify(Operation::Add, &Info::TableV2(table))
-            .await;
+        mut table: ProstTable,
+        _plan: StreamNode,
+    ) -> Result<()> {
+        table.id = self.gen_id();
+        self.catalog.write().create_table(&table);
+        self.add_id(table.id, table.database_id, table.schema_id);
+        Ok(())
+    }
 
-        Ok(CreateMaterializedViewResponse {
-            status: None,
-            table_id,
-            version,
-        })
+    async fn create_source(&self, mut source: ProstSource) -> Result<()> {
+        source.id = self.gen_id();
+        self.catalog.write().create_source(source.clone());
+        self.add_id(source.id, source.database_id, source.schema_id);
+        Ok(())
+    }
+
+    async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(source_id);
+        self.drop_id(table_id.table_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, table_id);
+        self.catalog
+            .write()
+            .drop_source(database_id, schema_id, source_id);
+        Ok(())
     }
 }
 
-pub type Notification = std::result::Result<SubscribeResponse, tonic::Status>;
-
-/// it is just correct when only one frontend and will do nothing check on catalog request, and you
-/// might to use `Mutex<SingleFrontendMockNotifyService>`, we will remove it soon.
-struct SingleFrontendMockNotifyService {
-    cur_version: u64,
-    notify_tx: Sender<Notification>,
-    notify_rx: Option<Receiver<Notification>>,
-}
-impl SingleFrontendMockNotifyService {
-    pub fn new() -> Self {
-        let (notify_tx, notify_rx) = mpsc::channel(123456);
+impl MockCatalogWriter {
+    pub fn new(catalog: Arc<RwLock<Catalog>>) -> Self {
+        catalog.write().create_database(ProstDatabase {
+            name: DEFAULT_DATABASE_NAME.to_string(),
+            id: 0,
+        });
+        catalog.write().create_schema(ProstSchema {
+            id: 0,
+            name: DEFAULT_SCHEMA_NAME.to_string(),
+            database_id: 0,
+        });
         Self {
-            cur_version: 0,
-            notify_tx,
-            notify_rx: Some(notify_rx),
+            catalog,
+            id: AtomicU32::new(0),
+            id_to_schema_id: Default::default(),
         }
     }
 
-    pub async fn subscribe(&mut self) -> Box<dyn NotificationStream> {
-        Box::new(
-            mem::take(&mut self.notify_rx)
-                .expect("there should be only one frontend use this mock"),
-        )
+    fn gen_id(&self) -> u32 {
+        self.id.fetch_add(1, Ordering::SeqCst)
     }
 
-    // return the version id
-    pub async fn notify(&mut self, operation: Operation, info: &Info) -> u64 {
-        let version = self.gen_version();
-        self.notify_tx
-            .send(Ok(SubscribeResponse {
-                status: None,
-                operation: operation as i32,
-                info: Some(info.clone()),
-                // TODO: pass the version when call notify
-                version,
-            }))
-            .await
-            .unwrap();
-        version
+    fn add_id(&self, id: u32, database_id: DatabaseId, schema_id: SchemaId) {
+        self.id_to_schema_id
+            .write()
+            .insert(id, (database_id, schema_id));
     }
 
-    fn gen_version(&mut self) -> u64 {
-        self.cur_version += 1;
-        self.cur_version
+    fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
+        self.id_to_schema_id.write().remove(&id).unwrap()
+    }
+}
+
+pub struct MockFrontendMetaClient {}
+
+#[async_trait::async_trait]
+impl FrontendMetaClient for MockFrontendMetaClient {
+    async fn pin_snapshot(&self) -> Result<u64> {
+        Ok(0)
+    }
+
+    async fn flush(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
+        Ok(())
     }
 }

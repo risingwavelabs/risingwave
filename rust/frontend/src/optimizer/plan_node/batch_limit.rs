@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -37,7 +37,7 @@ impl BatchLimit {
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );
-        BatchLimit { logical, base }
+        BatchLimit { base, logical }
     }
 }
 

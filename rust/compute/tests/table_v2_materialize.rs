@@ -11,10 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use itertools::Itertools;
+use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::executor::{
     CreateTableExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor,
@@ -32,7 +33,8 @@ use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 use risingwave_source::{MemSourceManager, SourceManager};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::monitor::StateStoreMetrics;
-use risingwave_storage::table::mview::MViewTable;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
+// use risingwave_storage::table::mview::MViewTable;
 use risingwave_storage::{Keyspace, StateStore, StateStoreImpl};
 use risingwave_stream::executor::{
     Barrier, Executor as StreamExecutor, MaterializeExecutor, Message, PkIndices, SourceExecutor,
@@ -144,9 +146,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
+    let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
     let stream_source = SourceExecutor::new(
         source_table_id,
         source_desc.clone(),
+        keyspace,
         all_column_ids.clone(),
         all_schema.clone(),
         PkIndices::from([1]),
@@ -181,6 +185,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         source_manager.clone(),
         Box::new(insert_inner),
         0,
+        false,
     );
 
     tokio::spawn(async move {
@@ -197,12 +202,18 @@ async fn test_table_v2_materialize() -> Result<()> {
             data_type: field.data_type,
             column_id,
             name: field.name,
+            field_descs: vec![],
+            type_name: "".to_string(),
         })
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table
     let keyspace = Keyspace::table_root(memory_state_store, &source_table_id);
-    let table = MViewTable::new_adhoc(keyspace, column_descs);
+    let table = CellBasedTable::new_adhoc(
+        keyspace,
+        column_descs,
+        Arc::new(StateStoreMetrics::unused()),
+    );
 
     let mut scan = RowSeqScanExecutor::new(
         table.clone(),
@@ -210,6 +221,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     assert!(scan.next().await?.is_none());
@@ -251,6 +263,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqScanExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();
@@ -317,6 +330,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         true,
         "RowSeqScanExecutor".to_string(),
         u64::MAX,
+        Arc::new(BatchMetrics::unused()),
     );
     scan.open().await?;
     let c = scan.next().await?.unwrap();

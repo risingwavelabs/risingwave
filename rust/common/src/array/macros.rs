@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 /// `array` builds an `Array` with `Option`.
 #[macro_export]
 macro_rules! array {
@@ -27,6 +27,16 @@ macro_rules! array {
             builder.finish().unwrap()
         }
     };
+}
+
+/// `empty_array` builds an empty `Array`.
+#[macro_export]
+macro_rules! empty_array {
+    ($array:tt) => {{
+        use $crate::array::{Array, ArrayBuilder};
+        let builder = <$array as Array>::Builder::new(0).unwrap();
+        builder.finish().unwrap()
+    }};
 }
 
 /// `array_nonnull` builds an `Array` with concrete values.

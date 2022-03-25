@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use crate::array::{ArrayBuilder, ArrayImpl, ArrayRef, BoolArrayBuilder, DataChunk};
@@ -54,7 +54,7 @@ impl Expression for IsNullExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut builder = BoolArrayBuilder::new(input.cardinality())?;
         self.child
             .eval(input)?
@@ -71,7 +71,7 @@ impl Expression for IsNotNullExpression {
         self.return_type.clone()
     }
 
-    fn eval(&mut self, input: &DataChunk) -> Result<ArrayRef> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut builder = BoolArrayBuilder::new(input.cardinality())?;
         self.child
             .eval(input)?
@@ -95,7 +95,7 @@ mod tests {
     use crate::expr::{BoxedExpression, InputRefExpression};
     use crate::types::{DataType, Decimal};
 
-    fn do_test(mut expr: BoxedExpression, expected_result: Vec<bool>) -> Result<()> {
+    fn do_test(expr: BoxedExpression, expected_result: Vec<bool>) -> Result<()> {
         let input_array = {
             let mut builder = DecimalArrayBuilder::new(3)?;
             builder.append(Some(Decimal::from_str("0.1").unwrap()))?;

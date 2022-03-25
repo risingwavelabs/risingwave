@@ -11,10 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -23,7 +22,7 @@ use futures::SinkExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::hash::VIRTUAL_KEY_COUNT;
-use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use tracing::event;
 
@@ -124,7 +123,7 @@ pub struct DispatchExecutor<Inner: Dispatcher> {
 
 pub fn new_output(
     context: &SharedContext,
-    addr: SocketAddr,
+    addr: HostAddr,
     actor_id: u32,
     down_id: &u32,
 ) -> Result<Box<dyn Output>> {
@@ -192,7 +191,7 @@ impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
 
                     for actor_info in actor_infos.iter() {
                         let down_id = actor_info.get_actor_id();
-                        let downstream_addr = actor_info.get_host()?.to_socket_addr()?;
+                        let downstream_addr = actor_info.get_host()?.into();
                         new_outputs.push(new_output(
                             &self.context,
                             downstream_addr,
@@ -208,7 +207,7 @@ impl<Inner: Dispatcher + Send> DispatchExecutor<Inner> {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
                         let down_id = downstream_actor_info.get_actor_id();
-                        let downstream_addr = downstream_actor_info.get_host()?.to_socket_addr()?;
+                        let downstream_addr = downstream_actor_info.get_host()?.into();
                         outputs_to_add.push(new_output(
                             &self.context,
                             downstream_addr,
@@ -785,8 +784,8 @@ mod tests {
         ActorInfo {
             actor_id,
             host: Some(HostAddress {
-                host: LOCAL_TEST_ADDR.ip().to_string(),
-                port: LOCAL_TEST_ADDR.port() as i32,
+                host: LOCAL_TEST_ADDR.host.clone(),
+                port: LOCAL_TEST_ADDR.port as i32,
             }),
         }
     }

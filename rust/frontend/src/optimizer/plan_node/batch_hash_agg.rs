@@ -11,13 +11,17 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::expr::InputRefDisplay;
 use crate::optimizer::property::{Distribution, Order, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -35,7 +39,7 @@ impl BatchHashAgg {
             Distribution::any().clone(),
             Order::any().clone(),
         );
-        BatchHashAgg { logical, base }
+        BatchHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -48,7 +52,15 @@ impl BatchHashAgg {
 impl fmt::Display for BatchHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BatchHashAgg")
-            .field("group_keys", &self.group_keys())
+            .field(
+                "group_keys",
+                &self
+                    .group_keys()
+                    .iter()
+                    .copied()
+                    .map(InputRefDisplay)
+                    .collect_vec(),
+            )
             .field("aggs", &self.agg_calls())
             .finish()
     }
@@ -81,4 +93,20 @@ impl ToDistributedBatch for BatchHashAgg {
     }
 }
 
-impl ToBatchProst for BatchHashAgg {}
+impl ToBatchProst for BatchHashAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::HashAgg(HashAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            group_keys: self
+                .group_keys()
+                .iter()
+                .clone()
+                .map(|index| *index as u32)
+                .collect(),
+        })
+    }
+}

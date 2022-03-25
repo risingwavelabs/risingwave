@@ -11,14 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp;
 
 use bytes::Bytes;
 
 use super::version_cmp::VersionedComparator;
 
-/// TODO: Ord Trait with 'a'+epoch>'aa'+epoch issue
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
     pub left: Bytes,

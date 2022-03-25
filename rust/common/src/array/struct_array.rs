@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use core::fmt;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
@@ -161,6 +161,7 @@ impl Array for StructArray {
                 children_array,
                 children_type,
             }),
+            list_array_data: None,
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
         }

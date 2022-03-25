@@ -11,9 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{HostAddress, WorkerNode};
 
 use crate::model::MetadataModel;
 
@@ -24,7 +24,7 @@ pub const INVALID_EXPIRE_AT: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub struct Worker {
-    worker_node: WorkerNode,
+    pub worker_node: WorkerNode,
     expire_at: u64,
 }
 
@@ -53,10 +53,6 @@ impl MetadataModel for Worker {
 }
 
 impl Worker {
-    pub fn worker_type(&self) -> WorkerType {
-        WorkerType::from_i32(self.worker_node.r#type).unwrap()
-    }
-
     pub fn worker_id(&self) -> u32 {
         self.worker_node.id
     }
