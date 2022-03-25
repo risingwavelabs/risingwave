@@ -35,7 +35,7 @@ impl BatchSimpleAgg {
             Distribution::any().clone(),
             Order::any().clone(),
         );
-        BatchSimpleAgg { logical, base }
+        BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()

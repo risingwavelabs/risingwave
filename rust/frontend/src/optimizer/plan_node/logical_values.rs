@@ -31,7 +31,7 @@ pub struct LogicalValues {
 }
 
 impl LogicalValues {
-    /// Create a LogicalValues node. Used internally by optimizer.
+    /// Create a [`LogicalValues`] node. Used internally by optimizer.
     pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
@@ -45,7 +45,7 @@ impl LogicalValues {
         }
     }
 
-    /// Create a LogicalValues node. Used by planner.
+    /// Create a [`LogicalValues`] node. Used by planner.
     pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
         // No additional checks after binder.
         Self::new(rows, schema, ctx).into()

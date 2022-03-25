@@ -40,7 +40,7 @@ impl BatchFilter {
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );
-        BatchFilter { logical, base }
+        BatchFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {

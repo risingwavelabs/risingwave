@@ -15,7 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, OrderedColumnDesc};
+use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan::OrderType as ProstOrderType;
@@ -47,11 +47,12 @@ impl TableCatalog {
         self.pk_desc.as_ref()
     }
 
-    /// Get a CellBasedTableDesc of the table.
-    pub fn cell_based_table(&self) -> CellBasedTableDesc {
-        CellBasedTableDesc {
+    /// Get a [`TableDesc`] of the table.
+    pub fn table_desc(&self) -> TableDesc {
+        TableDesc {
             table_id: self.id,
             pk: self.pk_desc.clone(),
+            columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
         }
     }
 

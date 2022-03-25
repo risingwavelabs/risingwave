@@ -16,6 +16,7 @@ use std::ops::Index;
 
 use risingwave_pb::plan::Field as ProstField;
 
+use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::error::Result;
 use crate::types::DataType;
@@ -119,15 +120,26 @@ impl Field {
         }
     }
 
-    pub fn from(prost_field: &ProstField) -> Self {
+    pub fn data_type(&self) -> DataType {
+        self.data_type.clone()
+    }
+}
+
+impl From<&ProstField> for Field {
+    fn from(prost_field: &ProstField) -> Self {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
         }
     }
+}
 
-    pub fn data_type(&self) -> DataType {
-        self.data_type.clone()
+impl From<&ColumnDesc> for Field {
+    fn from(desc: &ColumnDesc) -> Self {
+        Self {
+            data_type: desc.data_type.clone(),
+            name: desc.name.clone(),
+        }
     }
 }
 

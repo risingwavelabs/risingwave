@@ -62,8 +62,8 @@ impl EqJoinPredicate {
     /// ```sql
     ///   select a.v1, a.v2, b.v1, b.v2 from a,b on a.v1 = a.v2 and a.v1 = b.v1 and a.v2 > b.v2
     /// ```
-    /// will call the `create` function with left_colsnum = 2 and on_clause is (supposed input_ref
-    /// count start from 0)
+    /// will call the `create` function with `left_colsnum` = 2 and `on_clause` is (supposed
+    /// `input_ref` count start from 0)
     /// ```sql
     /// input_ref(0) = input_ref(1) and input_ref(0) = input_ref(2) and input_ref(1) > input_ref(3)
     /// ```

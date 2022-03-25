@@ -185,7 +185,7 @@ impl Order {
 }
 
 pub trait WithOrder {
-    /// the order property of the PlanNode's output
+    /// the order property of the [`PlanNode`]'s output
     fn order(&self) -> &Order;
 }
 
