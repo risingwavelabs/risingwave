@@ -248,7 +248,7 @@ impl TestCase {
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
                 ret.stream_plan_proto = Some(
-                    serde_yaml::to_string(&stream_plan.to_stream_prost_identity(false))?
+                    serde_yaml::to_string(&stream_plan.to_stream_prost_auto_fields(false))?
                         + &serde_yaml::to_string(&table)?,
                 );
             }

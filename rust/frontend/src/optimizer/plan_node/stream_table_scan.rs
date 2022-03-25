@@ -85,7 +85,7 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, identity: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
         use risingwave_pb::plan::*;
         use risingwave_pb::stream_plan::*;
 
@@ -121,19 +121,47 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node: Some(ProstStreamNode::BatchPlanNode(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: if identity { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: if auto_fields {
+                        self.batch_plan_id.0 as u64
+                    } else {
+                        0
+                    },
+                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                 },
             ],
-            node: Some(ProstStreamNode::ChainNode(
-                // TODO: how to fill the chain node body?
-                Default::default(),
-            )),
+            node: Some(ProstStreamNode::ChainNode(ChainNode {
+                table_ref_id: Some(TableRefId {
+                    table_id: self.logical.table_desc().table_id.table_id as i32,
+                    schema_ref_id: None, // TODO: fill schema ref id
+                }),
+                // The fields from upstream
+                upstream_fields: self
+                    .logical
+                    .table_desc()
+                    .columns
+                    .iter()
+                    .map(|x| Field {
+                        data_type: Some(x.data_type.to_protobuf()),
+                        name: x.name.clone(),
+                    })
+                    .collect(),
+                // The column idxs need to be forwarded to the downstream
+                column_ids: self
+                    .logical
+                    .column_descs()
+                    .iter()
+                    .map(|x| x.column_id.get_id())
+                    .collect(),
+            })),
             pk_indices,
-            operator_id: self.base.id.0 as u64,
-            identity: if identity {
+            operator_id: if auto_fields {
+                self.base.id.0 as u64
+            } else {
+                0
+            },
+            identity: if auto_fields {
                 format!("{}", self)
             } else {
                 "".into()
