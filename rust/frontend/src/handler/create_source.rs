@@ -150,10 +150,19 @@ mod tests {
     syntax = "proto3";
     package test;
     message TestRecord {
-        int32 id = 1;
-        string city = 3;
-        int64 zipcode = 4;
-        float rate = 5;
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
     }"#;
         let temp_file = tempfile::Builder::new()
             .prefix("temp")
@@ -189,22 +198,38 @@ mod tests {
             .clone();
         assert_eq!(source.name, "t");
 
+        // Only check stream source
         if let Info::StreamSource(info) = source.info.as_ref().unwrap() {
             let catalogs: Vec<ColumnCatalog> = info
                 .columns
                 .iter()
                 .map(|col| col.clone().into())
                 .collect_vec();
-            let columns = catalogs
+            let mut columns = vec![];
+
+            // Get all column descs
+            for catalog in catalogs {
+                columns.append(&mut catalog.column_desc.get_column_descs());
+            }
+            let columns = columns
                 .iter()
-                .map(|col| (col.name(), col.data_type().clone()))
+                .map(|col| (col.name.as_str(), col.data_type.clone()))
                 .collect::<HashMap<&str, DataType>>();
+
+            let city_type = DataType::Struct {
+                fields: vec![DataType::Varchar, DataType::Varchar].into(),
+            };
             let expected_columns = maplit::hashmap! {
                 ROWID_NAME => DataType::Int32,
                 "id" => DataType::Int32,
-                "city" => DataType::Varchar,
+                "country.zipcode" => DataType::Varchar,
                 "zipcode" => DataType::Int64,
+                "country.city.address" => DataType::Varchar,
+                "country.address" => DataType::Varchar,
+                "country.city" => city_type.clone(),
+                "country.city.zipcode" => DataType::Varchar,
                 "rate" => DataType::Float32,
+                "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
             };
             assert_eq!(columns, expected_columns);
         }
