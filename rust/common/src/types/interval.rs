@@ -15,6 +15,7 @@
 use std::io::Write;
 use std::ops::{Add, Sub};
 
+use byteorder::{WriteBytesExt, BigEndian};
 use num_traits::{CheckedAdd, CheckedSub};
 use serde::{Deserialize, Serialize};
 
@@ -98,9 +99,9 @@ impl IntervalUnit {
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
         {
-            output.write(&self.months.to_be_bytes())?;
-            output.write(&self.days.to_be_bytes())?;
-            output.write(&self.ms.to_be_bytes())?;
+            output.write_i32::<BigEndian>(self.months)?;
+            output.write_i32::<BigEndian>(self.days)?;
+            output.write_i64::<BigEndian>(self.ms)?;
             Ok(16)
         }
         .map_err(|e| RwError::from(IoError(e)))
