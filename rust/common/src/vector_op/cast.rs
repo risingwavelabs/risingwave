@@ -75,11 +75,6 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
 }
 
 #[inline(always)]
-pub fn str_to_decimal(elem: &str) -> Result<Decimal> {
-    Decimal::from_str(elem).map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-
-#[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
     Ok(NaiveTimeWrapper::new(
         NaiveTime::parse_from_str(elem, "%H:%M:%S")
@@ -103,30 +98,19 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn str_to_real(elem: &str) -> Result<OrderedF32> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-
-#[inline(always)]
-pub fn str_to_double(elem: &str) -> Result<OrderedF64> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i16(elem: &str) -> Result<i16> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i32(elem: &str) -> Result<i32> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i64(elem: &str) -> Result<i64> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+pub fn str_parse<T>(elem: &str) -> Result<T>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display
+{
+    elem.parse().map_err(|e| {
+        RwError::from(InternalError(format!(
+            "Can't cast {:?} to {:?}: {}",
+            elem,
+            type_name::<T>(),
+            e
+        )))
+    })
 }
 
 #[inline(always)]
@@ -184,12 +168,14 @@ pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
 pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
+    <T1 as TryInto<T2>>::Error: std::fmt::Display
 {
-    elem.try_into().map_err(|_| {
+    elem.try_into().map_err(|e| {
         RwError::from(InternalError(format!(
-            "Can't cast {:?} to {:?}",
+            "Can't cast {:?} to {:?}: {}",
             &elem,
-            type_name::<T2>()
+            type_name::<T2>(),
+            e
         )))
     })
 }
