@@ -31,9 +31,9 @@ pub async fn handle_drop_mv(context: QueryContext, table_name: ObjectName) -> Re
 
         // If associated source is `Some`, then it is a actually a materialized source / table v2.
         if table.associated_source_id().is_some() {
-            Err(RwError::from(ErrorCode::InvalidInputSyntax(
+            return Err(RwError::from(ErrorCode::InvalidInputSyntax(
                 "Use `DROP TABLE` to drop a table.".to_owned(),
-            )))?;
+            )));
         }
         table.id()
     };
