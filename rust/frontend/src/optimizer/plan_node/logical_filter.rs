@@ -47,9 +47,9 @@ impl LogicalFilter {
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalFilter {
-            input,
             base,
             predicate,
+            input,
         }
     }
 
@@ -141,16 +141,14 @@ impl ToStream for LogicalFilter {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::ctx::WithId;
     use crate::session::QueryContext;
 
@@ -167,16 +165,14 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
             Field::with_name(DataType::Int32, "v3"),
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
@@ -192,7 +188,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);
@@ -215,13 +211,11 @@ mod tests {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
         }
-
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
-        assert_eq!(scan.id().0, 2);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 
     #[tokio::test]
@@ -236,7 +230,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter_no_project() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -252,15 +246,14 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
             ctx,
         );
+
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
@@ -271,7 +264,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);
@@ -289,10 +282,10 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

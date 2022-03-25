@@ -12,26 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc, OrderType};
-use risingwave_pb::stream_plan::source_node::SourceType;
+use risingwave_pb::plan::{ColumnCatalog, ColumnDesc as ProstColumnDesc};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
+use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::QueryContext;
+use crate::session::{QueryContext, QueryContextRef};
 
 pub const ROWID_NAME: &str = "_row_id";
 
@@ -55,67 +54,22 @@ pub async fn handle_create_table(
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
             name: ROWID_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         });
         for (i, column) in columns.into_iter().enumerate() {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
                 name: column.name.value,
+                field_descs: vec![],
+                type_name: "".to_string(),
             });
         }
         column_descs
     };
 
-    let plan = {
-        let context = Rc::new(RefCell::new(context));
-
-        let source_node = {
-            let (columns, fields) = column_descs
-                .iter()
-                .map(|c| {
-                    (
-                        c.column_id,
-                        Field::with_name(c.data_type.clone(), c.name.clone()),
-                    )
-                })
-                .unzip();
-            let schema = Schema::new(fields);
-            let logical_scan = LogicalScan::new(
-                table_name.clone(),
-                TableId::placeholder(),
-                columns,
-                schema,
-                context.clone(),
-            );
-            StreamSource::new(logical_scan, SourceType::Table)
-        };
-
-        let exchange_node =
-            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
-
-        let materialize_node = {
-            StreamMaterialize::new(
-                context,
-                exchange_node.into(),
-                TableId::placeholder(),
-                vec![
-                    // RowId column as key
-                    FieldOrder {
-                        index: 0,
-                        direct: Direction::Asc,
-                    },
-                ],
-                column_descs.iter().map(|x| x.column_id).collect(),
-            )
-        };
-
-        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
-    };
-
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
-
-    let columns = column_descs
+    let columns_catalog = column_descs
         .into_iter()
         .enumerate()
         .map(|(i, c)| ColumnCatalog {
@@ -123,6 +77,7 @@ pub async fn handle_create_table(
                 column_type: c.data_type.to_protobuf().into(),
                 column_id: c.column_id.get_id(),
                 name: c.name,
+                ..Default::default()
             }
             .into(),
             is_hidden: i == 0,
@@ -135,23 +90,54 @@ pub async fn handle_create_table(
         database_id,
         name: table_name.clone(),
         info: Info::TableSource(TableSourceInfo {
-            columns: columns.clone(),
+            columns: columns_catalog.clone(),
         })
         .into(),
     };
+
+    let plan = {
+        let context: QueryContextRef = context.into();
+
+        let source_node = StreamSource::create(context.clone(), vec![0], source.clone());
+
+        let exchange_node =
+            { StreamExchange::new(source_node.into(), Distribution::HashShard(vec![0])) };
+
+        let materialize_node = {
+            StreamMaterialize::new(
+                context,
+                exchange_node.into(),
+                vec![
+                    // RowId column as key
+                    FieldOrder {
+                        index: 0,
+                        direct: Direction::Asc,
+                    },
+                ],
+                columns_catalog
+                    .iter()
+                    .map(|x| x.column_desc.as_ref().unwrap().column_id.into())
+                    .collect(),
+            )
+        };
+
+        (Rc::new(materialize_node) as PlanRef).to_stream_prost()
+    };
+
+    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
+    log::debug!("name={}, plan=\n{}", table_name, json_plan);
 
     let table = ProstTable {
         id: TableId::placeholder().table_id(),
         schema_id,
         database_id,
         name: table_name,
-        columns,
+        columns: columns_catalog,
         pk_column_ids: vec![0],
-        pk_orders: vec![OrderType::Ascending as i32],
-        dependent_relations: vec![],
+        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
+        dependent_relations: vec![], // placeholder for meta
         optional_associated_source_id: None,
     };
-
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
         .create_materialized_source(source, table, plan)

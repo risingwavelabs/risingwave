@@ -109,6 +109,11 @@ where
         core.get_catalog().await
     }
 
+    pub async fn list_sources(&self) -> Result<Vec<Source>> {
+        let core = self.core.lock().await;
+        Source::list(&*core.meta_store_ref).await
+    }
+
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
@@ -275,8 +280,8 @@ where
             match core.get_ref_count(table_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete table {} because {} other table(s) depends on it.",
-                        table_id,
+                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                        table.name,
                         ref_count
                     )
                     .into(),
@@ -380,8 +385,8 @@ where
             match core.get_ref_count(source_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete source {} because {} other table(s) depends on it.",
-                        source_id,
+                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                        source.name,
                         ref_count
                     )
                     .into(),
@@ -522,8 +527,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete table {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                            mview.name,
                             ref_count
                         )
                         .into(),
@@ -533,8 +538,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(source_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete source {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                            source.name,
                             ref_count
                         )
                         .into(),

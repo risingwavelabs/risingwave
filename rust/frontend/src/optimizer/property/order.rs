@@ -30,11 +30,27 @@ pub struct Order {
 }
 
 impl Order {
+    pub fn new(field_order: Vec<FieldOrder>) -> Self {
+        Self { field_order }
+    }
+
+    /// Convert into protobuf.
     pub fn to_protobuf(&self) -> Vec<(InputRefExpr, OrderType)> {
         self.field_order
             .iter()
             .map(FieldOrder::to_protobuf)
             .collect_vec()
+    }
+
+    /// Convert into the format of vec of ids and vec of orders.
+    pub fn to_protobuf_id_and_order(&self) -> (Vec<i32>, Vec<OrderType>) {
+        (
+            self.field_order.iter().map(|x| x.index as i32).collect(),
+            self.field_order
+                .iter()
+                .map(|x| x.direct.to_protobuf())
+                .collect(),
+        )
     }
 }
 
@@ -169,7 +185,7 @@ impl Order {
 }
 
 pub trait WithOrder {
-    /// the order property of the PlanNode's output
+    /// the order property of the [`PlanNode`]'s output
     fn order(&self) -> &Order;
 }
 

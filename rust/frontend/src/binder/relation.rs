@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -49,8 +49,7 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub cell_based_desc: CellBasedTableDesc,
-    pub columns: Vec<ColumnDesc>,
+    pub table_desc: TableDesc,
 }
 
 #[derive(Debug)]
@@ -153,7 +152,7 @@ impl Binder {
         }
     }
 
-    /// return the (schema_name, table_name)
+    /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
@@ -176,7 +175,7 @@ impl Binder {
                 .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
         let table_id = table_catalog.id();
-        let cell_based_desc = table_catalog.cell_based_table();
+        let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
         let columns = columns
@@ -190,9 +189,8 @@ impl Binder {
 
         Ok(BoundBaseTable {
             name: table_name,
-            cell_based_desc,
+            table_desc,
             table_id,
-            columns,
         })
     }
 
@@ -212,10 +210,7 @@ impl Binder {
             .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
             .collect();
 
-        self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
-            source_name.clone(),
-        )?;
+        // Note(bugen): do not bind context here.
 
         Ok(BoundTableSource {
             name: source_name,
@@ -224,7 +219,7 @@ impl Binder {
         })
     }
 
-    /// Fill the BindContext for table.
+    /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType)>,
@@ -250,7 +245,7 @@ impl Binder {
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name: {}",
+                "Duplicated table name while binding context: {}",
                 table_name
             ))
             .into()),

@@ -192,6 +192,7 @@ where
             let node = locations.node_locations.get(node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -219,11 +220,11 @@ where
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
-            let client = self
-                .clients
-                .get_by_node_id(&node_id)
-                .expect("client not exists");
+            let node = locations.node_locations.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
+
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -241,6 +242,7 @@ where
             let node = locations.node_locations.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
@@ -321,7 +323,7 @@ mod tests {
     use crate::barrier::BarrierManager;
     use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{MetaSrvEnv, NotificationManager};
+    use crate::manager::{CatalogManager, MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -416,6 +418,13 @@ mod tests {
         ) -> std::result::Result<Response<DropSourceResponse>, Status> {
             unimplemented!()
         }
+
+        async fn shutdown(
+            &self,
+            _request: Request<ShutdownRequest>,
+        ) -> std::result::Result<Response<ShutdownResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {
@@ -457,7 +466,7 @@ mod tests {
             let cluster_manager = Arc::new(
                 StoredClusterManager::new(
                     env.clone(),
-                    notification_manager,
+                    notification_manager.clone(),
                     Duration::from_secs(3600),
                 )
                 .await?,
@@ -472,12 +481,23 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
+            let catalog_manager = Arc::new(
+                CatalogManager::new(
+                    env.meta_store_ref(),
+                    env.id_gen_manager_ref(),
+                    notification_manager,
+                )
+                .await?,
+            );
             let meta_metrics = Arc::new(MetaMetrics::new());
-            let hummock_manager =
-                Arc::new(HummockManager::new(env.clone(), meta_metrics.clone()).await?);
+            let hummock_manager = Arc::new(
+                HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+                    .await?,
+            );
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
+                catalog_manager,
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
                 hummock_manager,

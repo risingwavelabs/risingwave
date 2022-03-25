@@ -12,9 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -24,7 +21,7 @@ use risingwave_sqlparser::ast::Statement;
 use uuid::Uuid;
 
 use crate::binder::Binder;
-use crate::handler::util::{get_pg_field_descs, to_pg_rows};
+use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::session::QueryContext;
 
@@ -39,12 +36,17 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         );
         binder.bind(stmt)?
     };
-    let pg_descs = get_pg_field_descs(&bound)?;
 
-    let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
-        .gen_batch_query_plan()
-        .to_batch_prost();
+    let (plan, pg_descs) = {
+        // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
+        let plan = Planner::new(context.into())
+            .plan(bound)?
+            .gen_batch_query_plan();
+
+        let pg_descs = plan.schema().fields().iter().map(to_pg_field).collect();
+
+        (plan.to_batch_prost(), pg_descs)
+    };
 
     // Choose the first node by WorkerNodeManager.
     let manager = session.env().worker_node_manager();
@@ -55,7 +57,7 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         .host
         .as_ref()
         .ok_or_else(|| RwError::from(InternalError("host address not found".to_string())))?
-        .to_socket_addr()?;
+        .into();
     let compute_client: ComputeClient = ComputeClient::new(address).await?;
 
     // Build task id and task sink id

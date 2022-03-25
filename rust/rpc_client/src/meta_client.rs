@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::time::Duration;
 
 use paste::paste;
@@ -21,10 +20,11 @@ use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_common::try_match_expand;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
-use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
+use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateMaterializedSourceRequest,
@@ -87,29 +87,21 @@ impl MetaClient {
     /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
-        addr: SocketAddr,
+        addr: HostAddr,
         worker_type: WorkerType,
     ) -> Result<Box<dyn NotificationStream>> {
-        let host_address = HostAddress {
-            host: addr.ip().to_string(),
-            port: addr.port() as i32,
-        };
         let request = SubscribeRequest {
             worker_type: worker_type as i32,
-            host: Some(host_address),
+            host: Some(addr.to_protobuf()),
         };
         self.inner.subscribe(request).await
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: SocketAddr, worker_type: WorkerType) -> Result<u32> {
-        let host_address = HostAddress {
-            host: addr.ip().to_string(),
-            port: addr.port() as i32,
-        };
+    pub async fn register(&mut self, addr: HostAddr, worker_type: WorkerType) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
-            host: Some(host_address),
+            host: Some(addr.to_protobuf()),
         };
         let resp = self.inner.add_worker_node(request).await?;
         let worker_node =
@@ -119,13 +111,9 @@ impl MetaClient {
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
-    pub async fn activate(&self, addr: SocketAddr) -> Result<()> {
-        let host_address = HostAddress {
-            host: addr.ip().to_string(),
-            port: addr.port() as i32,
-        };
+    pub async fn activate(&self, addr: HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
-            host: Some(host_address),
+            host: Some(addr.to_protobuf()),
         };
         self.inner.activate_worker_node(request).await?;
         Ok(())
@@ -211,13 +199,9 @@ impl MetaClient {
     }
 
     /// Unregister the current node to the cluster.
-    pub async fn unregister(&self, addr: SocketAddr) -> Result<()> {
-        let host_address = HostAddress {
-            host: addr.ip().to_string(),
-            port: addr.port() as i32,
-        };
+    pub async fn unregister(&self, addr: HostAddr) -> Result<()> {
         let request = DeleteWorkerNodeRequest {
-            host: Some(host_address),
+            host: Some(addr.to_protobuf()),
         };
         self.inner.delete_worker_node(request).await?;
         Ok(())

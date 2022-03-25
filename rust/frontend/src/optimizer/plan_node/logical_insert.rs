@@ -47,11 +47,11 @@ impl LogicalInsert {
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let base = PlanBase::new_logical(ctx, schema, vec![]);
         Self {
+            base,
             table_source_name,
             source_id,
             columns,
             input,
-            base,
         }
     }
 
@@ -73,12 +73,6 @@ impl LogicalInsert {
     #[must_use]
     pub fn source_id(&self) -> TableId {
         self.source_id
-    }
-
-    /// Get a reference to the logical insert's table source name.
-    #[must_use]
-    pub fn table_source_name(&self) -> &str {
-        self.table_source_name.as_ref()
     }
 }
 

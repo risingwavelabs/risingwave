@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_pb::plan::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
     OrderedColumnDesc as ProstOrderedColumnDesc,
@@ -48,20 +49,26 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
-
+impl From<ColumnId> for i32 {
+    fn from(id: ColumnId) -> i32 {
+        id.0
+    }
+}
 impl std::fmt::Display for ColumnId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String, // for debugging
+    pub field_descs: Vec<ColumnDesc>,
+    pub type_name: String,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
     pub order: OrderType,
@@ -73,22 +80,104 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
+            field_descs: vec![],
+            type_name: String::new(),
+        }
+    }
+
+    /// Convert to proto
+    pub fn to_protobuf(&self) -> ProstColumnDesc {
+        ProstColumnDesc {
+            column_type: Some(self.data_type.to_protobuf()),
+            column_id: self.column_id.get_id(),
+            name: self.name.clone(),
+            field_descs: self
+                .field_descs
+                .clone()
+                .into_iter()
+                .map(|f| f.to_protobuf())
+                .collect_vec(),
+            type_name: self.type_name.clone(),
+        }
+    }
+
+    // Get all column descs under field_descs
+    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+        let mut descs = vec![self.clone()];
+        for desc in &self.field_descs {
+            descs.append(&mut desc.get_column_descs());
+        }
+        descs
+    }
+
+    #[cfg(test)]
+    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
+        Self {
+            data_type,
+            column_id: ColumnId::new(column_id),
+            name: name.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_struct(
+        name: &str,
+        column_id: i32,
+        type_name: &str,
+        fields: Vec<ColumnDesc>,
+    ) -> Self {
+        let data_type = DataType::Struct {
+            fields: fields
+                .iter()
+                .map(|f| f.data_type.clone())
+                .collect_vec()
+                .into(),
+        };
+        Self {
+            data_type,
+            column_id: ColumnId::new(column_id),
+            name: name.to_string(),
+            field_descs: fields,
+            type_name: type_name.to_string(),
         }
     }
 }
 
 impl From<ProstColumnDesc> for ColumnDesc {
+    // Since the prost DataType struct doesn't have field, so it need to be reinit when into
+    // ColumnDesc
     fn from(prost: ProstColumnDesc) -> Self {
-        let ProstColumnDesc {
-            column_type,
-            column_id,
-            name,
-        } = prost;
-
-        Self {
-            data_type: DataType::from(&column_type.unwrap()),
-            column_id: ColumnId::new(column_id),
-            name,
+        if let DataType::Struct { .. } = DataType::from(prost.column_type.as_ref().unwrap()) {
+            let descs: Vec<ColumnDesc> = prost
+                .field_descs
+                .into_iter()
+                .map(ColumnDesc::from)
+                .collect();
+            let date_type = DataType::Struct {
+                fields: descs
+                    .clone()
+                    .into_iter()
+                    .map(|c| c.data_type)
+                    .collect_vec()
+                    .into(),
+            };
+            Self {
+                data_type: date_type,
+                column_id: ColumnId::new(prost.column_id),
+                name: prost.name,
+                type_name: prost.type_name,
+                field_descs: descs,
+            }
+        } else {
+            Self {
+                data_type: DataType::from(prost.column_type.as_ref().unwrap()),
+                column_id: ColumnId::new(prost.column_id),
+                name: prost.name,
+                type_name: prost.type_name,
+                field_descs: vec![],
+            }
         }
     }
 }
@@ -99,11 +188,61 @@ impl From<&ProstColumnDesc> for ColumnDesc {
     }
 }
 
+impl From<&ColumnDesc> for ProstColumnDesc {
+    fn from(c: &ColumnDesc) -> Self {
+        Self {
+            column_type: c.data_type.to_protobuf().into(),
+            column_id: c.column_id.into(),
+            name: c.name.clone(),
+            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
+            type_name: c.type_name.clone(),
+        }
+    }
+}
+
 impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
     fn from(prost: ProstOrderedColumnDesc) -> Self {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
             order: OrderType::from_prost(&ProstOrderType::from_i32(prost.order).unwrap()),
         }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
+
+    use crate::catalog::ColumnDesc;
+    use crate::types::DataType;
+
+    pub fn build_prost_desc() -> ProstColumnDesc {
+        let city = vec![
+            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
+            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
+        ];
+        let country = vec![
+            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
+            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city),
+        ];
+        ProstColumnDesc::new_struct("country", 5, ".test.Country", country)
+    }
+
+    pub fn build_desc() -> ColumnDesc {
+        let city = vec![
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 3),
+        ];
+        let country = vec![
+            ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
+            ColumnDesc::new_struct("country.city", 4, ".test.City", city),
+        ];
+        ColumnDesc::new_struct("country", 5, ".test.Country", country)
+    }
+
+    #[test]
+    fn test_into_column_catalog() {
+        let desc: ColumnDesc = build_prost_desc().into();
+        assert_eq!(desc, build_desc());
     }
 }

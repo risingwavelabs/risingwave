@@ -12,8 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![warn(clippy::dbg_macro)]
+#![warn(clippy::disallowed_methods)]
+#![warn(clippy::doc_markdown)]
+#![warn(clippy::explicit_into_iter_loop)]
+#![warn(clippy::explicit_iter_loop)]
+#![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::map_flatten)]
+#![warn(clippy::no_effect_underscore_binding)]
+#![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(map_try_insert)]
 #![feature(let_chains)]
+#![feature(negative_impls)]
 
 #[macro_use]
 pub mod catalog;
@@ -41,8 +52,17 @@ use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
+    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
+
+    // Optional, we will use listen_address if not specified.
+    #[clap(long)]
+    pub client_address: Option<String>,
+
+    // TODO: This is currently unused.
+    #[clap(long)]
+    pub port: Option<u16>,
 
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,

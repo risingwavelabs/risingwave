@@ -31,36 +31,36 @@ select v1, v2 from t order by v2;
 
 # Delete
 
-# statement ok
-# delete from t where v1 = 1919;
+statement ok
+delete from t where v1 = 1919;
 
-# statement ok
-# flush;
+statement ok
+flush;
 
-# query RI
-# select v1, v2 from t order by v2;
-# ----
-# 114 10
-# 514 20
-# 810 40
+query RI
+select v1, v2 from t order by v2;
+----
+114 10
+514 20
+810 40
 
 # query I
-# select count(v1, v2) from t;
+# select count(*) from t;
 # ----
 # 3
 
-# statement ok
-# delete from t;
+statement ok
+delete from t;
 
-# statement ok
-# flush;
+statement ok
+flush;
 
-# query RI
-# select v1, v2 from t order by v2;
-# ----
+query RI
+select v1, v2 from t order by v2;
+----
 
 # query I
-# select count(v1, v2) from t;
+# select count(*) from t;
 # ----
 # 0
 

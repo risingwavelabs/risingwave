@@ -27,6 +27,10 @@ impl Binder {
                 Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
             }
             Value::Boolean(b) => self.bind_bool(b),
+            // FIXME: For now we just use a dummy type (Boolean) for null. We should
+            // bind the actual type according to the table schema if it's an
+            // `INSERT INTO ... VALUES` statement.
+            Value::Null => Ok(Literal::new(None, DataType::Boolean)),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
     }

@@ -36,10 +36,10 @@ impl LogicalLimit {
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalLimit {
+            base,
             input,
             limit,
             offset,
-            base,
         }
     }
 

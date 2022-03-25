@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -20,7 +19,7 @@ use risingwave_pb::plan::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::catalog::{ColumnId, TableId};
+use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, FieldOrder, WithSchema};
 use crate::session::QueryContextRef;
@@ -38,28 +37,16 @@ pub struct StreamMaterialize {
 
     /// Child of Materialize plan
     input: PlanRef,
-
-    /// Table Id of the materialized table
-    table_id: TableId,
 }
 
 impl StreamMaterialize {
+    /// Create a materialize node.
     pub fn new(
         ctx: QueryContextRef,
         input: PlanRef,
-        table_id: TableId,
-        mut column_orders: Vec<FieldOrder>,
+        column_orders: Vec<FieldOrder>,
         column_ids: Vec<ColumnId>,
     ) -> Self {
-        let pks = input.pk_indices();
-        let ordered_ids: HashSet<usize> = column_orders.iter().map(|x| x.index).collect();
-
-        for pk in pks {
-            if !ordered_ids.contains(pk) {
-                column_orders.push(FieldOrder::ascending(*pk));
-            }
-        }
-
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
         let base = PlanBase::new_stream(
@@ -72,10 +59,9 @@ impl StreamMaterialize {
 
         Self {
             base,
-            input,
-            table_id,
             column_orders,
             column_ids,
+            input,
         }
     }
 }
@@ -84,8 +70,8 @@ impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "StreamMaterialize {{ table_id: {}, column_order: {:?}, column_id: {:?}, pk_indices: {:?} }}",
-            self.table_id, self.column_orders, self.column_ids, self.base.pk_indices
+            "StreamMaterialize {{ column_orders: {:?}, column_id: {:?}, pk_indices: {:?} }}",
+            self.column_orders, self.column_ids, self.base.pk_indices
         )
     }
 }
@@ -99,7 +85,6 @@ impl PlanTreeNodeUnary for StreamMaterialize {
         Self::new(
             self.base.ctx.clone(),
             input,
-            self.table_id,
             self.column_orders.clone(),
             self.column_ids.clone(),
         )
@@ -119,6 +104,8 @@ impl ToStreamProst for StreamMaterialize {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::MaterializeNode(MaterializeNode {
+            // We don't need table id for materialize node in frontend. The id will be generated on
+            // meta catalog service.
             table_ref_id: None,
             associated_table_ref_id: None,
             column_ids: self.column_ids.iter().map(ColumnId::get_id).collect(),

@@ -16,11 +16,17 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::Field;
+use risingwave_common::types::{DataType, ScalarRefImpl};
 
-use crate::binder::{BoundSetExpr, BoundStatement};
-use crate::expr::Expr;
+/// Format scalars according to postgres convention.
+fn pg_value_format(d: ScalarRefImpl) -> String {
+    if let ScalarRefImpl::Bool(b) = d {
+        if b { "t" } else { "f" }.to_string()
+    } else {
+        d.to_string()
+    }
+}
 
 pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
     chunk
@@ -28,41 +34,16 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .map(|r| {
             Row::new(
                 r.0.into_iter()
-                    .map(|data| data.map(|d| d.to_string()))
+                    .map(|data| data.map(pg_value_format))
                     .collect_vec(),
             )
         })
         .collect_vec()
 }
 
-/// Get the [`PgFieldDescriptor`] for return values of the given statement.
-pub fn get_pg_field_descs(bound: &BoundStatement) -> Result<Vec<PgFieldDescriptor>> {
-    let pg_descs = match bound {
-        // The result set of these commands is ingored.
-        BoundStatement::Insert(_) | BoundStatement::Delete(_) => vec![],
-
-        BoundStatement::Query(query) => match &query.body {
-            BoundSetExpr::Select(select) => select
-                .select_items
-                .iter()
-                .enumerate()
-                .map(|(i, e)| {
-                    let name = select.aliases[i].clone().unwrap_or(format!("{:?}", e));
-                    PgFieldDescriptor::new(name, data_type_to_type_oid(e.return_type()))
-                })
-                .collect(),
-            BoundSetExpr::Values(v) => v
-                .schema
-                .fields()
-                .iter()
-                .map(|f| {
-                    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
-                })
-                .collect(),
-        },
-    };
-
-    Ok(pg_descs)
+/// Convert from [`Field`] to [`PgFieldDescriptor`].
+pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
+    PgFieldDescriptor::new(f.name.clone(), data_type_to_type_oid(f.data_type()))
 }
 
 pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
@@ -88,63 +69,19 @@ pub fn data_type_to_type_oid(data_type: DataType) -> TypeOid {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use pgwire::pg_field_descriptor::TypeOid;
     use risingwave_common::array::*;
     use risingwave_common::{column, column_nonnull};
 
-    use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr, BoundStatement};
-    use crate::expr::ExprImpl;
-    use crate::handler::util::{get_pg_field_descs, to_pg_rows};
+    use super::*;
 
     #[test]
-    fn test_get_pg_field_descs() {
-        let select = BoundSelect {
-            distinct: false,
-            select_items: vec![
-                ExprImpl::literal_int(1),
-                ExprImpl::literal_int(2),
-                ExprImpl::literal_bool(true),
-            ],
-            aliases: vec![
-                Some("column1".to_string()),
-                None,
-                Some("column3".to_string()),
-            ],
-            from: None,
-            where_clause: None,
-            group_by: vec![],
-        };
-        let bound = BoundStatement::Query(
-            BoundQuery {
-                body: BoundSetExpr::Select(select.into()),
-                order: vec![],
-            }
-            .into(),
-        );
-        let pg_descs = get_pg_field_descs(&bound).unwrap();
+    fn test_to_pg_field() {
+        let field = Field::with_name(DataType::Int32, "v1");
+        let pg_field = to_pg_field(&field);
+        assert_eq!(pg_field.get_name(), "v1");
         assert_eq!(
-            pg_descs
-                .clone()
-                .into_iter()
-                .map(|p| { p.get_name().to_string() })
-                .collect_vec(),
-            [
-                "column1".to_string(),
-                "2:Int32".to_string(),
-                "column3".to_string()
-            ]
-        );
-        assert_eq!(
-            pg_descs
-                .into_iter()
-                .map(|p| { p.get_type_oid().as_number() })
-                .collect_vec(),
-            [
-                TypeOid::Int.as_number(),
-                TypeOid::Int.as_number(),
-                TypeOid::Boolean.as_number()
-            ]
+            pg_field.get_type_oid().as_number(),
+            TypeOid::Int.as_number()
         );
     }
 

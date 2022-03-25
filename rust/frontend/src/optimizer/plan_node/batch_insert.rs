@@ -39,7 +39,7 @@ impl BatchInsert {
             Distribution::any().clone(),
             Order::any().clone(),
         );
-        BatchInsert { logical, base }
+        BatchInsert { base, logical }
     }
 }
 

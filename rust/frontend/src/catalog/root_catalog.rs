@@ -29,7 +29,7 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
 
 /// Root catalog of database catalog. Manage all database/schema/table in memory on frontend. it
-/// is protected by a RwLock. only [`ObserverManager`] will get its mut reference and do write to
+/// is protected by a `RwLock`. only [`ObserverManager`] will get its mut reference and do write to
 /// sync with the meta catalog. Other situations it is read only with a read guard.
 ///
 /// - catalog (root catalog)
