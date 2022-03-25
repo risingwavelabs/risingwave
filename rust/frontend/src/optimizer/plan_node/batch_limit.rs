@@ -37,7 +37,7 @@ impl BatchLimit {
             logical.input().distribution().clone(),
             logical.input().order().clone(),
         );
-        BatchLimit { logical, base }
+        BatchLimit { base, logical }
     }
 }
 

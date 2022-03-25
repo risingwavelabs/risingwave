@@ -35,7 +35,7 @@ pub trait ColPrunable {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef;
 }
 
-/// Implements ColPrunable for batch and streaming node.
+/// Implements [`ColPrunable`] for batch and streaming node.
 macro_rules! impl_prune_col {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{

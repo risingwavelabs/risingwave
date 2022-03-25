@@ -153,7 +153,7 @@ impl Binder {
         }
     }
 
-    /// return the (schema_name, table_name)
+    /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
@@ -221,7 +221,7 @@ impl Binder {
         })
     }
 
-    /// Fill the BindContext for table.
+    /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType)>,

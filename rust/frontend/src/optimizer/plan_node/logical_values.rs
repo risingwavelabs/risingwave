@@ -31,7 +31,7 @@ pub struct LogicalValues {
 }
 
 impl LogicalValues {
-    /// Create a LogicalValues node. Used internally by optimizer.
+    /// Create a [`LogicalValues`] node. Used internally by optimizer.
     pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
@@ -45,7 +45,7 @@ impl LogicalValues {
         }
     }
 
-    /// Create a LogicalValues node. Used by planner.
+    /// Create a [`LogicalValues`] node. Used by planner.
     pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
         // No additional checks after binder.
         Self::new(rows, schema, ctx).into()
@@ -103,8 +103,6 @@ impl ToStream for LogicalValues {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, Datum};
@@ -127,7 +125,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_prune_filter() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

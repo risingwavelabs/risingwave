@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -31,7 +30,7 @@ use crate::binder::Binder;
 use crate::optimizer::plan_node::{LogicalScan, StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::QueryContext;
+use crate::session::{QueryContext, QueryContextRef};
 
 pub const ROWID_NAME: &str = "_row_id";
 
@@ -55,19 +54,23 @@ pub async fn handle_create_table(
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
             name: ROWID_NAME.to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         });
         for (i, column) in columns.into_iter().enumerate() {
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
                 name: column.name.value,
+                field_descs: vec![],
+                type_name: "".to_string(),
             });
         }
         column_descs
     };
 
     let plan = {
-        let context = Rc::new(RefCell::new(context));
+        let context: QueryContextRef = context.into();
 
         let source_node = {
             let (columns, fields) = column_descs
@@ -122,6 +125,7 @@ pub async fn handle_create_table(
                 column_type: c.data_type.to_protobuf().into(),
                 column_id: c.column_id.get_id(),
                 name: c.name,
+                ..Default::default()
             }
             .into(),
             is_hidden: i == 0,

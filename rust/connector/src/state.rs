@@ -35,6 +35,12 @@ pub struct SourceStateHandler<S: StateStore> {
     keyspace: Keyspace<S>,
 }
 
+impl<S: StateStore> Debug for SourceStateHandler<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SourceStateHandler").finish()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 struct StateStoredKey {
     state_identifier: String,

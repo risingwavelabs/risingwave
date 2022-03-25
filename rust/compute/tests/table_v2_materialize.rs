@@ -146,9 +146,11 @@ async fn test_table_v2_materialize() -> Result<()> {
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
     let (barrier_tx, barrier_rx) = unbounded_channel();
+    let keyspace = Keyspace::executor_root(MemoryStateStore::new(), 0x2333);
     let stream_source = SourceExecutor::new(
         source_table_id,
         source_desc.clone(),
+        keyspace,
         all_column_ids.clone(),
         all_schema.clone(),
         PkIndices::from([1]),
@@ -200,6 +202,8 @@ async fn test_table_v2_materialize() -> Result<()> {
             data_type: field.data_type,
             column_id,
             name: field.name,
+            field_descs: vec![],
+            type_name: "".to_string(),
         })
         .collect_vec();
 

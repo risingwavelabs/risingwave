@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
 
 use itertools::Itertools;
 use pgwire::pg_response::PgResponse;
@@ -47,6 +45,8 @@ impl BoundQuery {
                 data_type: data_type.clone(),
                 column_id: ColumnId::new(i as i32),
                 name: name.to_string(),
+                field_descs: vec![],
+                type_name: "".to_string(),
             });
         }
 
@@ -62,7 +62,8 @@ pub struct MvInfo {
 }
 
 impl MvInfo {
-    /// Generate MvInfo with the table name. Note that this cannot be used to actually create an MV.
+    /// Generate [`MvInfo`] with the table name. Note that this cannot be used to actually create an
+    /// MV.
     pub fn with_name(name: impl Into<String>) -> Self {
         Self {
             table_name: name.into(),
@@ -130,6 +131,8 @@ pub fn gen_create_mv_plan(
                         data_type: plan.schema()[*pk].data_type(),
                         column_id: ColumnId::new(pk_column_id as i32),
                         name: format!("_pk_{}", pk),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
                     },
                     is_hidden: true,
                 },
@@ -193,7 +196,7 @@ pub async fn handle_create_mv(
     let session = context.session_ctx.clone();
 
     let (table, plan) = {
-        let mut planner = Planner::new(Rc::new(RefCell::new(context)));
+        let mut planner = Planner::new(context.into());
 
         let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
         let (database_id, schema_id) = session

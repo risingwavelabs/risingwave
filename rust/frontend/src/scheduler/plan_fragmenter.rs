@@ -236,8 +236,7 @@ impl BatchPlanFragmenter {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+
     use std::sync::Arc;
 
     use risingwave_common::catalog::{Field, Schema, TableId};
@@ -268,7 +267,7 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = QueryContext::mock().await;
         let fields = vec![
             Field::unnamed(DataType::Int32),
             Field::unnamed(DataType::Float64),
