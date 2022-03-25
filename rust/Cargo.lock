@@ -3889,13 +3889,24 @@ dependencies = [
 name = "risingwave_sqlparser"
 version = "0.1.3"
 dependencies = [
- "anyhow",
  "itertools",
  "log",
- "matches",
  "risingwave_common",
+ "risingwave_sqlparser_test_runner",
  "serde",
  "serde_json",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_sqlparser_test_runner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "itertools",
+ "risingwave_sqlparser",
+ "serde_yaml",
+ "tempfile",
  "walkdir",
  "workspace-hack",
 ]
