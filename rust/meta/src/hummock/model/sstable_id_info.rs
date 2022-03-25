@@ -17,7 +17,7 @@ use std::time::SystemTime;
 use prost::Message;
 use risingwave_pb::hummock::{SstableIdInfo, SstableRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 
 /// Column family name for hummock sstable id.
 /// `cf(hummock_sstable_id)`: `SstableRefId` -> `SstableIdInfo`
@@ -51,8 +51,6 @@ impl MetadataModel for SstableIdInfo {
         Ok(SstableRefId { id: self.id })
     }
 }
-
-impl Transactional for SstableIdInfo {}
 
 pub fn get_timestamp_now() -> u64 {
     SystemTime::now()

@@ -15,7 +15,7 @@
 use prost::Message;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 
 /// Column family name for hummock version.
 /// `cf(hummock_version)`: `HummockVersionRefId` -> `HummockVersion`
@@ -46,5 +46,3 @@ impl MetadataModel for HummockVersion {
         Ok(HummockVersionRefId { id: self.id })
     }
 }
-
-impl Transactional for HummockVersion {}
