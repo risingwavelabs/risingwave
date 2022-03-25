@@ -109,10 +109,13 @@ macro_rules! gen_cast {
             { int16, decimal, general_cast },
             { int32, int16, general_cast },
             { int32, int64, general_cast },
+            { int32, float32, to_f32 }, // lossy
             { int32, float64, general_cast },
             { int32, decimal, general_cast },
             { int64, int16, general_cast },
             { int64, int32, general_cast },
+            { int64, float32, to_f32 }, // lossy
+            { int64, float64, to_f64 }, // lossy
             { int64, decimal, general_cast },
 
             { float32, float64, general_cast },
@@ -124,11 +127,14 @@ macro_rules! gen_cast {
             { float64, int16, to_i16 },
             { float64, int32, to_i32 },
             { float64, int64, to_i64 },
+            { float64, float32, to_f32 }, // lossy
 
             { decimal, decimal, dec_to_dec },
-            { decimal, int16, deci_to_i16 },
-            { decimal, int32, deci_to_i32 },
-            { decimal, int64, deci_to_i64 },
+            { decimal, int16, dec_to_i16 },
+            { decimal, int32, dec_to_i32 },
+            { decimal, int64, dec_to_i64 },
+            { decimal, float32, to_f32 },
+            { decimal, float64, to_f64 },
 
             { date, timestamp, date_to_timestamp }
         }
