@@ -65,7 +65,7 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await.map_err(err)?.into_bytes();
 
-        if !block_loc.is_none() && block_loc.as_ref().unwrap().size != val.len() {
+        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
             return Err(RwError::from(InternalError(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 block_loc.as_ref().unwrap().size,
