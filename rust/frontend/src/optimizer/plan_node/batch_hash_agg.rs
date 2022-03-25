@@ -96,12 +96,17 @@ impl ToDistributedBatch for BatchHashAgg {
 impl ToBatchProst for BatchHashAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HashAgg(HashAggNode {
-            group_keys: self.group_keys().iter().map(|k| *k as u32).collect_vec(),
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|c| c.to_protobuf())
-                .collect_vec(),
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            group_keys: self
+                .group_keys()
+                .iter()
+                .clone()
+                .map(|index| *index as u32)
+                .collect(),
         })
     }
 }

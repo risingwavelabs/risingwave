@@ -85,8 +85,8 @@ impl ToBatchProst for BatchSimpleAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|c| c.to_protobuf())
-                .collect_vec(),
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
             // We treat simple agg as a special sort agg without group keys.
             group_keys: vec![],
         })
