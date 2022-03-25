@@ -60,6 +60,7 @@ pub async fn handle_show_table(
     ))
 }
 
+// row result conclude column name and column datatype
 fn col_desc_to_row(col: ColumnDesc) -> Row {
     let type_name = {
         // if datatype is struct, use type name as struct name
