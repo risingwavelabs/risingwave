@@ -78,6 +78,7 @@ pub async fn handle_create_table(
                 column_type: c.data_type.to_protobuf().into(),
                 column_id: c.column_id.get_id(),
                 name: c.name,
+                ..Default::default()
             }
             .into(),
             is_hidden: i == 0,

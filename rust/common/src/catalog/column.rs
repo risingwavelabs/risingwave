@@ -194,6 +194,8 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             column_type: c.data_type.to_protobuf().into(),
             column_id: c.column_id.into(),
             name: c.name.clone(),
+            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
+            type_name: c.type_name.clone(),
         }
     }
 }
