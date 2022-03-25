@@ -125,17 +125,6 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
-    async fn create_materialized_source(
-        &self,
-        source: ProstSource,
-        table: ProstTable,
-        plan: StreamNode,
-    ) -> Result<()> {
-        self.create_source(source).await?;
-        self.create_materialized_view(table, plan).await?;
-        Ok(())
-    }
-
     async fn create_materialized_view(
         &self,
         mut table: ProstTable,
@@ -144,6 +133,17 @@ impl CatalogWriter for MockCatalogWriter {
         table.id = self.gen_id();
         self.catalog.write().create_table(&table);
         self.add_id(table.id, table.database_id, table.schema_id);
+        Ok(())
+    }
+
+    async fn create_materialized_source(
+        &self,
+        source: ProstSource,
+        table: ProstTable,
+        plan: StreamNode,
+    ) -> Result<()> {
+        self.create_source(source).await?;
+        self.create_materialized_view(table, plan).await?;
         Ok(())
     }
 
@@ -163,6 +163,15 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(table_id.table_id);
+        self.drop_id(table_id.table_id);
+        self.catalog
+            .write()
+            .drop_table(database_id, schema_id, table_id);
         Ok(())
     }
 }
