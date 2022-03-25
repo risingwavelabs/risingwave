@@ -1,0 +1,37 @@
+statement ok
+create table create_mv_t1 (v1 int not null, v2 int not null, v3 int not null);
+
+statement ok
+insert into create_mv_t1 values (1,4,2), (2,3,3);
+
+statement ok
+create materialized view create_mv_mv1 as select * from create_mv_t1;
+
+statement ok
+flush;
+
+query III
+select v1, v2, v3 from create_mv_mv1;
+----
+1 4 2
+2 3 3
+
+statement ok
+insert into create_mv_t1 values (3,4,4), (4,3,5);
+
+statement ok
+flush;
+
+query III
+select v1, v2, v3 from create_mv_mv1;
+----
+1 4 2
+2 3 3
+3 4 4
+4 3 5
+
+# statement ok
+# drop materialized view create_mv_mv1
+
+# statement ok
+# drop table create_mv_t1
