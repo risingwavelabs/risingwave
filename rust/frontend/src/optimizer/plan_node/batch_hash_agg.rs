@@ -33,12 +33,20 @@ pub struct BatchHashAgg {
 impl BatchHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let input_dist = logical.input().distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            Distribution::Broadcast => panic!(),
+            Distribution::AnyShard => panic!(),
+            Distribution::HashShard(_) => {
+                assert!(
+                    input_dist.satisfies(&Distribution::HashShard(logical.group_keys().to_vec()))
+                );
+                input_dist.clone()
+            }
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
