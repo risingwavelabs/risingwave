@@ -139,10 +139,10 @@ impl Condition {
     }
 
     #[must_use]
-    /// Separate equality conditions which connects left columns and right columns from other
+    /// Separate equality conditions which connect left columns and right columns from other
     /// conditions.
     ///
-    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    /// The equality conditions are transformed into `(left_col_idx, right_col_idx)` pairs.
     pub fn split_eq_keys(
         self,
         left_col_num: usize,
