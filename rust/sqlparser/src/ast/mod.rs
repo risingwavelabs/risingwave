@@ -1356,8 +1356,9 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
+    ExprQualifiedWildcard(Expr, ObjectName),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(Expr, ObjectName),
+    QualifiedWildcard(ObjectName),
     /// An unqualified `*`
     Wildcard,
 }
@@ -1367,7 +1368,7 @@ impl fmt::Display for FunctionArgExpr {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             // TODO: refactor QualifiedWildcard and binder to change this.
-            FunctionArgExpr::QualifiedWildcard(expr, prefix) => {
+            FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
                 if let Expr::CompoundIdentifier(idents) = expr {
                     if idents.is_empty() {
                         return write!(f, "{}.*", prefix);
@@ -1375,6 +1376,7 @@ impl fmt::Display for FunctionArgExpr {
                 }
                 write!(f, "{}.{}.*", expr, prefix)
             }
+            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             FunctionArgExpr::Wildcard => f.write_str("*"),
         }
     }
