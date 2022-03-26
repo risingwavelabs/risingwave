@@ -103,6 +103,7 @@ message AggCall {
     COUNT = 4;
     AVG = 5;
     STRING_AGG = 6;
+    SINGLE_VALUE = 7;
   }
   message Arg {
     InputRefExpr input = 1;

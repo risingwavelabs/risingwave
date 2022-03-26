@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
@@ -9,6 +23,7 @@ pub mod data_chunk_iter;
 mod decimal_array;
 pub mod interval_array;
 mod iterator;
+pub mod list_array;
 mod macros;
 mod primitive_array;
 pub mod stream_chunk;
@@ -31,6 +46,7 @@ pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
@@ -40,9 +56,8 @@ pub use utf8_array::*;
 
 use crate::array::iterator::ArrayImplIterator;
 use crate::buffer::Bitmap;
-pub use crate::error::ErrorCode::InternalError;
-use crate::error::Result;
-pub use crate::error::RwError;
+use crate::error::ErrorCode::InternalError;
+use crate::error::{Result, RwError};
 use crate::types::*;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -147,7 +162,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     fn iter(&self) -> Self::Iter<'_>;
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> Result<ProstArray>;
+    fn to_protobuf(&self) -> ProstArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -183,6 +198,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
 pub enum ArrayMeta {
     Simple, // Simple array without given any extra metadata.
     Struct { children: Arc<[DataType]> },
+    List { datatype: Box<DataType> },
 }
 
 /// Implement `compact` on array, which removes element according to `visibility`.
@@ -230,7 +246,8 @@ macro_rules! for_all_variants {
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
-            { Struct, struct, StructArray, StructArrayBuilder }
+            { Struct, struct, StructArray, StructArrayBuilder },
+            { List, list, ListArray, ListArrayBuilder }
         }
     };
 }
@@ -297,6 +314,12 @@ impl From<NaiveTimeArray> for ArrayImpl {
 impl From<StructArray> for ArrayImpl {
     fn from(arr: StructArray) -> Self {
         Self::Struct(arr)
+    }
+}
+
+impl From<ListArray> for ArrayImpl {
+    fn from(arr: ListArray) -> Self {
+        Self::List(arr)
     }
 }
 
@@ -449,7 +472,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> Result<ProstArray> {
+            pub fn to_protobuf(&self) -> ProstArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }
@@ -544,10 +567,12 @@ impl ArrayImpl {
             ProstArrayType::Decimal => {
                 read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
             }
-            ProstArrayType::Date => read_naivedate_array(array, cardinality)?,
-            ProstArrayType::Time => read_naivetime_array(array, cardinality)?,
-            ProstArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
+            ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
+            ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
+            ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
+            ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
+            ProstArrayType::List => ListArray::from_protobuf(array)?,
         };
         Ok(array)
     }

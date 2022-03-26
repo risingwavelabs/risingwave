@@ -1,19 +1,51 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
-use crate::catalog::catalog_service::DEFAULT_SCHEMA_NAME;
-use crate::session::RwSession;
+use crate::binder::Binder;
+use crate::session::QueryContext;
 
-pub(super) async fn handle_drop_table(
-    session: &RwSession,
+pub async fn handle_drop_table(
+    context: QueryContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
-    let str_table_name = table_name.to_string();
+    let session = context.session_ctx;
+    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
-    let catalog_mgr = session.env().catalog_mgr();
-    catalog_mgr
-        .drop_table(session.database(), DEFAULT_SCHEMA_NAME, &str_table_name)
+    let catalog_reader = session.env().catalog_reader();
+
+    let (source_id, table_id) = {
+        let reader = catalog_reader.read_guard();
+        let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+
+        // If associated source is `None`, then it is a normal mview.
+        match table.associated_source_id() {
+            Some(source_id) => (source_id, table.id()),
+            None => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                )))
+            }
+        }
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .drop_materialized_source(source_id.table_id(), table_id)
         .await?;
 
     Ok(PgResponse::new(
@@ -26,26 +58,33 @@ pub(super) async fn handle_drop_table(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_meta::test_utils::LocalMeta;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
-    use crate::catalog::catalog_service::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
     async fn test_drop_table_handler() {
-        let meta = LocalMeta::start(12003).await;
         let sql_create_table = "create table t (v1 smallint);";
         let sql_drop_table = "drop table t;";
-        let frontend = LocalFrontend::new(&meta).await;
+        let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql_create_table).await.unwrap();
         frontend.run_sql(sql_drop_table).await.unwrap();
 
-        let catalog_manager = frontend.session().env().catalog_mgr();
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
 
-        assert!(catalog_manager
-            .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-            .is_none());
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .ok()
+            .cloned();
+        assert!(source.is_none());
 
-        meta.stop().await;
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .ok()
+            .cloned();
+        assert!(table.is_none());
     }
 }

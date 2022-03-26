@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::path::Path;
 
 use protobuf::descriptor::FileDescriptorSet;
@@ -12,7 +26,7 @@ use risingwave_common::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
-use serde_protobuf::descriptor::{Descriptors, FieldType};
+use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
@@ -113,19 +127,52 @@ impl ProtobufParser {
                 )
             }
         };
+        let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| {
-                let field_type = f.field_type(&self.descriptors);
-                let column_type =
-                    protobuf_type_mapping(&field_type, f.is_repeated())?.to_protobuf()?;
-                Ok(ColumnDesc {
-                    column_type: Some(column_type),
-                    name: f.name().to_string(),
-                    ..Default::default()
-                })
-            })
+            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
             .collect::<Result<Vec<ColumnDesc>>>()
+    }
+
+    // Use pb field to create column_desc, use index to create increment column_id
+    pub fn pb_field_to_col_desc(
+        field_descriptor: &FieldDescriptor,
+        descriptors: &Descriptors,
+        lastname: String,
+        index: &mut i32,
+    ) -> Result<ColumnDesc> {
+        let field_type = field_descriptor.field_type(descriptors);
+        let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
+        if let FieldType::Message(m) = field_type {
+            let column_vec = m
+                .fields()
+                .iter()
+                .map(|f| {
+                    Self::pb_field_to_col_desc(
+                        f,
+                        descriptors,
+                        lastname.clone() + field_descriptor.name() + ".",
+                        index,
+                    )
+                })
+                .collect::<Result<Vec<_>>>()?;
+            *index += 1;
+            Ok(ColumnDesc {
+                column_id: *index, // need increment
+                name: lastname + field_descriptor.name(),
+                column_type: Some(data_type.to_protobuf()),
+                field_descs: column_vec,
+                type_name: m.name().to_string(),
+            })
+        } else {
+            *index += 1;
+            Ok(ColumnDesc {
+                column_id: *index, // need increment
+                name: lastname + field_descriptor.name(),
+                column_type: Some(data_type.to_protobuf()),
+                ..Default::default()
+            })
+        }
     }
 }
 
@@ -143,7 +190,9 @@ macro_rules! protobuf_match_type {
 }
 
 /// Maps a protobuf field type to a DB column type.
-fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<DataType> {
+fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Result<DataType> {
+    let is_repeated = f.is_repeated();
+    let field_type = &f.field_type(descriptors);
     if is_repeated {
         return Err(NotImplementedError("repeated field is not supported".to_string()).into());
     }
@@ -154,6 +203,14 @@ fn protobuf_type_mapping(field_type: &FieldType, is_repeated: bool) -> Result<Da
         FieldType::Int32 | FieldType::SFixed32 | FieldType::SInt32 => DataType::Int32,
         FieldType::Bool => DataType::Boolean,
         FieldType::String => DataType::Varchar,
+        FieldType::Message(m) => {
+            let vec = m
+                .fields()
+                .iter()
+                .map(|f| protobuf_type_mapping(f, descriptors))
+                .collect::<Result<Vec<_>>>()?;
+            DataType::Struct { fields: vec.into() }
+        }
         actual_type => {
             return Err(
                 NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
@@ -260,7 +317,7 @@ mod tests {
     //    Date:    "2021-01-01"
     static PRE_GEN_PROTO_DATA: &[u8] = b"\x08\x7b\x12\x0c\x74\x65\x73\x74\x20\x61\x64\x64\x72\x65\x73\x73\x1a\x09\x74\x65\x73\x74\x20\x63\x69\x74\x79\x20\xc8\x03\x2d\x19\x04\x9e\x3f\x32\x0a\x32\x30\x32\x31\x2d\x30\x31\x2d\x30\x31";
 
-    fn create_parser() -> Result<ProtobufParser> {
+    fn create_parser(proto_data: &str) -> Result<ProtobufParser> {
         let temp_file = Builder::new()
             .prefix("temp")
             .suffix(".proto")
@@ -270,11 +327,30 @@ mod tests {
 
         let path = temp_file.path().to_str().unwrap();
         let mut file = temp_file.as_file();
-        file.write_all(PROTO_FILE_DATA.as_ref())
+        file.write_all(proto_data.as_ref())
             .expect("writing binary to test file");
 
         ProtobufParser::new(format!("file://{}", path).as_str(), ".test.TestRecord")
     }
+
+    static PROTO_NESTED_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
 
     #[test]
     fn test_proto_message_name() {
@@ -295,12 +371,12 @@ mod tests {
 
     #[test]
     fn test_create_parser() {
-        create_parser().unwrap();
+        create_parser(PROTO_FILE_DATA).unwrap();
     }
 
     #[test]
     fn test_parser_decode() {
-        let parser = create_parser().unwrap();
+        let parser = create_parser(PROTO_FILE_DATA).unwrap();
 
         let value = parser.decode(PRE_GEN_PROTO_DATA).unwrap();
 
@@ -341,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_parser_parse() {
-        let parser = create_parser().unwrap();
+        let parser = create_parser(PROTO_FILE_DATA).unwrap();
         let descs = vec![
             SourceColumnDesc {
                 name: "id".to_string(),
@@ -400,41 +476,24 @@ mod tests {
     fn test_map_to_columns() {
         use risingwave_common::types::*;
 
-        let parser = create_parser().unwrap();
+        let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
+        let city = vec![
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+        ];
+        let country = vec![
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
+            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+        ];
         assert_eq!(
             columns,
             vec![
-                ColumnDesc {
-                    column_type: Some(DataType::Int32.to_protobuf().unwrap()),
-                    name: "id".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    name: "address".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    name: "city".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Int64.to_protobuf().unwrap()),
-                    name: "zipcode".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Float32.to_protobuf().unwrap()),
-                    name: "rate".to_string(),
-                    ..Default::default()
-                },
-                ColumnDesc {
-                    column_type: Some(DataType::Varchar.to_protobuf().unwrap()),
-                    name: "date".to_string(),
-                    ..Default::default()
-                },
+                ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
+                ColumnDesc::new_struct("country", 7, ".test.Country", country),
+                ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
+                ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]
         );
     }

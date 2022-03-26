@@ -1,5 +1,6 @@
 package com.risingwave.planner;
 
+import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER;
 import static com.risingwave.common.config.LeaderServerConfigurations.CLUSTER_MODE;
 import static com.risingwave.common.config.LeaderServerConfigurations.ClusterMode.Distributed;
 
@@ -19,6 +20,9 @@ public class SubQueryPlannerTest extends BatchPlanTestBase {
     super.init();
     var conf = executionContext.getConf();
     conf.set(CLUSTER_MODE, Distributed);
+    executionContext
+        .getSessionConfiguration()
+        .setByString(ENABLE_NEW_SUBQUERY_PLANNER.getKey(), "true");
   }
 
   @ParameterizedTest(name = "{index} => {0}")

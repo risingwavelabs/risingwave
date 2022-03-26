@@ -68,7 +68,7 @@ public class CreateMaterializedViewHandlerTest {
     String tableName = createMaterializedView.name.getSimple();
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, executionContext);
-    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, false);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, null);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 
@@ -100,7 +100,7 @@ public class CreateMaterializedViewHandlerTest {
     String tableName = createMaterializedView.name.getSimple();
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(ast, executionContext);
-    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, false);
+    TableCatalog catalog = handler.convertPlanToCatalog(tableName, plan, executionContext, null);
 
     Assertions.assertEquals(catalog.isMaterializedView(), true);
 

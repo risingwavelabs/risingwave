@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::{btree_map, BTreeMap};
 use std::sync::Arc;
 
@@ -5,6 +19,7 @@ use bytes::Bytes;
 use risingwave_common::array::data_chunk_iter::RowDeserializer;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -74,7 +89,7 @@ impl<S: StateStore> JoinEntryState<S> {
     }
 
     fn fill_cached(
-        data: Vec<(Bytes, Bytes)>,
+        data: Vec<(Bytes, StorageValue)>,
         data_types: Arc<[DataType]>,
         pk_data_types: Arc<[DataType]>,
     ) -> Result<BTreeMap<PkType, StateValueType>> {
@@ -83,7 +98,7 @@ impl<S: StateStore> JoinEntryState<S> {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
             let key = pk_deserializer.deserialize_not_null(&raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(&raw_value)?;
+            let value = deserializer.deserialize(raw_value.as_bytes())?;
             cached.insert(key, value);
         }
         Ok(cached)

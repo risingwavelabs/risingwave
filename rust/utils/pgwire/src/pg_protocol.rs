@@ -1,4 +1,18 @@
-use std::io::Result;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::io::{Error as IoError, Result};
 use std::sync::Arc;
 
 use bytes::BytesMut;
@@ -27,7 +41,7 @@ where
     is_terminate: bool,
 
     session_mgr: Arc<dyn SessionManager>,
-    session: Option<Box<dyn Session>>,
+    session: Option<Arc<dyn Session>>,
 }
 
 /// States flow happened from top to down.
@@ -88,8 +102,8 @@ where
     }
 
     fn process_startup_msg(&mut self, _msg: FeStartupMessage) -> Result<()> {
-        self.session = Some(self.session_mgr.connect());
-        self.session = Some(self.session_mgr.connect());
+        // TODO: Replace `DEFAULT_DATABASE_NAME` with true database name in `FeStartupMessage`.
+        self.session = Some(self.session_mgr.connect("dev").map_err(IoError::other)?);
         self.write_message_no_flush(&BeMessage::AuthenticationOk)?;
         self.write_message_no_flush(&BeMessage::ParameterStatus(
             BeParameterStatusMessage::Encoding("utf8"),
@@ -107,13 +121,15 @@ where
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
         info!("receive query: {}", query.get_sql());
-        let session = self.session.as_ref().unwrap();
+        let session = self.session.clone().unwrap();
 
         // execute query
         let process_res = session.run_statement(query.get_sql()).await;
         match process_res {
             Ok(res) => {
-                if res.is_query() {
+                if res.is_empty() {
+                    self.write_message_no_flush(&BeMessage::EmptyQueryResponse)?;
+                } else if res.is_query() {
                     self.process_query_with_results(res).await?;
                 } else {
                     self.write_message_no_flush(&BeMessage::CommandComplete(

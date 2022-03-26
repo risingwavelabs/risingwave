@@ -64,7 +64,7 @@ public class DropMaterializedViewHandlerTest {
         ((CreateMaterializedViewHandler) sqlHandlerFactory.create(createAst, executionContext));
     StreamPlanner planner = new StreamPlanner();
     StreamingPlan plan = planner.plan(createAst, executionContext);
-    createMaterializedViewHandler.convertPlanToCatalog(tableName, plan, executionContext, false);
+    createMaterializedViewHandler.convertPlanToCatalog(tableName, plan, executionContext, null);
   }
 
   @Test

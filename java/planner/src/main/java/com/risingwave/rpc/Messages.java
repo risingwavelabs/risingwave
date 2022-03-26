@@ -9,12 +9,10 @@ import com.risingwave.catalog.TableCatalog;
 import com.risingwave.proto.computenode.CreateTaskRequest;
 import com.risingwave.proto.plan.DatabaseRefId;
 import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.QueryId;
 import com.risingwave.proto.plan.SchemaRefId;
-import com.risingwave.proto.plan.StageId;
 import com.risingwave.proto.plan.TableRefId;
 import com.risingwave.proto.plan.TaskId;
-import com.risingwave.proto.plan.TaskSinkId;
+import com.risingwave.proto.plan.TaskOutputId;
 import java.util.Random;
 import java.util.UUID;
 import org.reflections.Reflections;
@@ -65,16 +63,15 @@ public class Messages {
         TaskId.newBuilder()
             // FIXME: replace random number with a better .
             .setTaskId(new Random().nextInt(1000000000))
-            .setStageId(
-                StageId.newBuilder()
-                    .setQueryId(QueryId.newBuilder().setTraceId(UUID.randomUUID().toString())))
+            .setStageId(0)
+            .setQueryId(UUID.randomUUID().toString())
             .build();
     return CreateTaskRequest.newBuilder().setTaskId(taskId).setPlan(planFragment).build();
   }
 
-  public static TaskSinkId buildTaskSinkId(TaskId taskId) {
+  public static TaskOutputId buildTaskOutputId(TaskId taskId) {
     // TODO: Set SinkId.
-    return TaskSinkId.newBuilder().setTaskId(taskId).build();
+    return TaskOutputId.newBuilder().setTaskId(taskId).build();
   }
 
   /**

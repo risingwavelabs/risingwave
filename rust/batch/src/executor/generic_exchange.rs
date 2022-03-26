@@ -1,15 +1,29 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::marker::PhantomData;
-use std::net::SocketAddr;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
+use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
-use crate::execution::exchange_source::{ExchangeSource, GrpcExchangeSource, LocalExchangeSource};
+use crate::execution::local_exchange::LocalExchangeSource;
 use crate::executor::{Executor, ExecutorBuilder};
 use crate::task::{BatchEnvironment, TaskId};
 
@@ -17,7 +31,7 @@ pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ProstExchangeSource>,
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
     env: BatchEnvironment,
 
     source_idx: usize,
@@ -49,11 +63,11 @@ impl CreateSource for DefaultCreateSource {
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
-        let peer_addr = value.get_host()?.to_socket_addr()?;
+        let peer_addr = value.get_host()?.into();
         if is_local_address(env.server_address(), &peer_addr) {
-            trace!("Exchange locally [{:?}]", value.get_sink_id());
+            trace!("Exchange locally [{:?}]", value.get_task_output_id());
             return Ok(Box::new(LocalExchangeSource::create(
-                value.get_sink_id()?.try_into()?,
+                value.get_task_output_id()?.try_into()?,
                 env,
                 task_id,
             )?));
@@ -61,11 +75,10 @@ impl CreateSource for DefaultCreateSource {
         trace!(
             "Exchange remotely from {} [{:?}]",
             &peer_addr,
-            value.get_sink_id()
+            value.get_task_output_id()
         );
         Ok(Box::new(
-            GrpcExchangeSource::create(peer_addr, task_id, value.get_sink_id()?.try_into()?)
-                .await?,
+            GrpcExchangeSource::create(peer_addr, value.get_task_output_id()?.clone()).await?,
         ))
     }
 }
@@ -77,7 +90,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             NodeBody::Exchange
         )?;
 
-        let server_addr = *source.env.server_address();
+        let server_addr = source.env.server_address().clone();
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
@@ -193,7 +206,7 @@ mod tests {
 
         let mut executor = GenericExchangeExecutor::<FakeCreateSource> {
             sources,
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_idx: 0,
             current_source: None,
             source_creator: PhantomData,

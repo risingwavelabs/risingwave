@@ -1,9 +1,29 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use async_trait::async_trait;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
@@ -25,6 +45,37 @@ pub struct ChainExecutor {
     column_idxs: Vec<usize>,
     /// Logical Operator Info
     op_info: String,
+}
+
+pub struct ChainExecutorBuilder {}
+
+impl ExecutorBuilder for ChainExecutorBuilder {
+    fn new_boxed_executor(
+        mut params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
+        let snapshot = params.input.remove(1);
+        let mview = params.input.remove(0);
+
+        // TODO(MrCroxx): Use column_descs to get idx after mv planner can generate stable
+        // column_ids. Now simply treat column_id as column_idx.
+        // TODO(bugen): how can we know the way of mapping?
+        let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
+
+        // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
+        // its schema.
+        let schema = snapshot.schema().clone();
+        Ok(Box::new(ChainExecutor::new(
+            snapshot,
+            mview,
+            schema,
+            column_idxs,
+            params.op_info,
+        )))
+    }
 }
 
 impl ChainExecutor {
@@ -81,21 +132,28 @@ impl ChainExecutor {
                 }
                 Err(e)
             }
-            Ok(msg) => self.mapping(msg),
+            Ok(msg) => Ok(msg),
         }
     }
 
     async fn init(&mut self) -> Result<Message> {
         match self.read_mview().await? {
-            // The first message should be a barrier with conf change from mview side.
-            // Swallow it and get its barrier for snapshot read.
+            // The first message should be a barrier.
             Message::Chunk(_) => Err(ErrorCode::InternalError(
                 "the first message received by chain node should be a barrier".to_owned(),
             )
             .into()),
             Message::Barrier(barrier) => {
-                self.snapshot.init(barrier.epoch.prev)?;
-                self.state = ChainState::ReadingSnapshot;
+                if barrier.is_add_output() {
+                    // If the barrier is a conf change from mview side, init snapshot from its epoch
+                    // and set its state to reading snapshot.
+                    self.snapshot.init(barrier.epoch.prev)?;
+                    self.state = ChainState::ReadingSnapshot;
+                } else {
+                    // If the barrier is not a conf change, means snapshot already read and state
+                    // should be set to reading mview.
+                    self.state = ChainState::ReadingMView;
+                }
                 Ok(Message::Barrier(barrier))
             }
         }
@@ -131,23 +189,17 @@ impl Executor for ChainExecutor {
     fn logical_operator_info(&self) -> &str {
         &self.op_info
     }
-
-    fn reset(&mut self, _epoch: u64) {
-        // nothing to do
-    }
 }
 
 #[cfg(test)]
 mod test {
 
     use async_trait::async_trait;
-    use risingwave_common::array::{Array, I32Array, Op, RwError, StreamChunk};
-    use risingwave_common::catalog::Schema;
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::error::{ErrorCode, Result};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::plan::ColumnDesc;
+    use risingwave_common::error::{ErrorCode, Result, RwError};
+    use risingwave_common::types::DataType;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -206,23 +258,11 @@ mod test {
         fn init(&mut self, _: u64) -> Result<()> {
             Ok(())
         }
-
-        fn reset(&mut self, _epoch: u64) {
-            // nothing to do
-        }
     }
 
     #[tokio::test]
     async fn test_basic() {
-        let columns = vec![ColumnDesc {
-            column_type: Some(DataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            name: "v1".to_string(),
-            ..Default::default()
-        }];
-        let schema = Schema::try_from(&columns).unwrap();
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
         let first = Box::new(MockSnapshot::with_chunks(
             schema.clone(),
             PkIndices::new(),

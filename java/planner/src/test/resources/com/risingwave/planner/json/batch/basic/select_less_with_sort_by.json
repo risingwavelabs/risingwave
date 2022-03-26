@@ -2,23 +2,19 @@
   "children": [{
     "children": [{
       "rowSeqScan": {
-        "tableRefId": {
-          "schemaRefId": {
-            "databaseRefId": {
-            }
-          },
+        "tableDesc": {
           "tableId": 1
         },
-        "columnIds": [0, 1],
-        "fields": [{
-          "dataType": {
+        "columnDescs": [{
+          "columnType": {
             "typeName": "INT32"
           },
           "name": "v1"
         }, {
-          "dataType": {
+          "columnType": {
             "typeName": "INT32"
           },
+          "columnId": 1,
           "name": "v2"
         }]
       },

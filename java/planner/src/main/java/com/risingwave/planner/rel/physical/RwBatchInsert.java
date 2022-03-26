@@ -1,9 +1,11 @@
 package com.risingwave.planner.rel.physical;
 
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
+import static java.util.Objects.requireNonNull;
 
 import com.google.common.collect.ImmutableList;
 import com.risingwave.catalog.ColumnCatalog;
+import com.risingwave.catalog.MaterializedViewCatalog;
 import com.risingwave.catalog.TableCatalog;
 import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalInsert;
@@ -86,8 +88,13 @@ public class RwBatchInsert extends TableModify implements RisingWaveBatchPhyRel 
               .collect(ImmutableList.toImmutableList());
     }
 
+    // For table v2, we can only insert into "associated materialized view".
+    var mvCatalog = (MaterializedViewCatalog) tableCatalog;
+    var tableSourceId =
+        requireNonNull(mvCatalog.getAssociatedTableId(), "cannot insert into materialized view");
+
     InsertNode.Builder insertNodeBuilder =
-        InsertNode.newBuilder().setTableRefId(Messages.getTableRefId(tableCatalog.getId()));
+        InsertNode.newBuilder().setTableSourceRefId(Messages.getTableRefId(tableSourceId));
 
     var identity =
         "RwBatchInsertExecutor(TableName:"

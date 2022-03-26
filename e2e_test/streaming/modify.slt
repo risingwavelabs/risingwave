@@ -1,0 +1,68 @@
+statement ok
+create table t (r real not null, i int not null);
+
+# Insert
+
+statement ok
+insert into t values (114, 10), (514, 20);
+
+statement ok
+flush;
+
+query RI
+select * from t order by i;
+----
+114 10
+514 20
+
+statement ok
+insert into t values (810, 40), (1919, 30);
+
+statement ok
+flush;
+
+query RI
+select * from t order by i;
+----
+114 10
+514 20
+1919 30
+810 40
+
+# Delete
+
+statement ok
+delete from t where r = 1919;
+
+statement ok
+flush;
+
+query RI
+select * from t order by i;
+----
+114 10
+514 20
+810 40
+
+query I
+select count(*) from t;
+----
+3
+
+statement ok
+delete from t;
+
+statement ok
+flush;
+
+query RI
+select * from t order by i;
+----
+
+query I
+select count(*) from t;
+----
+0
+
+statement ok
+drop table t;

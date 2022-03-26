@@ -102,7 +102,7 @@ public class CreateTableHandler implements SqlHandler {
     }
     // Register the view on catalog.
     TableCatalog mvCatalog =
-        CreateMaterializedViewHandler.convertPlanToCatalog(tableName, plan, context, true);
+        CreateMaterializedViewHandler.convertPlanToCatalog(tableName, plan, context, sourceTableId);
 
     // Bind stream plan with materialized view catalog.
     var streamingPlan = plan.getStreamingPlan();

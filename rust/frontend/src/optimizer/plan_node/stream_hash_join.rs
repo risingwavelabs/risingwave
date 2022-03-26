@@ -1,22 +1,80 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::JoinType;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::HashJoinNode;
 
-use super::{IntoPlanRef, LogicalJoin, PlanRef, PlanTreeNodeBinary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithDistribution, WithOrder, WithSchema};
+use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use crate::expr::Expr;
+use crate::optimizer::plan_node::EqJoinPredicate;
+use crate::optimizer::property::{Distribution, WithSchema};
 
+/// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
+/// from inner (right-side) relation and probes with data from outer (left-side) relation to
+/// get output rows.
 #[derive(Debug, Clone)]
 pub struct StreamHashJoin {
+    pub base: PlanBase,
     logical: LogicalJoin,
+
+    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// non-equal parts to facilitate execution later
+    eq_join_predicate: EqJoinPredicate,
 }
+
 impl StreamHashJoin {
-    pub fn new(logical: LogicalJoin) -> Self {
-        Self { logical }
+    pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
+        let ctx = logical.base.ctx.clone();
+        // Inner join won't change the append-only behavior of the stream. The rest might.
+        let append_only = match logical.join_type() {
+            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+            _ => false,
+        };
+        // TODO: derive from input
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            logical.base.pk_indices.to_vec(),
+            Distribution::any().clone(),
+            append_only,
+        );
+
+        Self {
+            base,
+            logical,
+            eq_join_predicate,
+        }
+    }
+
+    /// Get a reference to the batch hash join's eq join predicate.
+    pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
+        &self.eq_join_predicate
     }
 }
+
 impl fmt::Display for StreamHashJoin {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "StreamHashJoin {{ type: {:?}, predicate: {} }}",
+            self.logical.join_type(),
+            self.eq_join_predicate()
+        )
     }
 }
 
@@ -28,7 +86,10 @@ impl PlanTreeNodeBinary for StreamHashJoin {
         self.logical.right()
     }
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_left_right(left, right))
+        Self::new(
+            self.logical.clone_with_left_right(left, right),
+            self.eq_join_predicate.clone(),
+        )
     }
     fn left_dist_required(&self) -> &Distribution {
         todo!()
@@ -37,12 +98,32 @@ impl PlanTreeNodeBinary for StreamHashJoin {
         todo!()
     }
 }
-impl_plan_tree_node_for_binary! {StreamHashJoin}
+
+impl_plan_tree_node_for_binary! { StreamHashJoin }
+
 impl WithSchema for StreamHashJoin {
     fn schema(&self) -> &Schema {
         self.logical.schema()
     }
 }
-impl WithDistribution for StreamHashJoin {}
-impl WithOrder for StreamHashJoin {}
-impl ToStreamProst for StreamHashJoin {}
+
+impl ToStreamProst for StreamHashJoin {
+    fn to_stream_prost_body(&self) -> Node {
+        Node::HashJoinNode(HashJoinNode {
+            join_type: self.logical.join_type() as i32,
+            left_key: self
+                .eq_join_predicate
+                .left_eq_indexes()
+                .iter()
+                .map(|v| *v as i32)
+                .collect(),
+            right_key: self
+                .eq_join_predicate
+                .right_eq_indexes()
+                .iter()
+                .map(|v| *v as i32)
+                .collect(),
+            condition: Some(self.eq_join_predicate.other_cond().as_expr().to_protobuf()),
+        })
+    }
+}

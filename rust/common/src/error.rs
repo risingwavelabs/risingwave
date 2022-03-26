@@ -1,5 +1,20 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::alloc::Layout;
 use std::backtrace::Backtrace;
+use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
@@ -51,9 +66,8 @@ pub enum ErrorCode {
     TaskNotFound,
     #[error("Item not found: {0}")]
     ItemNotFound(String),
-
-    #[error(r#"invalid input syntax for {0} type: "{1}""#)]
-    InvalidInputSyntax(String, String),
+    #[error("Invalid input syntax: {0}")]
+    InvalidInputSyntax(String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(MemComparableError),
 
@@ -153,6 +167,12 @@ impl From<std::net::AddrParseError> for RwError {
     }
 }
 
+impl From<Infallible> for RwError {
+    fn from(x: Infallible) -> Self {
+        match x {}
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -198,7 +218,7 @@ impl ErrorCode {
             ErrorCode::TaskNotFound => 10,
             ErrorCode::ProstError(_) => 11,
             ErrorCode::ItemNotFound(_) => 13,
-            ErrorCode::InvalidInputSyntax(_, _) => 14,
+            ErrorCode::InvalidInputSyntax(_) => 14,
             ErrorCode::MemComparableError(_) => 15,
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
@@ -271,8 +291,10 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
 }
 
 impl ToErrorStr for tonic::Status {
+    /// [`tonic::Status`] means no transportation error but only application-level failure.
+    /// In this case we focus on the message rather than other fields.
     fn to_error_str(self) -> String {
-        format!("grpc tonic error: {}", self)
+        self.message().to_string()
     }
 }
 

@@ -1,4 +1,19 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use super::*;
+use crate::array::list_array::{ListRef, ListValue};
 use crate::array::struct_array::{StructRef, StructValue};
 use crate::{for_all_native_types, for_all_scalar_variants};
 
@@ -12,29 +27,29 @@ pub trait ScalarPartialOrd: Scalar {
 /// Implement `Scalar` and `ScalarRef` for native type.
 /// For `PrimitiveArrayItemType`, clone is trivial, so `T` is both `Scalar` and `ScalarRef`.
 macro_rules! impl_all_native_scalar {
-  ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
-    $(
-      impl Scalar for $scalar_type {
-        type ScalarRefType<'a> = Self;
+    ([], $({ $scalar_type:ty, $variant_name:ident } ),*) => {
+        $(
+            impl Scalar for $scalar_type {
+                type ScalarRefType<'a> = Self;
 
-        fn as_scalar_ref(&self) -> Self {
-          *self
-        }
+                fn as_scalar_ref(&self) -> Self {
+                    *self
+                }
 
-        fn to_scalar_value(self) -> ScalarImpl {
-          ScalarImpl::$variant_name(self)
-        }
-      }
+                fn to_scalar_value(self) -> ScalarImpl {
+                    ScalarImpl::$variant_name(self)
+                }
+            }
 
-      impl<'scalar> ScalarRef<'scalar> for $scalar_type {
-        type ScalarType = Self;
+            impl<'scalar> ScalarRef<'scalar> for $scalar_type {
+                type ScalarType = Self;
 
-        fn to_owned_scalar(&self) -> Self {
-          *self
-        }
-      }
-    )*
-  };
+                fn to_owned_scalar(&self) -> Self {
+                    *self
+                }
+            }
+        )*
+    };
 }
 
 for_all_native_types! { impl_all_native_scalar }
@@ -63,6 +78,19 @@ impl Scalar for StructValue {
 
     fn to_scalar_value(self) -> ScalarImpl {
         ScalarImpl::Struct(self)
+    }
+}
+
+/// Implement `Scalar` for `ListValue`.
+impl Scalar for ListValue {
+    type ScalarRefType<'a> = ListRef<'a>;
+
+    fn as_scalar_ref(&self) -> ListRef<'_> {
+        ListRef::ValueRef { val: self }
+    }
+
+    fn to_scalar_value(self) -> ScalarImpl {
+        ScalarImpl::List(self)
     }
 }
 
@@ -271,15 +299,29 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     }
 }
 
+/// Implement `Scalar` for `ListValue`.
+impl<'a> ScalarRef<'a> for ListRef<'a> {
+    type ScalarType = ListValue;
+
+    fn to_owned_scalar(&self) -> ListValue {
+        let fields = self
+            .values_ref()
+            .iter()
+            .map(|f| f.map(|s| s.into_scalar_impl()))
+            .collect();
+        ListValue::new(fields)
+    }
+}
+
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(_) => stringify!($variant_name), )*
+            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(_) => stringify!($variant_name), )*
+                }
+            };
         }
-      };
-    }
         for_all_scalar_variants! { impl_all_get_ident, self }
     }
 }
@@ -287,12 +329,12 @@ impl ScalarImpl {
 impl<'scalar> ScalarRefImpl<'scalar> {
     pub fn get_ident(&self) -> &'static str {
         macro_rules! impl_all_get_ident {
-      ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-        match $self {
-          $( Self::$variant_name(_) => stringify!($variant_name), )*
+            ([$self:ident], $({ $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                match $self {
+                    $( Self::$variant_name(_) => stringify!($variant_name), )*
+                }
+            };
         }
-      };
-    }
         for_all_scalar_variants! { impl_all_get_ident, self }
     }
 }

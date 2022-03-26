@@ -56,7 +56,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
 
     // Send create MV tasks to all compute nodes.
-    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context, false);
+    TableCatalog catalog = convertPlanToCatalog(tableName, plan, context, null);
     PlanFragment planFragment =
         TableNodeSerializer.createProtoFromCatalog(catalog, false, plan.getStreamingPlan());
     CreateTaskBroadcaster.broadCastTaskFromPlanFragment(planFragment, context);
@@ -74,7 +74,10 @@ public class CreateMaterializedViewHandler implements SqlHandler {
 
   @VisibleForTesting
   public static MaterializedViewCatalog convertPlanToCatalog(
-      String tableName, StreamingPlan plan, ExecutionContext context, boolean hasAssociated) {
+      String tableName,
+      StreamingPlan plan,
+      ExecutionContext context,
+      TableCatalog.TableId associated) {
     SchemaCatalog.SchemaName schemaName = context.getCurrentSchema();
 
     CreateMaterializedViewInfo.Builder builder = CreateMaterializedViewInfo.builder(tableName);
@@ -85,9 +88,9 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     }
     builder.setCollation(rootNode.getCollation());
     builder.setMv(true);
-    builder.setAssociated(hasAssociated);
+    builder.setAssociated(associated);
     builder.setDependentTables(rootNode.getDependentTables());
-    if (!hasAssociated) {
+    if (associated == null) {
       rootNode.getPrimaryKeyIndices().forEach(builder::addPrimaryKey);
     }
     CreateMaterializedViewInfo mvInfo = builder.build();

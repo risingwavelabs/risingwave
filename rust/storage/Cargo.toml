@@ -12,10 +12,13 @@ aws-endpoint = "0.8"
 aws-sdk-s3 = "0.8"
 aws-smithy-http = "0.38"
 aws-smithy-types = "0.38"
+aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 crc32fast = "1"
+crossbeam = "0.8.1"
+dashmap = { version = "5", default-features = false }
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -23,6 +26,7 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
 moka = { version = "0.7", features = ["future"] }
 num-integer = "0.1"
@@ -32,8 +36,8 @@ paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.9"
 rand = "0.8"
-risingwave-pb = { path = "../prost" }
 risingwave_common = { path = "../common" }
+risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
     "encryption",
@@ -42,7 +46,7 @@ rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", 
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"
-tikv-client = { version = "0.1.0", optional = true }
+tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
     "fs",
     "rt",
@@ -55,12 +59,16 @@ tokio = { version = "1", features = [
 tokio-retry = "0.3"
 tokio-stream = "0.1"
 tonic = "0.6"
-tracing = { version = "0.1", features = ["release_max_level_info"] }
+tracing = { version = "0.1" }
 twox-hash = "1"
+value-encoding = { path = "../utils/value-encoding" }
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
+default = ["blockv2"]
 rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]
+blockv2 = []

@@ -1,25 +1,39 @@
-use std::sync::Arc;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::column::Column;
-use risingwave_common::array::{
-    Array, ArrayBuilderImpl, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk,
-};
+use risingwave_common::array::{Array, ArrayRef, DataChunk, Op, Row, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::expr::RowExpression;
+use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_storage::keyspace::Segment;
+use risingwave_pb::stream_plan;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
 use super::managed_state::join::*;
 use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
+use crate::common::StreamChunkBuilder;
+use crate::executor::ExecutorBuilder;
+use crate::task::{ExecutorParams, StreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
-// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/44580) get completed.
+// TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 type JoinTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
@@ -30,98 +44,6 @@ pub mod JoinType {
     pub const FullOuter: JoinTypePrimitive = 3;
 }
 
-/// Build a array and it's corresponding operations.
-struct StreamChunkBuilder {
-    /// operations in the data chunk to build
-    ops: Vec<Op>,
-    /// arrays in the data chunk to build
-    column_builders: Vec<ArrayBuilderImpl>,
-    /// The start position of the columns of the side
-    /// stream coming from. If the coming side is the
-    /// left, the `update_start_pos` should be 0.
-    /// If the coming side is the right, the `update_start_pos`
-    /// is the number of columns of the left side.
-    update_start_pos: usize,
-    /// The start position of the columns of the opposite side
-    /// stream coming from. If the coming side is the
-    /// left, the `matched_start_pos` should be the number of columns of the left side.
-    /// If the coming side is the right, the `matched_start_pos`
-    /// should be 0.
-    matched_start_pos: usize,
-}
-
-impl StreamChunkBuilder {
-    fn new(
-        capacity: usize,
-        data_types: &[DataType],
-        update_start_pos: usize,
-        matched_start_pos: usize,
-    ) -> Result<Self> {
-        let ops = Vec::with_capacity(capacity);
-        let column_builders = data_types
-            .iter()
-            .map(|datatype| datatype.create_array_builder(capacity))
-            .collect::<Result<Vec<_>>>()?;
-        Ok(Self {
-            ops,
-            column_builders,
-            update_start_pos,
-            matched_start_pos,
-        })
-    }
-
-    /// append a row with coming update value and matched value.
-    fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
-        self.ops.push(op);
-        for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
-        }
-        for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
-        }
-        Ok(())
-    }
-
-    /// append a row with coming update value and fill the other side with null.
-    fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
-        self.ops.push(op);
-        for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
-        }
-        for i in 0..self.column_builders.len() - row_update.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&None)?;
-        }
-        Ok(())
-    }
-
-    /// append a row with matched value and fill the coming side with null.
-    fn append_row_matched(&mut self, op: Op, row_matched: &Row) -> Result<()> {
-        self.ops.push(op);
-        for i in 0..self.column_builders.len() - row_matched.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(None)?;
-        }
-        for i in 0..row_matched.size() {
-            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
-        }
-        Ok(())
-    }
-
-    fn finish(self) -> Result<StreamChunk> {
-        let new_arrays = self
-            .column_builders
-            .into_iter()
-            .map(|builder| builder.finish())
-            .collect::<Result<Vec<_>>>()?;
-
-        let new_columns = new_arrays
-            .into_iter()
-            .map(|array_impl| Column::new(Arc::new(array_impl)))
-            .collect::<Vec<_>>();
-
-        Ok(StreamChunk::new(self.ops, new_columns, None))
-    }
-}
-
 type SideTypePrimitive = u8;
 #[allow(non_snake_case, non_upper_case_globals)]
 mod SideType {
@@ -130,8 +52,8 @@ mod SideType {
     pub const Right: SideTypePrimitive = 1;
 }
 
-const JOIN_LEFT_PATH: &[u8] = b"l";
-const JOIN_RIGHT_PATH: &[u8] = b"r";
+const JOIN_LEFT_PATH: u8 = b'l';
+const JOIN_RIGHT_PATH: u8 = b'r';
 
 const fn outer_side_keep(join_type: JoinTypePrimitive, side_type: SideTypePrimitive) -> bool {
     join_type == JoinType::FullOuter
@@ -183,7 +105,6 @@ impl<S: StateStore> std::fmt::Debug for JoinSide<S> {
 }
 
 impl<S: StateStore> JoinSide<S> {
-    #[allow(dead_code)]
     fn is_dirty(&self) -> bool {
         self.ht.values().any(|state| state.is_dirty())
     }
@@ -194,6 +115,20 @@ impl<S: StateStore> JoinSide<S> {
             "cannot clear cache while states of hash join are dirty"
         );
         self.ht.clear();
+    }
+}
+
+pub struct HashJoinExecutorBuilder {}
+
+impl ExecutorBuilder for HashJoinExecutorBuilder {
+    fn new_boxed_executor(
+        params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        store: impl StateStore,
+        stream: &mut StreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
+        stream.create_hash_join_node(params, node, store)
     }
 }
 
@@ -294,12 +229,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> Executor for HashJoinExecutor<S,
 
         Ok(())
     }
-
-    fn reset(&mut self, epoch: u64) {
-        self.side_l.ht.clear();
-        self.side_r.ht.clear();
-        self.update_executor_state(ExecutorState::Active(epoch));
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -348,8 +277,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         let pk_indices_l = input_l.pk_indices().to_vec();
         let pk_indices_r = input_r.pk_indices().to_vec();
 
-        let ks_l = keyspace.with_segment(Segment::FixedLength(JOIN_LEFT_PATH.to_vec()));
-        let ks_r = keyspace.with_segment(Segment::FixedLength(JOIN_RIGHT_PATH.to_vec()));
+        let ks_l = keyspace.append_u8(JOIN_LEFT_PATH);
+        let ks_r = keyspace.append_u8(JOIN_RIGHT_PATH);
         Self {
             aligner: BarrierAligner::new(input_l, input_r),
             output_data_types,

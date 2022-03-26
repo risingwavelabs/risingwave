@@ -30,7 +30,7 @@ public class FrontendServerConfigurations {
 
   @Config
   public static final ConfigEntry<String> PG_WIRE_IP =
-      ConfigEntry.<String>builder("risingwave.metadata.ip")
+      ConfigEntry.<String>builder("risingwave.pgserver.ip")
           .setOptional(true)
           .withDefaultValue("0.0.0.0")
           .withDoc("PostgreSQL server IP address")

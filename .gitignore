@@ -46,6 +46,7 @@ rust/log/
 log/
 
 .risingwave/
+.bin/
 
 # generated files
 risedev-components.user.env

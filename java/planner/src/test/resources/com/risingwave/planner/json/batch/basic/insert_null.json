@@ -19,12 +19,12 @@
     "identity": "RwBatchValuesExecutor"
   }],
   "insert": {
-    "tableRefId": {
+    "tableSourceRefId": {
       "schemaRefId": {
         "databaseRefId": {
         }
       },
-      "tableId": 7
+      "tableId": 6
     },
     "columnIds": [0]
   },

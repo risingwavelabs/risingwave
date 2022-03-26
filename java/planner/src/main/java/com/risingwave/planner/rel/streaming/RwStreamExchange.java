@@ -6,7 +6,8 @@ import com.risingwave.common.datatype.RisingWaveDataType;
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.common.dist.RwDistributionTrait;
 import com.risingwave.proto.plan.Field;
-import com.risingwave.proto.streaming.plan.Dispatcher;
+import com.risingwave.proto.streaming.plan.DispatchStrategy;
+import com.risingwave.proto.streaming.plan.DispatcherType;
 import com.risingwave.proto.streaming.plan.ExchangeNode;
 import com.risingwave.proto.streaming.plan.MergeNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -63,16 +64,16 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
 
     // Add dispatcher.
     RelDistribution distribution = getDistribution();
-    Dispatcher.Builder dispatcherBuilder = Dispatcher.newBuilder();
+    DispatchStrategy.Builder dispatcherBuilder = DispatchStrategy.newBuilder();
     if (distribution.getType() == RelDistribution.Type.BROADCAST_DISTRIBUTED) {
-      dispatcherBuilder.setType(Dispatcher.DispatcherType.BROADCAST);
+      dispatcherBuilder.setType(DispatcherType.BROADCAST);
     } else if (distribution.getType() == RelDistribution.Type.HASH_DISTRIBUTED) {
-      dispatcherBuilder.setType(Dispatcher.DispatcherType.HASH);
+      dispatcherBuilder.setType(DispatcherType.HASH);
       dispatcherBuilder.addAllColumnIndices(distribution.getKeys());
     } else if (distribution.getType() == RelDistribution.Type.SINGLETON) {
-      dispatcherBuilder.setType(Dispatcher.DispatcherType.SIMPLE);
+      dispatcherBuilder.setType(DispatcherType.SIMPLE);
     }
-    exchangeBuilder.setDispatcher(dispatcherBuilder);
+    exchangeBuilder.setStrategy(dispatcherBuilder);
 
     return StreamNode.newBuilder()
         .setExchangeNode(exchangeBuilder)

@@ -1,6 +1,19 @@
-use std::marker::PhantomData;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
-/// For expression that only accept two arguments + 1 bytes writer as input.
+//! For expression that only accept two arguments + 1 bytes writer as input.
+
 use crate::array::{I32Array, Utf8Array};
 use crate::expr::template::BinaryBytesExpression;
 use crate::expr::BoxedExpression;
@@ -12,13 +25,12 @@ pub fn new_substr_start(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: substr_start,
-        _phantom: PhantomData,
-    })
+        substr_start,
+    ))
 }
 
 pub fn new_substr_for(
@@ -26,13 +38,12 @@ pub fn new_substr_for(
     expr_ia2: BoxedExpression,
     return_type: DataType,
 ) -> BoxedExpression {
-    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _> {
+    Box::new(BinaryBytesExpression::<Utf8Array, I32Array, _>::new(
         expr_ia1,
         expr_ia2,
         return_type,
-        func: substr_for,
-        _phantom: PhantomData,
-    })
+        substr_for,
+    ))
 }
 
 #[cfg(test)]
@@ -60,7 +71,7 @@ mod tests {
         let start_pos = 3;
         let for_pos = 4;
 
-        let mut substr_start_normal = create_str_i32_binary_expr(
+        let substr_start_normal = create_str_i32_binary_expr(
             new_substr_start,
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(start_pos)),
@@ -73,7 +84,7 @@ mod tests {
             )))
         );
 
-        let mut substr_start_i32_none = create_str_i32_binary_expr(
+        let substr_start_i32_none = create_str_i32_binary_expr(
             new_substr_start,
             Some(ScalarImpl::from(String::from(text))),
             None,
@@ -83,7 +94,7 @@ mod tests {
             .unwrap();
         assert_eq!(res.to_datum(), None);
 
-        let mut substr_for_normal = create_str_i32_binary_expr(
+        let substr_for_normal = create_str_i32_binary_expr(
             new_substr_for,
             Some(ScalarImpl::from(String::from(text))),
             Some(ScalarImpl::Int32(for_pos)),
@@ -94,7 +105,7 @@ mod tests {
             Some(ScalarImpl::from(String::from(&text[..for_pos as usize])))
         );
 
-        let mut substr_for_str_none =
+        let substr_for_str_none =
             create_str_i32_binary_expr(new_substr_for, None, Some(ScalarImpl::Int32(for_pos)));
         let res = substr_for_str_none.eval(&DataChunk::new_dummy(1)).unwrap();
         assert_eq!(res.to_datum(), None);

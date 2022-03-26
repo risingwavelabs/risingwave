@@ -1,5 +1,6 @@
 package com.risingwave.planner.planner.streaming;
 
+import com.risingwave.common.config.StreamPlannerConfigurations;
 import com.risingwave.planner.util.PlanTestCaseLoader;
 import com.risingwave.planner.util.PlannerTestCase;
 import com.risingwave.planner.util.ToPlannerTestCase;
@@ -19,6 +20,9 @@ public class StreamJoinPlanTest extends StreamPlanTestBase {
   @BeforeAll
   public void initAll() {
     super.init();
+    executionContext
+        .getSessionConfiguration()
+        .setByString(StreamPlannerConfigurations.ENABLE_NEW_SUBQUERY_PLANNER.getKey(), "true");
   }
 
   @ParameterizedTest(name = "{index} => {0}")

@@ -1,3 +1,19 @@
+/*
+ * Copyright 2022 Singularity Data
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ */
 import Head from 'next/head'
 import Link from 'next/link';
 
@@ -27,10 +43,13 @@ import { capitalize } from '../lib/str';
 
 const drawerWidth = 215;
 
+const mainPadding = 30;
 const Main = styled('main', { shouldForwardProp: (prop) => prop !== 'open' })(
   ({ theme, open }) => ({
+    height: "100%",
+    width: "100%",
     flexGrow: 1,
-    padding: theme.spacing(3),
+    padding: `${mainPadding}px`,
     transition: theme.transitions.create('margin', {
       easing: theme.transitions.easing.sharp,
       duration: theme.transitions.duration.leavingScreen,
@@ -94,11 +113,10 @@ const NavBarItem = (props) => {
   )
 }
 
-export default function Home(props) {
+export default function Layout(props) {
   const theme = useTheme();
   const [open, setOpen] = useState(true);
   const [currentPage, setCurrentPage] = useState(props.currentPage ? props.currentPage : " ");
-
   const handleDrawerOpen = () => {
     setOpen(true);
   };
@@ -124,7 +142,7 @@ export default function Home(props) {
         <title>Dashboard | RisingWave</title>
         <link rel="icon" href="/singularitydata.svg" />
       </Head>
-      <Box sx={{ display: 'flex' }}>
+      <Box sx={{ display: 'flex', height: "100vh", width: "100vw" }}>
         <CssBaseline />
         <AppBar open={open}>
           <Toolbar>
@@ -191,8 +209,10 @@ export default function Home(props) {
           </List>
         </Drawer>
         <Main open={open}>
-          <DrawerHeader />
-          {props.children}
+          <div style={{height: "68px"}}></div>
+          <div style={{width: "calc(100vw - 275px)", height: "calc(100% - 68px)"}}>
+            {props.children}
+          </div>
         </Main>
       </Box>
     </>

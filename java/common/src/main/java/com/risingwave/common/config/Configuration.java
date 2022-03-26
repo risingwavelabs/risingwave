@@ -54,9 +54,7 @@ public class Configuration {
     var configEntry = confRegistry.get(stringKey);
     if (configEntry == null) {
       throw new PgException(
-          PgErrorCode.CONFIG_FILE_ERROR,
-          "Config %s is missing and has no default value!",
-          stringKey);
+          PgErrorCode.CONFIG_FILE_ERROR, "Config entry '%s' not found!", stringKey);
     } else {
       return configEntry;
     }
@@ -120,12 +118,17 @@ public class Configuration {
 
   private static ImmutableMap<String, ConfigEntry<?>> loadConfigRegistry() {
     // Load batch planner options.
-    List<ConfigEntry<?>> configEntries = loadConfigEntries(BatchPlannerConfigurations.class);
+    List<List<ConfigEntry<?>>> configEntriesList =
+        List.of(
+            loadConfigEntries(BatchPlannerConfigurations.class),
+            loadConfigEntries(StreamPlannerConfigurations.class));
     var mapBuilder = new ImmutableMap.Builder<String, ConfigEntry<?>>();
-    configEntries.forEach(
-        entry -> {
-          mapBuilder.put(entry.getKey(), entry);
-        });
+    for (var configEntries : configEntriesList) {
+      configEntries.forEach(
+          entry -> {
+            mapBuilder.put(entry.getKey(), entry);
+          });
+    }
     return mapBuilder.build();
   }
 

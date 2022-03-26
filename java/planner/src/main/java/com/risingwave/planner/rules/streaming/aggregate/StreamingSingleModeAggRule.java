@@ -4,6 +4,7 @@ import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.planner.PlannerUtils.isSingleMode;
 import static com.risingwave.planner.rel.streaming.RisingWaveStreamingRel.STREAMING;
 
+import com.risingwave.planner.rel.common.dist.RwDistributions;
 import com.risingwave.planner.rel.logical.RwLogicalAggregate;
 import com.risingwave.planner.rel.streaming.RwStreamAgg;
 import org.apache.calcite.plan.RelOptRule;
@@ -30,7 +31,8 @@ public class StreamingSingleModeAggRule extends RelRule<StreamingSingleModeAggRu
   @Override
   public void onMatch(RelOptRuleCall call) {
     RwLogicalAggregate logicalAgg = call.rel(0);
-    var requiredInputTraitSet = logicalAgg.getInput().getTraitSet().plus(STREAMING);
+    var requiredInputTraitSet =
+        logicalAgg.getInput().getTraitSet().plus(STREAMING).plus(RwDistributions.SINGLETON);
     var aggTraits = logicalAgg.getTraitSet().plus(STREAMING);
     var newInput = RelOptRule.convert(logicalAgg.getInput(), requiredInputTraitSet);
 

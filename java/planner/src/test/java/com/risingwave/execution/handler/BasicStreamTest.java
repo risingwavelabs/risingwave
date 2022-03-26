@@ -78,8 +78,8 @@ public class BasicStreamTest {
     assertEquals(node.getColumnDescs(3).getName(), "age");
     assertEquals(node.getColumnDescs(3).getColumnType().getTypeName(), DataType.TypeName.INT32);
 
-    assertEquals(node.getPropertiesMap().get("upstream.source"), "file");
-    assertEquals(node.getPropertiesMap().get("local.file.path"), "/tmp/data.txt");
+    assertEquals(node.getInfo().getPropertiesMap().get("upstream.source"), "file");
+    assertEquals(node.getInfo().getPropertiesMap().get("local.file.path"), "/tmp/data.txt");
   }
 
   @Test

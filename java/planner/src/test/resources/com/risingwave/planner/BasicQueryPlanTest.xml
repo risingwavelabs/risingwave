@@ -1,5 +1,5 @@
 <Root>
-    <TestCase name="select all columns from table">
+    <TestCase name="q1: select all columns from table">
         <Resource name="sql">
             <![CDATA[
 select * from t
@@ -12,7 +12,7 @@ RwBatchScan(table=[[test_schema, t]], columns=[v1,v2,v3])
         </Resource>
     </TestCase>
 
-    <TestCase name="insert into values">
+    <TestCase name="q2: insert into values">
         <Resource name="sql">
             <![CDATA[
 insert into t values(1,4,2), (2,3,3), (3,4,4), (4,3,5)
@@ -28,7 +28,7 @@ RwBatchInsert(table=[[test_schema, t]], operation=[INSERT], flattened=[false])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with project">
+    <TestCase name="q3: select with project">
         <Resource name="sql">
             <![CDATA[
 select v3, v1+v2, v1-v2, v1*v2, v1/v2 from t
@@ -42,7 +42,7 @@ RwBatchProject(v3=[$2], EXPR$1=[+($0, $1)], EXPR$2=[-($0, $1)], EXPR$3=[*($0, $1
         </Resource>
     </TestCase>
 
-    <TestCase name="select with filter">
+    <TestCase name="q4: select with filter">
         <Resource name="sql">
             <![CDATA[
 select * from t where v1 > 1 and v2 > 1 and v3 > 1
@@ -57,7 +57,7 @@ RwBatchFilter(condition=[AND(>($0, 1), >($1, 1), >($2, 1))])
         <Resource name="json" path="batch/basic/select_with_filter">
         </Resource>
     </TestCase>
-    <TestCase name="simple agg">
+    <TestCase name="q5: simple agg">
         <Resource name="sql">
             <![CDATA[
 select sum(v3) from t
@@ -71,7 +71,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)])
         </Resource>
     </TestCase>
 
-        <TestCase name="simple agg with 2 sum, max, min">
+        <TestCase name="q6: simple agg with 2 sum, max, min">
         <Resource name="sql">
             <![CDATA[
 select sum(v3), sum(v2), max(v1), min(v3) from t
@@ -85,7 +85,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)], EXPR$2=[MAX($2)],
         </Resource>
     </TestCase>
 
-    <TestCase name="hash agg with 2 sum">
+    <TestCase name="q7: hash agg with 2 sum">
         <Resource name="sql">
             <![CDATA[
 select sum(v1), sum(v2) from t group by v1
@@ -100,7 +100,7 @@ RwBatchProject(EXPR$0=[$1], EXPR$1=[$2])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key sum 1">
+    <TestCase name="q8: select with non-key sum 1">
         <Resource name="sql">
             <![CDATA[
 select sum(v1+v2),sum(v1+v3) from t
@@ -115,7 +115,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key sum 2">
+    <TestCase name="q9: select with non-key sum 2">
         <Resource name="sql">
             <![CDATA[
 select sum(v1), sum(v3) from t
@@ -129,7 +129,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[SUM($0)], EXPR$1=[SUM($1)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key min">
+    <TestCase name="q10: select with non-key min">
         <Resource name="sql">
             <![CDATA[
 select min(v1) from t
@@ -143,7 +143,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MIN($0)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key max">
+    <TestCase name="q11: select with non-key max">
         <Resource name="sql">
             <![CDATA[
 select max(v1) from t
@@ -157,7 +157,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key max with filter">
+    <TestCase name="q12: select with non-key max with filter">
         <Resource name="sql">
             <![CDATA[
 select max(v1) from t where v2>3
@@ -173,7 +173,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[MAX($0)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with non-key avg">
+    <TestCase name="q13: select with non-key avg">
         <Resource name="sql">
             <![CDATA[
 select avg(v2) from t
@@ -187,7 +187,7 @@ RwBatchSortAgg(group=[{}], EXPR$0=[AVG($0)])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with sum and group by">
+    <TestCase name="q14: select with sum and group by">
         <Resource name="sql">
             <![CDATA[
 select sum(v1), v2 from t group by v2
@@ -202,7 +202,7 @@ RwBatchProject(EXPR$0=[$1], v2=[$0])
         </Resource>
     </TestCase>
 
-    <TestCase name="select with order by">
+    <TestCase name="q15: select with order by">
         <Resource name="sql">
             <![CDATA[
 select * from t order by v1;
@@ -218,7 +218,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC])
         </Resource>>
     </TestCase>
 
-    <TestCase name="select with order by + limit">
+    <TestCase name="q16: select with order by + limit">
         <Resource name="sql">
             <![CDATA[
 select * from t order by v1 limit 1;
@@ -235,7 +235,7 @@ RwBatchSort(sort0=[$0], dir0=[ASC], fetch=[1])
     </TestCase>
 
 
-    <TestCase name="select only">
+    <TestCase name="q17: select only">
         <Resource name="sql">
             <![CDATA[
 select 100.0::DOUBLE/8.0::DOUBLE
@@ -248,7 +248,7 @@ RwBatchProject(EXPR$0=[/(100.0:DOUBLE, 8.0:DOUBLE)])
 ]]>
         </Resource>
     </TestCase>
-    <TestCase name="filter expression for date">
+    <TestCase name="q18: filter expression for date">
         <Resource name="sql">
             <![CDATA[
             select v1 from t2 where v1 >= '1970-01-01'
@@ -261,7 +261,7 @@ RwBatchFilter(condition=[>=($0, CAST('1970-01-01'):DATE NOT NULL)])
             ]]>
         </Resource>
     </TestCase>
-    <TestCase name="nested loop join">
+    <TestCase name="q19: nested loop join">
         <Resource name="sql">
             <![CDATA[
             select * from t, t3 where t.v1 > t3.v1;
@@ -277,7 +277,7 @@ RwBatchNestedLoopJoin(condition=[>($0, $3)], joinType=[inner])
         <Resource name="json" path="batch/basic/nested_loop_join">
         </Resource>
     </TestCase>
-    <TestCase name="insert null">
+    <TestCase name="q20: insert null">
         <Resource name="sql">
             <![CDATA[
             insert into t4 values(NULL);
@@ -292,7 +292,7 @@ RwBatchInsert(table=[[test_schema, t4]], operation=[INSERT], flattened=[false])
         <Resource name="json" path="batch/basic/insert_null">
         </Resource>
     </TestCase>
-    <TestCase name="hash inner join">
+    <TestCase name="q21: hash inner join">
         <Resource name="sql">
             <![CDATA[
             select * from t, t3 where t.v1 = t3.v1;
@@ -307,7 +307,7 @@ RwBatchHashJoin(condition=[=($0, $3)], joinType=[inner])
         <Resource name="json" path="batch/basic/hash_inner_join">
         </Resource>
     </TestCase>
-    <TestCase name="select interval">
+    <TestCase name="q22: select interval">
         <Resource name="sql">
             <![CDATA[
             select date '2021-10-1' + interval '1024' year + interval '1024' day;
@@ -322,7 +322,7 @@ RwBatchProject(EXPR$0=[+(+(CAST('2021-10-1'):DATE NOT NULL, 12288:INTERVAL YEAR(
         <Resource name="json" path="batch/basic/select_interval">
         </Resource>
     </TestCase>
-    <TestCase name="extract function">
+    <TestCase name="q23: extract function">
         <Resource name="sql">
             <![CDATA[
             select extract(day from date '1999-1-2');
@@ -337,7 +337,7 @@ RwBatchProject(EXPR$0=[EXTRACT(FLAG(DAY), CAST('1999-1-2'):DATE NOT NULL)])
         <Resource name="json" path="batch/basic/extract">
         </Resource>
     </TestCase>
-    <TestCase name="round function">
+    <TestCase name="q24: round function">
         <Resource name="sql">
             <![CDATA[
             select round(v1, 4) from t5;
@@ -352,7 +352,7 @@ RwBatchProject(EXPR$0=[ROUND($0, 4)])
         <Resource name="json" path="batch/basic/round_digit">
         </Resource>
     </TestCase>
-    <TestCase name="limit">
+    <TestCase name="q25: limit">
         <Resource name="sql">
             <![CDATA[
             select * from t5 limit 1 offset 1;
@@ -367,7 +367,7 @@ RwBatchLimit(offset=[1], fetch=[1])
         <Resource name="json" path="batch/basic/limit">
         </Resource>
     </TestCase>
-    <TestCase name="bool literal">
+    <TestCase name="q26: bool literal">
         <Resource name="sql">
             <![CDATA[
 select false AND NULL, true or NULL;
@@ -382,7 +382,7 @@ RwBatchProject(EXPR$0=[AND(false, null)], EXPR$1=[OR(true, null)])
         <Resource name="json" path="batch/basic/bool_literal">
         </Resource>
     </TestCase>
-    <TestCase name="select less with sort by">
+    <TestCase name="q27: select less with sort by">
         <Resource name="sql">
             <![CDATA[
 select v1 from t order by v2;
@@ -406,7 +406,7 @@ RwBatchProject(v1=[$0])
         <Resource name="json" path="batch/basic/select_less_with_sort_by">
         </Resource>
     </TestCase>
-    <TestCase name="cast minus numeric">
+    <TestCase name="q28 cast minus numeric">
         <Resource name="sql">
             <![CDATA[
     select -1::int2::int4::int8, -2.1::float4::float8;

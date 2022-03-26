@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ops::Deref;
@@ -6,9 +20,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_pb::stream_plan::dispatcher::DispatcherType;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, MergeNode, StreamActor, StreamNode};
+use risingwave_pb::stream_plan::{
+    ActorMapping, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+};
 
 use crate::cluster::NodeId;
 use crate::model::{ActorId, FragmentId};
@@ -59,11 +74,12 @@ impl StreamActorBuilder {
         })
     }
 
-    #[allow(dead_code)]
-    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<usize>) {
+    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<u32>, hash_mapping: ActorMapping) {
         self.dispatcher = Some(Dispatcher {
             r#type: DispatcherType::Hash as i32,
             column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
+            hash_mapping: Some(hash_mapping),
+            ..Default::default()
         })
     }
 
@@ -93,8 +109,13 @@ impl StreamActorBuilder {
             actor_id: self.actor_id,
             fragment_id: self.fragment_id,
             nodes: Some(self.nodes.deref().clone()),
-            dispatcher: self.dispatcher.clone(),
-            downstream_actor_id: self.downstream_actors.iter().copied().collect(),
+            dispatcher: match self.dispatcher.clone() {
+                Some(d) => vec![Dispatcher {
+                    downstream_actor_id: self.downstream_actors.iter().copied().collect(),
+                    ..d
+                }],
+                None => vec![],
+            },
             upstream_actor_id,
         }
     }
@@ -190,6 +211,7 @@ where
         }
         ctx.dispatches = dispatches;
         ctx.upstream_node_actors = upstream_node_actors;
+        ctx.table_sink_map = table_sink_map;
         Ok(graph)
     }
 
@@ -286,7 +308,7 @@ where
                     Entry::Vacant(v) => {
                         let actor_ids = self
                             .fragment_manager_ref
-                            .get_table_sink_actor_ids(&table_id)?;
+                            .blocking_get_table_sink_actor_ids(&table_id)?;
                         v.insert(actor_ids).clone()
                     }
                     Entry::Occupied(o) => o.get().clone(),
@@ -295,8 +317,9 @@ where
             );
 
             dispatch_upstreams.extend(upstream_actor_ids.iter());
-            let chain_upstream_table_node_actors =
-                self.fragment_manager_ref.get_table_node_actors(&table_id)?;
+            let chain_upstream_table_node_actors = self
+                .fragment_manager_ref
+                .blocking_table_node_actors(&table_id)?;
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()
                 .flat_map(|(node_id, actor_ids)| {
@@ -318,11 +341,7 @@ where
             let chain_input = vec![
                 StreamNode {
                     input: vec![],
-                    pk_indices: chain_node
-                        .pk_indices
-                        .iter()
-                        .map(|x| *x as u32)
-                        .collect_vec(),
+                    pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
                         fields: chain_node.upstream_fields.clone(),

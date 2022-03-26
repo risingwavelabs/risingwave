@@ -179,6 +179,7 @@ impl Parser {
                 Keyword::EXECUTE => Ok(self.parse_execute()?),
                 Keyword::PREPARE => Ok(self.parse_prepare()?),
                 Keyword::COMMENT => Ok(self.parse_comment()?),
+                Keyword::FLUSH => Ok(Statement::Flush),
                 _ => self.expected("an SQL statement", Token::Word(w)),
             },
             Token::LParen => {
@@ -308,7 +309,12 @@ impl Parser {
                     op: UnaryOperator::Not,
                     expr: Box::new(self.parse_subexpr(Self::UNARY_NOT_PREC)?),
                 }),
-                Keyword::ROW => Ok(Expr::Row(self.parse_parenthesized_exprs()?)),
+                Keyword::ROW => Ok(Expr::Row(
+                    self.parse_token_wrapped_exprs(&Token::LParen, &Token::RParen)?,
+                )),
+                Keyword::ARRAY => Ok(Expr::Array(
+                    self.parse_token_wrapped_exprs(&Token::LBracket, &Token::RBracket)?,
+                )),
                 // Here `w` is a word, check if it's a part of a multi-part
                 // identifier, a function call, or a simple identifier:
                 _ => match self.peek_token() {
@@ -386,6 +392,14 @@ impl Parser {
                     };
                 self.expect_token(&Token::RParen)?;
                 Ok(expr)
+            }
+
+            Token::LBrace => {
+                self.prev_token();
+                Ok(Expr::Array(self.parse_token_wrapped_exprs(
+                    &Token::LBrace,
+                    &Token::RBrace,
+                )?))
             }
             unexpected => self.expected("an expression:", unexpected),
         }?;
@@ -839,7 +853,15 @@ impl Parser {
         } else if let Token::Word(w) = &tok {
             match w.keyword {
                 Keyword::IS => {
-                    if self.parse_keyword(Keyword::NULL) {
+                    if self.parse_keyword(Keyword::TRUE) {
+                        Ok(Expr::IsTrue(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::TRUE]) {
+                        Ok(Expr::IsNotTrue(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::FALSE) {
+                        Ok(Expr::IsFalse(Box::new(expr)))
+                    } else if self.parse_keywords(&[Keyword::NOT, Keyword::FALSE]) {
+                        Ok(Expr::IsNotFalse(Box::new(expr)))
+                    } else if self.parse_keyword(Keyword::NULL) {
                         Ok(Expr::IsNull(Box::new(expr)))
                     } else if self.parse_keywords(&[Keyword::NOT, Keyword::NULL]) {
                         Ok(Expr::IsNotNull(Box::new(expr)))
@@ -852,7 +874,7 @@ impl Parser {
                         Ok(Expr::IsNotDistinctFrom(Box::new(expr), Box::new(expr2)))
                     } else {
                         self.expected(
-                            "[NOT] NULL or [NOT] DISTINCT FROM after IS",
+                            "[NOT] TRUE or [NOT] FALSE or [NOT] NULL or [NOT] DISTINCT FROM after IS",
                             self.peek_token(),
                         )
                     }
@@ -999,7 +1021,7 @@ impl Parser {
             Token::Mul | Token::Div | Token::Mod | Token::StringConcat => Ok(40),
             Token::DoubleColon => Ok(50),
             Token::ExclamationMark => Ok(50),
-            Token::LBracket | Token::RBracket => Ok(10),
+            Token::LBracket => Ok(10),
             _ => Ok(0),
         }
     }
@@ -1266,6 +1288,7 @@ impl Parser {
     // SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
+    // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
@@ -1339,7 +1362,7 @@ impl Parser {
         })
     }
 
-    fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+    pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
@@ -1756,7 +1779,7 @@ impl Parser {
     pub fn parse_data_type(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
-                Keyword::BOOLEAN => Ok(DataType::Boolean),
+                Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
                 Keyword::FLOAT => Ok(DataType::Float(self.parse_optional_precision()?)),
                 Keyword::REAL => Ok(DataType::Real),
                 Keyword::DOUBLE => {
@@ -1956,13 +1979,21 @@ impl Parser {
         }
     }
 
-    pub fn parse_parenthesized_exprs(&mut self) -> Result<Vec<Expr>, ParserError> {
-        if self.consume_token(&Token::LParen) {
+    /// Parse a comma-separated list from a wrapped expression
+    pub fn parse_token_wrapped_exprs(
+        &mut self,
+        left: &Token,
+        right: &Token,
+    ) -> Result<Vec<Expr>, ParserError> {
+        if self.consume_token(left) {
             let exprs = self.parse_comma_separated(Parser::parse_expr)?;
-            self.expect_token(&Token::RParen)?;
+            self.expect_token(right)?;
             Ok(exprs)
         } else {
-            self.expected("a list of expressions in parentheses", self.peek_token())
+            self.expected(
+                format!("an array of expressions in {} and {}", left, right).as_str(),
+                self.peek_token(),
+            )
         }
     }
 
@@ -2384,13 +2415,6 @@ impl Parser {
                 self.expected("subquery after LATERAL", self.peek_token())?;
             }
             self.parse_derived_table_factor(Lateral)
-        } else if self.parse_keyword(Keyword::TABLE) {
-            // parse table function (SELECT * FROM TABLE (<expr>) [ AS <alias> ])
-            self.expect_token(&Token::LParen)?;
-            let expr = self.parse_expr()?;
-            self.expect_token(&Token::RParen)?;
-            let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            Ok(TableFactor::TableFunction { expr, alias })
         } else if self.consume_token(&Token::LParen) {
             // A left paren introduces either a derived table (i.e., a subquery)
             // or a nested join. It's nearly impossible to determine ahead of
@@ -2440,30 +2464,14 @@ impl Parser {
             }
         } else {
             let name = self.parse_object_name()?;
-            // Postgres, MSSQL: table-valued functions:
+            // Postgres,table-valued functions:
             let args = if self.consume_token(&Token::LParen) {
                 self.parse_optional_args()?
             } else {
                 vec![]
             };
             let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            // MSSQL-specific table hints:
-            let mut with_hints = vec![];
-            if self.parse_keyword(Keyword::WITH) {
-                if self.consume_token(&Token::LParen) {
-                    with_hints = self.parse_comma_separated(Parser::parse_expr)?;
-                    self.expect_token(&Token::RParen)?;
-                } else {
-                    // rewind, as WITH may belong to the next statement's CTE
-                    self.prev_token();
-                }
-            };
-            Ok(TableFactor::Table {
-                name,
-                alias,
-                args,
-                with_hints,
-            })
+            Ok(TableFactor::Table { name, alias, args })
         }
     }
 

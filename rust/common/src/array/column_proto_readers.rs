@@ -1,4 +1,18 @@
-use std::io::{Cursor, Read};
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::io::{self, Cursor, Read};
 
 use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
@@ -6,13 +20,14 @@ use risingwave_pb::data::Array as ProstArray;
 
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
-    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, NaiveDateArrayBuilder,
-    NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    ArrayBuilder, ArrayImpl, ArrayMeta, BoolArrayBuilder, IntervalArrayBuilder,
+    NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
+use crate::types::interval::IntervalUnit;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
@@ -56,7 +71,7 @@ fn read_bool(cursor: &mut Cursor<&[u8]>) -> Result<bool> {
     Ok(v != 0)
 }
 
-fn read_naivedate(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
+fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
     match cursor.read_i32::<BigEndian>() {
         Ok(days) => NaiveDateWrapper::from_protobuf(days),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -66,7 +81,7 @@ fn read_naivedate(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateWrapper> {
     }
 }
 
-fn read_naivetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
+fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveTimeWrapper::from_protobuf(t),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -76,7 +91,7 @@ fn read_naivetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveTimeWrapper> {
     }
 }
 
-fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
+fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper> {
     match cursor.read_i64::<BigEndian>() {
         Ok(t) => NaiveDateTimeWrapper::from_protobuf(t),
         Err(e) => Err(RwError::from(InternalError(format!(
@@ -86,37 +101,54 @@ fn read_naivedatetime(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapper
     }
 }
 
+fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
+    {
+        let months = cursor.read_i32::<BigEndian>()?;
+        let days = cursor.read_i32::<BigEndian>()?;
+        let ms = cursor.read_i64::<BigEndian>()?;
+
+        Ok(IntervalUnit::new(months, days, ms))
+    }
+    .map_err(|e: io::Error| {
+        RwError::from(InternalError(format!(
+            "Failed to read IntervalUnit from buffer: {}",
+            e
+        )))
+    })
+}
+
 macro_rules! read_one_value_array {
     ($({ $type:ident, $builder:ty }),*) => {
-      paste! {
-        $(
-          pub fn [<read_ $type:lower _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
-            ensure!(
-              array.get_values().len() == 1,
-              "Must have only 1 buffer in a {} array", stringify!($type)
-            );
+        paste! {
+            $(
+            pub fn [<read_ $type:snake _array>](array: &ProstArray, cardinality: usize) -> Result<ArrayImpl> {
+                ensure!(
+                    array.get_values().len() == 1,
+                    "Must have only 1 buffer in a {} array", stringify!($type)
+                );
 
-            let buf = array.get_values()[0].get_body().as_slice();
+                let buf = array.get_values()[0].get_body().as_slice();
 
-            let mut builder = $builder::new(cardinality)?;
-            let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
-            let mut cursor = Cursor::new(buf);
-            for not_null in bitmap.iter() {
-              if not_null {
-                builder.append(Some([<read_ $type:lower>](&mut cursor)?))?;
-              } else {
-                builder.append(None)?;
-              }
+                let mut builder = $builder::new(cardinality)?;
+                let bitmap: Bitmap = array.get_null_bitmap()?.try_into()?;
+                let mut cursor = Cursor::new(buf);
+                for not_null in bitmap.iter() {
+                    if not_null {
+                        builder.append(Some([<read_ $type:snake>](&mut cursor)?))?;
+                    } else {
+                        builder.append(None)?;
+                    }
+                }
+                let arr = builder.finish()?;
+                Ok(arr.into())
             }
-            let arr = builder.finish()?;
-            Ok(arr.into())
-          }
-        )*
-      }
+            )*
+        }
     };
 }
 
 read_one_value_array! {
+    { IntervalUnit, IntervalArrayBuilder },
     { bool, BoolArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },

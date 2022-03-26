@@ -1,10 +1,30 @@
-mod column;
-mod schema;
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
+mod column;
+mod physical_table;
+mod schema;
 use core::fmt;
 
 pub use column::*;
-pub use schema::*;
+pub use physical_table::*;
+pub use schema::{test_utils as schema_test_utils, Field, Schema};
+
+pub const DEFAULT_DATABASE_NAME: &str = "dev";
+pub const DEFAULT_SCHEMA_NAME: &str = "dev";
+
+pub type CatalogVersion = u64;
 
 pub enum CatalogId {
     DatabaseId(DatabaseId),
@@ -42,15 +62,35 @@ impl SchemaId {
 pub struct TableId {
     pub table_id: u32,
 }
+
 impl TableId {
-    pub fn new(table_id: u32) -> Self {
+    pub const fn new(table_id: u32) -> Self {
         TableId { table_id }
+    }
+
+    /// Sometimes the id field is filled later, we use this value for better debugging.
+    pub const fn placeholder() -> Self {
+        TableId {
+            table_id: u32::MAX - 1,
+        }
     }
 
     pub fn table_id(&self) -> u32 {
         self.table_id
     }
 }
+
+impl From<u32> for TableId {
+    fn from(id: u32) -> Self {
+        Self::new(id)
+    }
+}
+impl From<TableId> for u32 {
+    fn from(id: TableId) -> Self {
+        id.table_id
+    }
+}
+
 impl fmt::Display for TableId {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.table_id,)

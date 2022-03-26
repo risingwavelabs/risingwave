@@ -1,5 +1,20 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::error::Error;
 use std::io;
+use std::result::Result;
 use std::sync::Arc;
 
 use log::{error, info};
@@ -11,14 +26,17 @@ use crate::pg_response::PgResponse;
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync {
-    fn connect(&self) -> Box<dyn Session>;
+    fn connect(&self, database: &str) -> Result<Arc<dyn Session>, Box<dyn Error + Send + Sync>>;
 }
 
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
 #[async_trait::async_trait]
 pub trait Session: Send + Sync {
-    async fn run_statement(&self, sql: &str) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
+    async fn run_statement(
+        self: Arc<Self>,
+        sql: &str,
+    ) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
 }
 
 /// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
@@ -80,8 +98,11 @@ mod tests {
     struct TestSessionManager {}
 
     impl SessionManager for TestSessionManager {
-        fn connect(&self) -> Box<dyn super::Session> {
-            Box::new(TestSession {})
+        fn connect(
+            &self,
+            _database: &str,
+        ) -> Result<Arc<dyn super::Session>, Box<dyn Error + Send + Sync>> {
+            Ok(Arc::new(TestSession {}))
         }
     }
 
@@ -90,7 +111,7 @@ mod tests {
     #[async_trait::async_trait]
     impl Session for TestSession {
         async fn run_statement(
-            &self,
+            self: Arc<TestSession>,
             sql: &str,
         ) -> Result<PgResponse, Box<dyn Error + Send + Sync>> {
             // simulate an error

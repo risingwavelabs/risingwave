@@ -1,16 +1,11 @@
 {
   "children": [{
     "rowSeqScan": {
-      "tableRefId": {
-        "schemaRefId": {
-          "databaseRefId": {
-          }
-        },
+      "tableDesc": {
         "tableId": 9
       },
-      "columnIds": [0],
-      "fields": [{
-        "dataType": {
+      "columnDescs": [{
+        "columnType": {
           "typeName": "DECIMAL",
           "precision": 28,
           "scale": 10,

@@ -1,0 +1,29 @@
+SELECT ARRAY[a, b, c]::foo;
+---
+SELECT CAST(ARRAY[a, b, c] AS foo)
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Cast { expr: Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]), data_type: Custom(ObjectName([Ident { value: "foo", quote_style: None }])) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT ARRAY[a, b, c];
+---
+SELECT ARRAY[a, b, c]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT {1, 2, 3};
+---
+SELECT ARRAY[1, 2, 3]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3", false))]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT {{1, 2}, {3, 4}, {5, 6}};
+---
+SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4], ARRAY[5, 6]]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Array([Value(Number("1", false)), Value(Number("2", false))]), Array([Value(Number("3", false)), Value(Number("4", false))]), Array([Value(Number("5", false)), Value(Number("6", false))])]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+
+SELECT ARRAY[1, 2, 3.0];
+---
+SELECT ARRAY[1, 2, 3.0]
+=>
+Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3.0", false))]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })

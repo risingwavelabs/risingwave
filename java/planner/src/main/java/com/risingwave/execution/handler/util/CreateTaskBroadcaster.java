@@ -9,7 +9,7 @@ import com.risingwave.proto.computenode.CreateTaskResponse;
 import com.risingwave.proto.computenode.GetDataRequest;
 import com.risingwave.proto.computenode.GetDataResponse;
 import com.risingwave.proto.plan.PlanFragment;
-import com.risingwave.proto.plan.TaskSinkId;
+import com.risingwave.proto.plan.TaskOutputId;
 import com.risingwave.rpc.ComputeClient;
 import com.risingwave.rpc.ComputeClientManager;
 import com.risingwave.rpc.Messages;
@@ -41,8 +41,9 @@ public class CreateTaskBroadcaster {
       if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");
       }
-      TaskSinkId taskSinkId = Messages.buildTaskSinkId(createTaskRequest.getTaskId());
-      var iterator = client.getData(GetDataRequest.newBuilder().setSinkId(taskSinkId).build());
+      TaskOutputId taskOutputId = Messages.buildTaskOutputId(createTaskRequest.getTaskId());
+      var iterator =
+          client.getData(GetDataRequest.newBuilder().setTaskOutputId(taskOutputId).build());
       responseIterators.add(iterator);
     }
     // Wait for create table task finished.

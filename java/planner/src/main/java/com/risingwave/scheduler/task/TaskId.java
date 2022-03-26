@@ -25,7 +25,8 @@ public class TaskId {
 
   public com.risingwave.proto.plan.TaskId toTaskIdProto() {
     return com.risingwave.proto.plan.TaskId.newBuilder()
-        .setStageId(stageId.toStageIdProto())
+        .setQueryId(stageId.getQueryId().getId())
+        .setStageId(stageId.getId())
         .setTaskId(id)
         .build();
   }

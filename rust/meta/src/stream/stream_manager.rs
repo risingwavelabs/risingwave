@@ -1,23 +1,41 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::{debug, info};
+use log::info;
+use risingwave_common::catalog::TableId;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_pb::common::ActorInfo;
+use risingwave_pb::common::{ActorInfo, WorkerType};
+use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
+use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{NodeId, StoredClusterManager};
+use crate::cluster::{NodeId, StoredClusterManagerRef};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, ScheduleCategory, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
 
@@ -28,16 +46,26 @@ pub struct CreateMaterializedViewContext {
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
     pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    /// Upstream mview actor ids grouped by table id.
+    pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
-pub struct StreamManager<S>
-where
-    S: MetaStore,
-{
+/// Stream Manager
+
+pub struct StreamManager<S> {
+    /// Manages definition and status of fragments and actors
     fragment_manager_ref: FragmentManagerRef<S>,
 
+    /// Broadcasts and collect barriers
     barrier_manager_ref: BarrierManagerRef<S>,
+
+    /// Maintains information of the cluster
+    cluster_manager_ref: StoredClusterManagerRef<S>,
+
+    /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
+
+    /// Clients to stream service on compute nodes
     clients: StreamClientsRef,
 }
 
@@ -49,12 +77,13 @@ where
         env: MetaSrvEnv<S>,
         fragment_manager_ref: FragmentManagerRef<S>,
         barrier_manager_ref: BarrierManagerRef<S>,
-        cluster_manager: Arc<StoredClusterManager<S>>,
+        cluster_manager_ref: StoredClusterManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager_ref,
             barrier_manager_ref,
-            scheduler: Scheduler::new(ScheduleCategory::RoundRobin, cluster_manager),
+            cluster_manager_ref: cluster_manager_ref.clone(),
+            scheduler: Scheduler::new(cluster_manager_ref),
             clients: env.stream_clients_ref(),
         })
     }
@@ -69,21 +98,41 @@ where
         mut table_fragments: TableFragments,
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
-        let actor_ids = table_fragments.actor_ids();
-        let source_actor_ids = table_fragments.source_actor_ids();
+        let nodes = self
+            .cluster_manager_ref
+            .list_worker_node(
+                WorkerType::ComputeNode,
+                Some(risingwave_pb::common::worker_node::State::Running),
+            )
+            .await;
+        if nodes.is_empty() {
+            return Err(InternalError("no available node exist".to_string()).into());
+        }
 
-        // Divide all actors into source and non-source actors.
-        let non_source_actor_ids = actor_ids
-            .clone()
-            .into_iter()
-            .filter(|id| !source_actor_ids.contains(id))
-            .collect::<Vec<_>>();
+        let mut locations = ScheduledLocations::new();
+        locations.node_locations = nodes.into_iter().map(|node| (node.id, node)).collect();
 
-        let locations = self
-            .scheduler
-            .schedule(&non_source_actor_ids, &source_actor_ids)?;
+        for fragment in table_fragments.fragments() {
+            self.scheduler
+                .schedule(fragment.clone(), &mut locations)
+                .await?;
+        }
 
-        table_fragments.set_locations(locations.actor_locations.clone());
+        let actor_info = locations
+            .actor_locations
+            .iter()
+            .map(|(&actor_id, parallel_unit)| {
+                (
+                    actor_id,
+                    ActorStatus {
+                        node_id: parallel_unit.worker_node_id,
+                        state: ActorState::Inactive as i32,
+                    },
+                )
+            })
+            .collect();
+
+        table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
         let actor_infos = locations.actor_infos();
@@ -143,6 +192,7 @@ where
             let node = locations.node_locations.get(node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
@@ -157,7 +207,7 @@ where
                 .collect::<Vec<_>>();
 
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]update actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -170,11 +220,11 @@ where
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
-            let client = self
-                .clients
-                .get_by_node_id(&node_id)
-                .expect("client not exists");
+            let node = locations.node_locations.get(&node_id).unwrap();
+
+            let client = self.clients.get(node).await?;
             let request_id = Uuid::new_v4().to_string();
+
             client
                 .to_owned()
                 .update_actors(UpdateActorsRequest {
@@ -192,8 +242,9 @@ where
             let node = locations.node_locations.get(&node_id).unwrap();
 
             let client = self.clients.get(node).await?;
+
             let request_id = Uuid::new_v4().to_string();
-            debug!("[{}]build actors: {:?}", request_id, actors);
+            tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
             client
                 .to_owned()
                 .build_actors(BuildActorsRequest {
@@ -211,6 +262,7 @@ where
         self.barrier_manager_ref
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
+                table_sink_map: ctx.table_sink_map,
                 dispatches,
             })
             .await?;
@@ -253,7 +305,7 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::error::tonic_err;
     use risingwave_pb::common::{HostAddress, WorkerType};
-    use risingwave_pb::meta::table_fragments::fragment::FragmentType;
+    use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
@@ -261,7 +313,7 @@ mod tests {
     };
     use risingwave_pb::stream_service::{
         BroadcastActorInfoTableResponse, BuildActorsResponse, DropActorsRequest,
-        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse,
+        DropActorsResponse, InjectBarrierRequest, InjectBarrierResponse, UpdateActorsResponse, *,
     };
     use tokio::sync::mpsc::UnboundedSender;
     use tokio::task::JoinHandle;
@@ -269,8 +321,9 @@ mod tests {
 
     use super::*;
     use crate::barrier::BarrierManager;
+    use crate::cluster::StoredClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{MetaSrvEnv, NotificationManager};
+    use crate::manager::{CatalogManager, MetaSrvEnv, NotificationManager};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -351,6 +404,27 @@ mod tests {
                 status: None,
             }))
         }
+
+        async fn create_source(
+            &self,
+            _request: Request<CreateSourceRequest>,
+        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn drop_source(
+            &self,
+            _request: Request<DropSourceRequest>,
+        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn shutdown(
+            &self,
+            _request: Request<ShutdownRequest>,
+        ) -> std::result::Result<Response<ShutdownResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {
@@ -387,9 +461,16 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager = Arc::new(NotificationManager::new());
-            let cluster_manager =
-                Arc::new(StoredClusterManager::new(env.clone(), None, notification_manager).await?);
+            let notification_manager =
+                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
+            let cluster_manager = Arc::new(
+                StoredClusterManager::new(
+                    env.clone(),
+                    notification_manager.clone(),
+                    Duration::from_secs(3600),
+                )
+                .await?,
+            );
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,
@@ -400,11 +481,23 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let hummock_manager = Arc::new(HummockManager::new(env.clone()).await?);
+            let catalog_manager = Arc::new(
+                CatalogManager::new(
+                    env.meta_store_ref(),
+                    env.id_gen_manager_ref(),
+                    notification_manager,
+                )
+                .await?,
+            );
             let meta_metrics = Arc::new(MetaMetrics::new());
+            let hummock_manager = Arc::new(
+                HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
+                    .await?,
+            );
             let barrier_manager_ref = Arc::new(BarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
+                catalog_manager,
                 fragment_manager.clone(),
                 env.epoch_generator_ref(),
                 hummock_manager,
@@ -473,6 +566,7 @@ mod tests {
             Fragment {
                 fragment_id: 0,
                 fragment_type: FragmentType::Sink as i32,
+                distribution_type: FragmentDistributionType::Hash as i32,
                 actors: actors.clone(),
             },
         );
@@ -521,8 +615,12 @@ mod tests {
 
         let sink_actor_ids = services
             .fragment_manager
-            .get_table_sink_actor_ids(&table_id)?;
-        let actor_ids = services.fragment_manager.get_table_actor_ids(&table_id)?;
+            .get_table_sink_actor_ids(&table_id)
+            .await?;
+        let actor_ids = services
+            .fragment_manager
+            .get_table_actor_ids(&table_id)
+            .await?;
         assert_eq!(sink_actor_ids, (0..5).collect::<Vec<u32>>());
         assert_eq!(actor_ids, (0..5).collect::<Vec<u32>>());
 

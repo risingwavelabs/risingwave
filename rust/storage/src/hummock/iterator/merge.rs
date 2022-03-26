@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use super::variants::FORWARD;
 use crate::hummock::iterator::merge_inner::MergeIteratorInner;
 
@@ -7,107 +21,182 @@ pub type MergeIterator<'a> = MergeIteratorInner<'a, FORWARD>;
 mod test {
     use std::sync::Arc;
 
-    use itertools::Itertools;
-
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable, iterator_test_key_of, test_key,
-        test_value_of, TestIteratorBuilder, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
+        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::sstable::SSTableIterator;
+    use crate::monitor::StateStoreMetrics;
 
     #[tokio::test]
     async fn test_merge_basic() {
-        let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
-            .map(|iter_id| {
-                TestIteratorBuilder::<FORWARD>::default()
-                    .id(0)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize) + 1))
-                    .map_value(move |id, x| test_value_of(id, x * 3 + (iter_id as usize) + 1))
-                    .finish()
-            })
-            .unzip();
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_base(
+            0,
+            default_builder_opt_for_test(),
+            |x| x * 3,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_base(
+            1,
+            default_builder_opt_for_test(),
+            |x| x * 3 + 1,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table2 = gen_iterator_test_sstable_base(
+            2,
+            default_builder_opt_for_test(),
+            |x| x * 3 + 2,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let iters: Vec<BoxedHummockIterator> = vec![
+            Box::new(SSTableIterator::new(
+                Arc::new(table0),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(
+                Arc::new(table1),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(Arc::new(table2), sstable_store)),
+        ];
 
-        let iters: Vec<BoxedHummockIterator> = iters
-            .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
-            .collect_vec();
-
-        let mut mi = MergeIterator::new(iters);
+        let mut iter = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
         let mut i = 0;
-        mi.rewind().await.unwrap();
-        while mi.is_valid() {
-            let key = mi.key();
-            let val = mi.value();
-            validators[i % 3].assert_key(i / 3, key);
-            validators[i % 3].assert_hummock_value(i / 3, val);
+        iter.rewind().await.unwrap();
+        while iter.is_valid() {
+            let key = iter.key();
+            let val = iter.value();
+            assert_eq!(key, iterator_test_key_of(i).as_slice());
+            assert_eq!(
+                val.into_put_value().unwrap(),
+                iterator_test_value_of(i).as_slice()
+            );
             i += 1;
-            mi.next().await.unwrap();
+            iter.next().await.unwrap();
             if i == TEST_KEYS_COUNT * 3 {
-                assert!(!mi.is_valid());
+                assert!(!iter.is_valid());
                 break;
             }
         }
-        assert!(i >= TEST_KEYS_COUNT);
+        assert!(i >= TEST_KEYS_COUNT * 3);
     }
 
     #[tokio::test]
     async fn test_merge_seek() {
-        let (iters, validators): (Vec<_>, Vec<_>) = (0..3)
-            .map(|iter_id| {
-                TestIteratorBuilder::<FORWARD>::default()
-                    .id(0)
-                    .total(20)
-                    .map_key(move |id, x| iterator_test_key_of(id, x * 3 + (iter_id as usize)))
-                    .finish()
-            })
-            .unzip();
-        let iters: Vec<BoxedHummockIterator> = iters
-            .into_iter()
-            .map(|x| Box::new(x) as BoxedHummockIterator)
-            .collect_vec();
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_base(
+            0,
+            default_builder_opt_for_test(),
+            |x| x * 3,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_base(
+            1,
+            default_builder_opt_for_test(),
+            |x| x * 3 + 1,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table2 = gen_iterator_test_sstable_base(
+            2,
+            default_builder_opt_for_test(),
+            |x| x * 3 + 2,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let iters: Vec<BoxedHummockIterator> = vec![
+            Box::new(SSTableIterator::new(
+                Arc::new(table0),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(
+                Arc::new(table1),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(Arc::new(table2), sstable_store)),
+        ];
 
-        let mut mi = MergeIterator::new(iters);
-        let test_validator = &validators[2];
+        let mut mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         // right edge case
-        mi.seek(test_key!(test_validator, 3 * TEST_KEYS_COUNT))
+        mi.seek(iterator_test_key_of(TEST_KEYS_COUNT * 3).as_slice())
             .await
             .unwrap();
         assert!(!mi.is_valid());
 
         // normal case
-        mi.seek(test_key!(test_validator, 4)).await.unwrap();
+        mi.seek(iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice())
+            .await
+            .unwrap();
         let k = mi.key();
         let v = mi.value();
-        test_validator.assert_hummock_value(4, v);
-        test_validator.assert_key(4, k);
+        assert_eq!(
+            v.into_put_value().unwrap(),
+            iterator_test_value_of(TEST_KEYS_COUNT * 2 + 5).as_slice()
+        );
+        assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT * 2 + 5).as_slice());
 
-        mi.seek(test_key!(test_validator, 17)).await.unwrap();
+        mi.seek(iterator_test_key_of(17).as_slice()).await.unwrap();
         let k = mi.key();
         let v = mi.value();
-        test_validator.assert_hummock_value(17, v);
-        test_validator.assert_key(17, k);
+        assert_eq!(
+            v.into_put_value().unwrap(),
+            iterator_test_value_of(TEST_KEYS_COUNT + 7).as_slice()
+        );
+        assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 7).as_slice());
 
         // left edge case
-        mi.seek(test_key!(test_validator, 0)).await.unwrap();
+        mi.seek(iterator_test_key_of(0).as_slice()).await.unwrap();
         let k = mi.key();
         let v = mi.value();
-        test_validator.assert_hummock_value(0, v);
-        test_validator.assert_key(0, k);
+        assert_eq!(
+            v.into_put_value().unwrap(),
+            iterator_test_value_of(0).as_slice()
+        );
+        assert_eq!(k, iterator_test_key_of(0).as_slice());
     }
 
     #[tokio::test]
     async fn test_merge_invalidate_reset() {
-        let table0 = gen_test_sstable(0, default_builder_opt_for_test()).await;
-        let table1 = gen_test_sstable(1, default_builder_opt_for_test()).await;
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_base(
+            0,
+            default_builder_opt_for_test(),
+            |x| x,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_base(
+            1,
+            default_builder_opt_for_test(),
+            |x| TEST_KEYS_COUNT + x,
+            sstable_store.clone(),
+            TEST_KEYS_COUNT,
+        )
+        .await;
         let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(SSTableIterator::new(Arc::new(table0))),
-            Box::new(SSTableIterator::new(Arc::new(table1))),
+            Box::new(SSTableIterator::new(
+                Arc::new(table0),
+                sstable_store.clone(),
+            )),
+            Box::new(SSTableIterator::new(Arc::new(table1), sstable_store)),
         ];
 
-        let mut mi = MergeIterator::new(iters);
+        let mut mi = MergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
 
         mi.rewind().await.unwrap();
         let mut count = 0;
