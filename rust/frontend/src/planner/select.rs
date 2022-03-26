@@ -71,6 +71,8 @@ impl Planner {
         LogicalValues::create(vec![vec![]], Schema::default(), self.ctx.clone())
     }
 
+    /// Helper to create an `EXISTS` boolean operator with the given `input`.
+    /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
         let count_star =
             LogicalAgg::create(vec![ExprImpl::count_star()], vec![None], vec![], input)?;
@@ -89,6 +91,7 @@ impl Planner {
         ))
     }
 
+    /// A wrapper around [`substitute_subqueries_vec`]
     fn substitute_subqueries(
         &mut self,
         mut root: PlanRef,
@@ -99,11 +102,33 @@ impl Planner {
         Ok((root, exprs.into_iter().next().unwrap()))
     }
 
+    /// Substitues all [`Subquery`] in `exprs`.
+    ///
+    /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
+    /// replaced by a new [`LogicalApply`] node, whose left side is `root` and right side is the
+    /// planned subquery.
+    ///
+    /// The [`InputRef`]s' indexes start from `root.schema().len()`,
+    /// which means they are additional columns beyond the original `root`.
     fn substitute_subqueries_vec(
         &mut self,
         mut root: PlanRef,
         mut exprs: Vec<ExprImpl>,
     ) -> Result<(PlanRef, Vec<ExprImpl>)> {
+        struct SubstituteSubQueries {
+            input_col_num: usize,
+            subqueries: Vec<Subquery>,
+        }
+
+        impl ExprRewriter for SubstituteSubQueries {
+            fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
+                let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
+                self.subqueries.push(subquery);
+                self.input_col_num += 1;
+                input_ref
+            }
+        }
+
         let mut rewriter = SubstituteSubQueries {
             input_col_num: root.schema().len(),
             subqueries: vec![],
@@ -142,19 +167,5 @@ impl Planner {
             }
         }
         Ok((root, exprs))
-    }
-}
-
-struct SubstituteSubQueries {
-    input_col_num: usize,
-    subqueries: Vec<Subquery>,
-}
-
-impl ExprRewriter for SubstituteSubQueries {
-    fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
-        let input_ref = InputRef::new(self.input_col_num, subquery.return_type()).into();
-        self.subqueries.push(subquery);
-        self.input_col_num += 1;
-        input_ref
     }
 }
