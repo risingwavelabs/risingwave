@@ -41,7 +41,7 @@ impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
         let ctx = input.ctx();
         for cond in &predicate.conjunctions {
-            assert_input_ref(cond, input.schema().fields().len());
+            assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
@@ -93,18 +93,17 @@ impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectInputRef {
-            input_bits: required_cols.clone(),
-        };
+        let mut visitor = CollectInputRef::new(required_cols.clone());
         self.predicate.visit_expr(&mut visitor);
+        let input_required_cols = visitor.collect();
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
 
-        if required_cols == &visitor.input_bits {
+        if required_cols == &input_required_cols {
             filter.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());

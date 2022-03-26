@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, Scalar};
 mod input_ref;
 pub use input_ref::*;
@@ -67,6 +68,16 @@ impl ExprImpl {
             Some(v.to_scalar_value()),
             DataType::Boolean,
         )))
+    }
+
+    /// Collect all `InputRef`s' indexes in the expression.
+    ///
+    /// # Panics
+    /// Panics if `input_ref >= input_col_num`.
+    pub fn collect_input_refs(&self, input_col_num: usize) -> FixedBitSet {
+        let mut visitor = CollectInputRef::with_capacity(input_col_num);
+        visitor.visit_expr(self);
+        visitor.collect()
     }
 }
 
