@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::vec::{self};
+use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
