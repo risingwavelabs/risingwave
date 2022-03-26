@@ -141,7 +141,9 @@ impl Binder {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(
+                        self.bind_subquery_relation(*subquery)?,
+                    )))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -256,18 +258,17 @@ impl Binder {
         }
     }
 
-    /// Before binding a subquery, we push the current context to the stack and create a new
-    /// context.
+    /// Before binding a subquery, we push the current [`BindContext`](super::BindContext) to to the
+    /// stack and create a new context.
     ///
     /// After finishing binding, we pop the previous context from the stack. And
     /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
-        self.push_context();
+    pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
-        self.pop_context();
+        let sub_query_id = self.next_subquery_id();
         self.bind_context(
             itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
-            UNNAMED_SUBQUERY.to_string(),
+            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
         )?;
         Ok(BoundSubquery { query })
     }

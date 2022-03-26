@@ -185,6 +185,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_values;
 mod logical_agg;
+mod logical_apply;
 mod logical_delete;
 mod logical_filter;
 mod logical_insert;
@@ -217,6 +218,7 @@ pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_values::BatchValues;
 pub use logical_agg::LogicalAgg;
+pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
@@ -256,6 +258,7 @@ macro_rules! for_all_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Logical, Agg }
+            ,{ Logical, Apply }
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }
@@ -297,6 +300,7 @@ macro_rules! for_logical_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Logical, Agg }
+            ,{ Logical, Apply }
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }

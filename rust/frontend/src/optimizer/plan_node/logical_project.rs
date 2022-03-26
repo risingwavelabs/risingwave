@@ -45,6 +45,8 @@ impl LogicalProject {
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
+            assert!(!expr.has_subquery());
+            assert!(!expr.has_agg_call());
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
