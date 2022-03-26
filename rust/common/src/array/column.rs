@@ -36,6 +36,10 @@ impl Column {
     pub fn array_ref(&self) -> &ArrayImpl {
         &*self.array
     }
+
+    pub fn array_mut_ref(&mut self) -> &mut ArrayImpl {
+        Arc::get_mut(&mut self.array).unwrap()
+    }
 }
 
 #[cfg(test)]

@@ -22,7 +22,7 @@ use crate::task::TaskId;
 /// ```sql
 /// select a.a1, a.a2, b.b1, b.b2 from a inner join b where a.a3 = b.b3 and a.a1 = b.b1
 /// ```
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct EquiJoinParams {
     join_type: JoinType,
     /// Column indexes of left keys in equi join, e.g., the column indexes of `b1` and `b3` in `b`.
@@ -42,6 +42,8 @@ pub(super) struct EquiJoinParams {
     output_data_types: Vec<DataType>,
     /// Data chunk buffer size
     batch_size: usize,
+    /// Non-equi condition
+    pub cond: Option<BoxedExpression>,
 }
 
 /// Different states when executing a hash join.
@@ -85,7 +87,6 @@ pub(super) struct HashJoinExecutor<K> {
     state: HashJoinState<K>,
     schema: Schema,
     identity: String,
-    cond: Option<BoxedExpression>,
 }
 
 impl EquiJoinParams {
@@ -117,6 +118,11 @@ impl EquiJoinParams {
     #[inline(always)]
     pub(super) fn batch_size(&self) -> usize {
         self.batch_size
+    }
+
+    #[inline(always)]
+    pub(super) fn has_non_equi_cond(&self) -> bool {
+        self.cond.is_some()
     }
 }
 
@@ -205,8 +211,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
 
         loop {
-            if let Some(ret_data_chunk) = probe_table.join()? {
+            if let Some(mut ret_data_chunk) = probe_table.join()? {
+                if probe_table.has_non_equi_cond() {
+                    probe_table.process_non_equi_condition(&mut ret_data_chunk)?
+                }
+
                 self.state = HashJoinState::Probe(probe_table);
+
                 return Ok(Some(ret_data_chunk));
             } else {
                 match self.left_child.next().await? {
@@ -214,13 +225,17 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         probe_table.set_probe_data(data_chunk)?;
                     }
                     None => {
-                        return if probe_table.join_type().need_join_remaining() {
+                        let mut ret_data_chunk = probe_table.consume_left()?;
+                        if probe_table.has_non_equi_cond() {
+                            probe_table.process_non_equi_condition(&mut ret_data_chunk)?
+                        }
+
+                        if probe_table.join_type().need_join_remaining() {
                             self.state = HashJoinState::ProbeRemaining(probe_table);
-                            Ok(None)
                         } else {
                             self.state = HashJoinState::Done;
-                            probe_table.consume_left()
                         }
+                        return Ok(Some(ret_data_chunk));
                     }
                 }
             }
@@ -236,7 +251,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             Ok(Some(ret_data_chunk))
         } else {
             self.state = HashJoinState::Done;
-            probe_table.consume_left()
+            probe_table.consume_left().map(|chunk| Some(chunk))
         }
     }
 }
@@ -255,7 +270,6 @@ impl<K> HashJoinExecutor<K> {
             state: HashJoinState::Build(BuildTable::with_params(params)),
             schema,
             identity,
-            cond: None,
         }
     }
 }
@@ -608,6 +622,7 @@ mod tests {
                 output_columns,
                 output_data_types,
                 batch_size: 2,
+                cond: None,
             };
 
             let fields = params

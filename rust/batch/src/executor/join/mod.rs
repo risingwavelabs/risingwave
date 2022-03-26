@@ -47,6 +47,20 @@ impl JoinType {
             JoinTypeProst::FullOuter => JoinType::FullOuter,
         }
     }
+
+    fn need_build_flag(self) -> bool {
+        match self {
+            JoinType::RightSemi => true,
+            other => other.need_join_remaining(),
+        }
+    }
+
+    fn need_probe_flag(self) -> bool {
+        matches!(
+            self,
+            JoinType::FullOuter | JoinType::LeftOuter | JoinType::LeftAnti | JoinType::LeftSemi
+        )
+    }
 }
 
 impl Default for JoinType {

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, LinkedList};
 use std::convert::TryFrom;
 use std::mem;
 use std::sync::Arc;
@@ -7,6 +7,7 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
@@ -111,12 +112,18 @@ pub(super) struct ProbeTable<K> {
     ///
     /// See [`JoinType::need_join_remaining`]
     build_matched: Option<ChunkedData<bool>>,
-    probe_matched: Option<Vec<Option<ProbeRowId>>>,
+    probe_matched: Option<LinkedList<Vec<usize>>>,
+    cur_probe_matched: usize,
+    /// When a chunk is full, if true, there are still rows in
+    /// the build side that matches the current row in probe
+    /// side that has not been added to the chunk.
+    has_pending_matched: bool,
 
     /// Map from row ids in join result chunk to those in probe/build chunk
     /// with length of batch size.
     result_build_index: Vec<Option<RowId>>,
     result_probe_index: Vec<Option<ProbeRowId>>,
+    // Only used when reentry remove_duplicated_rows function
     result_offset: usize,
 
     /// Fields for generating one chunk during probe
@@ -148,11 +155,19 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
 
         let mut build_matched = None;
         let mut remaining_build_row_id = None;
-        if build_table.params.join_type().need_build_flag() {
+        let mut probe_matched = None;
+        if build_table.params.join_type().need_build_flag()
+            && !build_table.params.has_non_equi_cond()
+        {
             build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
                 build_table.build_data.iter().map(|c| c.cardinality()),
             )?);
             remaining_build_row_id = Some(RowId::default());
+        }
+        if build_table.params.join_type().need_probe_flag()
+            && build_table.params.has_non_equi_cond()
+        {
+            probe_matched = Some(LinkedList::new());
         }
 
         let result_build_index = Vec::with_capacity(build_table.params.batch_size());
@@ -170,7 +185,9 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             build_data: build_table.build_data,
             build_index,
             build_matched,
-            probe_matched: None,
+            probe_matched,
+            cur_probe_matched: 0,
+            has_pending_matched: false,
             result_build_index,
             result_probe_index,
             result_offset: 0,
@@ -185,6 +202,10 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
 }
 
 impl<K: HashKey> ProbeTable<K> {
+    pub(super) fn has_non_equi_cond(&self) ->bool {
+        self.params.has_non_equi_cond()
+    }
+
     pub(super) fn join_type(&self) -> JoinType {
         self.params.join_type()
     }
@@ -194,10 +215,11 @@ impl<K: HashKey> ProbeTable<K> {
         let probe_data_chunk = probe_data_chunk.compact()?;
         ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
-        if self.params.join_type().need_build_flag() {
-            self.probe_matched = Some(Vec::with_capacity(probe_data_chunk.cardinality()))
+        if self.params.join_type().need_probe_flag() && self.params.has_non_equi_cond() {
+            self.probe_matched
+                .as_mut()
+                .map(|list| list.push_back(vec![0; probe_data_chunk.capacity()]));
         }
-
         self.cur_probe_row_id = 0;
         self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
         self.cur_probe_data = Some(ProbeData::<K> {
@@ -209,46 +231,380 @@ impl<K: HashKey> ProbeTable<K> {
 
     /// Do join using
     pub(super) fn join(&mut self) -> Result<Option<DataChunk>> {
-        match self.params.join_type() {
-            JoinType::Inner => self.do_inner_join(),
-            JoinType::LeftOuter => self.do_left_outer_join(),
-            JoinType::LeftAnti => self.do_left_anti_join(),
-            JoinType::LeftSemi => self.do_left_semi_join(),
-            JoinType::RightOuter => self.do_right_outer_join(),
-            JoinType::RightAnti => self.do_right_anti_join(),
-            JoinType::RightSemi => self.do_right_semi_join(),
-            JoinType::FullOuter => self.do_full_outer_join(),
+        if self.params.cond.is_none() {
+            match self.params.join_type() {
+                JoinType::Inner => self.do_inner_join(),
+                JoinType::LeftOuter => self.do_left_outer_join(),
+                JoinType::LeftAnti => self.do_left_anti_join(),
+                JoinType::LeftSemi => self.do_left_semi_join(),
+                JoinType::RightOuter => self.do_right_outer_join(),
+                JoinType::RightAnti => self.do_right_anti_join(),
+                JoinType::RightSemi => self.do_right_semi_join(),
+                JoinType::FullOuter => self.do_full_outer_join(),
+            }
+        } else {
+            match self.params.join_type() {
+                JoinType::Inner => self.do_inner_join(),
+                JoinType::LeftOuter => self.do_left_outer_join_with_non_equi_condition(),
+                JoinType::LeftAnti => self.do_left_anti_join_with_non_equi_conditon(),
+                JoinType::LeftSemi => self.do_left_semi_join_with_non_equi_condition(),
+                JoinType::RightOuter => self.do_right_outer_join_with_non_equi_condition(),
+                JoinType::RightAnti => self.do_right_anti_join_with_non_equi_condition(),
+                JoinType::RightSemi => self.do_right_semi_join_with_non_equi_condition(),
+                JoinType::FullOuter => self.do_full_outer_join_with_non_equi_condition(),
+            }
         }
     }
 
-    // fn process_non_equi_condition(&mut self) -> DataChunk {
-    //     match self.params.join_type() {
-    //         JoinType::Inner => self.process_inner_join_non_equi_condition(),
-    //         JoinType::LeftOuter | JoinType::FullOuter => {
-    //             self.process_outer_join_non_equi_condition()
-    //         }
-    //         JoinType::LeftSemi
-    //         | JoinType::LeftAnti
-    //         | JoinType::RightSemi
-    //         | JoinType::RightOuter => self.process_semi_join_non_equi_condition(),
-    //         JoinType::RightAnti => self.process_right_anti_join_non_equi_condition(),
-    //     }
-    // }
+    fn nullify_build_side_for_non_equi_condition(
+        &mut self,
+        data_chunk: &mut DataChunk,
+        filter: &Bitmap,
+    ) {
+        for column_id in self.params.output_columns().iter().copied() {
+            match column_id {
+                // probe side column, do nothing
+                Either::Left(_) => {}
 
-    // fn process_inner_join_non_equi_condition(&mut self) -> DataChunk {}
+                // build side column
+                Either::Right(idx) => data_chunk
+                    .column_mut_at(idx)
+                    .array_mut_ref()
+                    .set_bitmap(filter.clone()),
+            }
+        }
+    }
 
-    // fn process_semi_join_non_equi_condition(&mut self) -> DataChunk {}
+    fn remove_duplicate_rows_for_left_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let probe_matched_list = self.probe_matched.as_mut().unwrap();
+        let mut last_probe_matched = None;
+        let mut result_row_id = 0;
+        let chunk_len = filter.len();
+        let mut new_filter = Vec::with_capacity(chunk_len);
+        while let Some(mut probe_matched) = probe_matched_list.pop_front() {
+            while self.cur_probe_matched < probe_matched.len() {
+                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
+                // Probe side does not match any, but will have a row where build side is null
+                if cur_result_row_cnt == 0 {
+                    cur_result_row_cnt = 1;
+                }
+                for _ in 0..cur_result_row_cnt {
+                    let filter_bit = filter.is_set(result_row_id).unwrap();
 
-    // fn process_right_anti_join_non_equi_condition(&mut self) -> DataChunk {}
+                    if probe_matched[self.cur_probe_matched] == 0 {
+                        new_filter.push(true);
+                    } else if probe_matched[self.cur_probe_matched] == 1
+                        && !(self.has_pending_matched && result_row_id == chunk_len - 1)
+                    {
+                        if filter_bit == false {
+                            new_filter.push(true);
+                        }
+                    } else if filter_bit == true {
+                        probe_matched[self.cur_probe_matched] -= 1;
+                        new_filter.push(filter_bit);
+                    }
 
-    // fn process_outer_join_non_equi_condition(&mut self) -> DataChunk {}
+                    result_row_id += 1;
+                }
+                self.cur_probe_matched += 1;
+            }
+            self.cur_probe_matched = 0;
+            if probe_matched_list.is_empty() {
+                last_probe_matched = Some(probe_matched);
+            }
+        }
+        assert_eq!(result_row_id, chunk_len);
+        // push the last probe_match vec back bacause the probe may not be finished
+        probe_matched_list.push_back(last_probe_matched.unwrap());
+        new_filter.try_into()
+    }
+
+    fn remove_duplicate_rows_for_left_semi(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let probe_matched_list = self.probe_matched.as_mut().unwrap();
+        let mut last_probe_matched = None;
+        let mut result_row_id = 0;
+        let chunk_len = filter.len();
+        let mut new_filter = Vec::with_capacity(chunk_len);
+        while let Some(mut probe_matched) = probe_matched_list.pop_front() {
+            while self.cur_probe_matched < probe_matched.len() {
+                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
+                // Probe side does not match any, but will have a row where build side is null
+                if cur_result_row_cnt == 0 {
+                    cur_result_row_cnt = 1;
+                }
+                for _ in 0..cur_result_row_cnt {
+                    let filter_bit = filter.is_set(result_row_id).unwrap();
+
+                    if filter_bit == true {
+                        if probe_matched[self.cur_probe_matched] == 0 {
+                            probe_matched[self.cur_probe_matched] = 1;
+                            new_filter.push(true);
+                        } else {
+                            new_filter.push(false);
+                        }
+                    } else {
+                        new_filter.push(filter_bit);
+                    }
+
+                    result_row_id += 1;
+                }
+                self.cur_probe_matched += 1;
+            }
+            self.cur_probe_matched = 0;
+            if probe_matched_list.is_empty() {
+                last_probe_matched = Some(probe_matched);
+            }
+        }
+        assert_eq!(result_row_id, chunk_len);
+        // push the last probe_match vec back bacause the probe may not be finished
+        probe_matched_list.push_back(last_probe_matched.unwrap());
+        new_filter.try_into()
+    }
+
+    fn remove_duplicate_rows_for_left_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let probe_matched_list = self.probe_matched.as_mut().unwrap();
+        let mut last_probe_matched = None;
+        let mut result_row_id = 0;
+        let chunk_len = filter.len();
+        let mut new_filter = Vec::with_capacity(chunk_len);
+        while let Some(mut probe_matched) = probe_matched_list.pop_front() {
+            while self.cur_probe_matched < probe_matched.len() {
+                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
+                // Probe side does not match any, but will have a row where build side is null
+                if cur_result_row_cnt == 0 {
+                    cur_result_row_cnt = 1;
+                }
+                for _ in 0..cur_result_row_cnt {
+                    let filter_bit = filter.is_set(result_row_id).unwrap();
+
+                    if probe_matched[self.cur_probe_matched] == 0 {
+                        new_filter.push(true);
+                    } else if probe_matched[self.cur_probe_matched] == 1
+                        && !(self.has_pending_matched && result_row_id == chunk_len - 1)
+                    {
+                        probe_matched[self.cur_probe_matched] -= 1;
+                        new_filter.push(!filter_bit);
+                    } else if filter_bit == false {
+                        probe_matched[self.cur_probe_matched] -= 1;
+                        new_filter.push(filter_bit);
+                    } else {
+                        new_filter.push(false);
+                    }
+
+                    result_row_id += 1;
+                }
+                self.cur_probe_matched += 1;
+            }
+            self.cur_probe_matched = 0;
+            if probe_matched_list.is_empty() {
+                last_probe_matched = Some(probe_matched);
+            }
+        }
+        assert_eq!(result_row_id, chunk_len);
+        // push the last probe_match vec back bacause the probe may not be finished
+        probe_matched_list.push_back(last_probe_matched.unwrap());
+        new_filter.try_into()
+    }
+
+    fn remove_duplicate_rows_for_right_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let chunk_len = filter.len();
+        for result_row_id in 0..chunk_len {
+            let filter_bit = filter.is_set(result_row_id).unwrap();
+            if filter_bit == true {
+                // Not possible to have a null row in right side in right outer join.
+                // Thus just unwrap.
+                let build_row_id = self.result_build_index[result_row_id].unwrap();
+                self.set_build_matched(build_row_id)?;
+            }
+        }
+        Ok(filter)
+    }
+
+    fn remove_duplicate_rows_for_right_semi(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let chunk_len = filter.len();
+        let mut new_filter = Vec::with_capacity(chunk_len);
+        for result_row_id in 0..chunk_len {
+            let filter_bit = filter.is_set(result_row_id).unwrap();
+            if filter_bit == true {
+                // Not possible to have a null row in right side in right semi join.
+                // Thus just unwrap.
+                let build_row_id = self.result_build_index[result_row_id].unwrap();
+                if !self.is_build_matched(build_row_id)? {
+                    self.set_build_matched(build_row_id)?;
+                    new_filter.push(filter_bit);
+                } else {
+                    new_filter.push(false);
+                }
+            } else {
+                new_filter.push(filter_bit);
+            }
+        }
+        new_filter.try_into()
+    }
+
+    fn remove_duplicate_rows_for_right_anti(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        let chunk_len = filter.len();
+        for result_row_id in 0..chunk_len {
+            let filter_bit = filter.is_set(result_row_id).unwrap();
+            if filter_bit == true {
+                // Not possible to have a null row in right side in right anti join.
+                // Thus just unwrap.
+                let build_row_id = self.result_build_index[result_row_id].unwrap();
+                self.set_build_matched(build_row_id)?;
+            }
+        }
+        Ok(filter)
+    }
+
+    fn remove_duplicate_rows_for_full_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        // TODO(yuhao): This is a bit dirty. I have to take the list out of struct
+        // and put it back before return to cheat the borrow checker.
+        let mut probe_matched_list = self.probe_matched.take().unwrap();
+        let mut last_probe_matched = None;
+        let mut result_row_id = 0;
+        let chunk_len = filter.len();
+        let mut new_filter = Vec::with_capacity(chunk_len);
+        while let Some(mut probe_matched) = probe_matched_list.pop_front() {
+            while self.cur_probe_matched < probe_matched.len() {
+                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
+                // Probe side does not match any, but will have a row where build side is null
+                if cur_result_row_cnt == 0 {
+                    cur_result_row_cnt = 1;
+                }
+                for _ in 0..cur_result_row_cnt {
+                    let filter_bit = filter.is_set(result_row_id).unwrap();
+                    if probe_matched[self.cur_probe_matched] == 0 {
+                        new_filter.push(true);
+                    } else if probe_matched[self.cur_probe_matched] == 1
+                        && !(self.has_pending_matched && result_row_id == chunk_len - 1)
+                    {
+                        if filter_bit == true {
+                            // Not possible to have a null row in right side when probe
+                            // matched >= 1. Thus just unwrap.
+                            self.set_build_matched(
+                                self.result_build_index[result_row_id].unwrap(),
+                            )?;
+                        }
+                        new_filter.push(true);
+                    } else {
+                        if filter_bit == false {
+                            probe_matched[self.cur_probe_matched] -= 1;
+                        } else {
+                            self.set_build_matched(
+                                self.result_build_index[result_row_id].unwrap(),
+                            )?;
+                        }
+                        new_filter.push(filter_bit);
+                    }
+
+                    result_row_id += 1;
+                }
+                self.cur_probe_matched += 1;
+            }
+            self.cur_probe_matched = 0;
+            if probe_matched_list.is_empty() {
+                last_probe_matched = Some(probe_matched);
+            }
+        }
+        assert_eq!(result_row_id, chunk_len);
+        // push the last probe_match vec back bacause the probe may not be finished
+        probe_matched_list.push_back(last_probe_matched.unwrap());
+        self.probe_matched = Some(probe_matched_list);
+        new_filter.try_into()
+    }
+
+    fn remove_duplicate_rows(&mut self, filter: Bitmap) -> Result<Bitmap> {
+        match self.params.join_type() {
+            JoinType::FullOuter => self.remove_duplicate_rows_for_full_outer(filter),
+            JoinType::LeftOuter => self.remove_duplicate_rows_for_left_outer(filter),
+            JoinType::LeftSemi => self.remove_duplicate_rows_for_left_semi(filter),
+            JoinType::LeftAnti => self.remove_duplicate_rows_for_left_anti(filter),
+            JoinType::RightOuter => self.remove_duplicate_rows_for_right_outer(filter),
+            JoinType::RightSemi => self.remove_duplicate_rows_for_right_semi(filter),
+            JoinType::RightAnti => self.remove_duplicate_rows_for_right_anti(filter),
+            JoinType::Inner => unreachable!(),
+        }
+    }
+
+    pub(super) fn process_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
+        match self.params.join_type() {
+            JoinType::Inner => self.process_inner_join_non_equi_condition(data_chunk)?,
+            JoinType::LeftOuter | JoinType::FullOuter => {
+                self.process_outer_join_non_equi_condition(data_chunk)?
+            }
+            JoinType::LeftSemi
+            | JoinType::LeftAnti
+            | JoinType::RightSemi
+            | JoinType::RightOuter => self.process_semi_join_non_equi_condition(data_chunk)?,
+            JoinType::RightAnti => self.process_right_anti_join_non_equi_condition(data_chunk)?,
+        };
+        // Clear the flag when finishing processing a chunk.
+        self.has_pending_matched = false;
+        Ok(())
+    }
+
+    fn process_inner_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
+        let filter = self
+            .get_non_equi_cond_filter(&data_chunk)?
+            .as_bool()
+            .try_into()?;
+        data_chunk.set_visibility(filter);
+        Ok(())
+    }
+
+    fn process_outer_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
+        let filter = self
+            .get_non_equi_cond_filter(&data_chunk)?
+            .as_bool()
+            .try_into()?;
+        self.nullify_build_side_for_non_equi_condition(data_chunk, &filter);
+        let filter = self.remove_duplicate_rows(filter)?;
+        data_chunk.set_visibility(filter);
+        Ok(())
+    }
+
+    fn process_semi_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
+        let filter = self
+            .get_non_equi_cond_filter(&data_chunk)?
+            .as_bool()
+            .try_into()?;
+        let filter = self.remove_duplicate_rows(filter)?;
+        data_chunk.set_visibility(filter);
+        Ok(())
+    }
+
+    fn process_right_anti_join_non_equi_condition(
+        &mut self,
+        data_chunk: &mut DataChunk,
+    ) -> Result<()> {
+        let filter = self
+            .get_non_equi_cond_filter(&data_chunk)?
+            .as_bool()
+            .try_into()?;
+        let filter = self.remove_duplicate_rows(filter)?;
+        data_chunk.set_visibility(filter);
+        Ok(())
+    }
+
+    fn get_non_equi_cond_filter(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        self.params.cond.as_mut().unwrap().eval(data_chunk)
+    }
 
     pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {
         self.do_join_remaining()
     }
 
-    pub(super) fn consume_left(&mut self) -> Result<Option<DataChunk>> {
-        Ok(Some(self.finish_data_chunk()?))
+    pub(super) fn consume_left(&mut self) -> Result<DataChunk> {
+        Ok(self.finish_data_chunk()?)
+    }
+
+    fn next_probe_row(&mut self) {
+        self.cur_probe_row_id += 1;
+        // We must put the rest of `cur_build_row_id` here because we may reenter this method.
+        if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
+            self.cur_joined_build_row_id =
+                self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
+        }
     }
 
     fn do_inner_join(&mut self) -> Result<Option<DataChunk>> {
@@ -261,15 +617,8 @@ impl<K: HashKey> ProbeTable<K> {
                     return Ok(Some(ret_data_chunk));
                 }
             }
-
-            self.cur_probe_row_id += 1;
-            // We must put the rest of `cur_build_row_id` here because we may reenter this method.
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
+            self.next_probe_row();
         }
-
         Ok(None)
     }
 
@@ -293,26 +642,17 @@ impl<K: HashKey> ProbeTable<K> {
                 if let Some(ret_data_chunk) =
                     self.append_one_row(None, Some(self.cur_probe_row_id))?
                 {
-                    self.cur_probe_row_id += 1;
-                    // We must put the rest of `cur_build_row_id` here because we may reenter this
-                    // method.
-                    if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                        self.cur_joined_build_row_id = self
-                            .first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-                    }
+                    self.next_probe_row();
                     return Ok(Some(ret_data_chunk));
                 }
             }
-
-            self.cur_probe_row_id += 1;
-            // We must put the rest of `cur_build_row_id` here because we may reenter this method.
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
+            self.next_probe_row();
         }
-
         Ok(None)
+    }
+
+    fn do_left_outer_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        self.do_full_outer_join_with_non_equi_condition()
     }
 
     fn do_left_semi_join(&mut self) -> Result<Option<DataChunk>> {
@@ -329,8 +669,11 @@ impl<K: HashKey> ProbeTable<K> {
                 }
             }
         }
-
         Ok(None)
+    }
+
+    fn do_left_semi_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        self.do_full_outer_join_with_non_equi_condition()
     }
 
     fn do_left_anti_join(&mut self) -> Result<Option<DataChunk>> {
@@ -347,8 +690,11 @@ impl<K: HashKey> ProbeTable<K> {
                 }
             }
         }
-
         Ok(None)
+    }
+
+    fn do_left_anti_join_with_non_equi_conditon(&mut self) -> Result<Option<DataChunk>> {
+        self.do_full_outer_join_with_non_equi_condition()
     }
 
     fn do_right_outer_join(&mut self) -> Result<Option<DataChunk>> {
@@ -362,15 +708,23 @@ impl<K: HashKey> ProbeTable<K> {
                     return Ok(Some(ret_data_chunk));
                 }
             }
-
-            self.cur_probe_row_id += 1;
-            // We must put the rest of `cur_build_row_id` here because we may reenter this method.
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
+            self.next_probe_row();
         }
+        Ok(None)
+    }
 
+    fn do_right_outer_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        while self.cur_probe_row_id < self.current_probe_data_chunk_size() {
+            while let Some(build_row_id) = self.next_joined_build_row_id() {
+                // Here we have one full data chunk
+                if let Some(ret_data_chunk) =
+                    self.append_one_row(Some(build_row_id), Some(self.cur_probe_row_id))?
+                {
+                    return Ok(Some(ret_data_chunk));
+                }
+            }
+            self.next_probe_row();
+        }
         Ok(None)
     }
 
@@ -384,16 +738,13 @@ impl<K: HashKey> ProbeTable<K> {
                     }
                 }
             }
-
-            self.cur_probe_row_id += 1;
-            // We must put the rest of `cur_build_row_id` here because we may reenter this method.
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
+            self.next_probe_row();
         }
-
         Ok(None)
+    }
+
+    fn do_right_semi_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        self.do_right_outer_join_with_non_equi_condition()
     }
 
     fn do_right_anti_join(&mut self) -> Result<Option<DataChunk>> {
@@ -401,15 +752,13 @@ impl<K: HashKey> ProbeTable<K> {
             while let Some(build_row_id) = self.next_joined_build_row_id() {
                 self.set_build_matched(build_row_id)?;
             }
-
-            self.cur_probe_row_id += 1;
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
+            self.next_probe_row();
         }
-
         Ok(None)
+    }
+
+    fn do_right_anti_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        self.do_right_outer_join_with_non_equi_condition()
     }
 
     fn do_join_remaining(&mut self) -> Result<Option<DataChunk>> {
@@ -445,25 +794,58 @@ impl<K: HashKey> ProbeTable<K> {
                 if let Some(ret_data_chunk) =
                     self.append_one_row(None, Some(self.cur_probe_row_id))?
                 {
-                    self.cur_probe_row_id += 1;
-                    // We must put the rest of `cur_build_row_id` here because we may reenter this
-                    // method.
-                    if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                        self.cur_joined_build_row_id = self
-                            .first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
+                    self.next_probe_row();
+                    return Ok(Some(ret_data_chunk));
+                }
+            }
+            self.next_probe_row();
+        }
+        Ok(None)
+    }
+
+    fn do_full_outer_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
+        // TODO(yuhao): This is a bit dirty. I have to take the list out of struct
+        // and put it back before return to cheat the borrow checker.
+        let mut probe_matched_list = self.probe_matched.take().unwrap();
+        let probe_matched = probe_matched_list.front_mut().unwrap();
+        while self.cur_probe_row_id < self.current_probe_data_chunk_size() {
+            while let Some(build_row_id) = self.next_joined_build_row_id() {
+                // Only needed for non-equi condition
+                probe_matched[self.cur_probe_row_id] += 1;
+                // Here we have one full data chunk
+                if let Some(ret_data_chunk) =
+                    self.append_one_row(Some(build_row_id), Some(self.cur_probe_row_id))?
+                {
+                    // There should be more rows in the build side that
+                    // matches the current row in probe side.
+                    if self.build_index[build_row_id].is_some() {
+                        self.has_pending_matched = true;
                     }
+
+                    self.probe_matched = Some(probe_matched_list);
                     return Ok(Some(ret_data_chunk));
                 }
             }
 
-            self.cur_probe_row_id += 1;
-            // We must put the rest of `cur_build_row_id` here because we may reenter this method.
-            if self.cur_probe_row_id < self.current_probe_data_chunk_size() {
-                self.cur_joined_build_row_id =
-                    self.first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id));
-            }
-        }
+            // We need this because for unmatched left side row, we need to emit null
+            // TODO(yuhao): avoid searching hash table here.
+            if self
+                .first_joined_row_id(self.current_probe_key_at(self.cur_probe_row_id))
+                .is_none()
+            {
+                // Here we have one full data chunk
+                if let Some(ret_data_chunk) =
+                    self.append_one_row(None, Some(self.cur_probe_row_id))?
+                {
+                    self.next_probe_row();
 
+                    self.probe_matched = Some(probe_matched_list);
+                    return Ok(Some(ret_data_chunk));
+                }
+            }
+            self.next_probe_row();
+        }
+        self.probe_matched = Some(probe_matched_list);
         Ok(None)
     }
 
@@ -595,7 +977,8 @@ impl<K: HashKey> ProbeTable<K> {
         self.result_build_index.clear();
         self.result_probe_index.clear();
         self.result_offset = 0;
-        DataChunk::try_from(new_columns)
+        let data_chunk = DataChunk::try_from(new_columns)?;
+        Ok(data_chunk)
     }
 
     fn get_build_array(&self, row_id: RowId, idx: usize) -> ArrayRef {
@@ -637,14 +1020,5 @@ impl<'a> Iterator for JoinedRowIdIterator<'a> {
         }
 
         ret
-    }
-}
-
-impl JoinType {
-    fn need_build_flag(self) -> bool {
-        match self {
-            JoinType::RightSemi => true,
-            other => other.need_join_remaining(),
-        }
     }
 }

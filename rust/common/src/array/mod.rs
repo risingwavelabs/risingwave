@@ -502,6 +502,12 @@ macro_rules! impl_array {
                 }
             }
 
+            pub fn set_bitmap(&mut self, bitmap: Bitmap) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.set_bitmap(bitmap), )*
+                }
+            }
+
             pub fn create_builder(&self, capacity: usize) -> Result<ArrayBuilderImpl> {
                 match self {
                     $( Self::$variant_name(inner) => inner.create_builder(capacity), )*
