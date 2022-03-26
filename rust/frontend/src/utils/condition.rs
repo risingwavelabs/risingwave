@@ -20,7 +20,6 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use crate::expr::{
     to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
-use crate::optimizer::plan_node::CollectInputRef;
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -117,7 +116,7 @@ impl Condition {
 
         let (mut left, mut right, mut others) = (vec![], vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_subset(&left_bit_map) {
                 left.push(expr)
             } else if input_bits.is_subset(&right_bit_map) {
@@ -139,10 +138,12 @@ impl Condition {
     }
 
     #[must_use]
-    /// Separate equality conditions which connect left columns and right columns from other
-    /// conditions.
+    /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
+    /// columns from other conditions.
     ///
-    /// The equality conditions are transformed into `(left_col_idx, right_col_idx)` pairs.
+    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    ///
+    /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
     pub fn split_eq_keys(
         self,
         left_col_num: usize,
@@ -153,7 +154,7 @@ impl Condition {
 
         let (mut eq_keys, mut others) = (vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
             } else {
@@ -190,7 +191,7 @@ impl Condition {
     pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
         let (mut referencing, mut disjoint) = (vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, columns.len());
+            let input_bits = expr.collect_input_refs(columns.len());
             if input_bits.is_disjoint(columns) {
                 disjoint.push(expr)
             } else {

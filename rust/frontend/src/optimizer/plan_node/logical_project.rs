@@ -220,7 +220,7 @@ impl ColPrunable for LogicalProject {
             visitor.visit_expr(&self.exprs[id]);
         });
 
-        let child_required_cols = visitor.input_bits;
+        let child_required_cols = visitor.collect();
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
         let (exprs, expr_alias) = required_cols

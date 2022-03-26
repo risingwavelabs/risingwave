@@ -281,19 +281,18 @@ impl ColPrunable for LogicalJoin {
 
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectInputRef {
-            input_bits: required_cols.clone(),
-        };
+        let mut visitor = CollectInputRef::new(required_cols.clone());
         self.on.visit_expr(&mut visitor);
+        let left_right_required_cols = visitor.collect();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
         on = on.rewrite_expr(&mut mapping);
 
         let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
         let mut right_required_cols =
             FixedBitSet::with_capacity(self.right.schema().fields().len());
-        visitor.input_bits.ones().for_each(|i| {
+        left_right_required_cols.ones().for_each(|i| {
             if i < left_len {
                 left_required_cols.insert(i);
             } else {
@@ -308,7 +307,7 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &visitor.input_bits {
+        if required_cols == &left_right_required_cols {
             join.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());

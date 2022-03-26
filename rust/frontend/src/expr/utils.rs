@@ -43,7 +43,7 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
 /// column number.
 macro_rules! assert_input_ref {
     ($expr:expr, $input_col_num:expr) => {
-        let _ = CollectInputRef::collect($expr, $input_col_num);
+        let _ = $expr.collect_input_refs($input_col_num);
     };
 }
 pub(crate) use assert_input_ref;
@@ -54,7 +54,7 @@ pub(crate) use assert_input_ref;
 /// Panics if an `InputRef`'s index is out of bounds of the [`FixedBitSet`].
 pub struct CollectInputRef {
     /// All `InputRef`s' indexes are inserted into the [`FixedBitSet`].
-    pub input_bits: FixedBitSet,
+    input_bits: FixedBitSet,
 }
 
 impl ExprVisitor for CollectInputRef {
@@ -78,13 +78,8 @@ impl CollectInputRef {
         }
     }
 
-    /// Collect all `InputRef`s' indexes in the expression.
-    ///
-    /// # Panics
-    /// Panics if `input_ref >= capacity`.
-    pub fn collect(expr: &ExprImpl, capacity: usize) -> FixedBitSet {
-        let mut visitor = Self::with_capacity(capacity);
-        visitor.visit_expr(expr);
-        visitor.input_bits
+    /// Returns the collected indexes by the `CollectInputRef`.
+    pub fn collect(self) -> FixedBitSet {
+        self.input_bits
     }
 }
