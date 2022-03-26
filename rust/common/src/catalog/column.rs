@@ -68,6 +68,7 @@ pub struct ColumnDesc {
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
 }
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct OrderedColumnDesc {
     pub column_desc: ColumnDesc,
