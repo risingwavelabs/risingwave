@@ -97,7 +97,7 @@ impl Binder {
     fn bind_function_expr_arg(&mut self, arg_expr: FunctionArgExpr) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
-            FunctionArgExpr::QualifiedWildcard(_) => todo!(),
+            FunctionArgExpr::QualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::Wildcard => Ok(vec![]),
         }
     }

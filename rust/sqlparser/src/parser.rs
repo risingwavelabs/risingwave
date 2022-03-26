@@ -67,7 +67,7 @@ use IsLateral::*;
 
 pub enum WildcardExpr {
     Expr(Expr),
-    QualifiedWildcard(ObjectName),
+    QualifiedWildcard(Expr, ObjectName),
     Wildcard,
 }
 
@@ -75,7 +75,7 @@ impl From<WildcardExpr> for FunctionArgExpr {
     fn from(wildcard_expr: WildcardExpr) -> Self {
         match wildcard_expr {
             WildcardExpr::Expr(expr) => Self::Expr(expr),
-            WildcardExpr::QualifiedWildcard(prefix) => Self::QualifiedWildcard(prefix),
+            WildcardExpr::QualifiedWildcard(expr, prefix) => Self::QualifiedWildcard(expr, prefix),
             WildcardExpr::Wildcard => Self::Wildcard,
         }
     }
@@ -208,26 +208,57 @@ impl Parser {
 
         match self.next_token() {
             Token::Word(w) if self.peek_token() == Token::Period => {
-                let mut id_parts: Vec<Ident> = vec![w.to_ident()];
-
-                while self.consume_token(&Token::Period) {
-                    match self.next_token() {
-                        Token::Word(w) => id_parts.push(w.to_ident()),
-                        Token::Mul => {
-                            return Ok(WildcardExpr::QualifiedWildcard(ObjectName(id_parts)));
-                        }
-                        unexpected => {
-                            return self.expected("an identifier or a '*' after '.'", unexpected);
-                        }
-                    }
-                }
+                // TODO: refactor binder and move id_parts from ObjectName to Expr.
+                return self.parse_simple_wildcard_expr(
+                    Expr::CompoundIdentifier(vec![]),
+                    index,
+                    vec![w.to_ident()],
+                );
             }
             Token::Mul => {
                 return Ok(WildcardExpr::Wildcard);
             }
+            // parser wildcard field selection expression
+            Token::LParen => {
+                let mut expr = self.parse_expr()?;
+                if self.consume_token(&Token::RParen) {
+                    // cast off nested expression
+                    while let Expr::Nested(expr1) = expr {
+                        expr = *expr1;
+                    }
+                    return self.parse_simple_wildcard_expr(expr, index, vec![]);
+                }
+            }
             _ => (),
         };
 
+        self.index = index;
+        self.parse_expr().map(WildcardExpr::Expr)
+    }
+
+    /// Parse simple wildcard
+    pub fn parse_simple_wildcard_expr(
+        &mut self,
+        expr: Expr,
+        index: usize,
+        mut id_parts: Vec<Ident>,
+    ) -> Result<WildcardExpr, ParserError> {
+        while self.consume_token(&Token::Period) {
+            match self.next_token() {
+                Token::Word(w) => id_parts.push(w.to_ident()),
+                Token::Mul => {
+                    if let Expr::FieldIdentifier(expr, mut idents) = expr {
+                        idents.append(&mut id_parts);
+                        return Ok(WildcardExpr::QualifiedWildcard(*expr, ObjectName(idents)));
+                    } else {
+                        return Ok(WildcardExpr::QualifiedWildcard(expr, ObjectName(id_parts)));
+                    }
+                }
+                unexpected => {
+                    return self.expected("an identifier or a '*' after '.'", unexpected);
+                }
+            }
+        }
         self.index = index;
         self.parse_expr().map(WildcardExpr::Expr)
     }
@@ -391,7 +422,11 @@ impl Parser {
                         }
                     };
                 self.expect_token(&Token::RParen)?;
-                Ok(expr)
+                if self.peek_token() == Token::Period {
+                    self.parse_struct_selection(expr)
+                } else {
+                    Ok(expr)
+                }
             }
 
             Token::LBrace => {
@@ -412,6 +447,55 @@ impl Parser {
         } else {
             Ok(expr)
         }
+    }
+
+    // Parser field selection expression
+    pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
+        if let Expr::Nested(compound_expr) = expr.clone() {
+            let mut nested_expr = *compound_expr;
+            // cast off nested expression
+            while let Expr::Nested(expr1) = nested_expr {
+                nested_expr = *expr1;
+            }
+            match nested_expr {
+                // parser expr like `SELECT (foo).v1 from foo`
+                Expr::Identifier(ident) => Ok(Expr::FieldIdentifier(
+                    Box::new(Expr::Identifier(ident)),
+                    self.parse_field(vec![])?,
+                )),
+                // parser expr like `SELECT (foo.v1).v2 from foo`
+                Expr::CompoundIdentifier(idents) => Ok(Expr::FieldIdentifier(
+                    Box::new(Expr::CompoundIdentifier(idents)),
+                    self.parse_field(vec![])?,
+                )),
+                // parser expr like `SELECT ((1,2,3)::foo).v1`
+                Expr::Cast { expr, data_type } => Ok(Expr::FieldIdentifier(
+                    Box::new(Expr::Cast { expr, data_type }),
+                    self.parse_field(vec![])?,
+                )),
+                Expr::FieldIdentifier(expr, idents) => {
+                    Ok(Expr::FieldIdentifier(expr, self.parse_field(idents)?))
+                }
+                _ => Ok(expr),
+            }
+        } else {
+            Ok(expr)
+        }
+    }
+
+    // Parser all words after period
+    pub fn parse_field(&mut self, mut idents: Vec<Ident>) -> Result<Vec<Ident>, ParserError> {
+        while self.consume_token(&Token::Period) {
+            match self.next_token() {
+                Token::Word(w) => {
+                    idents.push(w.to_ident());
+                }
+                unexpected => {
+                    return self.expected("an identifier after '.'", unexpected);
+                }
+            }
+        }
+        Ok(idents)
     }
 
     pub fn parse_function(&mut self, name: ObjectName) -> Result<Expr, ParserError> {
@@ -2721,7 +2805,9 @@ impl Parser {
                     Some(alias) => SelectItem::ExprWithAlias { expr, alias },
                     None => SelectItem::UnnamedExpr(expr),
                 }),
-            WildcardExpr::QualifiedWildcard(prefix) => Ok(SelectItem::QualifiedWildcard(prefix)),
+            WildcardExpr::QualifiedWildcard(expr, prefix) => {
+                Ok(SelectItem::QualifiedWildcard(expr, prefix))
+            }
             WildcardExpr::Wildcard => Ok(SelectItem::Wildcard),
         }
     }

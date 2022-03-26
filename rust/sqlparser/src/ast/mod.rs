@@ -169,6 +169,9 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
+    /// Struct-field identifier, expr is table or column struct, ident is field.
+    /// e.g. `(table.column).v1` or `(column).v1`
+    FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
     /// `IS NOT NULL` operator
@@ -313,6 +316,7 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
+            Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
             Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
@@ -1353,7 +1357,7 @@ impl fmt::Display for Assignment {
 pub enum FunctionArgExpr {
     Expr(Expr),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
-    QualifiedWildcard(ObjectName),
+    QualifiedWildcard(Expr, ObjectName),
     /// An unqualified `*`
     Wildcard,
 }
@@ -1362,7 +1366,15 @@ impl fmt::Display for FunctionArgExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
-            FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
+            // TODO: refactor QualifiedWildcard and binder to change this.
+            FunctionArgExpr::QualifiedWildcard(expr, prefix) => {
+                if let Expr::CompoundIdentifier(idents) = expr {
+                    if idents.is_empty() {
+                        return write!(f, "{}.*", prefix);
+                    }
+                }
+                write!(f, "{}.{}.*", expr, prefix)
+            }
             FunctionArgExpr::Wildcard => f.write_str("*"),
         }
     }

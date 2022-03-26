@@ -122,7 +122,7 @@ impl Binder {
                     select_list.push(expr);
                     aliases.push(Some(alias.value));
                 }
-                SelectItem::QualifiedWildcard(obj_name) => {
+                SelectItem::QualifiedWildcard(_expr, obj_name) => {
                     let table_name = &obj_name.0.last().unwrap().value;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))

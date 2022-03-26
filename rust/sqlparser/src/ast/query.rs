@@ -249,7 +249,7 @@ pub enum SelectItem {
     /// An expression, followed by `[ AS ] alias`
     ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
-    QualifiedWildcard(ObjectName),
+    QualifiedWildcard(Expr, ObjectName),
     /// An unqualified `*`
     Wildcard,
 }
@@ -259,7 +259,15 @@ impl fmt::Display for SelectItem {
         match &self {
             SelectItem::UnnamedExpr(expr) => write!(f, "{}", expr),
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
-            SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
+            // TODO: refactor QualifiedWildcard and binder to change this.
+            SelectItem::QualifiedWildcard(expr, prefix) => {
+                if let Expr::CompoundIdentifier(idents) = expr {
+                    if idents.is_empty() {
+                        return write!(f, "{}.*", prefix);
+                    }
+                }
+                write!(f, "{}.{}.*", expr, prefix)
+            }
             SelectItem::Wildcard => write!(f, "*"),
         }
     }

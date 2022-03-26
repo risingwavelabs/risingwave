@@ -299,17 +299,20 @@ fn parse_select_wildcard() {
     let sql = "SELECT foo.* FROM foo";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::QualifiedWildcard(ObjectName(vec![Ident::new("foo")])),
+        &SelectItem::QualifiedWildcard(
+            Expr::CompoundIdentifier(vec![]),
+            ObjectName(vec![Ident::new("foo")])
+        ),
         only(&select.projection)
     );
 
     let sql = "SELECT myschema.mytable.* FROM myschema.mytable";
     let select = verified_only_select(sql);
     assert_eq!(
-        &SelectItem::QualifiedWildcard(ObjectName(vec![
-            Ident::new("myschema"),
-            Ident::new("mytable"),
-        ])),
+        &SelectItem::QualifiedWildcard(
+            Expr::CompoundIdentifier(vec![]),
+            ObjectName(vec![Ident::new("myschema"), Ident::new("mytable"),])
+        ),
         only(&select.projection)
     );
 
