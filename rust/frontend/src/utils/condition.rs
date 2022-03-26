@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 use crate::optimizer::plan_node::CollectInputRef;
 
@@ -132,6 +132,52 @@ impl Condition {
             Condition {
                 conjunctions: right,
             },
+            Condition {
+                conjunctions: others,
+            },
+        )
+    }
+
+    #[must_use]
+    /// Separate equality conditions which connects left columns and right columns from other
+    /// conditions.
+    ///
+    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    pub fn split_eq_keys(
+        self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> (Vec<(InputRef, InputRef)>, Self) {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        let (mut eq_keys, mut others) = (vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+            if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
+                others.push(expr)
+            } else {
+                let mut is_eq_cond = false;
+                if let ExprImpl::FunctionCall(function_call) = expr.clone()
+                    && function_call.get_expr_type() == ExprType::Equal
+                    && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                            function_call.decompose_as_binary()
+                    {
+                        is_eq_cond = true;
+                        if x.index() < y.index() {
+                            eq_keys.push((*x, *y));
+                        } else {
+                            eq_keys.push((*y, *x));
+                        }
+                    }
+                if !is_eq_cond {
+                    others.push(expr)
+                }
+            }
+        });
+
+        (
+            eq_keys,
             Condition {
                 conjunctions: others,
             },
