@@ -41,7 +41,7 @@ impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
         let ctx = input.ctx();
         for cond in &predicate.conjunctions {
-            assert_input_ref(cond, input.schema().fields().len());
+            assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();

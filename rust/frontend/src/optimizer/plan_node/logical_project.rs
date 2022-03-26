@@ -44,7 +44,7 @@ impl LogicalProject {
         let schema = Self::derive_schema(&exprs, &expr_alias);
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
-            assert_input_ref(expr, input.schema().fields().len());
+            assert_input_ref!(expr, input.schema().fields().len());
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
@@ -215,9 +215,7 @@ impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectInputRef {
-            input_bits: FixedBitSet::with_capacity(self.input.schema().fields().len()),
-        };
+        let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
         });

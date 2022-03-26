@@ -14,9 +14,8 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
-
-use crate::expr::{get_inputs_col_index, ExprImpl, ExprType, FunctionCall, InputRef};
+use super::CollectInputRef;
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::utils::Condition;
 
 /// The join predicate used in optimizer
@@ -78,8 +77,7 @@ impl EqJoinPredicate {
         let mut eq_keys = vec![];
 
         for cond_expr in on_clause.conjunctions {
-            let mut cols = FixedBitSet::with_capacity(left_cols_num + right_cols_num);
-            get_inputs_col_index(&cond_expr, &mut cols);
+            let cols = CollectInputRef::collect(&cond_expr, left_cols_num + right_cols_num);
             let from_left = cols
                 .ones()
                 .min()
