@@ -33,7 +33,8 @@ pub struct BatchHashAgg {
 impl BatchHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let input_dist = logical.input().distribution();
+        let input = logical.input();
+        let input_dist = input.distribution();
         let dist = match input_dist {
             Distribution::Any => panic!(),
             Distribution::Single => Distribution::Single,

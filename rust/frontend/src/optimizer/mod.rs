@@ -172,7 +172,7 @@ impl PlanRoot {
     pub fn gen_create_mv_plan(&mut self) -> PlanRef {
         let mut plan = self.gen_optimized_logical_plan();
         plan = {
-            let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
+            let (plan, out_col_change) = plan.logical_rewrite_for_stream();
             self.required_dist = out_col_change
                 .rewrite_required_distribution(&self.required_dist)
                 .unwrap();

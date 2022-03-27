@@ -64,7 +64,7 @@ impl BatchHashJoin {
     ) -> Distribution {
         match (left, right) {
             (Distribution::Single, Distribution::Single) => Distribution::Single,
-            (Distribution::HashShard(l_cols), Distribution::HashShard(r_cols)) => {
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
                 assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
                 assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
                 l2o_mapping.rewrite_provided_distribution(left)

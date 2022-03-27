@@ -230,12 +230,12 @@ impl ColIndexMapping {
     /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
     pub fn rewrite_provided_order(&self, order: &Order) -> Order {
-        let mapped_field = vec![];
-        for field in order.field_order {
+        let mut mapped_field = vec![];
+        for field in &order.field_order {
             match self.try_map(field.index) {
                 Some(mapped_index) => mapped_field.push(FieldOrder {
                     index: mapped_index,
-                    direct: field.direct,
+                    direct: field.direct.clone(),
                 }),
                 None => break,
             }
@@ -256,7 +256,7 @@ impl ColIndexMapping {
             .map(|field| {
                 self.try_map(field.index).map(|mapped_index| FieldOrder {
                     index: mapped_index,
-                    direct: field.direct,
+                    direct: field.direct.clone(),
                 })
             })
             .collect::<Option<Vec<_>>>()
@@ -269,7 +269,7 @@ impl ColIndexMapping {
     /// distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to AnyShard.
-    pub fn rewrite_provided_distribution(self, dist: &Distribution) -> Distribution {
+    pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(col_idxes) => {
                 let mapped_dist = col_idxes
@@ -289,7 +289,7 @@ impl ColIndexMapping {
     /// required distribution after the column index mapping, it will return None.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
-    pub fn rewrite_required_distribution(self, dist: &Distribution) -> Option<Distribution> {
+    pub fn rewrite_required_distribution(&self, dist: &Distribution) -> Option<Distribution> {
         match dist {
             Distribution::HashShard(col_idxes) => col_idxes
                 .iter()

@@ -37,8 +37,6 @@ impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-
-        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
         let distribution = i2o.rewrite_provided_distribution(logical.input().distribution());
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
