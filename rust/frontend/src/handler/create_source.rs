@@ -27,7 +27,7 @@ use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSch
 
 use crate::binder::expr::bind_data_type;
 use crate::handler::create_table::ROWID_NAME;
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
 fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
@@ -43,7 +43,7 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCa
 }
 
 pub(super) async fn handle_create_source(
-    context: QueryContext,
+    context: OptimizerContext,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;

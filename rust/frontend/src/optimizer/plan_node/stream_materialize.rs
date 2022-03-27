@@ -22,7 +22,7 @@ use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::{Distribution, FieldOrder, WithSchema};
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -42,7 +42,7 @@ pub struct StreamMaterialize {
 impl StreamMaterialize {
     /// Create a materialize node.
     pub fn new(
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
         input: PlanRef,
         column_orders: Vec<FieldOrder>,
         column_ids: Vec<ColumnId>,

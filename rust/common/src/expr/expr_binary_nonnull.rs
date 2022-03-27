@@ -202,9 +202,10 @@ macro_rules! gen_binary_expr_atm {
         $date_date_f:ident,
         $interval_date_f:ident,
         $date_interval_f:ident,
+        $interval_interval_f:ident,
         $l:expr,
         $r:expr,
-        $ret:expr
+        $ret:expr $(,)?
     ) => {
         $macro! {
             [$l, $r, $ret],
@@ -302,24 +303,64 @@ pub fn new_binary_expr(
             gen_binary_expr_cmp! {gen_cmp_impl, general_le, str_le, l, r, ret}
         }
         Type::Add => {
-            gen_binary_expr_atm! {gen_atm_impl, general_add, atm_placeholder, atm_placeholder,
-            interval_date_add, date_interval_add, l, r, ret}
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                general_add,
+                atm_placeholder,
+                atm_placeholder,
+                interval_date_add,
+                date_interval_add,
+                general_add,
+                l, r, ret,
+            }
         }
         Type::Subtract => {
-            gen_binary_expr_atm! {gen_atm_impl, general_sub, timestamp_timestamp_sub, date_date_sub,
-            atm_placeholder, date_interval_sub, l, r, ret}
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                general_sub,
+                timestamp_timestamp_sub,
+                date_date_sub,
+                atm_placeholder,
+                date_interval_sub,
+                general_sub,
+                l, r, ret,
+            }
         }
         Type::Multiply => {
-            gen_binary_expr_atm! {gen_atm_impl, general_mul, atm_placeholder, atm_placeholder,
-            atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                general_mul,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                l, r, ret,
+            }
         }
         Type::Divide => {
-            gen_binary_expr_atm! {gen_atm_impl, general_div, atm_placeholder, atm_placeholder,
-            atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                general_div,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                l, r, ret,
+            }
         }
         Type::Modulus => {
-            gen_binary_expr_atm! {gen_atm_impl, general_mod, atm_placeholder, atm_placeholder,
-            atm_placeholder, atm_placeholder, l, r, ret}
+            gen_binary_expr_atm! {
+                gen_atm_impl,
+                general_mod,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                atm_placeholder,
+                l, r, ret,
+            }
         }
         Type::Extract => build_extract_expr(ret, l, r),
         Type::RoundDigit => Box::new(

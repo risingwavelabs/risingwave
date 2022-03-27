@@ -24,7 +24,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -42,7 +42,7 @@ impl LogicalScan {
         table_name: String,           // explain-only
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -82,7 +82,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
             table_name,
