@@ -29,6 +29,7 @@ impl Planner {
         let order = Order {
             field_order: query.order,
         };
+        // A logical limit is added if limit, offset or both are specified
         if query.limit.is_some() || query.offset.is_some() {
             plan = LogicalLimit::create(plan, query.limit.unwrap_or(0), query.offset.unwrap_or(0))
         }
