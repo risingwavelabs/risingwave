@@ -103,7 +103,7 @@ macro_rules! abort_multi_var {
 /// Parse a mutable reference expression DSL
 /// - For r($field), return the immutable reference to the field
 /// - For mr($field), return the mutable reference to the field
-/// - For var_txn($field), return a `VarTransaction` that wraps the field
+/// - For `var_txn($field)`, return a `VarTransaction` that wraps the field
 macro_rules! parse_mut_ref_expr {
     // take the immutable ref
     ($var:ident,r, $field:ident) => {
