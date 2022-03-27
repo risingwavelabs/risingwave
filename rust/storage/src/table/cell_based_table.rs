@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -33,6 +33,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::hummock::key::next_key;
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
@@ -122,27 +123,148 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Option<Row>> {
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         // get row by state_store muti get
-        todo!()
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let column_ids = generate_column_id(&self.column_descs);
+        let mut row = Vec::with_capacity(column_ids.len());
+        let key = &serialize_pk(pk, pk_serializer)?;
+        let state_store_get_res = self.keyspace.state_store().get(key, epoch).await?;
+
+        let special_key = &[
+            &serialize_pk(pk, pk_serializer)?[..],
+            &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
+        ]
+        .concat();
+        let specail_cell_res = self.keyspace.get(&special_key, epoch).await?;
+        if specail_cell_res.is_some() {
+            return Ok(Some(Row::new(vec![None; column_ids.len()])));
+        }
+        for column_id in column_ids {
+            let key = &[
+                &serialize_pk(pk, pk_serializer)?[..],
+                &serialize_column_id(&column_id)?,
+            ]
+            .concat();
+            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
+            let column_index = self
+                .column_id_to_column_index
+                .get(&column_id)
+                .expect("column id not found");
+            if let Some(state_store_get_res) = state_store_get_res {
+                let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
+                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+                row.push(cell);
+            } else {
+                row.push(None);
+            }
+        }
+        // row does not exist
+        if row == vec![None; self.column_ids.len()] {
+            return Ok(None);
+        }
+        Ok(Some(Row::new(row)))
     }
 
-    pub async fn get_row_scan(
-        &self,
-        pk: Row,
-        column: &[ColumnDesc],
-        epoch: u64,
-    ) -> Result<Option<Row>> {
+    pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         // get row by state_store scan
-        todo!()
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let column_ids = generate_column_id(&self.column_descs);
+        let mut row = vec![None; column_ids.len()];
+        let start_key = &serialize_pk(pk, pk_serializer)?;
+
+        let state_store_range_scan_res = self
+            .keyspace
+            .state_store()
+            .scan(
+                self.keyspace.prefixed_key(start_key)
+                    ..next_key(&self.keyspace.prefixed_key(start_key)),
+                None,
+                epoch,
+            )
+            .await?;
+
+        // row does not exist
+        if state_store_range_scan_res.is_empty() {
+            return Ok(None);
+        }
+
+        for (key, value) in state_store_range_scan_res {
+            if key.len() > 4 {
+                let column_id_bytes = &key[key.len() - 4..];
+                let column_id = deserialize_column_id(column_id_bytes)?;
+                if column_id == NULL_ROW_SPECIAL_CELL_ID {
+                    break;
+                }
+                let column_index = self
+                    .column_id_to_column_index
+                    .get(&column_id)
+                    .expect("column id not found");
+                let mut de = value_encoding::Deserializer::new(value.to_bytes());
+                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+                row[*column_index] = cell;
+            } else {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "state store key length incoreet ".to_string(),
+                )));
+            }
+        }
+
+        Ok(Some(Row::new(row)))
     }
 
-    pub async fn delete_row(&mut self, pk: Row, epoch: u64) -> Result<()> {
-        todo!()
+    pub async fn delete_row(&mut self, pk: &Row, old_value: Option<Row>, epoch: u64) -> Result<()> {
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
+        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
+        let column_ids = generate_column_id(&self.column_descs);
+        let bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, old_value, &column_ids)?;
+        for (key, value) in bytes {
+            if value.is_some() {
+                local.delete(key);
+            }
+        }
+        batch.ingest(epoch).await?;
+        Ok(())
     }
 
-    pub async fn update_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
-        todo!()
+    pub async fn update_row(
+        &mut self,
+        pk: &Row,
+        old_value: Option<Row>,
+        new_value: Option<Row>,
+        epoch: u64,
+    ) -> Result<()> {
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
+        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
+        let column_ids = generate_column_id(&self.column_descs);
+
+        let old_bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, old_value, &column_ids)?;
+        let new_bytes =
+            self.cell_based_row_serializer
+                .serialize(&arrange_key_buf, new_value, &column_ids)?;
+        // delete original kv_pairs in state_store
+        for (key, value) in &old_bytes {
+            if value.is_some() {
+                local.delete(key);
+            }
+        }
+        // write updated kv_pairs in state_store
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
+        for (key, value) in new_bytes {
+            match value {
+                Some(val) => local.put(key, val),
+                None => local.delete(key),
+            }
+        }
+        batch.ingest(epoch).await?;
+        Ok(())
     }
 
     pub async fn batch_write_rows(
@@ -150,7 +272,24 @@ impl<S: StateStore> CellBasedTable<S> {
         rows: Vec<(Row, Option<Row>)>,
         epoch: u64,
     ) -> Result<()> {
-        todo!();
+        let mut batch = self.keyspace.state_store().start_write_batch();
+        let mut local = batch.prefixify(&self.keyspace);
+        let column_ids = generate_column_id(&self.column_descs);
+        for (pk, cell_values) in rows {
+            let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
+            let bytes = self
+                .cell_based_row_serializer
+                .serialize(&arrange_key_buf, cell_values, &column_ids)
+                .unwrap();
+            for (key, value) in bytes {
+                match value {
+                    Some(val) => local.put(key, val),
+                    None => local.delete(key),
+                }
+            }
+        }
+        batch.ingest(epoch).await?;
+        Ok(())
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
