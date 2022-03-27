@@ -20,7 +20,7 @@ use itertools::Itertools;
 use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, FieldOrder, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -226,20 +226,39 @@ impl ColIndexMapping {
         self.target_size() == 0
     }
 
-    pub fn rewrite_order(&self, mut order: Order) -> Order {
-        for field in &mut order.field_order {
-            field.index = self.map(field.index)
+    /// rewrite the order's field index
+    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
+    pub fn rewrite_order(&self, order: Order) -> Order {
+        let mapped_field = vec![];
+        for field in order.field_order {
+            match self.try_map(field.index) {
+                Some(mapped_index) => mapped_field.push(FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                }),
+                None => break,
+            }
         }
-        order
+        Order {
+            field_order: mapped_field,
+        }
     }
 
-    pub fn rewrite_distribution(&mut self, dist: Distribution) -> Distribution {
+    /// rewrite the distribution's field index
+    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
+    pub fn rewrite_distribution(self, dist: Distribution) -> Distribution {
         match dist {
-            Distribution::HashShard(mut col_idxes) => {
-                for idx in &mut col_idxes {
-                    *idx = self.map(*idx);
+            Distribution::HashShard(col_idxes) => {
+                let mapped_dist = col_idxes
+                    .iter()
+                    .map(|col_idx| self.try_map(*col_idx))
+                    .collect::<Option<Vec<_>>>();
+                match mapped_dist {
+                    Some(col_idx) => Distribution::HashShard(col_idx),
+                    None => Distribution::AnyShard,
                 }
-                Distribution::HashShard(col_idxes)
             }
             _ => dist,
         }
