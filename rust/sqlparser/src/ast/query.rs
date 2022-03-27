@@ -262,15 +262,7 @@ impl fmt::Display for SelectItem {
         match &self {
             SelectItem::UnnamedExpr(expr) => write!(f, "{}", expr),
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
-            // TODO: refactor QualifiedWildcard and binder to change this.
-            SelectItem::ExprQualifiedWildcard(expr, prefix) => {
-                // if let Expr::CompoundIdentifier(idents) = expr {
-                //     if idents.is_empty() {
-                //         return write!(f, "{}.*", prefix);
-                //     }
-                // }
-                write!(f, "{}.{}.*", expr, prefix)
-            }
+            SelectItem::ExprQualifiedWildcard(expr, prefix) => write!(f, "{}.{}.*", expr, prefix),
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             SelectItem::Wildcard => write!(f, "*"),
         }

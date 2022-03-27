@@ -1369,13 +1369,7 @@ impl fmt::Display for FunctionArgExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
-            // TODO: refactor QualifiedWildcard and binder to change this.
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
-                // if let Expr::CompoundIdentifier(idents) = expr {
-                //     if idents.is_empty() {
-                //         return write!(f, "{}.*", prefix);
-                //     }
-                // }
                 write!(f, "{}.{}.*", expr, prefix)
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
