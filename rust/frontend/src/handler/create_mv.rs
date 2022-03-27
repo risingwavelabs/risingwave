@@ -12,20 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
-
 use pgwire::pg_response::PgResponse;
-
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use crate::binder::{Binder};
-
-
-
-
+use crate::binder::Binder;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};

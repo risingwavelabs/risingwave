@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
@@ -30,7 +28,6 @@ use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Order, WithSchema};
-
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
