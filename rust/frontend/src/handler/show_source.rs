@@ -22,10 +22,10 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
 pub async fn handle_show_source(
-    context: QueryContext,
+    context: OptimizerContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
