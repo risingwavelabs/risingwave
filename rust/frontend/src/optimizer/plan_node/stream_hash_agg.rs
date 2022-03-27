@@ -33,7 +33,7 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let input_dist = logical.distribution();
+        let input_dist = logical.input().distribution();
         let dist = match input_dist {
             Distribution::Any => panic!(),
             Distribution::Single => Distribution::Single,
