@@ -22,10 +22,10 @@ use super::create_mv::{gen_create_mv_plan, MvInfo};
 use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::planner::Planner;
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
 pub(super) fn handle_explain(
-    context: QueryContext,
+    context: OptimizerContext,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {

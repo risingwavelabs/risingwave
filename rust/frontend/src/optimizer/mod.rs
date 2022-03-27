@@ -196,11 +196,11 @@ mod tests {
 
     use super::*;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let values = LogicalValues::new(
             vec![],
             Schema::new(vec![
