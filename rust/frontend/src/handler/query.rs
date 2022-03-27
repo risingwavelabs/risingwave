@@ -21,9 +21,9 @@ use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
-pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 

@@ -255,7 +255,7 @@ mod tests {
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
     use crate::scheduler::schedule::{BatchScheduler, WorkerNodeManager};
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
     use crate::utils::Condition;
 
     #[tokio::test]
@@ -267,7 +267,7 @@ mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
 
         let batch_plan_node: PlanRef = BatchSeqScan::new(LogicalScan::new(
             "".to_string(),

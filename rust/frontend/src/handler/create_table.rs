@@ -30,13 +30,13 @@ use crate::binder::Binder;
 use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
 use crate::optimizer::property::{Direction, Distribution, FieldOrder};
 use crate::optimizer::PlanRef;
-use crate::session::{QueryContext, QueryContextRef, SessionImpl};
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 
 pub const ROWID_NAME: &str = "_row_id";
 
 pub fn gen_create_table_plan(
     session: &SessionImpl,
-    context: QueryContextRef,
+    context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<(PlanRef, ProstSource, ProstTable)> {
@@ -137,7 +137,7 @@ pub fn gen_create_table_plan(
 }
 
 pub async fn handle_create_table(
-    context: QueryContext,
+    context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnDef>,
 ) -> Result<PgResponse> {
