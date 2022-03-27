@@ -18,6 +18,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::Binder;
+use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -44,9 +45,9 @@ pub fn gen_create_mv_plan(
         binder.bind_query(*query)?
     };
 
-    let materialize = Planner::new(context)
-        .plan_query(bound)?
-        .gen_create_mv_plan(table_name);
+    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    plan_root.set_required_dist(Distribution::any().clone());
+    let materialize = plan_root.gen_create_mv_plan(table_name);
     let table = materialize.table().to_prost(schema_id, database_id);
     let plan: PlanRef = materialize.into();
 

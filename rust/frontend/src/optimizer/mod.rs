@@ -200,6 +200,11 @@ impl PlanRoot {
             self.out_fields.clone(),
         )
     }
+
+    /// Set the plan root's required dist.
+    pub fn set_required_dist(&mut self, required_dist: Distribution) {
+        self.required_dist = required_dist;
+    }
 }
 
 #[cfg(test)]
