@@ -84,7 +84,7 @@ impl StreamHashJoin {
             (Distribution::HashShard(l_cols), Distribution::HashShard(r_cols)) => {
                 assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
                 assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
-                l2o_mapping.rewrite_distribution(left.clone())
+                l2o_mapping.rewrite_provided_distribution(left)
             }
             (_, _) => panic!(),
         }

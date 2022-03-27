@@ -45,7 +45,7 @@ impl StreamHashAgg {
                 );
                 logical
                     .i2o_col_mapping()
-                    .rewrite_distribution(input_dist.clone())
+                    .rewrite_provided_distribution(input_dist)
             }
         };
         // Hash agg executor might change the append-only behavior of the stream.

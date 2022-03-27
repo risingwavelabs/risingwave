@@ -226,12 +226,10 @@ impl ColIndexMapping {
         self.target_size() == 0
     }
 
-    // TODO: maybe rewrite required property and provided provided should be different
-
-    /// rewrite the order's field index.
+    /// rewrite the provided order's field index. it will try best to give the most accurate order.
     /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
-    pub fn rewrite_order(&self, order: Order) -> Order {
+    pub fn rewrite_provided_order(&self, order: &Order) -> Order {
         let mapped_field = vec![];
         for field in order.field_order {
             match self.try_map(field.index) {
@@ -247,10 +245,31 @@ impl ColIndexMapping {
         }
     }
 
-    /// rewrite the distribution's field index
-    /// HashShard(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2)
-    /// HashShard(0,1,2) with mapping(0->1,2->0) will be rewritten to AnyShard
-    pub fn rewrite_distribution(self, dist: Distribution) -> Distribution {
+    /// rewrite the required order's field index. if it can't give a corresponding
+    /// required order after the column index mapping, it will return None.
+    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will return None
+    pub fn rewrite_required_order(&self, order: &Order) -> Option<Order> {
+        order
+            .field_order
+            .iter()
+            .map(|field| {
+                self.try_map(field.index).map(|mapped_index| FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|mapped_field| Order {
+                field_order: mapped_field,
+            })
+    }
+
+    /// rewrite the provided distribution's field index. it will try best to give the most accurate
+    /// distribution.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to AnyShard.
+    pub fn rewrite_provided_distribution(self, dist: &Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(col_idxes) => {
                 let mapped_dist = col_idxes
@@ -262,7 +281,22 @@ impl ColIndexMapping {
                     None => Distribution::AnyShard,
                 }
             }
-            _ => dist,
+            _ => dist.clone(),
+        }
+    }
+
+    /// rewrite the required distribution's field index. if it can't give a corresponding
+    /// required distribution after the column index mapping, it will return None.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
+    pub fn rewrite_required_distribution(self, dist: &Distribution) -> Option<Distribution> {
+        match dist {
+            Distribution::HashShard(col_idxes) => col_idxes
+                .iter()
+                .map(|col_idx| self.try_map(*col_idx))
+                .collect::<Option<Vec<_>>>()
+                .map(|col_idxes| Distribution::HashShard(col_idxes)),
+            _ => Some(dist.clone()),
         }
     }
 

@@ -45,7 +45,7 @@ impl BatchHashAgg {
                 );
                 logical
                     .i2o_col_mapping()
-                    .rewrite_distribution(input_dist.clone())
+                    .rewrite_provided_distribution(input_dist)
             }
         };
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());

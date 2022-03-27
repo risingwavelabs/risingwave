@@ -37,19 +37,9 @@ impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
         let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-        let distribution = match logical.input().distribution() {
-            Distribution::HashShard(dists) => {
-                let new_dists = dists
-                    .iter()
-                    .map(|hash_col| i2o.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match new_dists {
-                    Some(new_dists) => Distribution::HashShard(new_dists),
-                    None => Distribution::AnyShard,
-                }
-            }
-            dist => dist.clone(),
-        };
+
+        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
+        let distribution = i2o.rewrite_provided_distribution(logical.input().distribution());
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,

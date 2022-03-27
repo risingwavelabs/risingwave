@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 
 use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order, WithSchema};
+use crate::optimizer::property::{FieldOrder, Order, WithOrder, WithSchema};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -70,7 +70,9 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 input,
                 self.limit,
                 self.offset,
-                input_col_change.rewrite_order(self.order.clone()),
+                input_col_change
+                    .rewrite_required_order(&self.order)
+                    .unwrap(),
             ),
             input_col_change,
         )
