@@ -251,22 +251,17 @@ impl ToBatch for LogicalProject {
 
 impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
-        let o2i = LogicalProject::o2i_col_mapping(self.input().schema().len(), self.exprs());
-        let input_dist = match required_dist {
-            Distribution::HashShard(dists) => {
-                let input_dists = dists
-                    .iter()
-                    .map(|hash_col| o2i.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match input_dists {
-                    Some(input_dists) => Distribution::HashShard(input_dists),
-                    None => Distribution::AnyShard,
-                }
+        let input_required = match required_dist {
+            Distribution::HashShard(_) => {
+                let o2i =
+                    LogicalProject::o2i_col_mapping(self.input().schema().len(), self.exprs());
+                o2i.rewrite_required_distribution(required_dist)
+                    .unwrap_or(Distribution::AnyShard)
             }
             Distribution::AnyShard => Distribution::AnyShard,
             _ => Distribution::Any,
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_dist);
+        let new_input = self.input().to_stream_with_dist_required(&input_required);
         let new_logical = self.clone_with_input(new_input);
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
