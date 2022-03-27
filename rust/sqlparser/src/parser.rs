@@ -226,12 +226,12 @@ impl Parser {
             Token::LParen => {
                 let mut expr = self.parse_expr()?;
                 if self.consume_token(&Token::RParen) {
-                    // Now that we have an expr, what follows must be
-                    // dot-delimited identifiers, e.g. `(a).b.c.*`
-                    // Cast off nested expression
+                    // Cast off nested expression to avoid interface by parentesis.
                     while let Expr::Nested(expr1) = expr {
                         expr = *expr1;
                     }
+                    // Now that we have an expr, what follows must be
+                    // dot-delimited identifiers, e.g. `(a).b.c.*`
                     let wildcard_expr = self.parse_simple_wildcard_expr(index)?;
                     return self.expr_concat_wildcard_expr(expr, wildcard_expr);
                 }
@@ -243,7 +243,8 @@ impl Parser {
         self.parse_expr().map(WildcardExpr::Expr)
     }
 
-    /// Will return a `WildcardExpr::QualifiedWildcard(ObjectName)` with word concat or input expr
+    /// Will return a `WildcardExpr::QualifiedWildcard(ObjectName)` with word concat or
+    /// `WildcardExpr::Expr`
     pub fn word_concat_wildcard_expr(
         &mut self,
         ident: Ident,
@@ -259,7 +260,7 @@ impl Parser {
     }
 
     /// Will return a `WildcardExpr::ExprQualifiedWildcard(Expr,ObjectName)` with expr concat or
-    /// input wildcard_expr
+    /// `WildcardExpr::Expr`
     pub fn expr_concat_wildcard_expr(
         &mut self,
         expr: Expr,
