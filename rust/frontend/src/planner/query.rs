@@ -16,6 +16,7 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundQuery;
+use crate::optimizer::plan_node::LogicalLimit;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
@@ -23,11 +24,14 @@ use crate::planner::Planner;
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
-        let plan = self.plan_set_expr(query.body)?;
+        let mut plan = self.plan_set_expr(query.body)?;
         // plan order and limit here
         let order = Order {
             field_order: query.order,
         };
+        if let Some(limit) = query.limit {
+            plan = LogicalLimit::create(plan, limit, 0);
+        }
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);

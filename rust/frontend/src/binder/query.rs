@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
+use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query, Value};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::{Direction, FieldOrder};
@@ -27,6 +27,7 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
+    pub limit: Option<usize>,
 }
 
 impl BoundQuery {
@@ -54,12 +55,16 @@ impl Binder {
             }),
             BoundSetExpr::Values(_) => {}
         };
+        let limit = match query.limit {
+            Some(Expr::Value(Value::Number(limit, _))) => limit.parse().ok(),
+            _ => None,
+        };
         let order = query
             .order_by
             .into_iter()
             .map(|order_by_expr| self.bind_order_by_expr(order_by_expr, &name_to_index))
             .collect::<Result<_>>()?;
-        Ok(BoundQuery { body, order })
+        Ok(BoundQuery { body, order, limit })
     }
 
     fn bind_order_by_expr(
