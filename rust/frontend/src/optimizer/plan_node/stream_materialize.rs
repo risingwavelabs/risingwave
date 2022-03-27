@@ -42,7 +42,7 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    fn derive_plan_base(input: PlanRef) -> PlanBase {
+    fn derive_plan_base(input: &PlanRef) -> PlanBase {
         let ctx = input.ctx();
         let schema = input.schema();
         let pk_indices = input.pk_indices();
@@ -57,7 +57,7 @@ impl StreamMaterialize {
     }
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = Self::derive_plan_base(input);
+        let base = Self::derive_plan_base(&input);
         Self { base, input, table }
     }
 
@@ -68,7 +68,7 @@ impl StreamMaterialize {
         user_order_by: Order,
         user_cols: FixedBitSet,
     ) -> Self {
-        let base = Self::derive_plan_base(input);
+        let base = Self::derive_plan_base(&input);
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
@@ -79,9 +79,9 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
                 column_desc: ColumnDesc {
-                    data_type: field.data_type,
+                    data_type: field.data_type.clone(),
                     column_id: (i as i32).into(),
-                    name: field.name,
+                    name: field.name.clone(),
                     field_descs: vec![],
                     type_name: "".to_string(),
                 },
@@ -89,8 +89,8 @@ impl StreamMaterialize {
             })
             .collect_vec();
 
-        let in_pk = FixedBitSet::with_capacity(schema.len());
-        let pk_desc = vec![];
+        let mut in_pk = FixedBitSet::with_capacity(schema.len());
+        let mut pk_desc = vec![];
         for field in &user_order_by.field_order {
             let idx = field.index;
             pk_desc.push(OrderedColumnDesc {

@@ -27,7 +27,7 @@ use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::LogicalProject;
+use self::plan_node::{LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::expr::InputRef;
 
@@ -169,7 +169,7 @@ impl PlanRoot {
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self) -> PlanRef {
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> StreamMaterialize {
         let mut plan = self.gen_optimized_logical_plan();
         plan = {
             let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
@@ -184,7 +184,14 @@ impl PlanRoot {
 
         // Convert to physical plan node, using distribution of the input node
         // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
-        plan.to_stream_with_dist_required(plan.distribution())
+        plan = plan.to_stream_with_dist_required(&self.required_dist);
+
+        StreamMaterialize::create(
+            plan,
+            mv_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+        )
     }
 }
 

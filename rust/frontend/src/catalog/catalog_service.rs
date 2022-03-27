@@ -27,7 +27,9 @@ use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
 
 use super::root_catalog::Catalog;
-use super::DatabaseId;
+use super::{DatabaseId, SchemaId};
+use crate::optimizer::plan_node::{PlanNode, StreamMaterialize};
+use crate::optimizer::PlanRef;
 
 pub type CatalogReadGuard = ArcRwLockReadGuard<RawRwLock, Catalog>;
 

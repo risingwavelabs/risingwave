@@ -20,7 +20,7 @@ mod resolve_id;
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_table, drop_table, gen_create_mv_plan, MvInfo};
+use risingwave_frontend::handler::{create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
