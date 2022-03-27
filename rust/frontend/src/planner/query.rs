@@ -29,8 +29,8 @@ impl Planner {
         let order = Order {
             field_order: query.order,
         };
-        if let Some(limit) = query.limit {
-            plan = LogicalLimit::create(plan, limit, 0);
+        if query.limit.is_some() || query.offset.is_some() {
+            plan = LogicalLimit::create(plan, query.limit.unwrap_or(0), query.offset.unwrap_or(0))
         }
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
