@@ -33,15 +33,22 @@ impl PlanTreeNodeLeaf for BatchValues {}
 impl_plan_tree_node_for_leaf!(BatchValues);
 
 impl BatchValues {
-    pub fn new(logical: LogicalValues) -> Self {
+    pub fn new_inner(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchValues { base, logical }
+    }
+    pub fn new(logical: LogicalValues) -> Self {
+        Self::new_inner(logical, Distribution::Any)
+    }
+    pub fn new_with_dist(logical: LogicalValues) -> Self {
+        Self::new_inner(logical, Distribution::Single)
+    }
+
+    /// Get a reference to the batch values's logical.
+    #[must_use]
+    pub fn logical(&self) -> &LogicalValues {
+        &self.logical
     }
 }
 
@@ -61,7 +68,7 @@ impl WithSchema for BatchValues {
 
 impl ToDistributedBatch for BatchValues {
     fn to_distributed(&self) -> PlanRef {
-        self.clone().into()
+        Self::new_with_dist(self.logical().clone()).into()
     }
 }
 
