@@ -37,7 +37,11 @@ pub struct StreamSource {
 }
 
 impl StreamSource {
-    pub fn create(ctx: OptimizerContextRef, pk_idx: Vec<usize>, source_catalog: ProstSource) -> Self {
+    pub fn create(
+        ctx: OptimizerContextRef,
+        pk_idx: Vec<usize>,
+        source_catalog: ProstSource,
+    ) -> Self {
         let (source_type, prost_columns) = match &source_catalog.info {
             Some(Info::StreamSource(source)) => (SourceType::Source, source.columns.clone()),
             Some(Info::TableSource(source)) => (SourceType::Table, source.columns.clone()),

@@ -27,7 +27,7 @@ macro_rules! impl_with_ctx {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
             impl WithContext for [<$convention $name>] {
-                fn ctx(&self) -> QueryContextRef {
+                fn ctx(&self) -> OptimizerContextRef {
                     self.base.ctx.clone()
                 }
             }

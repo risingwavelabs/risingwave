@@ -175,7 +175,11 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
-    fn apply_query(&self, stmt: &Statement, context: OptimizerContextRef) -> Result<TestCaseResult> {
+    fn apply_query(
+        &self,
+        stmt: &Statement,
+        context: OptimizerContextRef,
+    ) -> Result<TestCaseResult> {
         let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
 
