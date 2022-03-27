@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_meta::manager::IdCategory::Table;
+
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
@@ -29,8 +29,8 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, WithSchema};
-use crate::session::OptimizerContextRef;
+use crate::optimizer::property::{Order, WithSchema};
+
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -115,7 +115,7 @@ impl StreamMaterialize {
             associated_source_id: None,
             name: mv_name,
             columns,
-            pk_desc: pk_desc,
+            pk_desc,
         };
 
         Self { base, input, table }
@@ -132,7 +132,7 @@ impl StreamMaterialize {
     }
 
     /// XXX(st1page): this function is used for potential DDL demand in future, and please try your
-    /// best not convert ColumnId to usize(col_index)
+    /// best not convert `ColumnId` to `usize(col_index`)
     fn col_id_to_idx(&self, id: ColumnId) -> usize {
         id.get_id() as usize
     }

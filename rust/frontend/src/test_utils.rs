@@ -35,7 +35,7 @@ use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::meta_client::FrontendMetaClient;
-use crate::optimizer::plan_node::StreamMaterialize;
+
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};

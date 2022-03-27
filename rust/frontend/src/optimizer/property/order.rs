@@ -117,9 +117,9 @@ pub enum Direction {
     Any, // only used in order requirement
 }
 
-impl Into<OrderType> for Direction {
-    fn into(self) -> OrderType {
-        match self {
+impl From<Direction> for OrderType {
+    fn from(dir: Direction) -> Self {
+        match dir {
             Direction::Asc => OrderType::Ascending,
             Direction::Desc => OrderType::Descending,
             Direction::Any => OrderType::Ascending,

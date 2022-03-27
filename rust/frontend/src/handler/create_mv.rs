@@ -12,20 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
 
-use itertools::Itertools;
+
+
 use pgwire::pg_response::PgResponse;
-use risingwave_common::catalog::ColumnDesc;
+
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
-use crate::binder::{Binder, BoundQuery};
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::{ColumnId, TableId};
-use crate::optimizer::plan_node::{PlanNode, StreamMaterialize};
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::binder::{Binder};
+
+
+
+
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
@@ -37,7 +37,7 @@ pub fn gen_create_mv_plan(
     query: Box<Query>,
     name: ObjectName,
 ) -> Result<(PlanRef, ProstTable)> {
-    let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
+    let (schema_name, table_name) = Binder::resolve_table_name(name)?;
     let (database_id, schema_id) = session
         .env()
         .catalog_reader()
@@ -52,7 +52,7 @@ pub fn gen_create_mv_plan(
         binder.bind_query(*query)?
     };
 
-    let materialize = Planner::new(context.into())
+    let materialize = Planner::new(context)
         .plan_query(bound)?
         .gen_create_mv_plan(table_name);
     let table = materialize.table().to_prost(schema_id, database_id);
