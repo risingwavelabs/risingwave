@@ -20,7 +20,7 @@ mod resolve_id;
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_table, drop_table};
+use risingwave_frontend::handler::{create_mv, create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
 use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
@@ -197,7 +197,7 @@ impl TestCase {
             }
         };
 
-        let mut planner = Planner::new(context);
+        let mut planner = Planner::new(context.clone());
 
         let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
@@ -241,8 +241,12 @@ impl TestCase {
                 return Err(anyhow!("expect a query"));
             };
 
-            let (stream_plan, table) =
-                gen_create_mv_plan(&session, &mut planner, q, MvInfo::with_name("test"))?;
+            let (stream_plan, table) = create_mv::gen_create_mv_plan(
+                &session,
+                context,
+                Box::new(q),
+                ObjectName(vec!["test".into()]),
+            )?;
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
