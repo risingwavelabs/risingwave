@@ -67,6 +67,8 @@ use IsLateral::*;
 
 pub enum WildcardExpr {
     Expr(Expr),
+    /// Expr and Qualified wildcard, expr is a table or a column struct, object_name is field.
+    /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, ObjectName),
     QualifiedWildcard(ObjectName),
     Wildcard,

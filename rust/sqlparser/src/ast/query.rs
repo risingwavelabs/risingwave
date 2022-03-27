@@ -246,12 +246,11 @@ impl fmt::Display for Cte {
 pub enum SelectItem {
     /// Any expression, not followed by `[ AS ] alias`
     UnnamedExpr(Expr),
+    /// expr is a table or a column struct, object_name is field.
+    /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, ObjectName),
     /// An expression, followed by `[ AS ] alias`
-    ExprWithAlias {
-        expr: Expr,
-        alias: Ident,
-    },
+    ExprWithAlias { expr: Expr, alias: Ident },
     /// `alias.*` or even `schema.table.*`
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -265,11 +264,11 @@ impl fmt::Display for SelectItem {
             SelectItem::ExprWithAlias { expr, alias } => write!(f, "{} AS {}", expr, alias),
             // TODO: refactor QualifiedWildcard and binder to change this.
             SelectItem::ExprQualifiedWildcard(expr, prefix) => {
-                if let Expr::CompoundIdentifier(idents) = expr {
-                    if idents.is_empty() {
-                        return write!(f, "{}.*", prefix);
-                    }
-                }
+                // if let Expr::CompoundIdentifier(idents) = expr {
+                //     if idents.is_empty() {
+                //         return write!(f, "{}.*", prefix);
+                //     }
+                // }
                 write!(f, "{}.{}.*", expr, prefix)
             }
             SelectItem::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),

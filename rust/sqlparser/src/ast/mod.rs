@@ -169,8 +169,8 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
-    /// Struct-field identifier, expr is table or column struct, ident is field.
-    /// e.g. `(table.column).v1` or `(column).v1`
+    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// e.g. `(table.v1).v2` or `(table).v1.v2`
     FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
@@ -1356,6 +1356,8 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
+    /// expr is a table or a column struct, object_name is field.
+    /// e.g. `(table.v1).*` or `(table).v1.*`
     ExprQualifiedWildcard(Expr, ObjectName),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
@@ -1369,11 +1371,11 @@ impl fmt::Display for FunctionArgExpr {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
             // TODO: refactor QualifiedWildcard and binder to change this.
             FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
-                if let Expr::CompoundIdentifier(idents) = expr {
-                    if idents.is_empty() {
-                        return write!(f, "{}.*", prefix);
-                    }
-                }
+                // if let Expr::CompoundIdentifier(idents) = expr {
+                //     if idents.is_empty() {
+                //         return write!(f, "{}.*", prefix);
+                //     }
+                // }
                 write!(f, "{}.{}.*", expr, prefix)
             }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
