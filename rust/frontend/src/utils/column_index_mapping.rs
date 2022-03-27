@@ -226,7 +226,9 @@ impl ColIndexMapping {
         self.target_size() == 0
     }
 
-    /// rewrite the order's field index
+    // TODO: maybe rewrite required property and provided provided should be different
+
+    /// rewrite the order's field index.
     /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
     pub fn rewrite_order(&self, order: Order) -> Order {
@@ -246,8 +248,8 @@ impl ColIndexMapping {
     }
 
     /// rewrite the distribution's field index
-    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
-    /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
+    /// HashShard(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2)
+    /// HashShard(0,1,2) with mapping(0->1,2->0) will be rewritten to AnyShard
     pub fn rewrite_distribution(self, dist: Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(col_idxes) => {
