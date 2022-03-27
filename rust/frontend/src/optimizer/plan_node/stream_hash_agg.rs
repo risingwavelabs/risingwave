@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
@@ -33,14 +33,23 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
+        let input_dist = logical.distribution();
+        let dist = match input_dist {
+            Distribution::Any => panic!(),
+            Distribution::Single => Distribution::Single,
+            Distribution::Broadcast => panic!(),
+            Distribution::AnyShard => panic!(),
+            Distribution::HashShard(_) => {
+                assert!(
+                    input_dist.satisfies(&Distribution::HashShard(logical.group_keys().to_vec()))
+                );
+                logical
+                    .i2o_col_mapping()
+                    .rewrite_distribution(input_dist.clone())
+            }
+        };
         // Hash agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            Distribution::HashShard(logical.group_keys().to_vec()),
-            false,
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
