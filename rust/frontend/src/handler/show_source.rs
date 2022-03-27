@@ -33,7 +33,7 @@ pub async fn handle_show_source(
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
-    // Get column descs from source info
+    // Get prost column_descs from source info and into column_descs
     let columns: Vec<ColumnDesc> = catalog_reader
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .get_column_descs()
@@ -41,7 +41,7 @@ pub async fn handle_show_source(
         .map(|c| c.into())
         .collect_vec();
 
-    // Get all column descs and convert to row
+    // Convert all column_descs to rows
     let mut rows = vec![];
     for col in columns {
         rows.append(
@@ -64,7 +64,7 @@ pub async fn handle_show_source(
     ))
 }
 
-// row result conclude column name and column datatype
+/// Convert column desc to row which conclude column name and column datatype
 fn col_desc_to_row(col: ColumnDesc) -> Row {
     let type_name = {
         // if datatype is struct, use type name as struct name

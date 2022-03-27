@@ -68,6 +68,7 @@ impl crate::catalog::Source {
         )
     }
 
+    /// Return column_descs from source info
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let catalogs = match self.get_info().unwrap() {
             crate::catalog::source::Info::StreamSource(info) => &info.columns,
