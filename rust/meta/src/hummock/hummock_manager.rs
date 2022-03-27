@@ -40,17 +40,16 @@ use crate::hummock::model::{
     INVALID_TIMESTAMP,
 };
 use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
-use crate::model::{MetadataModel, VarTransaction, VarTransactionImpl, Worker};
+use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
 
 // Update to states are performed as follow:
-// - Call load_meta_store_state when creating HummockManager (on boot or on meta-node leadership
-//   change).
-// - Read in-mem states and make copies of them.
-// - Make changes on the copies.
-// - Commit the changes via meta store transaction.
-// - If transaction succeeds, update in-mem states with the copies.
+// - Initialize ValTransaction for the meta state to update
+// - Make changes on the ValTransaction.
+// - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
+//   succeeds, the in-mem state will be updated by the way.
+// - Call `abort_multi_var` if the ValTransaction is no longer needed
 pub struct HummockManager<S> {
     meta_store_ref: Arc<S>,
     id_gen_manager_ref: IdGeneratorManagerRef<S>,
@@ -67,16 +66,22 @@ struct Compaction {
     compact_status: CompactStatus,
 }
 
+/// Commit multiple `ValTransaction`s to state store and upon success update the local in-mem state
+/// by the way
+/// After called, the `ValTransaction` will be dropped.
 macro_rules! commit_multi_var {
     ($hummock_mgr:expr, $context_id:expr, $($val_txn:expr),*) => {
         {
             async {
                 let mut trx = Transaction::default();
+                // Apply the change in `ValTransaction` to trx
                 $(
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
+                // Commit to state store
                 $hummock_mgr.commit_trx($hummock_mgr.meta_store_ref.as_ref(), trx, $context_id)
                 .await?;
+                // Upon successful commit, commit the change to local in-mem state
                 $(
                     $val_txn.commit();
                 )*
@@ -86,14 +91,19 @@ macro_rules! commit_multi_var {
     };
 }
 
+/// Abort the `ValTransaction`s. Simply drop them
 macro_rules! abort_multi_var {
     ($($val_txn:expr),*) => {
         $(
-            drop($val_txn);
+            $val_txn.abort();
         )*
     }
 }
 
+/// Parse a mutable reference expression DSL
+/// - For r($field), return the immutable reference to the field
+/// - For mr($field), return the mutable reference to the field
+/// - For var_txn($field), return a `VarTransaction` that wraps the field
 macro_rules! parse_mut_ref_expr {
     // take the immutable ref
     ($var:ident,r, $field:ident) => {
@@ -105,10 +115,12 @@ macro_rules! parse_mut_ref_expr {
     };
     // start a var txn
     ($var:ident,var_txn, $field:ident) => {
-        VarTransactionImpl::from_var(&mut $var.$field)
+        VarTransaction::new(&mut $var.$field)
     };
 }
 
+/// Split a mutable reference of a struct to multiple reference, mutable reference or
+/// `VarTransaction` to its field
 macro_rules! split_fields_mut_ref {
     ($mut_ref_expr:expr, $mut_ref_type:ident ($field: ident)) => {
         {
@@ -274,14 +286,13 @@ where
         last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
-        let (pv_mut_ref, hummock_versions, current_version_id) = split_fields_mut_ref!(
+        let (mut pinned_versions, hummock_versions, current_version_id) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
-            mr(pinned_versions),
+            var_txn(pinned_versions),
             r(hummock_versions),
             r(current_version_id)
         );
-        let mut context_pinned_version = VarTransactionImpl::from_btreemap_entry_or_default(
-            pv_mut_ref,
+        let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
             HummockPinnedVersion {
                 context_id,
@@ -330,14 +341,14 @@ where
         pinned_version_id: HummockVersionId,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let pv_ref_mut = split_fields_mut_ref!(versioning_guard.deref_mut(), mr(pinned_versions));
-        let mut context_pinned_version =
-            match VarTransactionImpl::from_btreemap_entry(pv_ref_mut, context_id) {
-                None => {
-                    return Ok(());
-                }
-                Some(context_pinned_version) => context_pinned_version,
-            };
+        let mut pinned_versions =
+            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_versions));
+        let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
+            None => {
+                return Ok(());
+            }
+            Some(context_pinned_version) => context_pinned_version,
+        };
         context_pinned_version.unpin_version(pinned_version_id);
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
 
@@ -486,10 +497,10 @@ where
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
 
-        let (mut current_version_id, hummock_versions, mut sstable_id_infos) = split_fields_mut_ref!(
+        let (mut current_version_id, mut hummock_versions, mut sstable_id_infos) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
             var_txn(current_version_id),
-            mr(hummock_versions),
+            var_txn(hummock_versions),
             var_txn(sstable_id_infos)
         );
 
@@ -529,11 +540,8 @@ where
         }
 
         current_version_id.increase();
-        let mut new_hummock_version = VarTransactionImpl::from_btreemap_entry_or_default(
-            hummock_versions,
-            current_version_id.id(),
-            current_hummock_version,
-        );
+        let mut new_hummock_version = hummock_versions
+            .new_entry_txn_or_default(current_version_id.id(), current_hummock_version);
 
         new_hummock_version.id = current_version_id.id();
 
@@ -596,10 +604,10 @@ where
             .unwrap()
             .max_committed_epoch;
 
-        let ps_mut_ref = split_fields_mut_ref!(versioning_guard.deref_mut(), mr(pinned_snapshots));
+        let mut pinned_snapshots =
+            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_snapshots));
 
-        let mut context_pinned_snapshot = VarTransactionImpl::from_btreemap_entry_or_default(
-            ps_mut_ref,
+        let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
             HummockPinnedSnapshot {
                 context_id,
@@ -646,15 +654,15 @@ where
         hummock_snapshot: HummockSnapshot,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let ps_mut_ref = split_fields_mut_ref!(versioning_guard.deref_mut(), mr(pinned_snapshots));
+        let mut pinned_snapshots =
+            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_snapshots));
 
-        let mut context_pinned_snapshot =
-            match VarTransactionImpl::from_btreemap_entry(ps_mut_ref, context_id) {
-                None => {
-                    return Ok(());
-                }
-                Some(context_pinned_snapshot) => context_pinned_snapshot,
-            };
+        let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
+            None => {
+                return Ok(());
+            }
+            Some(context_pinned_snapshot) => context_pinned_snapshot,
+        };
         context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
         commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
 
@@ -669,7 +677,7 @@ where
 
     pub async fn get_compact_task(&self) -> Result<Option<CompactTask>> {
         let mut compaction_guard = self.compaction.lock().await;
-        let mut compact_status = VarTransactionImpl::from_var(&mut compaction_guard.compact_status);
+        let mut compact_status = VarTransaction::new(&mut compaction_guard.compact_status);
         let compact_task = compact_status.get_compact_task();
         let mut should_commit = false;
         let ret = match compact_task {
@@ -739,7 +747,7 @@ where
         let compact_metrics = compact_task.metrics.clone();
         let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
-        let mut compact_status = VarTransactionImpl::from_var(&mut compaction_guard.compact_status);
+        let mut compact_status = VarTransaction::new(&mut compaction_guard.compact_status);
         let delete_table_ids = match compact_status.report_compact_task(
             output_table_compact_entries,
             compact_task,
@@ -757,13 +765,13 @@ where
             let (
                 mut current_version_id,
                 mut hummock_versions,
-                stale_sstables_mut_ref,
+                mut stale_sstables,
                 mut sstable_id_infos,
             ) = split_fields_mut_ref!(
                 versioning_guard.deref_mut(),
                 var_txn(current_version_id),
                 var_txn(hummock_versions),
-                mr(stale_sstables),
+                var_txn(stale_sstables),
                 var_txn(sstable_id_infos)
             );
             let old_version = hummock_versions
@@ -801,8 +809,7 @@ where
 
             hummock_versions.insert(current_version_id.id(), new_version);
 
-            let mut version_stale_sstables = VarTransactionImpl::from_btreemap_entry_or_default(
-                stale_sstables_mut_ref,
+            let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
                 old_version.id,
                 HummockStaleSstables {
                     version_id: old_version.id,
@@ -867,24 +874,18 @@ where
 
     pub async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
-        let mut compact_status = VarTransactionImpl::from_var(&mut compaction_guard.compact_status);
+        let mut compact_status = VarTransaction::new(&mut compaction_guard.compact_status);
         let mut versioning_guard = self.versioning.write().await;
-        let (mut current_version_id, hummock_versions_mut_ref) = split_fields_mut_ref!(
+        let (mut current_version_id, mut hummock_versions) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
             var_txn(current_version_id),
-            mr(hummock_versions)
+            var_txn(hummock_versions)
         );
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
-        let old_version_copy = hummock_versions_mut_ref
-            .get(&old_version_id)
-            .unwrap()
-            .clone();
-        let mut new_hummock_version = VarTransactionImpl::from_btreemap_entry_or_default(
-            hummock_versions_mut_ref,
-            new_version_id,
-            old_version_copy,
-        );
+        let old_version_copy = hummock_versions.get(&old_version_id).unwrap().clone();
+        let mut new_hummock_version =
+            hummock_versions.new_entry_txn_or_default(new_version_id, old_version_copy);
         // TODO: return error instead of panic
         if epoch <= new_hummock_version.max_committed_epoch {
             panic!(
@@ -975,23 +976,17 @@ where
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let (mut current_version_id, mut sstable_id_infos, hummock_versions_mut_ref) = split_fields_mut_ref!(
+        let (mut current_version_id, mut sstable_id_infos, mut hummock_versions) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
             var_txn(current_version_id),
             var_txn(sstable_id_infos),
-            mr(hummock_versions)
+            var_txn(hummock_versions)
         );
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
-        let old_hummock_version = hummock_versions_mut_ref
-            .get(&old_version_id)
-            .unwrap()
-            .clone();
-        let mut new_hummock_version = VarTransactionImpl::from_btreemap_entry_or_default(
-            hummock_versions_mut_ref,
-            new_version_id,
-            old_hummock_version,
-        );
+        let old_hummock_version = hummock_versions.get(&old_version_id).unwrap().clone();
+        let mut new_hummock_version =
+            hummock_versions.new_entry_txn_or_default(new_version_id, old_hummock_version);
 
         let mut should_commit = false;
 
@@ -1249,8 +1244,7 @@ where
 
     pub async fn delete_sstable_ids(&self, sst_ids: impl AsRef<[HummockSSTableId]>) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut sstable_id_infos =
-            VarTransactionImpl::from_var(&mut versioning_guard.sstable_id_infos);
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
 
         // Update in-mem state after transaction succeeds.
         for sst_id in sst_ids.as_ref() {

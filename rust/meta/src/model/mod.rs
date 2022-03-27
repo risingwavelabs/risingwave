@@ -142,159 +142,209 @@ where
     }
 }
 
-pub trait ValModifier<'a, T> {
-    fn apply_new_val(&mut self, val: T);
-    fn get_orig_val(&self) -> Option<&T>;
-}
-
-pub struct BTreeMapEntryValModifier<'a, K: Ord, V> {
-    tree_ref: &'a mut BTreeMap<K, V>,
-    key: K,
-}
-
-impl<'a, K: Ord + Clone, V> ValModifier<'a, V> for BTreeMapEntryValModifier<'a, K, V> {
-    fn apply_new_val(&mut self, val: V) {
-        self.tree_ref.insert(self.key.clone(), val);
-    }
-    fn get_orig_val(&self) -> Option<&V> {
-        None
-    }
-}
-
-pub struct VarModifier<'a, T> {
-    val_ref: &'a mut T,
-}
-
-impl<'a, T> ValModifier<'a, T> for VarModifier<'a, T> {
-    fn apply_new_val(&mut self, val: T) {
-        *self.val_ref = val;
-    }
-    fn get_orig_val(&self) -> Option<&T> {
-        Some(self.val_ref)
-    }
-}
-
-pub trait VarTransaction {
+/// Trait that wraps a local memory value and applies the change to the local memory value on
+/// `commit` or leaves the local memory value untouched on `abort`.
+pub trait ValTransaction: Sized {
+    /// Commit the change to local memory value
     fn commit(self);
+
+    /// Apply the change (upsert or delete) to `txn`
     fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()>;
+
+    /// Abort the `VarTransaction` and leave the local memory value untouched
+    fn abort(self) {
+        drop(self);
+    }
 }
 
-pub struct VarTransactionImpl<'a, T> {
-    modifier: Box<dyn ValModifier<'a, T> + 'a + Send>,
-    // TODO: may want to use a lazy value
-    orig_value: Option<T>,
-    new_value: T,
+/// Transaction wrapper for a variable.
+/// In first `deref_mut` call, a copy of the original value will be assigned to `new_value`
+/// and all subsequent modifications will be applied to the `new_value`.
+/// When `commit` is called, the change to `new_value` will be applied to the `orig_value_ref`
+/// When `abort` is called, the VarTransaction is dropped and the local memory value is
+/// untouched.
+pub struct VarTransaction<'a, T> {
+    orig_value_ref: &'a mut T,
+    new_value: Option<T>,
 }
 
-impl<'a, T> VarTransactionImpl<'a, T>
+impl<'a, T> VarTransaction<'a, T>
 where
-    T: Clone + Send,
+    T: Clone,
 {
-    pub fn from_btreemap_entry_or_default<K: Ord + Clone + Send>(
-        tree_ref: &'a mut BTreeMap<K, T>,
-        key: K,
-        default_val: T,
-    ) -> VarTransactionImpl<'a, T> {
-        let orig_value = tree_ref.get(&key).cloned();
-        VarTransactionImpl {
-            orig_value: orig_value.clone(),
-            new_value: orig_value.unwrap_or(default_val),
-            modifier: Box::new(BTreeMapEntryValModifier { tree_ref, key }),
+    /// Create a `VarTransaction` that wraps a raw variable
+    pub fn new(val_ref: &'a mut T) -> VarTransaction<'a, T> {
+        VarTransaction {
+            // lazy initialization
+            new_value: None,
+            orig_value_ref: val_ref,
+        }
+    }
+}
+
+impl<'a, T> Deref for VarTransaction<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match &self.new_value {
+            Some(new_value) => new_value,
+            None => self.orig_value_ref,
+        }
+    }
+}
+
+impl<'a, T> DerefMut for VarTransaction<'a, T>
+where
+    T: Clone,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        if let None = self.new_value {
+            self.new_value.replace(self.orig_value_ref.clone());
+        }
+        self.new_value.as_mut().unwrap()
+    }
+}
+
+impl<'a, T> ValTransaction for VarTransaction<'a, T>
+where
+    T: Transactional + PartialEq,
+{
+    fn commit(self) {
+        if let Some(new_value) = self.new_value {
+            *self.orig_value_ref = new_value;
         }
     }
 
-    pub fn from_btreemap_entry<K: Ord + Clone + Send>(
-        tree_ref: &'a mut BTreeMap<K, T>,
+    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+        if let Some(new_value) = &self.new_value {
+            // Apply the change to `txn` only when the value is modified
+            if *self.orig_value_ref != *new_value {
+                new_value.upsert_in_transaction(txn)
+            } else {
+                Ok(())
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl<'a, K, V> ValTransaction for VarTransaction<'a, BTreeMap<K, V>>
+where
+    K: Ord,
+    V: Transactional + PartialEq,
+{
+    fn commit(self) {
+        if let Some(new_value) = self.new_value {
+            *self.orig_value_ref = new_value;
+        }
+    }
+
+    /// For keys only in `self.orig_value`, call `delete_in_transaction` for the corresponding
+    /// value. For keys only in `self.new_value` or in both `self.new_value` and
+    /// `self.orig_value` but different in the value, call `upsert_in_transaction` for the
+    /// corresponding value.
+    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
+        if let Some(new_value) = &self.new_value {
+            for (k, v) in self.orig_value_ref.iter() {
+                if !new_value.contains_key(k) {
+                    v.delete_in_transaction(txn)?;
+                }
+            }
+            for (k, v) in new_value {
+                let orig_value = self.orig_value_ref.get(k);
+                if orig_value.is_none() || orig_value.unwrap() != v {
+                    v.upsert_in_transaction(txn)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Transaction wrapper for a `BTreeMap` entry value of given `key`
+pub struct BTreeMapEntryTransaction<'a, K, V> {
+    tree_ref: &'a mut BTreeMap<K, V>,
+    key: K,
+    new_value: V,
+}
+
+impl<'a, K: Ord, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
+    /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
+    /// If the tree does not contain `key`, the `default_val` will be used as the initial value
+    pub fn new_or_default(
+        tree_ref: &'a mut BTreeMap<K, V>,
         key: K,
-    ) -> Option<VarTransactionImpl<'a, T>> {
+        default_val: V,
+    ) -> BTreeMapEntryTransaction<'a, K, V> {
+        let init_value = tree_ref.get(&key).cloned().unwrap_or(default_val);
+        BTreeMapEntryTransaction {
+            new_value: init_value,
+            tree_ref,
+            key,
+        }
+    }
+
+    /// Create a `ValTransaction` that wraps a `BTreeMap` entry of the given `key`.
+    /// If the `key` exists in the tree, return `Some` of a `VarTransaction` wrapped for the
+    /// of the given `key`.
+    /// Otherwise return `None`.
+    pub fn new(
+        tree_ref: &'a mut BTreeMap<K, V>,
+        key: K,
+    ) -> Option<BTreeMapEntryTransaction<'a, K, V>> {
         tree_ref
             .get(&key)
             .cloned()
-            .map(|orig_value| VarTransactionImpl {
-                orig_value: Some(orig_value.clone()),
-                new_value: orig_value,
-                modifier: Box::new(BTreeMapEntryValModifier { tree_ref, key }),
+            .map(|orig_value| BTreeMapEntryTransaction {
+                new_value: orig_value.clone(),
+                tree_ref,
+                key,
             })
-    }
-
-    pub fn from_var(val_ref: &'a mut T) -> VarTransactionImpl<'a, T> {
-        VarTransactionImpl {
-            new_value: val_ref.clone(),
-            orig_value: Some(val_ref.clone()),
-            modifier: Box::new(VarModifier { val_ref }),
-        }
     }
 }
 
-impl<'a, T> Deref for VarTransactionImpl<'a, T> {
-    type Target = T;
+impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
+    type Target = V;
 
     fn deref(&self) -> &Self::Target {
         &self.new_value
     }
 }
 
-impl<'a, T> DerefMut for VarTransactionImpl<'a, T> {
+impl<'a, K, V> DerefMut for BTreeMapEntryTransaction<'a, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.new_value
     }
 }
 
-impl<'a, T> VarTransaction for VarTransactionImpl<'a, T>
-where
-    T: Transactional + PartialEq + Clone,
+impl<'a, K: Ord, V: PartialEq + Transactional> ValTransaction
+    for BTreeMapEntryTransaction<'a, K, V>
 {
-    fn commit(mut self) {
-        if match self.orig_value {
-            None => true,
-            Some(orig_value) => orig_value != self.new_value,
-        } {
-            self.modifier.apply_new_val(self.new_value);
-        }
+    fn commit(self) {
+        self.tree_ref.insert(self.key, self.new_value);
     }
+
     fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
-        if match &self.orig_value {
-            None => true,
-            Some(orig_value) => *orig_value != self.new_value,
-        } {
-            self.new_value.upsert_in_transaction(txn)
-        } else {
-            Ok(())
+        if !self.tree_ref.contains_key(&self.key)
+            || *self.tree_ref.get(&self.key).unwrap() != self.new_value
+        {
+            self.new_value.upsert_in_transaction(txn)?
         }
+        Ok(())
     }
 }
 
-impl<'a, K, V> VarTransaction for VarTransactionImpl<'a, BTreeMap<K, V>>
-where
-    K: Ord + Clone,
-    V: Transactional + PartialEq + Clone,
-{
-    fn commit(mut self) {
-        if match self.orig_value {
-            None => true,
-            Some(orig_value) => orig_value != self.new_value,
-        } {
-            self.modifier.apply_new_val(self.new_value);
-        }
+impl<'a, K: Ord, V: Clone> VarTransaction<'a, BTreeMap<K, V>> {
+    pub fn new_entry_txn(&mut self, key: K) -> Option<BTreeMapEntryTransaction<K, V>> {
+        BTreeMapEntryTransaction::new(self.orig_value_ref, key)
     }
-    fn apply_to_txn(&self, txn: &mut Transaction) -> Result<()> {
-        let temp_default = BTreeMap::default();
-        let orig_value = self.orig_value.as_ref().unwrap_or(&temp_default);
-        if *orig_value != self.new_value {
-            for (k, v) in orig_value {
-                if !self.new_value.contains_key(k) {
-                    v.delete_in_transaction(txn)?;
-                }
-            }
-            for (k, v) in &self.new_value {
-                let orig_value = orig_value.get(k);
-                if orig_value.is_none() || orig_value.unwrap() != v {
-                    v.upsert_in_transaction(txn)?;
-                }
-            }
-            Ok(())
-        } else {
-            Ok(())
-        }
+
+    pub fn new_entry_txn_or_default(
+        &mut self,
+        key: K,
+        default_val: V,
+    ) -> BTreeMapEntryTransaction<K, V> {
+        BTreeMapEntryTransaction::new_or_default(self.orig_value_ref, key, default_val)
     }
 }
