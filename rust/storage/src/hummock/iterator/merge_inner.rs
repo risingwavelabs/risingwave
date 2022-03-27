@@ -121,7 +121,7 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
             let node = PeekMut::pop(node);
             self.unused_iters.push_back(node.0);
         } else {
-            // This will update the heap top
+            // This will update the heap top.
             drop(node);
         }
 

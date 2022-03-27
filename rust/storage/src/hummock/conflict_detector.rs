@@ -41,8 +41,8 @@ impl ConflictDetector {
         self.epoch_watermark.load()
     }
 
+    // Sets the new watermark with CAS to enable detection in concurrent update
     pub fn set_watermark(&self, epoch: HummockEpoch) {
-        // Set the new watermark with CAS to enable detection in concurrent update
         loop {
             let current_watermark = self.get_epoch_watermark();
             assert!(
