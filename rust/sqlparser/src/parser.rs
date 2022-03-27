@@ -496,26 +496,27 @@ impl Parser {
     pub fn parse_struct_selection(&mut self, expr: Expr) -> Result<Expr, ParserError> {
         if let Expr::Nested(compound_expr) = expr.clone() {
             let mut nested_expr = *compound_expr;
-            // cast off nested expression
+            // Cast off nested expression to avoid interface by parentesis.
             while let Expr::Nested(expr1) = nested_expr {
                 nested_expr = *expr1;
             }
             match nested_expr {
-                // parser expr like `SELECT (foo).v1 from foo`
+                // Parser expr like `SELECT (foo).v1 from foo`
                 Expr::Identifier(ident) => Ok(Expr::FieldIdentifier(
                     Box::new(Expr::Identifier(ident)),
                     self.parse_field()?,
                 )),
-                // parser expr like `SELECT (foo.v1).v2 from foo`
+                // Parser expr like `SELECT (foo.v1).v2 from foo`
                 Expr::CompoundIdentifier(idents) => Ok(Expr::FieldIdentifier(
                     Box::new(Expr::CompoundIdentifier(idents)),
                     self.parse_field()?,
                 )),
-                // parser expr like `SELECT ((1,2,3)::foo).v1`
+                // Parser expr like `SELECT ((1,2,3)::foo).v1`
                 Expr::Cast { expr, data_type } => Ok(Expr::FieldIdentifier(
                     Box::new(Expr::Cast { expr, data_type }),
                     self.parse_field()?,
                 )),
+                // Parser expr like `SELECT ((foo.v1).v2).v3 from foo`
                 Expr::FieldIdentifier(expr, mut idents) => {
                     idents.extend(self.parse_field()?);
                     Ok(Expr::FieldIdentifier(expr, idents))
@@ -527,7 +528,7 @@ impl Parser {
         }
     }
 
-    // Parser all words after period
+    /// Parser all words after period until not period
     pub fn parse_field(&mut self) -> Result<Vec<Ident>, ParserError> {
         let mut idents = vec![];
         while self.consume_token(&Token::Period) {
