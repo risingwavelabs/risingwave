@@ -402,7 +402,7 @@ impl CompactStatus {
                 Some(delete_table_ids)
             }
             false => {
-                if !self.cancel_compact_task(compact_task.task_id) {
+                if !self.cancel_compact_task(&compact_task) {
                     // The task has been processed previously.
                     return None;
                 }
@@ -412,11 +412,11 @@ impl CompactStatus {
         }
     }
 
-    pub fn cancel_compact_task(&mut self, task_id: u64) -> bool {
-        // TODO: loop only in input levels
+    pub fn cancel_compact_task(&mut self, compact_task: &CompactTask) -> bool {
         let mut changed = false;
-        for level_handler in &mut self.level_handlers {
-            changed = changed || level_handler.unassign_task(task_id);
+        for LevelEntry { level_idx, .. } in &compact_task.input_ssts {
+            changed = changed
+                || self.level_handlers[*level_idx as usize].unassign_task(compact_task.task_id);
         }
         changed
     }
