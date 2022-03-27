@@ -38,7 +38,7 @@ use crate::catalog::DatabaseId;
 use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
-use crate::session::{FrontendEnv, QueryContext, SessionImpl};
+use crate::session::{FrontendEnv, OptimizerContext, SessionImpl};
 use crate::FrontendOpts;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
@@ -84,7 +84,7 @@ impl LocalFrontend {
                 );
                 binder.bind(Statement::Query(query.clone()))?
             };
-            Ok(Planner::new(QueryContext::new(session).into())
+            Ok(Planner::new(OptimizerContext::new(session).into())
                 .plan(bound)
                 .unwrap()
                 .gen_batch_query_plan())

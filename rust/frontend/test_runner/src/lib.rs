@@ -23,7 +23,7 @@ use risingwave_frontend::binder::Binder;
 use risingwave_frontend::handler::{create_table, drop_table, gen_create_mv_plan, MvInfo};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::{QueryContext, QueryContextRef};
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -148,7 +148,7 @@ impl TestCase {
             let statements = Parser::parse_sql(sql).unwrap();
 
             for stmt in statements {
-                let context = QueryContext::new(session.clone());
+                let context = OptimizerContext::new(session.clone());
                 match stmt.clone() {
                     Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                         if result.is_some() {
@@ -175,7 +175,11 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
-    fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
+    fn apply_query(
+        &self,
+        stmt: &Statement,
+        context: OptimizerContextRef,
+    ) -> Result<TestCaseResult> {
         let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
 
