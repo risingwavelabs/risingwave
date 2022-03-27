@@ -17,9 +17,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
-pub async fn handle_drop_mv(context: QueryContext, table_name: ObjectName) -> Result<PgResponse> {
+pub async fn handle_drop_mv(context: OptimizerContext, table_name: ObjectName) -> Result<PgResponse> {
     let session = context.session_ctx;
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 

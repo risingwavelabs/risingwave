@@ -16,11 +16,11 @@ use paste::paste;
 
 use super::super::plan_node::*;
 use crate::optimizer::plan_node::PlanNodeId;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 pub trait WithContext {
-    fn ctx(&self) -> QueryContextRef;
+    fn ctx(&self) -> OptimizerContextRef;
 }
 
 macro_rules! impl_with_ctx {

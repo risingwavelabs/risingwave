@@ -43,29 +43,29 @@ use crate::scheduler::query_manager::QueryManager;
 use crate::scheduler::schedule::WorkerNodeManager;
 use crate::FrontendOpts;
 
-pub struct QueryContext {
+pub struct OptimizerContext {
     pub session_ctx: Arc<SessionImpl>,
     // We use `AtomicI32` here because  `Arc<T>` implements `Send` only when `T: Send + Sync`.
     pub next_id: AtomicI32,
 }
 
 #[derive(Clone, Debug)]
-pub struct QueryContextRef {
-    inner: Arc<QueryContext>,
+pub struct OptimizerContextRef {
+    inner: Arc<OptimizerContext>,
 }
 
-impl !Sync for QueryContextRef {}
+impl !Sync for OptimizerContextRef {}
 
-impl From<QueryContext> for QueryContextRef {
-    fn from(inner: QueryContext) -> Self {
+impl From<OptimizerContext> for OptimizerContextRef {
+    fn from(inner: OptimizerContext) -> Self {
         Self {
             inner: Arc::new(inner),
         }
     }
 }
 
-impl QueryContextRef {
-    pub fn inner(&self) -> &QueryContext {
+impl OptimizerContextRef {
+    pub fn inner(&self) -> &OptimizerContext {
         &self.inner
     }
 
@@ -77,7 +77,7 @@ impl QueryContextRef {
     }
 }
 
-impl QueryContext {
+impl OptimizerContext {
     pub fn new(session_ctx: Arc<SessionImpl>) -> Self {
         Self {
             session_ctx,
@@ -87,7 +87,7 @@ impl QueryContext {
 
     // TODO(TaoWu): Remove the async.
     #[cfg(test)]
-    pub async fn mock() -> QueryContextRef {
+    pub async fn mock() -> OptimizerContextRef {
         Self {
             session_ctx: Arc::new(SessionImpl::mock()),
             next_id: AtomicI32::new(0),
@@ -96,7 +96,7 @@ impl QueryContext {
     }
 }
 
-impl std::fmt::Debug for QueryContext {
+impl std::fmt::Debug for OptimizerContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -365,11 +365,11 @@ impl Session for SessionImpl {
 mod tests {
     use assert_impl::assert_impl;
 
-    use crate::session::QueryContextRef;
+    use crate::session::OptimizerContextRef;
 
     #[test]
     fn check_query_context_ref() {
-        assert_impl!(Send: QueryContextRef);
-        assert_impl!(!Sync: QueryContextRef);
+        assert_impl!(Send: OptimizerContextRef);
+        assert_impl!(!Sync: OptimizerContextRef);
     }
 }

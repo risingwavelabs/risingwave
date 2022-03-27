@@ -28,7 +28,7 @@ use crate::optimizer::plan_node::StreamMaterialize;
 use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
-use crate::session::{QueryContext, SessionImpl};
+use crate::session::{OptimizerContext, SessionImpl};
 
 impl BoundQuery {
     /// Generate create MV's column desc from query.
@@ -189,7 +189,7 @@ pub fn gen_create_mv_plan(
 }
 
 pub async fn handle_create_mv(
-    context: QueryContext,
+    context: OptimizerContext,
     name: ObjectName,
     query: Box<Query>,
 ) -> Result<PgResponse> {

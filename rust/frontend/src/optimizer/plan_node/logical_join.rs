@@ -408,7 +408,7 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text
@@ -426,7 +426,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -512,7 +512,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -592,7 +592,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: DataType::Int32,

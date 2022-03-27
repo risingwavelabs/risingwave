@@ -18,7 +18,7 @@ use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement};
 
-use crate::session::{QueryContext, SessionImpl};
+use crate::session::{OptimizerContext, SessionImpl};
 
 mod create_mv;
 mod create_source;
@@ -33,7 +33,7 @@ pub mod util;
 pub use create_mv::{gen_create_mv_plan, MvInfo};
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session.clone());
+    let context = OptimizerContext::new(session.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..
