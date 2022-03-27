@@ -268,7 +268,7 @@ impl ColIndexMapping {
     /// rewrite the provided distribution's field index. it will try best to give the most accurate
     /// distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
-    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to AnyShard.
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `AnyShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
         match dist {
             Distribution::HashShard(col_idxes) => {
@@ -295,7 +295,7 @@ impl ColIndexMapping {
                 .iter()
                 .map(|col_idx| self.try_map(*col_idx))
                 .collect::<Option<Vec<_>>>()
-                .map(|col_idxes| Distribution::HashShard(col_idxes)),
+                .map(Distribution::HashShard),
             _ => Some(dist.clone()),
         }
     }

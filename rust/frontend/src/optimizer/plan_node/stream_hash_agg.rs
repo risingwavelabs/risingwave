@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
-use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
+use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
