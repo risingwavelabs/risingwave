@@ -36,8 +36,9 @@ pub struct BatchProject {
 impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
-        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-        let distribution = i2o.rewrite_provided_distribution(logical.input().distribution());
+        let distribution = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(logical.input().distribution());
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,
@@ -85,14 +86,11 @@ impl ToDistributedBatch for BatchProject {
         required_dist: &Distribution,
     ) -> PlanRef {
         let input_required = match required_dist {
-            Distribution::HashShard(_) => {
-                let o2i = LogicalProject::o2i_col_mapping(
-                    self.input().schema().len(),
-                    self.logical.exprs(),
-                );
-                o2i.rewrite_required_distribution(required_dist)
-                    .unwrap_or(Distribution::AnyShard)
-            }
+            Distribution::HashShard(_) => self
+                .logical
+                .o2i_col_mapping()
+                .rewrite_required_distribution(required_dist)
+                .unwrap_or(Distribution::AnyShard),
             Distribution::AnyShard => Distribution::AnyShard,
             _ => Distribution::Any,
         };

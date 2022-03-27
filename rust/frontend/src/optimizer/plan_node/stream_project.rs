@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::{WithSchema};
+use crate::optimizer::property::WithSchema;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -41,8 +41,9 @@ impl StreamProject {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-        let distribution = i2o.rewrite_provided_distribution(input.distribution());
+        let distribution = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input.distribution());
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream(
