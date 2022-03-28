@@ -87,6 +87,13 @@ risedev:
     - use: compute-node
     - use: frontend
 
+  dev-frontend-v2:
+    - use: minio
+    - use: meta-node
+    - use: compute-node
+    - use: frontend-v2
+      user-managed: true
+    
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
   minio:
