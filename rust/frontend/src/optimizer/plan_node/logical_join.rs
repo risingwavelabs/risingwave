@@ -337,8 +337,11 @@ impl ToBatch for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -373,8 +376,11 @@ impl ToStream for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
