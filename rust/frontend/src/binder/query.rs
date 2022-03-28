@@ -56,33 +56,15 @@ impl Binder {
         result
     }
 
-    fn check_aliases(aliases: &[Option<String>]) -> Result<()> {
-        for alias in aliases {
-            if let Some(name) = alias {
-                if is_row_id_column_name(name) {
-                    return Err(ErrorCode::InternalError(format!(
-                        "column name prefixed with {:?} are reserved word.",
-                        ROWID_PREFIX
-                    ))
-                    .into());
-                }
-            }
-        }
-        Ok(())
-    }
-
     fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {
-            BoundSetExpr::Select(s) => {
-                Self::check_aliases(&s.aliases)?;
-                s.aliases.iter().enumerate().for_each(|(index, alias)| {
-                    if let Some(name) = alias {
-                        name_to_index.insert(name.clone(), index);
-                    }
-                })
-            }
+            BoundSetExpr::Select(s) => s.aliases.iter().enumerate().for_each(|(index, alias)| {
+                if let Some(name) = alias {
+                    name_to_index.insert(name.clone(), index);
+                }
+            }),
             BoundSetExpr::Values(_) => {}
         };
         let order = query
