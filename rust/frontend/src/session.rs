@@ -157,9 +157,8 @@ impl FrontendEnv {
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let config = load_config(opts);
-        tracing::info!("Starting compute node with config {:?}", config);
+        tracing::info!("Starting frontend node with config {:?}", config);
 
-        // TODO: refactor this when we have a separate port option
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
