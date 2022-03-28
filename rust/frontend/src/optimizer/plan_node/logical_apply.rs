@@ -71,9 +71,8 @@ impl LogicalApply {
     }
     pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                left_len + right_len
-            }
+            JoinType::LeftOuter => left_len + right_len,
+            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable!(),
             _ => unimplemented!(),
         }
     }
@@ -85,15 +84,14 @@ impl LogicalApply {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::new(
-                    (0..left_len)
-                        .into_iter()
-                        .map(Some)
-                        .chain(iter::repeat(None).take(right_len))
-                        .collect_vec(),
-                )
-            }
+            JoinType::LeftOuter => ColIndexMapping::new(
+                (0..left_len)
+                    .into_iter()
+                    .map(Some)
+                    .chain(iter::repeat(None).take(right_len))
+                    .collect_vec(),
+            ),
+            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable! {},
             _ => unimplemented!(),
         }
     }
@@ -105,9 +103,10 @@ impl LogicalApply {
         join_type: JoinType,
     ) -> ColIndexMapping {
         match join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
+            JoinType::LeftOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
+            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable!(),
             _ => unimplemented!(),
         }
     }
