@@ -11,7 +11,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { columns: ["v1", "_row_id"(hidden)], pk_columns: ["_row_id"] }
+    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id] }
       StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
     values(cast(1 as bigint));
@@ -57,7 +57,7 @@
         BatchExchange { order: [], dist: HashShard([2]) }
           BatchScan { table: t3, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: ["_row_id", "v1", "v2", "_row_id", "v1", "v2", "_row_id", "v1", "v2"], pk_columns: ["_row_id", "_row_id", "_row_id"] }
+    StreamMaterialize { columns: [_row_id, v1, v2, _row_id, v1, v2, _row_id, v1, v2], pk_columns: [_row_id, _row_id, _row_id] }
       StreamHashJoin { type: Inner, predicate: $5 = $8 }
         StreamExchange { dist: HashShard([5]) }
           StreamHashJoin { type: Inner, predicate: $1 = $4 }
@@ -80,7 +80,7 @@
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t2, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: ["v2", "v2", "expr#2"(hidden), "expr#3"(hidden)], pk_columns: ["expr#2", "expr#3"] }
+    StreamMaterialize { columns: [v2, v2, expr#2(hidden), expr#3(hidden)], pk_columns: [expr#2, expr#3] }
       StreamProject { exprs: [$1, $4, $2, $5], expr_alias: [v2, v2,  ,  ] }
         StreamHashJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
@@ -103,7 +103,7 @@
               BatchExchange { order: [], dist: HashShard([0]) }
                 BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { columns: ["v1", "expr#1"], pk_columns: ["v1"] }
+    StreamMaterialize { columns: [v1, expr#1], pk_columns: [v1] }
       StreamProject { exprs: [$0, ($2 + ($3 * $4))], expr_alias: [v1,  ] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($3)] }
           StreamExchange { dist: HashShard([0]) }
@@ -119,7 +119,7 @@
         BatchExchange { order: [], dist: Single }
           BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { columns: ["expr#0", "expr#1"(hidden), "expr#2"(hidden), "expr#3"(hidden), "expr#4"(hidden)], pk_columns: ["expr#1", "expr#2", "expr#3", "expr#4"] }
+    StreamMaterialize { columns: [expr#0, expr#1(hidden), expr#2(hidden), expr#3(hidden), expr#4(hidden)], pk_columns: [expr#1, expr#2, expr#3, expr#4] }
       StreamProject { exprs: [($1 + ($2 * $3)), $0, $1, $2, $3], expr_alias: [ ,  ,  ,  ,  ] }
         StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
           StreamTableScan { table: t, columns: [v1, v2, v3, _row_id], pk_indices: [3] }
@@ -138,7 +138,7 @@
             BatchExchange { order: [], dist: HashShard([2]) }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
-    StreamMaterialize { columns: ["v3", "expr#1"], pk_columns: ["v3"] }
+    StreamMaterialize { columns: [v3, expr#1], pk_columns: [v3] }
       StreamProject { exprs: [$0, ($2 * ($3 / $4))], expr_alias: [v3,  ] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), sum($2), count($2)] }
           StreamProject { exprs: [$2, $0, ($0 + $1), $3], expr_alias: [ ,  ,  ,  ] }
