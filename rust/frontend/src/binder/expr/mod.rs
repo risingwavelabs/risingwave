@@ -27,7 +27,6 @@ mod column;
 mod function;
 mod subquery;
 mod value;
-pub use subquery::*;
 
 impl Binder {
     pub(super) fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {

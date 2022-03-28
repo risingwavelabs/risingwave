@@ -23,7 +23,7 @@ use crate::expr::{
 };
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalProject, LogicalValues, PlanRef,
+    LogicalAgg, LogicalApply, LogicalProject, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::planner::Planner;
 impl Planner {
@@ -75,7 +75,7 @@ impl Planner {
     /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
         let count_star =
-            LogicalAgg::create(vec![ExprImpl::count_star()], vec![None], vec![], input)?;
+            LogicalAgg::new(vec![PlanAggCall::count_star()], vec![None], vec![], input);
         let ge = FunctionCall::new(
             ExprType::GreaterThanOrEqual,
             vec![
@@ -85,7 +85,7 @@ impl Planner {
         )
         .unwrap();
         Ok(LogicalProject::create(
-            count_star,
+            count_star.into(),
             vec![ge.into()],
             vec![None],
         ))

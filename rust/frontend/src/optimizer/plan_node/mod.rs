@@ -217,7 +217,7 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_values::BatchValues;
-pub use logical_agg::LogicalAgg;
+pub use logical_agg::{LogicalAgg, PlanAggCall};
 pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;

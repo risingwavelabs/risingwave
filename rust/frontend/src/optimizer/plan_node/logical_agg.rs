@@ -69,6 +69,14 @@ impl PlanAggCall {
             distinct: false,
         }
     }
+
+    pub fn count_star() -> Self {
+        PlanAggCall {
+            agg_kind: AggKind::Count,
+            return_type: DataType::Int64,
+            inputs: vec![],
+        }
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.

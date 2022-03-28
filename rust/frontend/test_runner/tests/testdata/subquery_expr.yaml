@@ -60,11 +60,9 @@
         LogicalApply { type: LeftOuter }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalProject { exprs: [$0], expr_alias: [ ] }
-              LogicalAgg { group_keys: [], agg_calls: [count] }
-                LogicalProject { exprs: [], expr_alias: [] }
-                  LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
-                    LogicalScan { table: t, columns: [_row_id, x] }
+            LogicalAgg { group_keys: [], agg_calls: [count] }
+              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+                LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
@@ -75,11 +73,9 @@
         LogicalApply { type: LeftOuter }
           LogicalScan { table: t1, columns: [_row_id, x] }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalProject { exprs: [$0], expr_alias: [ ] }
-              LogicalAgg { group_keys: [], agg_calls: [count] }
-                LogicalProject { exprs: [], expr_alias: [] }
-                  LogicalProject { exprs: [$1], expr_alias: [x] }
-                    LogicalScan { table: t2, columns: [_row_id, x] }
+            LogicalAgg { group_keys: [], agg_calls: [count] }
+              LogicalProject { exprs: [$1], expr_alias: [x] }
+                LogicalScan { table: t2, columns: [_row_id, x] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
@@ -89,8 +85,6 @@
         LogicalApply { type: LeftOuter }
           LogicalScan { table: t, columns: [_row_id, x] }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalProject { exprs: [$0], expr_alias: [ ] }
-              LogicalAgg { group_keys: [], agg_calls: [count] }
-                LogicalProject { exprs: [], expr_alias: [] }
-                  LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
-                    LogicalScan { table: t, columns: [_row_id, x] }
+            LogicalAgg { group_keys: [], agg_calls: [count] }
+              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+                LogicalScan { table: t, columns: [_row_id, x] }

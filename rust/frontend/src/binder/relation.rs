@@ -258,11 +258,10 @@ impl Binder {
         }
     }
 
-    /// Before binding a subquery, we push the current [`BindContext`](super::BindContext) to to the
-    /// stack and create a new context.
+    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// [`BindContext`](super::BindContext) for it.
     ///
-    /// After finishing binding, we pop the previous context from the stack. And
-    /// update it with the output of the subquery.
+    /// After finishing binding, we update the current context with the output of the subquery.
     pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();

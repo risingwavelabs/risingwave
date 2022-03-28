@@ -12,7 +12,7 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let r = self.bind_query(query);
         if let Ok(query) = r {
-            // uncorrected subquery
+            // uncorrelated subquery
             if kind == SubqueryKind::Scalar && query.data_types().len() != 1 {
                 return Err(ErrorCode::BindError(
                     "subquery must return only one column".to_string(),
