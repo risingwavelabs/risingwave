@@ -239,11 +239,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
-        #[cfg(not(test))]
-        StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
-            .await,
-    ];
+    let mut sub_tasks = vec![];
     sub_tasks.extend(
         hummock::start_hummock_workers(
             hummock_manager,
@@ -253,6 +249,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         )
         .await,
     );
+    #[cfg(not(test))]
+    {
+        sub_tasks.push(
+            StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
+                .await,
+        );
+    }
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -273,10 +276,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = shutdown_recv.recv() => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if shutdown_sender.send(()).is_ok() {
-                                    if let Err(err) = join_handle.await {
-                                        tracing::warn!("shutdown err: {}", err);
-                                    }
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {}", err);
                                 }
                             }
                         },
