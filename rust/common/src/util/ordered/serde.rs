@@ -149,13 +149,6 @@ pub fn serialize_pk_and_row(
         ]
         .concat();
         result.push((key, None));
-    } else {
-        let key = [
-            pk_buf,
-            serialize_column_id(&NOT_NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
-        result.push((key, None));
     }
     for (index, column_id) in column_ids.iter().enumerate() {
         let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();

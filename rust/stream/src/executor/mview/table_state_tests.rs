@@ -609,36 +609,20 @@ async fn test_cell_based_write() {
 
     // cell_based delete row
     let delete_pk1 = Row(vec![Some(2_i32.into()), Some(22_i32.into())]);
-    let delete_value1 = Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]);
+    let delete_value1 = Row(vec![
+        Some(2_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]);
     table
-        .delete_row(&delete_pk1, Some(delete_value1), epoch)
+        .delete_row(&delete_pk1, delete_value1, epoch)
         .await
         .unwrap();
     let get_delete_row2_res1 = table
         .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
         .await
         .unwrap();
-    assert_eq!(
-        get_delete_row2_res1,
-        Some(Row(vec![None, Some(22_i32.into()), None]))
-    );
-
-    let delete_pk2 = Row(vec![Some(2_i32.into()), Some(22_i32.into())]);
-    let delete_value2 = Row(vec![
-        Some(2_i32.into()),
-        Some(22_i32.into()),
-        Some(222_i32.into()),
-    ]);
-    table
-        .delete_row(&delete_pk2, Some(delete_value2), epoch)
-        .await
-        .unwrap();
-
-    let get_delete_row2_res2 = table
-        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
-        .await
-        .unwrap();
-    assert_eq!(get_delete_row2_res2, None);
+    assert_eq!(get_delete_row2_res1, None);
 
     // cell_based update row
     let update_pk = Row(vec![Some(1_i32.into()), Some(11_i32.into())]);

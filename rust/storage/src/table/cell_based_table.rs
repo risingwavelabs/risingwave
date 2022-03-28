@@ -131,13 +131,13 @@ impl<S: StateStore> CellBasedTable<S> {
         let key = &serialize_pk(pk, pk_serializer)?;
         let state_store_get_res = self.keyspace.state_store().get(key, epoch).await?;
 
-        let special_key = &[
+        let all_none_special_key = &[
             &serialize_pk(pk, pk_serializer)?[..],
             &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
         ]
         .concat();
-        let specail_cell_res = self.keyspace.get(&special_key, epoch).await?;
-        if specail_cell_res.is_some() {
+        let all_none_res = self.keyspace.get(&all_none_special_key, epoch).await?;
+        if all_none_res.is_some() {
             return Ok(Some(Row::new(vec![None; column_ids.len()])));
         }
         for column_id in column_ids {
@@ -213,14 +213,16 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(Some(Row::new(row)))
     }
 
-    pub async fn delete_row(&mut self, pk: &Row, old_value: Option<Row>, epoch: u64) -> Result<()> {
+    pub async fn delete_row(&mut self, pk: &Row, old_value: Row, epoch: u64) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
         let column_ids = generate_column_id(&self.column_descs);
-        let bytes =
-            self.cell_based_row_serializer
-                .serialize(&arrange_key_buf, old_value, &column_ids)?;
+        let bytes = self.cell_based_row_serializer.serialize(
+            &arrange_key_buf,
+            Some(old_value),
+            &column_ids,
+        )?;
         for (key, value) in bytes {
             if value.is_some() {
                 local.delete(key);
