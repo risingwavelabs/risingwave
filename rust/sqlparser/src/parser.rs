@@ -1775,8 +1775,19 @@ impl Parser {
         }
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
+    /// into an array of that datatype if needed
     pub fn parse_data_type(&mut self) -> Result<DataType, ParserError> {
+        let mut data_type = self.parse_data_type_inner()?;
+        while self.consume_token(&Token::LBracket) {
+            self.expect_token(&Token::RBracket)?;
+            data_type = DataType::Array(Box::new(data_type));
+        }
+        Ok(data_type)
+    }
+
+    /// Parse a SQL datatype
+    pub fn parse_data_type_inner(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
                 Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
