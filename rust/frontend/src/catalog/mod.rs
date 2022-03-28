@@ -38,6 +38,11 @@ pub fn gen_row_id_column_name(idx: Option<usize>) -> String {
         None => ROWID_PREFIX.to_string(),
     }
 }
+
+pub fn is_row_id_column_name(name: &str) -> bool {
+    name.starts_with(ROWID_PREFIX)
+}
+
 #[derive(Error, Debug)]
 pub enum CatalogError {
     #[error("{0} not found: {1}")]
