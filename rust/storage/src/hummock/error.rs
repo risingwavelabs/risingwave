@@ -112,7 +112,7 @@ impl std::fmt::Debug for TracedHummockError {
         use std::error::Error;
 
         write!(f, "{}", self.source)?;
-        write!(f, "\n")?;
+        writeln!(f)?;
         if let Some(backtrace) = self.source.backtrace() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
