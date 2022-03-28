@@ -106,7 +106,7 @@ pub fn gen_create_table_plan(
             Order::any().clone(),
             required_cols,
         )
-        .gen_create_mv_plan(table_name)
+        .gen_create_mv_plan(table_name)?
     };
     let table = materialize.table().to_prost(schema_id, database_id);
 
