@@ -225,22 +225,22 @@ impl LogicalAgg {
         }
     }
 
-    /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let agg_cal_num = self.agg_calls().len();
+        let group_keys = self.group_keys();
+        let mut map = vec![None; agg_cal_num + group_keys.len()];
+        for (i, key) in group_keys.iter().enumerate() {
+            map[i] = Some(*key);
         }
         ColIndexMapping::with_target_size(map, input_len)
     }
 
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping(input_len, exprs).inverse()
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 
     fn derive_schema(
