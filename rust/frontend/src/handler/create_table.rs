@@ -128,8 +128,11 @@ pub async fn handle_create_table(
         (plan, source, table)
     };
 
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
+    log::trace!(
+        "name={}, plan=\n{}",
+        table_name,
+        serde_json::to_string_pretty(&plan).unwrap()
+    );
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

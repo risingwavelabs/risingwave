@@ -142,25 +142,34 @@ impl ExprRewriter for ExprHandler {
             .collect_vec();
 
         if agg_kind == AggKind::Avg {
-            // Rewrite avg to sum/count.
+            assert_eq!(inputs.len(), 1);
+
+            let left_return_type =
+                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]);
+
+            // Rewrite avg to sum / count.
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Sum,
-                return_type: return_type.clone(),
+                return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
             });
             let left = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type.clone(),
+                left_return_type,
             );
+
+            let right_return_type =
+                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]);
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
-                return_type: DataType::Int64,
+                return_type: right_return_type.clone(),
                 inputs,
             });
+
             let right = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type,
+                right_return_type,
             );
 
             ExprImpl::from(
