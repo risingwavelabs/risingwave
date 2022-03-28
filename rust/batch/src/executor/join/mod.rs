@@ -75,6 +75,27 @@ impl JoinType {
             JoinType::FullOuter | JoinType::LeftOuter | JoinType::LeftAnti | JoinType::LeftSemi
         )
     }
+
+    fn keep_all(self) -> bool {
+        matches!(
+            self,
+            JoinType::FullOuter | JoinType::LeftOuter | JoinType::RightOuter | JoinType::Inner
+        )
+    }
+
+    fn keep_left(self) -> bool {
+        matches!(
+            self,
+            JoinType::LeftAnti | JoinType::LeftSemi
+        )
+    }
+
+    fn keep_right(self) -> bool {
+        matches!(
+            self,
+            JoinType::RightAnti | JoinType::RightSemi
+        )
+    }
 }
 
 impl Default for JoinType {

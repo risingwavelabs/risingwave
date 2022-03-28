@@ -17,7 +17,6 @@ use std::convert::TryFrom;
 use std::mem;
 use std::sync::Arc;
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilderImpl, ArrayRef, DataChunk};
@@ -275,17 +274,12 @@ impl<K: HashKey> ProbeTable<K> {
         data_chunk: &mut DataChunk,
         filter: &Bitmap,
     ) {
-        for column_id in self.params.output_columns().iter().copied() {
-            match column_id {
-                // probe side column, do nothing
-                Either::Left(_) => {}
-
-                // build side column
-                Either::Right(idx) => data_chunk
-                    .column_mut_at(idx)
-                    .array_mut_ref()
-                    .set_bitmap(filter.clone()),
-            }
+        let build_start_pos = self.params.left_len();
+        for col_idx in 0..self.params.right_len() {
+            data_chunk
+            .column_mut_at(build_start_pos + col_idx)
+            .array_mut_ref()
+            .set_bitmap(filter.clone());
         }
     }
 
@@ -924,69 +918,90 @@ impl<K: HashKey> ProbeTable<K> {
         // The indices before the offset are already appended and dirty.
         let offset = self.result_offset;
         self.result_offset = self.result_build_index.len();
-        for (builder_idx, column_id) in self.params.output_columns().iter().copied().enumerate() {
-            match column_id {
-                // probe side column
-                Either::Left(idx) => {
-                    for probe_row_id in &self.result_probe_index[offset..] {
-                        if let Some(row_id) = probe_row_id {
-                            let array = self
-                                .cur_probe_data
-                                .as_ref()
-                                .unwrap()
-                                .probe_data_chunk
-                                .columns()[idx]
-                                .array_ref();
-                            self.array_builders[builder_idx]
-                                .append_array_element(array, *row_id)?;
-                        } else {
-                            self.array_builders[builder_idx].append_null()?;
-                        }
-                    }
-                }
-
-                // build side column
-                Either::Right(idx) => {
-                    for build_row_id in &self.result_build_index[offset..] {
-                        if let Some(row_id) = build_row_id {
-                            let array_ref = self.get_build_array(*row_id, idx);
-                            let array = array_ref.as_ref();
-                            self.array_builders[builder_idx]
-                                .append_array_element(array, row_id.row_id())?;
-                        } else {
-                            self.array_builders[builder_idx].append_null()?;
-                        }
-                    }
+        for col_idx in 0..self.params.left_len() {
+            let builder_idx = col_idx;
+            for probe_row_id in &self.result_probe_index[offset..] {
+                if let Some(row_id) = probe_row_id {
+                    let array = self
+                        .cur_probe_data
+                        .as_ref()
+                        .unwrap()
+                        .probe_data_chunk
+                        .columns()[col_idx]
+                        .array_ref();
+                    self.array_builders[builder_idx]
+                        .append_array_element(array, *row_id)?;
+                } else {
+                    self.array_builders[builder_idx].append_null()?;
                 }
             }
         }
 
+        for col_idx in 0..self.params.right_len() {
+            let builder_idx = self.params.left_len() + col_idx;
+            for build_row_id in &self.result_build_index[offset..] {
+                if let Some(row_id) = build_row_id {
+                    let array_ref = self.get_build_array(*row_id, col_idx);
+                    let array = array_ref.as_ref();
+                    self.array_builders[builder_idx]
+                        .append_array_element(array, row_id.row_id())?;
+                } else {
+                    self.array_builders[builder_idx].append_null()?;
+                }
+            }
+        }
         Ok(())
     }
 
     /// Produce a data chunk from builder.
     fn finish_data_chunk(&mut self) -> Result<DataChunk> {
         self.build_data_chunk()?;
+
         let new_array_builders = self
             .params
             .output_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(self.params.batch_size()))
             .collect::<Result<Vec<_>>>()?;
+
         let new_arrays = mem::replace(&mut self.array_builders, new_array_builders)
             .into_iter()
             .map(|builder| builder.finish())
             .collect::<Result<Vec<_>>>()?;
+
         let new_columns = new_arrays
             .into_iter()
             .map(|array| Column::new(Arc::new(array)))
             .collect_vec();
+            
         self.result_build_index.clear();
         self.result_probe_index.clear();
         self.result_offset = 0;
         let data_chunk = DataChunk::try_from(new_columns)?;
-        Ok(data_chunk)
+
+        // TODO(yuhao): Current we handle cut null columns in semi/anti join just 
+        // before returning chunks. We can furthur optimize this by cut columns earlier.
+        let output_data_chunk = self.remove_null_columns_for_semi_anti(data_chunk);
+
+        Ok(output_data_chunk)
     }
+
+    fn remove_null_columns_for_semi_anti(&self, data_chunk: DataChunk) -> DataChunk {
+        let join_type = self.params.join_type();
+        if join_type.keep_all() {
+            data_chunk
+        } else {
+            let (columns, vis) = data_chunk.into_parts();
+            let keep_columns = if join_type.keep_left() {
+                columns[0..self.params.left_len()].to_vec()
+            } else if join_type.keep_right() {
+                columns[self.params.left_len()..self.params.left_len() + self.params.right_len()].to_vec()
+            } else {
+                unreachable!()
+            };
+            DataChunk::new(keep_columns, vis)
+        }
+    } 
 
     fn get_build_array(&self, row_id: RowId, idx: usize) -> ArrayRef {
         self.build_data[row_id.chunk_id()].columns()[idx].array()
