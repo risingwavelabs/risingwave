@@ -14,11 +14,13 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::expr::column_idx_to_inputref_proto;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -84,6 +86,13 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            group_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .collect_vec(),
         })
     }
 }
