@@ -23,11 +23,8 @@ git clone https://github.com/singularity-data/risingwave.git
 To install components in macOS, run:
 
 ```shell
-brew install java11
+brew install java11 postgresql cmake protobuf openssl tmux
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install cmake
-brew install protobuf
-brew install openssl
 ```
 
 Note that we only tested our code against Java 11. So please use the specific version!
