@@ -138,13 +138,6 @@ impl Planner {
             .map(|e| rewriter.rewrite_expr(e))
             .collect();
 
-        let has_no_from = root.schema().is_empty();
-        let join_type = if has_no_from {
-            JoinType::FullOuter
-        } else {
-            JoinType::LeftOuter
-        };
-
         for subquery in rewriter.subqueries {
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
@@ -160,11 +153,7 @@ impl Planner {
                 }
             }
 
-            if root.schema().is_empty() {
-                root = right;
-            } else {
-                root = LogicalApply::create(root, right, join_type);
-            }
+            root = LogicalApply::create(root, right, JoinType::LeftOuter);
         }
         Ok((root, exprs))
     }
