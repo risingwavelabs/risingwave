@@ -77,6 +77,16 @@
     BatchInsert { table: t }
       BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
 - sql: |
+    create table t (v1 real, v2 int);
+    insert into t values (22.33, '33'), (44.55, '55');
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[Normalized(22.33):Decimal::Float32, "33":Varchar::Int32], [Normalized(44.55):Decimal::Float32, "55":Varchar::Int32]] }
+- sql: |
+    create table t (v1 real, v2 int, v3 varchar);
+    insert into t values (1, 2), (3, 4);
+  binder_error: 'Invalid input syntax: values length mismatched: expected 3, given 2'
+- sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |
