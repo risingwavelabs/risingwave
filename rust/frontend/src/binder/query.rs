@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Expr, Offset, OrderByExpr, Query, Value};
+use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::optimizer::property::{Direction, FieldOrder};
@@ -58,6 +58,8 @@ impl Binder {
     }
 
     fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
+        let limit = query.get_limit_value();
+        let offset = query.get_offset_value();
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {
@@ -67,19 +69,6 @@ impl Binder {
                 }
             }),
             BoundSetExpr::Values(_) => {}
-        };
-        let limit = match query.limit {
-            Some(Expr::Value(Value::Number(limit, _))) => limit.parse().ok(),
-            Some(_) => Err(ErrorCode::BindError("unable to bind limit value".to_string())).ok(),
-            _ => None,
-        };
-        let offset = match query.offset {
-            Some(Offset {
-                value: Expr::Value(Value::Number(offset, _)),
-                ..
-            }) => offset.parse().ok(),
-            Some(_) => Err(ErrorCode::BindError("unable to bind offset value".to_string())).ok(),
-            _ => None,
         };
         let order = query
             .order_by
