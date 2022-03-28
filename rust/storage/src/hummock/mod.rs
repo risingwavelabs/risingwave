@@ -177,12 +177,13 @@ impl HummockStorage {
 
         let mut table_counts = 0;
         for level in &version.levels() {
-            let tables = self
+            let mut tables = self
                 .local_version_manager
                 .pick_few_tables(&level.table_ids)
                 .await?;
             match level.level_type() {
                 LevelType::Overlapping => {
+                    tables.reverse();
                     for table in tables {
                         table_counts += 1;
                         if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
