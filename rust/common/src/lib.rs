@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! This file is adapted from [arrow-rs](https://github.com/apache/arrow-rs)
+
 #![allow(dead_code)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
