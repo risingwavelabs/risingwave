@@ -549,8 +549,8 @@ where
 
                 // now is safe to delete both mview and source
                 let mut transaction = Transaction::default();
-                Table::delete_in_transaction(mview_id, &mut transaction)?;
-                Source::delete_in_transaction(source_id, &mut transaction)?;
+                mview.delete_in_transaction(&mut transaction)?;
+                source.delete_in_transaction(&mut transaction)?;
                 core.meta_store_ref.txn(transaction).await?;
                 core.drop_table(&mview);
                 core.drop_source(&source);

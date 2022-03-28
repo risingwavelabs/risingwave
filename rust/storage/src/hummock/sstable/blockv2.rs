@@ -82,17 +82,17 @@ impl Block {
         self.data.len()
     }
 
-    /// Get restart point by index.
+    /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
         self.restart_points[index]
     }
 
-    /// Get restart point len.
+    /// Gets restart point len.
     pub fn restart_point_len(&self) -> usize {
         self.restart_points.len()
     }
 
-    /// Search the index of the restart point that the given `offset` belongs to.
+    /// Searches the index of the restart point that the given `offset` belongs to.
     pub fn search_restart_point(&self, offset: usize) -> usize {
         self.restart_points
             .binary_search(&(offset as u32))
@@ -149,22 +149,22 @@ impl KeyPrefix {
             + var_u32_len(self.value as u32)
     }
 
-    /// Get overlap len.
+    /// Gets overlap len.
     pub fn overlap_len(&self) -> usize {
         self.overlap
     }
 
-    /// Get diff key range.
+    /// Gets diff key range.
     pub fn diff_key_range(&self) -> Range<usize> {
         self.offset + self.len()..self.offset + self.len() + self.diff
     }
 
-    /// Get value range.
+    /// Gets value range.
     pub fn value_range(&self) -> Range<usize> {
         self.offset + self.len() + self.diff..self.offset + self.len() + self.diff + self.value
     }
 
-    /// Get entry len.
+    /// Gets entry len.
     pub fn entry_len(&self) -> usize {
         self.len() + self.diff + self.value
     }
@@ -219,7 +219,7 @@ impl BlockBuilder {
         }
     }
 
-    /// Append a kv pair to the block.
+    /// Appends a kv pair to the block.
     ///
     /// NOTE: Key must be added in ASCEND order.
     ///
@@ -264,7 +264,7 @@ impl BlockBuilder {
         self.entry_count += 1;
     }
 
-    /// Finish building block.
+    /// Finishes building block.
     ///
     /// # Format
     ///

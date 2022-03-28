@@ -31,7 +31,7 @@ pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
 pub const GET_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 pub const REPORT_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 
-/// Define all metrics.
+/// Defines all metrics.
 #[macro_export]
 macro_rules! for_all_hummock_metrics {
     ($macro:tt) => {
@@ -218,7 +218,7 @@ impl HummockMetrics {
         }
     }
 
-    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

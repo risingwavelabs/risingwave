@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -23,97 +23,139 @@ use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
-#[async_trait]
+pub trait GetFutureTrait<'a> = Future<Output = Result<Option<StorageValue>>> + Send;
+pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, StorageValue)>>> + Send;
+pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send;
+
+#[macro_export]
+macro_rules! define_state_store_associated_type {
+    () => {
+        type GetFuture<'a> = impl GetFutureTrait<'a>;
+        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type ReverseScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type IngestBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
+        type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
+        type IterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+        type ReverseIterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+    }
+}
+
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)>;
+    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)> + 'a;
 
-    /// Point get a value from the state store.
+    type GetFuture<'a>: GetFutureTrait<'a>;
+
+    type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
+    where
+        R: 'static + Send,
+        B: 'static + Send;
+
+    type ReverseScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
+    where
+        R: 'static + Send,
+        B: 'static + Send;
+
+    type IngestBatchFuture<'a>: EmptyFutureTrait<'a>;
+
+    type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
+
+    type WaitEpochFuture<'a>: EmptyFutureTrait<'a>;
+
+    type SyncFuture<'a>: EmptyFutureTrait<'a>;
+
+    type IterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
+    where
+        R: 'static + Send,
+        B: 'static + Send;
+
+    type ReverseIterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
+    where
+        R: 'static + Send,
+        B: 'static + Send;
+
+    /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>>;
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_>;
 
-    /// Scan `limit` number of keys from a key range. If `limit` is `None`, scan all elements.
+    /// Scans `limit` number of keys from a key range. If `limit` is `None`, scans all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
-    async fn scan<R, B>(
+    fn scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        collect_from_iter(self.iter(key_range, epoch).await?, limit).await
-    }
+        B: AsRef<[u8]> + Send;
 
-    async fn reverse_scan<R, B>(
+    fn reverse_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await
-    }
+        B: AsRef<[u8]> + Send;
 
-    /// Ingest a batch of data into the state store. One write batch should never contain operation
+    /// Ingests a batch of data into the state store. One write batch should never contain operation
     /// on the same key. e.g. Put(233, x) then Delete(233).
-    /// A epoch should be provided to ingest a write batch. It is served as:
+    /// An epoch should be provided to ingest a write batch. It is served as:
     /// - A handle to represent an atomic write session. All ingested write batches associated with
     ///   the same `Epoch` have the all-or-nothing semantics, meaning that partial changes are not
-    ///   queryable and will be rollbacked if instructed.
+    ///   queryable and will be rolled back if instructed.
     /// - A version of a kv pair. kv pair associated with larger `Epoch` is guaranteed to be newer
     ///   then kv pair with smaller `Epoch`. Currently this version is only used to derive the
     ///   per-key modification history (e.g. in compaction), not across different keys.
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()>;
+    ) -> Self::IngestBatchFuture<'_>;
 
     /// Functions the same as `ingest_batch`, except that data won't be persisted.
-    async fn replicate_batch(
+    fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()>;
+    ) -> Self::ReplicateBatchFuture<'_>;
 
-    /// Open and return an iterator for given `key_range`.
+    /// Opens and returns an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>;
+        B: AsRef<[u8]> + Send;
 
-    /// Open and return a reversed iterator for given `key_range`.
+    /// Opens and returns a reversed iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>;
+        B: AsRef<[u8]> + Send;
 
-    /// Create a `WriteBatch` associated with this state store.
+    /// Creates a `WriteBatch` associated with this state store.
     fn start_write_batch(&self) -> WriteBatch<Self> {
         WriteBatch::new(self.clone())
     }
 
-    /// Wait until the epoch is committed and its data is ready to read.
-    async fn wait_epoch(&self, epoch: u64) -> Result<()>;
+    /// Waits until the epoch is committed and its data is ready to read.
+    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_>;
 
-    /// Sync buffered data to S3.
-    /// If epoch is None, all buffered data will be synced.
+    /// Syncs buffered data to S3.
+    /// If the epoch is None, all buffered data will be synced.
     /// Otherwise, only data of the provided epoch will be synced.
-    async fn sync(&self, epoch: Option<u64>) -> Result<()>;
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_>;
 
-    /// Create a [`MonitoredStateStore`] from this state store, with given `stats`.
+    /// Creates a [`MonitoredStateStore`] from this state store, with given `stats`.
     fn monitored(self, stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         MonitoredStateStore::new(self, stats)
     }
@@ -126,9 +168,10 @@ pub trait StateStoreIter: Send {
     async fn next(&mut self) -> Result<Option<Self::Item>>;
 }
 
-async fn collect_from_iter<'a, I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
+pub async fn collect_from_iter<'a, I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
 where
     I: StateStoreIter,
+    I::Item: Send,
 {
     let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
 

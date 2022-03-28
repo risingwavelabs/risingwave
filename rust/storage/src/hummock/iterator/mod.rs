@@ -37,17 +37,15 @@ use async_trait::async_trait;
 /// `HummockIterator` defines the interface of all iterators, including `SSTableIterator`,
 /// `MergeIterator`, `UserIterator` and `ConcatIterator`.
 ///
-/// After create the iterator instance,
+/// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-///
-/// Before calling
 #[async_trait]
 pub trait HummockIterator: Send + Sync {
-    /// Move a valid iterator to the next key.
+    /// Moves a valid iterator to the next key.
     ///
     /// Note:
-    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - Before calling this function, makes sure the iterator `is_valid`.
     /// - After calling this function, you may first check whether the iterator `is_valid` again,
     ///   then get the new data by calling `key` and `value`.
     /// - If the position after calling this is invalid, this function WON'T return an `Err`. You
@@ -57,10 +55,10 @@ pub trait HummockIterator: Send + Sync {
     /// This function will panic if the iterator is invalid.
     async fn next(&mut self) -> HummockResult<()>;
 
-    /// Retrieve the current key.
+    /// Retrieves the current key.
     ///
     /// Note:
-    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - Before calling this function, makes sure the iterator `is_valid`.
     /// - This function should be straightforward and return immediately.
     ///
     /// # Panics
@@ -68,10 +66,10 @@ pub trait HummockIterator: Send + Sync {
     // TODO: Add lifetime
     fn key(&self) -> &[u8];
 
-    /// Retrieve the current value, decoded as [`HummockValue`].
+    /// Retrieves the current value, decoded as [`HummockValue`].
     ///
     /// Note:
-    /// - Before calling this function, make sure the iterator `is_valid`.
+    /// - Before calling this function, makes sure the iterator `is_valid`.
     /// - This function should be straightforward and return immediately.
     ///
     /// # Panics
@@ -80,14 +78,14 @@ pub trait HummockIterator: Send + Sync {
     // TODO: Add lifetime
     fn value(&self) -> HummockValue<&[u8]>;
 
-    /// Indicate whether the iterator can be used.
+    /// Indicates whether the iterator can be used.
     ///
     /// Note:
     /// - ONLY call `key`, `value`, and `next` if `is_valid` returns `true`.
     /// - This function should be straightforward and return immediately.
     fn is_valid(&self) -> bool;
 
-    /// Reset the position of the iterator.
+    /// Resets the position of the iterator.
     ///
     /// Note:
     /// - Do not decide whether the position is valid or not by checking the returned error of this
@@ -95,7 +93,7 @@ pub trait HummockIterator: Send + Sync {
     ///   before starting iteration.
     async fn rewind(&mut self) -> HummockResult<()>;
 
-    /// Reset iterator and seek to the first position where the key >= provided key, or key <=
+    /// Resets iterator and seeks to the first position where the key >= provided key, or key <=
     /// provided key if this is a reverse iterator.
     ///
     /// Note:

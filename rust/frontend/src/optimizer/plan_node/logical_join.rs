@@ -175,7 +175,11 @@ impl LogicalJoin {
         )
     }
 
-    fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
+    pub(super) fn derive_schema(
+        left_schema: &Schema,
+        right_schema: &Schema,
+        join_type: JoinType,
+    ) -> Schema {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
         let out_column_num = Self::out_column_num(left_len, right_len, join_type);
@@ -192,7 +196,7 @@ impl LogicalJoin {
         Schema { fields }
     }
 
-    fn derive_pk(
+    pub(super) fn derive_pk(
         left_len: usize,
         right_len: usize,
         left_pk: &[usize],
@@ -337,8 +341,11 @@ impl ToBatch for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -373,8 +380,11 @@ impl ToStream for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
