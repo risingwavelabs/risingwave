@@ -103,7 +103,7 @@ impl ColPrunable for LogicalTopN {
                 .iter()
                 .map(|fo| FieldOrder {
                     index: mapping.map(fo.index),
-                    direct: fo.direct.clone(),
+                    direct: fo.direct,
                 })
                 .collect(),
         };
