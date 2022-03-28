@@ -155,7 +155,7 @@ impl ExprRewriter for ExprHandler {
             });
             let left = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                left_return_type.clone(),
+                left_return_type,
             );
 
             let right_return_type =
@@ -169,18 +169,12 @@ impl ExprRewriter for ExprHandler {
 
             let right = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                right_return_type.clone(),
+                right_return_type,
             );
 
-            println!("{:?} / {:?}", left_return_type, right_return_type);
-
-            let expr = ExprImpl::from(
+            ExprImpl::from(
                 FunctionCall::new(ExprType::Divide, vec![left.into(), right.into()]).unwrap(),
-            );
-
-            println!("{:?}", expr.return_type());
-
-            expr
+            )
         } else {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
