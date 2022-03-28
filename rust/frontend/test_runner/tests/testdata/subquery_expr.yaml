@@ -110,18 +110,18 @@
           LogicalProject { exprs: [$1], expr_alias: [x] }
             LogicalScan { table: t2, columns: [_row_id, x] }
 - sql: |
-    select 1 where true and exists (values (1))
+    select 1 where 1>0 and exists (values (1))
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalFilter { predicate: true:Boolean }
+      LogicalFilter { predicate: (1:Int32 > 0:Int32) }
         LogicalJoin { type: LeftSemi, on: true:Boolean }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
 - sql: |
-    select 1 where (not exists (values (1))) and (true or exists (values (1)))
+    select 1 where (not exists (values (1))) and (1>0 or exists (values (1)))
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalFilter { predicate: (true:Boolean OR $0) }
+      LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR $0) }
         LogicalJoin { type: LeftOuter, on: true:Boolean }
           LogicalJoin { type: LeftAnti, on: true:Boolean }
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
