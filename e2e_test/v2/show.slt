@@ -1,7 +1,7 @@
 statement ok
 create table t3 (v1 int not null, v2 int not null, v3 int not null);
 
-query III
+query TT
 show table t3;
 ----
 v1 Int32
