@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-use std::{fmt, iter};
+use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -49,8 +47,8 @@ impl LogicalApply {
             join_type
         );
         let ctx = left.ctx();
-        let schema = Self::derive_schema(left.schema(), right.schema(), join_type);
-        let pk_indices = Self::derive_pk(
+        let schema = LogicalJoin::derive_schema(left.schema(), right.schema(), join_type);
+        let pk_indices = LogicalJoin::derive_pk(
             left.schema().len(),
             right.schema().len(),
             left.pk_indices(),
@@ -68,98 +66,6 @@ impl LogicalApply {
 
     pub fn create(left: PlanRef, right: PlanRef, join_type: JoinType) -> PlanRef {
         Self::new(left, right, join_type).into()
-    }
-    pub fn out_column_num(left_len: usize, right_len: usize, join_type: JoinType) -> usize {
-        match join_type {
-            JoinType::LeftOuter => left_len + right_len,
-            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable!(),
-            _ => unimplemented!(),
-        }
-    }
-
-    /// get the Mapping of columnIndex from output column index to left column index
-    pub fn o2l_col_mapping(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        match join_type {
-            JoinType::LeftOuter => ColIndexMapping::new(
-                (0..left_len)
-                    .into_iter()
-                    .map(Some)
-                    .chain(iter::repeat(None).take(right_len))
-                    .collect_vec(),
-            ),
-            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable! {},
-            _ => unimplemented!(),
-        }
-    }
-
-    /// get the Mapping of columnIndex from output column index to right column index
-    pub fn o2r_col_mapping(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        match join_type {
-            JoinType::LeftOuter => {
-                ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
-            }
-            JoinType::Inner | JoinType::RightOuter | JoinType::FullOuter => unreachable!(),
-            _ => unimplemented!(),
-        }
-    }
-
-    /// get the Mapping of columnIndex from left column index to output column index
-    pub fn l2o_col_mapping(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        Self::o2l_col_mapping(left_len, right_len, join_type).inverse()
-    }
-
-    /// get the Mapping of columnIndex from right column index to output column index
-    pub fn r2o_col_mapping(
-        left_len: usize,
-        right_len: usize,
-        join_type: JoinType,
-    ) -> ColIndexMapping {
-        Self::o2r_col_mapping(left_len, right_len, join_type).inverse()
-    }
-
-    fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
-        let left_len = left_schema.len();
-        let right_len = right_schema.len();
-        let out_column_num = Self::out_column_num(left_len, right_len, join_type);
-        let o2l = Self::o2l_col_mapping(left_len, right_len, join_type);
-        let o2r = Self::o2r_col_mapping(left_len, right_len, join_type);
-        let fields = (0..out_column_num)
-            .into_iter()
-            .map(|i| match (o2l.try_map(i), o2r.try_map(i)) {
-                (Some(l_i), None) => left_schema.fields()[l_i].clone(),
-                (None, Some(r_i)) => right_schema.fields()[r_i].clone(),
-                _ => panic!(),
-            })
-            .collect();
-        Schema { fields }
-    }
-
-    fn derive_pk(
-        left_len: usize,
-        right_len: usize,
-        left_pk: &[usize],
-        right_pk: &[usize],
-        join_type: JoinType,
-    ) -> Vec<usize> {
-        let l2o = Self::l2o_col_mapping(left_len, right_len, join_type);
-        let r2o = Self::r2o_col_mapping(left_len, right_len, join_type);
-        left_pk
-            .iter()
-            .map(|index| l2o.map(*index))
-            .chain(right_pk.iter().map(|index| r2o.map(*index)))
-            .collect()
     }
 
     /// Get the join type of the logical apply.
