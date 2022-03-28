@@ -271,7 +271,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                             for (join_handle, shutdown_sender) in sub_tasks {
                                 if shutdown_sender.send(()).is_ok() {
                                     if let Err(err) = join_handle.await {
-                                        tracing::warn!("shutdown err: {}", err);
+                                        tracing::warn!("shutdown err: {:?}", err);
                                     }
                                 }
                             }

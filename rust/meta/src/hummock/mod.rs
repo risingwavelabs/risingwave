@@ -85,7 +85,7 @@ where
                     continue;
                 }
                 Err(e) => {
-                    tracing::warn!("failed to get_compact_task {}", e);
+                    tracing::warn!("failed to get_compact_task {:?}", e);
                     continue;
                 }
             };
@@ -104,7 +104,7 @@ where
                     .report_compact_task(compact_task, false)
                     .await
                 {
-                    tracing::warn!("failed to report_compact_task {}", e);
+                    tracing::warn!("failed to report_compact_task {:?}", e);
                 }
                 continue;
             }

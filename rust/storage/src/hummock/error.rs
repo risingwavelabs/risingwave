@@ -100,7 +100,7 @@ impl From<prost::DecodeError> for TracedHummockError {
 }
 
 #[derive(Error)]
-#[error("{source:?}\n{backtrace:#}")]
+#[error("{source}")]
 pub struct TracedHummockError {
     #[from]
     source: HummockError,
@@ -109,7 +109,20 @@ pub struct TracedHummockError {
 
 impl std::fmt::Debug for TracedHummockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        use std::error::Error;
+
+        write!(f, "{}", self.source)?;
+        write!(f, "\n")?;
+        if let Some(backtrace) = self.source.backtrace() {
+            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
+        } else {
+            write!(
+                f,
+                "  backtrace of `TracedHummockError`:\n{}",
+                self.backtrace
+            )?;
+        }
+        Ok(())
     }
 }
 

@@ -318,7 +318,7 @@ where
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,
