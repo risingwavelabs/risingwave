@@ -27,7 +27,7 @@ use risingwave_common::util::value_encoding::{deserialize_cell_not_null, seriali
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::aggregation::ManagedExtremeState;
+use crate::executor::managed_state::aggregation::ManagedTableState;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -153,7 +153,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
+impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -272,7 +272,7 @@ mod tests {
 
     use super::*;
     use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
-    use crate::executor::managed_state::aggregation::ManagedExtremeState;
+    use crate::executor::managed_state::aggregation::ManagedTableState;
     use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(
