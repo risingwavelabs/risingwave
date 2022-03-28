@@ -87,6 +87,14 @@ impl LocalBarrierManager {
         self.senders.insert(actor_id, sender);
     }
 
+    /// Create a notifier for DDL finish. When an executor/actor finishes its DDL job, it can report
+    /// that using this notifier.
+    /// Note that a DDL of MV always corresponds to an epoch in our system.
+    ///
+    /// Take the creation of an MV for an example, it may last for several epochs to finish.
+    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will send the
+    /// DDL epoch using this notifier, which can be collected by the barrier manager and reported to
+    /// the meta service soon.
     pub fn register_ddl_finish_notifier(&mut self, actor_id: ActorId) -> DdlFinishNotifierTx {
         let (tx, rx) = oneshot::channel();
         debug!("register ddl finish notifier: {}", actor_id);
