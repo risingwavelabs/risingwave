@@ -147,7 +147,11 @@ impl ToStreamProst for StreamHashJoin {
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            condition: Some(self.eq_join_predicate.other_cond().as_expr().to_protobuf()),
+            condition: self
+                .eq_join_predicate
+                .other_cond()
+                .as_expr_unless_true()
+                .map(|x| x.to_protobuf()),
         })
     }
 }
