@@ -169,6 +169,7 @@ mod tests {
                 read_level_nplus1: Some(TableSetStatistics::default()),
                 write: Some(TableSetStatistics::default()),
             }),
+            task_status: false,
         }
     }
 

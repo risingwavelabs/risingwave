@@ -750,11 +750,7 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
-    pub async fn report_compact_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> Result<bool> {
+    pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -789,15 +785,14 @@ where
         compact_task_assignment.remove(&compact_task.task_id);
         let delete_table_ids = match compact_status.report_compact_task(
             output_table_compact_entries,
-            compact_task,
-            task_result,
+            compact_task.clone(),
         ) {
             None => {
                 panic!("Inconsistent compact status");
             }
             Some(delete_table_ids) => delete_table_ids,
         };
-        if task_result {
+        if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
             let (
