@@ -14,6 +14,7 @@
 
 //! Hummock is the state store of the streaming system.
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::ops::RangeBounds;
 use std::sync::Arc;
@@ -56,19 +57,19 @@ use risingwave_pb::hummock::LevelType;
 use value::*;
 
 use self::iterator::{
-    BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
-    UserIterator,
+    BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
 pub use self::state_store::*;
-use self::utils::{bloom_filter_sstables, range_overlap};
+use self::utils::range_overlap;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
+use crate::hummock::version_cmp::VersionedComparator;
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -160,8 +161,6 @@ impl HummockStorage {
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
     pub async fn get(&self, key: &[u8], epoch: u64) -> HummockResult<Option<Vec<u8>>> {
-        let mut table_iters: Vec<BoxedHummockIterator> = Vec::new();
-
         let version = self.local_version_manager.get_version()?;
         // check epoch validity
         validate_epoch(version.safe_epoch(), epoch)?;
@@ -174,37 +173,44 @@ impl HummockStorage {
             self.stats.get_shared_buffer_hit_counts.inc();
             return Ok(v.into_put_value().map(|x| x.to_vec()));
         }
+        let internal_key = key_with_epoch(key.to_vec(), epoch);
 
         let mut table_counts = 0;
         for level in &version.levels() {
+            let tables = self
+                .local_version_manager
+                .pick_few_tables(&level.table_ids)
+                .await?;
             match level.level_type() {
                 LevelType::Overlapping => {
-                    let tables = bloom_filter_sstables(
-                        self.local_version_manager
-                            .pick_few_tables(&level.table_ids)
-                            .await?,
-                        key,
-                        self.stats.clone(),
-                    )?;
-                    table_counts += tables.len();
-                    table_iters.extend(tables.into_iter().map(|table| {
-                        Box::new(SSTableIterator::new(table, self.sstable_store.clone()))
-                            as BoxedHummockIterator
-                    }))
+                    for table in tables {
+                        table_counts += 1;
+                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                            return Ok(Some(v));
+                        }
+                    }
                 }
                 LevelType::Nonoverlapping => {
-                    let tables = bloom_filter_sstables(
-                        self.local_version_manager
-                            .pick_few_tables(&level.table_ids)
-                            .await?,
-                        key,
-                        self.stats.clone(),
-                    )?;
-                    table_counts += tables.len();
-                    table_iters.push(Box::new(ConcatIterator::new(
-                        tables,
-                        self.sstable_store.clone(),
-                    )))
+                    let table_idx = tables
+                        .partition_point(|table| {
+                            let ord = VersionedComparator::compare_key(
+                                user_key(&table.meta.smallest_key),
+                                key,
+                            );
+                            ord == Ordering::Less || ord == Ordering::Equal
+                        })
+                        .saturating_sub(1); // considering the boundary of 0
+                    if table_idx < tables.len() {
+                        table_counts += 1;
+                        // Because we will keep multiple version of one in the same sst file, we do
+                        // not find it in the next adjacent file.
+                        if let Some(v) = self
+                            .get_from_table(tables[table_idx].clone(), &internal_key, key)
+                            .await?
+                        {
+                            return Ok(Some(v));
+                        }
+                    }
                 }
             }
         }
@@ -212,25 +218,7 @@ impl HummockStorage {
         self.stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
-        let mut it = MergeIterator::new(table_iters, self.stats.clone());
-
-        // Use `MergeIterator` to seek for the key with the latest version to
-        // get the latest key.
-        it.seek(&key_with_epoch(key.to_vec(), epoch)).await?;
-
-        // Iterator has sought passed the borders.
-        if !it.is_valid() {
-            return Ok(None);
-        }
-
-        // Iterator gets us the key, we tell if it's the key we want
-        // or key next to it.
-        let value = match user_key(it.key()) == key {
-            true => it.value().into_put_value().map(|x| x.to_vec()),
-            false => None,
-        };
-
-        Ok(value)
+        Ok(None)
     }
 
     /// Returns an iterator that scan from the begin key to the end key
@@ -428,6 +416,34 @@ impl HummockStorage {
             // TODO: Make this configurable.
             compression_algorithm: CompressionAlgorithm::None,
         })
+    }
+
+    async fn get_from_table(
+        &self,
+        table: Arc<Sstable>,
+        internal_key: &[u8],
+        key: &[u8],
+    ) -> HummockResult<Option<Vec<u8>>> {
+        if table.surely_not_have_user_key(key) {
+            self.stats.bloom_filter_true_negative_counts.inc();
+            return Ok(None);
+        }
+        // Might have the key, take it as might positive.
+        self.stats.bloom_filter_might_positive_counts.inc();
+        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
+        iter.seek(internal_key).await?;
+        // Iterator has seeked passed the borders.
+        if !iter.is_valid() {
+            return Ok(None);
+        }
+
+        // Iterator gets us the key, we tell if it's the key we want
+        // or key next to it.
+        let value = match user_key(iter.key()) == key {
+            true => iter.value().into_put_value().map(|x| x.to_vec()),
+            false => None,
+        };
+        Ok(value)
     }
 
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
