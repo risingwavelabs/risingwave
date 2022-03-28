@@ -56,7 +56,17 @@ impl Actor {
         loop {
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
-                Ok(Some(barrier)) => {
+                Ok(Some(mut barrier)) => {
+                    let (barrier, local_info) = {
+                        let local_info = barrier.take_actor_local_info();
+                        (barrier, local_info)
+                    };
+
+                    // TODO: process local info, for example, finished chains
+                    if let Some(local_info) = local_info {
+                        info!("local info for actor {}: {:?}", self.id, local_info);
+                    }
+
                     // collect barriers to local barrier manager
                     self.context
                         .lock_barrier_manager()

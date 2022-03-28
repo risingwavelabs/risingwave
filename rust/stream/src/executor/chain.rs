@@ -28,8 +28,8 @@ use crate::task::{ExecutorParams, StreamManagerCore};
 #[derive(Debug)]
 enum ChainState {
     Init,
-    ReadingSnapshot { epoch: u64 },
-    ReadingMview { finished_epoch: Option<u64> },
+    ReadingSnapshot { create_epoch: u64 },
+    ReadingMview { create_epoch: Option<u64> },
 }
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -118,15 +118,15 @@ impl ChainExecutor {
     async fn read_mview(&mut self) -> Result<Message> {
         let mut msg = self.mview.next().await?;
 
-        if let ChainState::ReadingMview { finished_epoch } = &mut self.state {
-            if let Some(finished_epoch) = finished_epoch.take() {
+        if let ChainState::ReadingMview { create_epoch } = &mut self.state {
+            if let Some(create_epoch) = create_epoch.take() {
                 match &mut msg {
                     Message::Chunk(_) => {}
                     Message::Barrier(barrier) => {
                         barrier
                             .actor_local_info_mut()
-                            .finished_epochs
-                            .insert(finished_epoch);
+                            .finished_ddl_epochs
+                            .insert(create_epoch);
                     }
                 }
             }
@@ -141,9 +141,9 @@ impl ChainExecutor {
         match msg {
             // TODO(Croxx): Refactor this once we find a better way to know the upstream is done.
             Err(e) if matches!(e.inner(), ErrorCode::Eof) => match self.state {
-                ChainState::ReadingSnapshot { epoch } => {
+                ChainState::ReadingSnapshot { create_epoch } => {
                     self.state = ChainState::ReadingMview {
-                        finished_epoch: Some(epoch),
+                        create_epoch: Some(create_epoch),
                     };
                     return self.read_mview().await;
                 }
@@ -167,14 +167,12 @@ impl ChainExecutor {
                     // and set its state to reading snapshot.
                     self.snapshot.init(barrier.epoch.prev)?;
                     self.state = ChainState::ReadingSnapshot {
-                        epoch: barrier.epoch.curr,
+                        create_epoch: barrier.epoch.curr,
                     };
                 } else {
                     // If the barrier is not a conf change, means snapshot already read and state
                     // should be set to reading mview.
-                    self.state = ChainState::ReadingMview {
-                        finished_epoch: None,
-                    };
+                    self.state = ChainState::ReadingMview { create_epoch: None };
                 }
                 Ok(Message::Barrier(barrier))
             }

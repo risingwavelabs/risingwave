@@ -137,7 +137,14 @@ impl Default for Epoch {
 
 #[derive(Debug, Clone, Default)]
 pub struct ActorLocalInfo {
-    pub finished_epochs: HashSet<u64>,
+    /// Previous DDLs that are finished in current epoch and current actor. Note that a DDL of MV
+    /// always correspond to an epoch in our system.
+    ///
+    /// Take the creation of an MV for an example, it may last for several epochs to finish.
+    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will push the
+    /// ddl epoch to this field, which can be found by the actor and reported to the meta service
+    /// soon.
+    pub finished_ddl_epochs: HashSet<u64>,
 }
 
 #[derive(Debug, Clone)]
