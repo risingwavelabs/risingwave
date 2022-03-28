@@ -235,7 +235,7 @@ impl ColIndexMapping {
             match self.try_map(field.index) {
                 Some(mapped_index) => mapped_field.push(FieldOrder {
                     index: mapped_index,
-                    direct: field.direct.clone(),
+                    direct: field.direct,
                 }),
                 None => break,
             }
@@ -256,7 +256,7 @@ impl ColIndexMapping {
             .map(|field| {
                 self.try_map(field.index).map(|mapped_index| FieldOrder {
                     index: mapped_index,
-                    direct: field.direct.clone(),
+                    direct: field.direct,
                 })
             })
             .collect::<Option<Vec<_>>>()
