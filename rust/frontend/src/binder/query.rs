@@ -70,6 +70,7 @@ impl Binder {
         };
         let limit = match query.limit {
             Some(Expr::Value(Value::Number(limit, _))) => limit.parse().ok(),
+            Some(_) => Err(ErrorCode::BindError("unable to bind limit value".to_string())).ok(),
             _ => None,
         };
         let offset = match query.offset {
@@ -77,6 +78,7 @@ impl Binder {
                 value: Expr::Value(Value::Number(offset, _)),
                 ..
             }) => offset.parse().ok(),
+            Some(_) => Err(ErrorCode::BindError("unable to bind offset value".to_string())).ok(),
             _ => None,
         };
         let order = query

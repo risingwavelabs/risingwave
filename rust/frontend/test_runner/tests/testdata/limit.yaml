@@ -10,7 +10,7 @@
     create table t (v int not null);
     select * from t offset 4;
   logical_plan: |
-    LogicalLimit { limit: 0, offset: 4 }
+    LogicalLimit { limit: 9223372036854775807, offset: 4 }
       LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, v] }
         LogicalScan { table: t, columns: [_row_id, v] }
 

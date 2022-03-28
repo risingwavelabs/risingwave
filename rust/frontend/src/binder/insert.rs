@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
+use risingwave_sqlparser::ast::{Expr, Ident, ObjectName, Offset, Query, SetExpr, Value};
 
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::{Binder, BoundTableSource};
@@ -34,6 +34,19 @@ impl Binder {
         source: Query,
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
+        let limit = match source.limit {
+            Some(Expr::Value(Value::Number(ref limit, _))) => limit.parse().ok(),
+            Some(_) => Err(ErrorCode::BindError("unable to bind limit value".to_string())).ok(),
+            _ => None,
+        };
+        let offset = match source.offset {
+            Some(Offset {
+                value: Expr::Value(Value::Number(ref offset, _)),
+                ..
+            }) => offset.parse().ok(),
+            Some(_) => Err(ErrorCode::BindError("unable to bind offset value".to_string())).ok(),
+            _ => None,
+        };
 
         let expected_types = table_source
             .columns
@@ -48,6 +61,8 @@ impl Binder {
                 BoundQuery {
                     body,
                     order: vec![],
+                    limit,
+                    offset
                 }
             }
 
