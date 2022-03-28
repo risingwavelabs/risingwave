@@ -25,6 +25,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{LogicalProject, StreamMaterialize};
@@ -170,7 +171,7 @@ impl PlanRoot {
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> StreamMaterialize {
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
         let stream_plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();

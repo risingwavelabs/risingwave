@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
@@ -64,7 +65,7 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-    ) -> Self {
+    ) -> Result<Self> {
         let base = Self::derive_plan_base(&input);
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
@@ -115,7 +116,7 @@ impl StreamMaterialize {
             pk_desc,
         };
 
-        Self { base, input, table }
+        Ok(Self { base, input, table })
     }
 
     /// Get a reference to the stream materialize's table.
