@@ -119,6 +119,22 @@ impl ExprImpl {
         visitor.visit_expr(self);
         visitor.has_subquery
     }
+
+    pub fn as_subquery(self) -> Option<Subquery> {
+        if let ExprImpl::Subquery(subquery) = self {
+            Some(*subquery)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_function_call(self) -> Option<FunctionCall> {
+        if let ExprImpl::FunctionCall(function_call) = self {
+            Some(*function_call)
+        } else {
+            None
+        }
+    }
 }
 
 impl Expr for ExprImpl {

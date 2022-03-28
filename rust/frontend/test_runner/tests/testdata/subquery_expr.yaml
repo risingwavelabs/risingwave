@@ -56,38 +56,48 @@
     select 1 where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalFilter { predicate: $0 }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
-          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-          LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
-                LogicalScan { table: t, columns: [_row_id, x] }
+      LogicalJoin { type: LeftSemi, on: true:Boolean }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalJoin { type: LeftSemi, on: true:Boolean }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        LogicalScan { table: t, columns: [] }
+- sql: |
+    create table t(x int);
+    select 1 where not exists (select * from t);
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalJoin { type: LeftAnti, on: true:Boolean }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+          LogicalScan { table: t, columns: [_row_id, x] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalJoin { type: LeftAnti, on: true:Boolean }
+        LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+        LogicalScan { table: t, columns: [] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
     select x from t1 where exists (select x from t2);
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
-      LogicalFilter { predicate: $2 }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
-          LogicalScan { table: t1, columns: [_row_id, x] }
-          LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [$1], expr_alias: [x] }
-                LogicalScan { table: t2, columns: [_row_id, x] }
+      LogicalJoin { type: LeftSemi, on: true:Boolean }
+        LogicalScan { table: t1, columns: [_row_id, x] }
+        LogicalProject { exprs: [$1], expr_alias: [x] }
+          LogicalScan { table: t2, columns: [_row_id, x] }
 - sql: |
     create table t(x int);
     select x from t where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
-      LogicalFilter { predicate: $2 }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftSemi, on: true:Boolean }
+        LogicalScan { table: t, columns: [_row_id, x] }
+        LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
           LogicalScan { table: t, columns: [_row_id, x] }
-          LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
-            LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
-                LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t1(x int);
     create table t2(x int);
@@ -99,3 +109,23 @@
           LogicalScan { table: t1, columns: [_row_id, x] }
           LogicalProject { exprs: [$1], expr_alias: [x] }
             LogicalScan { table: t2, columns: [_row_id, x] }
+- sql: |
+    select 1 where true and exists (values (1))
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: true:Boolean }
+        LogicalJoin { type: LeftSemi, on: true:Boolean }
+          LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+          LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
+- sql: |
+    select 1 where (not exists (values (1))) and (true or exists (values (1)))
+  logical_plan: |
+    LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
+      LogicalFilter { predicate: (true:Boolean OR $0) }
+        LogicalJoin { type: LeftOuter, on: true:Boolean }
+          LogicalJoin { type: LeftAnti, on: true:Boolean }
+            LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+            LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
+          LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
+            LogicalAgg { group_keys: [], agg_calls: [count] }
+              LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
