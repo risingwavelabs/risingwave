@@ -48,11 +48,14 @@ pub fn verify_batch(
     all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// All managed state for state aggregation. The managed state will manage the cache and integrate
+/// All managed state for aggregation. The managed state will manage the cache and integrate
 /// the state with the underlying state store. Managed states can only be evicted from outer cache
 /// when they are not dirty.
 pub enum ManagedStateImpl<S: StateStore> {
+    /// States as single value e.g. `COUNT`, `SUM`
     Value(ManagedValueState<S>),
+
+    /// States as table structure e.g. `MAX`, `STRING_AGG`
     Extreme(Box<dyn ManagedExtremeState<S>>),
 }
 
