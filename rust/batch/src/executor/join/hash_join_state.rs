@@ -559,18 +559,14 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn process_inner_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
         let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?
-            .as_bool()
-            .try_into()?;
+            .get_non_equi_cond_filter(&data_chunk)?;
         data_chunk.set_visibility(filter);
         Ok(())
     }
 
     fn process_outer_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
         let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?
-            .as_bool()
-            .try_into()?;
+            .get_non_equi_cond_filter(&data_chunk)?;
         self.nullify_build_side_for_non_equi_condition(data_chunk, &filter);
         let filter = self.remove_duplicate_rows(filter)?;
         data_chunk.set_visibility(filter);
@@ -579,9 +575,7 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn process_semi_join_non_equi_condition(&mut self, data_chunk: &mut DataChunk) -> Result<()> {
         let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?
-            .as_bool()
-            .try_into()?;
+            .get_non_equi_cond_filter(&data_chunk)?;
         let filter = self.remove_duplicate_rows(filter)?;
         data_chunk.set_visibility(filter);
         Ok(())
@@ -592,16 +586,15 @@ impl<K: HashKey> ProbeTable<K> {
         data_chunk: &mut DataChunk,
     ) -> Result<()> {
         let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?
-            .as_bool()
-            .try_into()?;
+            .get_non_equi_cond_filter(&data_chunk)?;
         let filter = self.remove_duplicate_rows(filter)?;
         data_chunk.set_visibility(filter);
         Ok(())
     }
 
-    fn get_non_equi_cond_filter(&mut self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-        self.params.cond.as_mut().unwrap().eval(data_chunk)
+    fn get_non_equi_cond_filter(&mut self, data_chunk: &DataChunk) -> Result<Bitmap> {
+        let array = self.params.cond.as_mut().unwrap().eval(data_chunk)?;
+        array.as_bool().try_into()
     }
 
     pub(super) fn join_remaining(&mut self) -> Result<Option<DataChunk>> {

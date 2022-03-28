@@ -407,8 +407,11 @@ mod tests {
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
+    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_common::expr::{BoxedExpression, InputRefExpression};
     use risingwave_common::hash::Key32;
     use risingwave_common::types::DataType;
+    use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
     use crate::executor::join::JoinType;
@@ -617,7 +620,18 @@ mod tests {
                 .collect::<Vec<DataType>>()
         }
 
-        fn create_join_executor(&self) -> BoxedExecutor {
+        fn create_cond() -> BoxedExpression {
+            let left_expr = InputRefExpression::new(DataType::Float32, 1);
+            let right_expr = InputRefExpression::new(DataType::Float64, 3);
+            new_binary_expr(
+                Type::LessThan,
+                DataType::Boolean,
+                Box::new(left_expr),
+                Box::new(right_expr),
+            )
+        }
+
+        fn create_join_executor(&self, has_non_equi_cond: bool) -> BoxedExecutor {
             let join_type = self.join_type;
 
             let left_child = self.create_left_executor();
@@ -627,6 +641,11 @@ mod tests {
 
             let output_data_types = self.output_data_types();
 
+            let cond = if has_non_equi_cond {
+                Some(Self::create_cond())
+            } else {
+                None
+            };
             let params = EquiJoinParams {
                 join_type,
                 left_key_columns: vec![0],
@@ -636,7 +655,7 @@ mod tests {
                 output_columns,
                 output_data_types,
                 batch_size: 2,
-                cond: None,
+                cond,
             };
 
             let fields = params
@@ -659,8 +678,8 @@ mod tests {
             )) as BoxedExecutor
         }
 
-        async fn do_test(&self, expected: DataChunk) {
-            let mut join_executor = self.create_join_executor();
+        async fn do_test(&self,expected: DataChunk, has_non_equi_cond: bool) {
+            let mut join_executor = self.create_join_executor(has_non_equi_cond);
             join_executor
                 .open()
                 .await
@@ -718,7 +737,7 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 
     /// Sql:
@@ -743,7 +762,31 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_left_outer_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
+
+        let column1 = Column::new(Arc::new(
+            array! {F32Array, [Some(6.1f32), None, Some(8.4f32), Some(3.9f32), None,
+            Some(6.6f32), Some(0.7f32), None, Some(5.5f32)]}
+            .into(),
+        ));
+
+        let column2 = Column::new(Arc::new(
+            array! {F64Array, [None, None, None, Some(5.7f64), None, Some(7.5f64), None, None, None]}.into(),
+    ));
+
+        let expected_chunk =
+            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
     }
 
     /// Sql:
@@ -776,8 +819,10 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
+
+    
 
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
@@ -813,7 +858,7 @@ mod tests {
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 
     #[tokio::test]
@@ -829,7 +874,7 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 
     #[tokio::test]
@@ -845,7 +890,7 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 
     #[tokio::test]
@@ -863,7 +908,7 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 
     #[tokio::test]
@@ -879,6 +924,6 @@ mod tests {
 
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
-        test_fixture.do_test(expected_chunk).await;
+        test_fixture.do_test(expected_chunk, false).await;
     }
 }
