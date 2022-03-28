@@ -191,12 +191,12 @@ impl ToStream for LogicalScan {
                         self.base.ctx.clone(),
                     )
                     .into(),
-                    ColIndexMapping::identical_map(self.schema().len()),
+                    ColIndexMapping::identity(self.schema().len()),
                 )
             }
             false => (
                 self.clone().into(),
-                ColIndexMapping::identical_map(self.schema().len()),
+                ColIndexMapping::identity(self.schema().len()),
             ),
         }
     }

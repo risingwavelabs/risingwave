@@ -393,7 +393,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .collect();
         let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(agg.schema().len());
+        let out_col_change = ColIndexMapping::identity(agg.schema().len());
         (agg, out_col_change)
     }
 }
