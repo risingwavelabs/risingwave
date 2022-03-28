@@ -173,7 +173,7 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(ProstColumnDesc {
                         column_id: 0,
-                        name: gen_row_id_column_name(None).to_string(),
+                        name: gen_row_id_column_name(0).to_string(),
                         field_descs: vec![],
                         column_type: Some(DataType::Int32.to_protobuf()),
                         type_name: String::new(),
@@ -220,7 +220,7 @@ mod tests {
                         column_desc: ColumnDesc {
                             data_type: DataType::Int32,
                             column_id: ColumnId::new(0),
-                            name: gen_row_id_column_name(None).to_string(),
+                            name: gen_row_id_column_name(0).to_string(),
                             field_descs: vec![],
                             type_name: String::new()
                         },
@@ -258,7 +258,7 @@ mod tests {
                     column_desc: ColumnDesc {
                         data_type: DataType::Int32,
                         column_id: ColumnId::new(0),
-                        name: gen_row_id_column_name(None).to_string(),
+                        name: gen_row_id_column_name(0).to_string(),
                         field_descs: vec![],
                         type_name: String::new()
                     },

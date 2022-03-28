@@ -50,7 +50,7 @@ pub fn gen_create_table_plan(
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
-            name: gen_row_id_column_name(None).to_string(),
+            name: gen_row_id_column_name(0).to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         });
@@ -188,7 +188,7 @@ mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let row_id_col_name = gen_row_id_column_name(None);
+        let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,

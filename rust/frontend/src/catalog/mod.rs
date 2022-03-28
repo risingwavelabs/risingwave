@@ -32,11 +32,8 @@ pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
 
 pub const ROWID_PREFIX: &str = "_row_id";
 
-pub fn gen_row_id_column_name(idx: Option<usize>) -> String {
-    match idx {
-        Some(idx) => ROWID_PREFIX.to_string() + "#" + &idx.to_string(),
-        None => ROWID_PREFIX.to_string(),
-    }
+pub fn gen_row_id_column_name(idx: usize) -> String {
+    ROWID_PREFIX.to_string() + "#" + &idx.to_string()
 }
 
 pub fn is_row_id_column_name(name: &str) -> bool {

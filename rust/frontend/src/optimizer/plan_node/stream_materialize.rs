@@ -78,7 +78,7 @@ impl StreamMaterialize {
                 true => {
                     let field = Field {
                         data_type: field.data_type.clone(),
-                        name: gen_row_id_column_name(Some(row_id_count)),
+                        name: gen_row_id_column_name(row_id_count),
                     };
                     row_id_count += 1;
                     field
