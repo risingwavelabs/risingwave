@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
+use std::future::Future;
 use std::ops::RangeBounds;
 
 use async_trait::async_trait;
@@ -21,7 +21,8 @@ use risingwave_common::error::Result;
 use super::HummockStorage;
 use crate::hummock::iterator::DirectedUserIterator;
 use crate::storage_value::StorageValue;
-use crate::{StateStore, StateStoreIter};
+use crate::store::{collect_from_iter, *};
+use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 /// A wrapper over [`HummockStorage`] as a state store.
 #[derive(Clone)]
@@ -39,69 +40,107 @@ impl HummockStateStore {
     }
 }
 
-#[async_trait]
 impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
+    define_state_store_associated_type!();
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
-        let value = self.storage.get(key, epoch).await?;
-        let value = value.map(Bytes::from);
-        let storage_value = value.map(StorageValue::from);
-        Ok(storage_value)
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+        async move {
+            let value = self.storage.get(key, epoch).await?;
+            let value = value.map(Bytes::from);
+            let storage_value = value.map(StorageValue::from);
+            Ok(storage_value)
+        }
     }
 
-    async fn ingest_batch(
+    fn scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ScanFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { collect_from_iter(self.iter(key_range, epoch).await?, limit).await }
+    }
+
+    fn reverse_scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ReverseScanFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await }
+    }
+
+    fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()> {
-        self.storage
-            .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
-            .await?;
-        Ok(())
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            self.storage
+                .write_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+                .await?;
+            Ok(())
+        }
     }
 
-    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        let inner = self.storage.range_scan(key_range, epoch).await?;
-        let mut res = DirectedUserIterator::Forward(inner);
-        res.rewind().await?;
-        Ok(HummockStateStoreIter::new(res))
-    }
-
-    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        let mut res = self.storage.reverse_range_scan(key_range, epoch).await?;
-        res.rewind().await?;
-        Ok(HummockStateStoreIter::new(DirectedUserIterator::Backward(
-            res,
-        )))
-    }
-
-    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
-        self.storage.wait_epoch(epoch).await
-    }
-
-    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
-        self.storage.sync(epoch).await?;
-        Ok(())
-    }
-
-    async fn replicate_batch(
+    fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()> {
-        self.storage
-            .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
-            .await?;
-        Ok(())
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move {
+            self.storage
+                .replicate_batch(kv_pairs.into_iter().map(|(k, v)| (k, v.into())), epoch)
+                .await?;
+            Ok(())
+        }
+    }
+
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            let inner = self.storage.range_scan(key_range, epoch).await?;
+            let mut res = DirectedUserIterator::Forward(inner);
+            res.rewind().await?;
+            Ok(HummockStateStoreIter::new(res))
+        }
+    }
+
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            let mut res = self.storage.reverse_range_scan(key_range, epoch).await?;
+            res.rewind().await?;
+            Ok(HummockStateStoreIter::new(DirectedUserIterator::Backward(
+                res,
+            )))
+        }
+    }
+
+    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { self.storage.wait_epoch(epoch).await }
+    }
+
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move {
+            self.storage.sync(epoch).await?;
+            Ok(())
+        }
     }
 }
 
