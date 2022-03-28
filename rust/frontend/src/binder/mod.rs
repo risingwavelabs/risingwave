@@ -48,6 +48,8 @@ pub struct Binder {
     ///
     /// See [`Binder::bind_subquery`] for details.
     upper_contexts: Vec<BindContext>,
+
+    next_subquery_id: usize,
 }
 
 impl Binder {
@@ -57,6 +59,7 @@ impl Binder {
             db_name,
             context: BindContext::new(),
             upper_contexts: vec![],
+            next_subquery_id: 0,
         }
     }
 
@@ -73,6 +76,12 @@ impl Binder {
     fn pop_context(&mut self) {
         let old_context = self.upper_contexts.pop();
         self.context = old_context.unwrap();
+    }
+
+    fn next_subquery_id(&mut self) -> usize {
+        let id = self.next_subquery_id;
+        self.next_subquery_id += 1;
+        id
     }
 }
 

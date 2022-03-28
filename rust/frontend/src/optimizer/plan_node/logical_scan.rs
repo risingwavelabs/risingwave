@@ -24,7 +24,7 @@ use risingwave_common::error::Result;
 use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
 use crate::optimizer::property::WithSchema;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
 /// `LogicalScan` returns contents of a table or other equivalent object
@@ -42,7 +42,7 @@ impl LogicalScan {
         table_name: String,           // explain-only
         required_col_idx: Vec<usize>, // the column index in the table
         table_desc: Rc<TableDesc>,
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -82,7 +82,7 @@ impl LogicalScan {
     pub fn create(
         table_name: String, // explain-only
         table_desc: Rc<TableDesc>,
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
     ) -> Result<PlanRef> {
         Ok(Self::new(
             table_name,
@@ -170,13 +170,16 @@ impl ToStream for LogicalScan {
                 for idx in &self.required_col_idx {
                     col_ids.insert(self.table_desc.columns[*idx].column_id);
                 }
+                let mut col_id_to_tb_idx = HashMap::new();
+                for (tb_idx, c) in self.table_desc().columns.iter().enumerate() {
+                    col_id_to_tb_idx.insert(c.column_id, tb_idx);
+                }
                 let col_need_to_add = self
                     .table_desc
                     .pk
                     .iter()
-                    .enumerate()
-                    .filter(|(_idx, c)| !col_ids.contains(&c.column_desc.column_id))
-                    .map(|(idx, _c)| idx)
+                    .filter(|c| !col_ids.contains(&c.column_desc.column_id))
+                    .map(|c| col_id_to_tb_idx.get(&c.column_desc.column_id).unwrap())
                     .collect_vec();
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);

@@ -92,7 +92,7 @@ impl Distribution {
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
-    fn satisfies(&self, other: &Distribution) -> bool {
+    pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
             Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),

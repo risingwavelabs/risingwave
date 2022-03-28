@@ -441,8 +441,9 @@ fn main() -> Result<()> {
         }
         Err(err) => {
             println!(
-                "{} - Failed to start: {}",
+                "{} - Failed to start: {}\nCaused by:\n\t{}",
                 style("ERROR").red().bold(),
+                err,
                 err.root_cause().to_string().trim(),
             );
             println!(

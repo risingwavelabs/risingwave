@@ -45,7 +45,19 @@ impl BoundQuery {
 
 impl Binder {
     /// Bind a [`Query`].
+    ///
+    /// Before binding the [`Query`], we push the current [`BindContext`](super::BindContext) to the
+    /// stack and create a new context, because it may be a subquery.
+    ///
+    /// After finishing binding, we pop the previous context from the stack.
     pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+        self.push_context();
+        let result = self.bind_query_inner(query);
+        self.pop_context();
+        result
+    }
+
+    fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {

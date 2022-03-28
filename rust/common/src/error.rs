@@ -56,6 +56,8 @@ pub enum ErrorCode {
     ),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
+    #[error("Bind error: {0}")]
+    BindError(String),
     #[error("Catalog error: {0}")]
     CatalogError(BoxedError),
     #[error("Out of range")]
@@ -223,6 +225,7 @@ impl ErrorCode {
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
+            ErrorCode::BindError(_) => 23,
             ErrorCode::UnknownError(_) => 101,
         }
     }
