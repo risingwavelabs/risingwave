@@ -11,7 +11,7 @@
     BatchExchange { order: [], dist: Single }
       BatchScan { table: t, columns: [_row_id, v1, v2] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1, #2], pk_indices: [0] }
+    StreamMaterialize { columns: ["_row_id", "v1", "v2"], pk_columns: ["_row_id"] }
       StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -25,7 +25,7 @@
       BatchFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
         BatchScan { table: t, columns: [_row_id] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0], pk_indices: [0] }
+    StreamMaterialize { columns: ["_row_id"], pk_columns: ["_row_id"] }
       StreamFilter { predicate: (((((1:Int32 > 2:Int32) AND (1:Int32 = 1:Int32)) AND (3:Int32 < 1:Int32)) AND (4:Int32 <> 1:Int32)) OR (((1:Int32 = 1:Int32) AND (2:Int32 >= 1:Int32)) AND (1:Int32 <= 2:Int32))) }
         StreamTableScan { table: t, columns: [_row_id], pk_indices: [0] }
 - sql: |
@@ -36,7 +36,7 @@
       BatchFilter { predicate: ($1 < 1:Int32) }
         BatchScan { table: t, columns: [_row_id, v1] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$0 ASC], column_id: [#0, #1], pk_indices: [0] }
+    StreamMaterialize { columns: ["_row_id", "v1"], pk_columns: ["_row_id"] }
       StreamFilter { predicate: ($1 < 1:Int32) }
         StreamTableScan { table: t, columns: [_row_id, v1], pk_indices: [0] }
 - sql: |
@@ -54,7 +54,7 @@
       BatchExchange { order: [], dist: Single }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
-    StreamMaterialize { column_orders: [$1 ASC], column_id: [#0, #1], pk_indices: [1] }
+    StreamMaterialize { columns: ["expr#0", "expr#1"(hidden)], pk_columns: ["expr#1"] }
       StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $1], expr_alias: [ ,  ] }
         StreamTableScan { table: t, columns: [v1, _row_id], pk_indices: [1] }
 - sql: |
@@ -76,6 +76,16 @@
   batch_plan: |
     BatchInsert { table: t }
       BatchValues { rows: [[22:Int32, 33:Int32], [44:Int32, 55:Int32]] }
+- sql: |
+    create table t (v1 real, v2 int);
+    insert into t values (22.33, '33'), (44, 55.0);
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[Normalized(22.33):Decimal::Float32, "33":Varchar::Int32], [44:Int32::Float32, Normalized(55.0):Decimal::Int32]] }
+- sql: |
+    create table t (v1 real, v2 int, v3 varchar);
+    insert into t values (1, 2), (3, 4);
+  binder_error: 'Invalid input syntax: values length mismatched: expected 3, given 2'
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
