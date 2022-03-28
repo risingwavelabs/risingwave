@@ -135,11 +135,16 @@ impl Default for Epoch {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct ActorLocalInfo {}
+
 #[derive(Debug, Clone)]
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub span: tracing::Span,
+
+    actor_local_info: Option<ActorLocalInfo>,
 }
 
 impl Default for Barrier {
@@ -148,6 +153,7 @@ impl Default for Barrier {
             span: tracing::Span::none(),
             epoch: Epoch::default(),
             mutation: None,
+            actor_local_info: None,
         }
     }
 }
@@ -180,11 +186,21 @@ impl Barrier {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
 
-    pub fn is_add_output(&self) -> bool {
+    pub fn is_add_output_mutation(&self) -> bool {
         self.mutation
             .as_ref()
             .map(|m| m.is_add_output())
             .unwrap_or(false)
+    }
+
+    pub fn take_actor_local_info(&mut self) -> Option<ActorLocalInfo> {
+        self.actor_local_info.take()
+    }
+
+    /// Get a mutable reference to the barrier's actor local info.
+    #[must_use]
+    pub fn actor_local_info_mut(&mut self) -> &mut ActorLocalInfo {
+        self.actor_local_info.get_or_insert_default()
     }
 }
 
@@ -289,6 +305,7 @@ impl Barrier {
             },
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
+            actor_local_info: None,
         })
     }
 }

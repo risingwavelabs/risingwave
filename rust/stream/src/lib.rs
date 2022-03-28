@@ -33,6 +33,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
+#![feature(option_get_or_insert_default)]
 
 #[macro_use]
 extern crate log;

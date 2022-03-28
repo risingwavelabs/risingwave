@@ -134,7 +134,7 @@ impl ReceiverExecutor {
 #[async_trait]
 impl Executor for ReceiverExecutor {
     async fn next(&mut self) -> Result<Message> {
-        let msg = self
+        let mut msg = self
             .receiver
             .next()
             .instrument(tracing::trace_span!("idle"))
@@ -142,6 +142,15 @@ impl Executor for ReceiverExecutor {
             .expect(
                 "upstream channel closed unexpectedly, please check error in upstream executors",
             ); // TODO: remove unwrap
+
+        // In case the actor from local upstream does not taken the info.
+        match &mut msg {
+            Message::Chunk(_) => {}
+            Message::Barrier(barrier) => {
+                barrier.take_actor_local_info();
+            }
+        }
+
         Ok(msg)
     }
 
