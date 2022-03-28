@@ -34,6 +34,7 @@ pub(crate) struct MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
+    #[allow(dead_code)]
     pub fn new(
         hummock_manager: Arc<HummockManager<MemStore>>,
         context_id: HummockContextId,
@@ -137,6 +138,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
+    #[allow(dead_code)]
     pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
         self.hummock_manager.clone()
     }
