@@ -221,8 +221,9 @@ mod tests {
             let city_type = DataType::Struct {
                 fields: vec![DataType::Varchar, DataType::Varchar].into(),
             };
+            let row_id_col_name = gen_row_id_column_name(None);
             let expected_columns = maplit::hashmap! {
-                gen_row_id_column_name(None) => DataType::Int32,
+                row_id_col_name.as_str() => DataType::Int32,
                 "id" => DataType::Int32,
                 "country.zipcode" => DataType::Varchar,
                 "zipcode" => DataType::Int64,

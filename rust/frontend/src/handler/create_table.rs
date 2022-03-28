@@ -188,8 +188,9 @@ mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
+        let row_id_col_name = gen_row_id_column_name(None);
         let expected_columns = maplit::hashmap! {
-            gen_row_id_column_name(None) => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
             "v2" => DataType::Int32,
             "v3" => DataType::Int64,
