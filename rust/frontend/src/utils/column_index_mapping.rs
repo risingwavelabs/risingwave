@@ -226,8 +226,8 @@ impl ColIndexMapping {
         self.target_size() == 0
     }
 
-    /// rewrite the provided order's field index. it will try best to give the most accurate order.
-    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Rewrite the provided order's field index. It will try its best to give the most accurate
+    /// order. Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
     pub fn rewrite_provided_order(&self, order: &Order) -> Order {
         let mut mapped_field = vec![];
@@ -245,7 +245,7 @@ impl ColIndexMapping {
         }
     }
 
-    /// rewrite the required order's field index. if it can't give a corresponding
+    /// Rewrite the required order's field index. if it can't give a corresponding
     /// required order after the column index mapping, it will return None.
     /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will return None
@@ -265,8 +265,8 @@ impl ColIndexMapping {
             })
     }
 
-    /// rewrite the provided distribution's field index. it will try best to give the most accurate
-    /// distribution.
+    /// Rewrite the provided distribution's field index. It will try its best to give the most
+    /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `AnyShard`.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
@@ -285,7 +285,7 @@ impl ColIndexMapping {
         }
     }
 
-    /// rewrite the required distribution's field index. if it can't give a corresponding
+    /// Rewrite the required distribution's field index. if it can't give a corresponding
     /// required distribution after the column index mapping, it will return None.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
