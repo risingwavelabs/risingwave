@@ -37,6 +37,11 @@ impl Subquery {
     pub fn new(query: BoundQuery, kind: SubqueryKind) -> Self {
         Self { query, kind }
     }
+
+    // TODO: add correlated subquery support
+    pub fn is_correlated(&self) -> bool {
+        false
+    }
 }
 
 impl Clone for Subquery {

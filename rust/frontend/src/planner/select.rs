@@ -23,7 +23,7 @@ use crate::expr::{
 };
 pub use crate::optimizer::plan_node::LogicalFilter;
 use crate::optimizer::plan_node::{
-    LogicalAgg, LogicalApply, LogicalProject, LogicalValues, PlanAggCall, PlanRef,
+    LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::planner::Planner;
 impl Planner {
@@ -106,8 +106,8 @@ impl Planner {
     /// Substitues all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
-    /// replaced by a new [`LogicalApply`] node, whose left side is `root` and right side is the
-    /// planned subquery.
+    /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
+    /// (uncorrelated) node, whose left side is `root` and right side is the planned subquery.
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
@@ -140,6 +140,7 @@ impl Planner {
             .collect();
 
         for subquery in rewriter.subqueries {
+            let is_correlated = subquery.is_correlated();
             let mut right = self.plan_query(subquery.query)?.as_subplan();
 
             match subquery.kind {
@@ -154,7 +155,16 @@ impl Planner {
                 }
             }
 
-            root = LogicalApply::create(root, right, JoinType::LeftOuter);
+            if is_correlated {
+                root = LogicalApply::create(root, right, JoinType::LeftOuter);
+            } else {
+                root = LogicalJoin::create(
+                    root,
+                    right,
+                    JoinType::LeftOuter,
+                    ExprImpl::literal_bool(true),
+                );
+            }
         }
         Ok((root, exprs))
     }
