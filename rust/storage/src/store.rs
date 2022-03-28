@@ -15,7 +15,6 @@ use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
@@ -43,7 +42,9 @@ macro_rules! define_state_store_associated_type {
 }
 
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)> + 'a;
+    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)>
+    where
+        Self: 'a;
 
     type GetFuture<'a>: GetFutureTrait<'a>;
 
@@ -161,16 +162,18 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     }
 }
 
-#[async_trait]
 pub trait StateStoreIter: Send {
     type Item;
+    type NextFuture<'a>: Future<Output = Result<Option<Self::Item>>>
+    where
+        Self: 'a;
 
-    async fn next(&mut self) -> Result<Option<Self::Item>>;
+    fn next(&mut self) -> Self::NextFuture<'_>;
 }
 
 pub async fn collect_from_iter<'a, I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
 where
-    I: StateStoreIter,
+    I: 'a + StateStoreIter,
     I::Item: Send,
 {
     let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
