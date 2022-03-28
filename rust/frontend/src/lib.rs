@@ -27,6 +27,7 @@
 #![feature(negative_impls)]
 #![feature(generators)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(let_else)]
 
 #[macro_use]
 pub mod catalog;
