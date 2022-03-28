@@ -30,6 +30,12 @@ brew install protobuf
 brew install openssl
 ```
 
+If one is running on macOS with Apple Silicon, please be sure that:
+```shell
+softwareupdate --install-rosetta 
+```
+Rosetta has been installed.
+
 Note that we only tested our code against Java 11. So please use the specific version!
 
 ## Development
