@@ -17,7 +17,7 @@
                     - columnType:
                         typeName: INT64
                         isNullable: true
-                      name: _row_id
+                      name: "_row_id#0"
                     - columnType:
                         typeName: INT32
                         isNullable: true
@@ -32,7 +32,7 @@
                 - dataType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
                 - dataType:
                     typeName: INT32
                     isNullable: true
@@ -82,7 +82,7 @@
           columnType:
             typeName: INT64
             isNullable: true
-          name: _row_id
+          name: "_row_id#0"
       - columnDesc:
           columnType:
             typeName: INT32
@@ -111,7 +111,7 @@
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
                 - columnType:
                     typeName: INT32
                     isNullable: true
@@ -126,7 +126,7 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: _row_id
+              name: "_row_id#0"
             - dataType:
                 typeName: INT32
                 isNullable: true
@@ -154,7 +154,7 @@
           columnType:
             typeName: INT64
             isNullable: true
-          name: _row_id
+          name: "_row_id#0"
       - columnDesc:
           columnType:
             typeName: INT32
@@ -188,7 +188,7 @@
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
         pkIndices:
           - 1
         chainNode:
@@ -198,7 +198,7 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: _row_id
+              name: "_row_id#0"
             - dataType:
                 typeName: INT32
                 isNullable: true
@@ -237,7 +237,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _row_id
+          name: "_row_id#0"
         isHidden: true
     pkColumnIds:
       - 1
@@ -267,7 +267,7 @@
                     - columnType:
                         typeName: INT64
                         isNullable: true
-                      name: _row_id
+                      name: "_row_id#0"
             pkIndices:
               - 1
             chainNode:
@@ -277,7 +277,7 @@
                 - dataType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
                 - dataType:
                     typeName: INT32
                     isNullable: true
@@ -376,7 +376,7 @@
                                 - columnType:
                                     typeName: INT64
                                     isNullable: true
-                                  name: _row_id
+                                  name: "_row_id#0"
                         pkIndices:
                           - 2
                         chainNode:
@@ -386,7 +386,7 @@
                             - dataType:
                                 typeName: INT64
                                 isNullable: true
-                              name: _row_id
+                              name: "_row_id#0"
                             - dataType:
                                 typeName: INT32
                                 isNullable: true
@@ -414,7 +414,7 @@
                         - dataType:
                             typeName: INT64
                             isNullable: true
-                          name: _row_id
+                          name: "_row_id#0"
                       strategy:
                         type: HASH
                         columnIndices:
@@ -502,7 +502,7 @@
             typeName: INT32
             isNullable: true
           columnId: 1
-          name: "expr#1"
+          name: v2
         isHidden: true
     pkColumnIds:
       - 1
