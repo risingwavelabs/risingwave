@@ -27,7 +27,9 @@ pub mod drop_mv;
 pub mod drop_table;
 mod explain;
 mod flush;
+#[allow(dead_code)]
 mod query;
+mod query_single;
 mod show_source;
 pub mod util;
 
@@ -60,8 +62,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             let table_object_name = ObjectName(vec![name]);
             drop_mv::handle_drop_mv(context, table_object_name).await
         }
-        Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
-            query::handle_query(context, stmt).await
+        Statement::Query(_) => query_single::handle_query_single(context, stmt).await,
+        Statement::Insert { .. } | Statement::Delete { .. } => {
+            query_single::handle_query_single(context, stmt).await
         }
         Statement::CreateView {
             materialized: true,

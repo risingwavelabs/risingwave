@@ -13,29 +13,25 @@
 // limitations under the License.
 
 use futures_async_stream::for_await;
-use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
-use tracing::info;
 
-use crate::binder::{Binder, BoundStatement};
+use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
-use crate::scheduler::{DataChunkStream, ExecutionContext, ExecutionContextRef};
+use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
 
 lazy_static::lazy_static! {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
-    /// TODO: Use session config to set this.
     static ref IMPLICIT_FLUSH: bool =
-        std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "1".to_string() }) == "1";
+     std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "true".to_string() }).parse().unwrap();
 }
 
-pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -47,11 +43,26 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         binder.bind(stmt)?
     };
 
-    let (data_stream, pg_descs) = distribute_execute(context, bound).await?;
+    let (plan, pg_descs) = {
+        // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
+        let plan = Planner::new(context.into())
+            .plan(bound)?
+            .gen_batch_query_plan();
+
+        let pg_descs = plan.schema().fields().iter().map(to_pg_field).collect();
+
+        (plan.to_batch_prost(), pg_descs)
+    };
+
+    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
+    let query_manager = execution_context.session().env().query_manager().clone();
 
     let mut rows = vec![];
     #[for_await]
-    for chunk in data_stream {
+    for chunk in query_manager
+        .schedule_single(execution_context, plan)
+        .await?
+    {
         rows.extend(to_pg_rows(chunk?));
     }
 
@@ -98,37 +109,4 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
         Statement::Query(_) => SELECT,
         _ => unreachable!(),
     }
-}
-
-async fn distribute_execute(
-    context: OptimizerContext,
-    stmt: BoundStatement,
-) -> Result<(impl DataChunkStream, Vec<PgFieldDescriptor>)> {
-    let session = context.session_ctx.clone();
-    // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
-    let (query, pg_descs) = {
-        let plan = Planner::new(context.into())
-            .plan(stmt)?
-            .gen_dist_batch_query_plan();
-
-        info!("Generated distributed plan: {:?}", &plan);
-
-        let pg_descs = plan
-            .schema()
-            .fields()
-            .iter()
-            .map(to_pg_field)
-            .collect::<Vec<PgFieldDescriptor>>();
-
-        let plan_fragmenter = BatchPlanFragmenter::new(session.env().worker_node_manager_ref());
-        let query = plan_fragmenter.split(plan)?;
-        (query, pg_descs)
-    };
-
-    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
-    let query_manager = execution_context.session().env().query_manager().clone();
-    Ok((
-        query_manager.schedule(execution_context, query).await?,
-        pg_descs,
-    ))
 }

@@ -98,6 +98,7 @@ impl ComputeClient {
             .into_inner())
     }
 
+    // TODO: Remove this
     pub async fn create_task(&self, task_id: TaskId, plan: PlanNode, epoch: u64) -> Result<()> {
         let plan = PlanFragment {
             root: Some(plan),
@@ -106,6 +107,22 @@ impl ComputeClient {
                 ..Default::default()
             }),
         };
+        let _ = self
+            .create_task_inner(CreateTaskRequest {
+                task_id: Some(task_id),
+                plan: Some(plan),
+                epoch,
+            })
+            .await?;
+        Ok(())
+    }
+
+    pub async fn create_task2(
+        &self,
+        task_id: TaskId,
+        plan: PlanFragment,
+        epoch: u64,
+    ) -> Result<()> {
         let _ = self
             .create_task_inner(CreateTaskRequest {
                 task_id: Some(task_id),
