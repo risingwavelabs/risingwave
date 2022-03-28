@@ -52,14 +52,29 @@ impl ColIndexMapping {
         };
         Self { target_size, map }
     }
+
     pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
         (self.map, self.target_size)
     }
 
-    pub fn identical_map(target_size: usize) -> Self {
-        let map = (0..target_size).into_iter().map(Some).collect();
+    pub fn identity(size: usize) -> Self {
+        let map = (0..size).into_iter().map(Some).collect();
         Self::new(map)
     }
+
+    pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
+        let map = (0..source_size)
+            .into_iter()
+            .map(|i| if i < target_size { Some(i) } else { None })
+            .collect();
+        Self::new(map)
+    }
+
+    pub fn empty(size: usize) -> Self {
+        let map = vec![None; size];
+        Self::new(map)
+    }
+
     /// Create a partial mapping which maps range `(0..source_num)` to range
     /// `(offset..offset+source_num)`.
     ///
