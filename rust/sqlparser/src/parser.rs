@@ -2349,7 +2349,25 @@ impl Parser {
         }
     }
 
+    // If first word is table or source, return show table or show source
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
+        let index = self.index;
+        if let Token::Word(w) = self.next_token() {
+            match w.keyword {
+                Keyword::TABLE => {
+                    return Ok(Statement::ShowTable {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                Keyword::SOURCE => {
+                    return Ok(Statement::ShowSource {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                _ => {}
+            }
+        }
+        self.index = index;
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })

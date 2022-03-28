@@ -30,7 +30,7 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a shared root [`Keyspace`] for all executors of the same operator.
+    /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to
     /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
@@ -48,7 +48,7 @@ impl<S: StateStore> Keyspace<S> {
         Self { store, prefix }
     }
 
-    /// Create a root [`Keyspace`] for an executor.
+    /// Creates a root [`Keyspace`] for an executor.
     pub fn executor_root(store: S, executor_id: u64) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(9);
@@ -59,7 +59,7 @@ impl<S: StateStore> Keyspace<S> {
         Self { store, prefix }
     }
 
-    /// Create a root [`Keyspace`] for a table.
+    /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
         let prefix = {
             let mut buf = BytesMut::with_capacity(5);
@@ -70,7 +70,7 @@ impl<S: StateStore> Keyspace<S> {
         Self { store, prefix }
     }
 
-    /// Append more bytes to the prefix and returns a new `Keyspace`
+    /// Appends more bytes to the prefix and returns a new `Keyspace`
     #[must_use]
     pub fn append(&self, mut bytes: Vec<u8>) -> Self {
         let mut prefix = self.prefix.clone();
@@ -91,29 +91,29 @@ impl<S: StateStore> Keyspace<S> {
         self.append(val.to_be_bytes().to_vec())
     }
 
-    /// Treat the keyspace as a single key, and return the key.
+    /// Treats the keyspace as a single key, and returns the key.
     pub fn key(&self) -> &[u8] {
         &self.prefix
     }
 
-    /// Treat the keyspace as a single key, and get its value.
+    /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefix, epoch).await
     }
 
-    /// Concatenate this keyspace and the given key to produce a prefixed key.
+    /// Concatenates this keyspace and the given key to produce a prefixed key.
     pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
         [self.prefix.as_slice(), key.as_ref()].concat()
     }
 
-    /// Get from the keyspace with the `prefixed_key` of given key.
+    /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-    /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
+    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan(
@@ -125,7 +125,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(range, limit, epoch).await
     }
 
-    /// Scan `limit` keys from the keyspace using a inclusive `start_key` and get their values. If
+    /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
     /// `limit` is None, all keys of the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan_with_start_key(
@@ -144,7 +144,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(range, limit, epoch).await
     }
 
-    /// Scan from the keyspace, and then strip the prefix of this keyspace.
+    /// Scans from the keyspace, and then strips the prefix of this keyspace.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     ///
     /// See also: [`Keyspace::scan`]
@@ -160,14 +160,14 @@ impl<S: StateStore> Keyspace<S> {
         Ok(pairs)
     }
 
-    /// Get an iterator with the prefix of this keyspace.
+    /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&'_ self, epoch: u64) -> Result<S::Iter<'_>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.iter(range, epoch).await
     }
 
-    /// Get the underlying state store.
+    /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
     }

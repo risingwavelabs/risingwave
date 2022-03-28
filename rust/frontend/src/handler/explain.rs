@@ -18,7 +18,7 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use super::create_mv::{gen_create_mv_plan, MvInfo};
+use super::create_mv::gen_create_mv_plan;
 use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::planner::Planner;
@@ -40,15 +40,7 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => {
-            gen_create_mv_plan(
-                &*session,
-                &mut planner,
-                *query,
-                MvInfo::with_name(name.to_string()),
-            )?
-            .0
-        }
+        } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
 
         Statement::CreateTable { name, columns, .. } => {
             gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0

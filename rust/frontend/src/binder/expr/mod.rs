@@ -20,11 +20,12 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
 mod function;
+mod subquery;
 mod value;
 
 impl Binder {
@@ -76,6 +77,8 @@ impl Binder {
                 self.bind_cast(*expr, data_type)?,
             ))),
             Expr::Function(f) => Ok(self.bind_function(f)?),
+            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
+            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", expr)).into()),
         }
     }

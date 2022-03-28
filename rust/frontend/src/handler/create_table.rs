@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan::ColumnCatalog;
@@ -27,9 +25,9 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::optimizer::plan_node::{StreamExchange, StreamMaterialize, StreamSource};
-use crate::optimizer::property::{Direction, Distribution, FieldOrder};
-use crate::optimizer::PlanRef;
+use crate::optimizer::plan_node::StreamSource;
+use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 
 pub const ROWID_NAME: &str = "_row_id";
@@ -85,55 +83,34 @@ pub fn gen_create_table_plan(
         database_id,
         name: table_name.clone(),
         info: Info::TableSource(TableSourceInfo {
-            columns: columns_catalog.clone(),
+            columns: columns_catalog,
         })
         .into(),
     };
 
-    // Manually assemble the materialization plan for the table.
-    let plan: PlanRef = {
-        let source_node = StreamSource::create(
-            context.clone(),
+    let materialize = {
+        // Manually assemble the materialization plan for the table.
+        let source_node: PlanRef = StreamSource::create(
+            context,
             vec![0], // row id column as pk
             source.clone(),
-        );
+        )
+        .into();
+        let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
+        required_cols.toggle_range(..);
+        required_cols.toggle(0);
 
-        let exchange_node = StreamExchange::new(
-            source_node.into(),
-            Distribution::HashShard(vec![0]), // hash shard on the row id column
-        );
-
-        let materialize_node = {
-            StreamMaterialize::new(
-                context,
-                exchange_node.into(),
-                vec![FieldOrder {
-                    index: 0, // row id column as key
-                    direct: Direction::Asc,
-                }],
-                columns_catalog
-                    .iter()
-                    .map(|x| x.column_desc.as_ref().unwrap().column_id.into())
-                    .collect(),
-            )
-        };
-
-        Rc::new(materialize_node)
+        PlanRoot::new(
+            source_node,
+            Distribution::HashShard(vec![0]),
+            Order::any().clone(),
+            required_cols,
+        )
+        .gen_create_mv_plan(table_name)
     };
+    let table = materialize.table().to_prost(schema_id, database_id);
 
-    let table = ProstTable {
-        id: TableId::placeholder().table_id(),
-        schema_id,
-        database_id,
-        name: table_name,
-        columns: columns_catalog,
-        pk_column_ids: vec![0], // row id column as pk
-        pk_orders: vec![OrderType::Ascending.to_prost() as i32],
-        dependent_relations: vec![],         // placeholder for meta
-        optional_associated_source_id: None, // placeholder for meta
-    };
-
-    Ok((plan, source, table))
+    Ok((materialize.into(), source, table))
 }
 
 pub async fn handle_create_table(
@@ -151,8 +128,11 @@ pub async fn handle_create_table(
         (plan, source, table)
     };
 
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
+    log::trace!(
+        "name={}, plan=\n{}",
+        table_name,
+        serde_json::to_string_pretty(&plan).unwrap()
+    );
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

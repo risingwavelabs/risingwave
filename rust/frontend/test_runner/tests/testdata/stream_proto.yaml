@@ -76,8 +76,6 @@
         - 1
     ---
     id: 4294967294
-    schemaId: 4294967295
-    databaseId: 4294967295
     name: test
     columns:
       - columnDesc:
@@ -150,8 +148,6 @@
         - 1
     ---
     id: 4294967294
-    schemaId: 4294967295
-    databaseId: 4294967295
     name: test
     columns:
       - columnDesc:
@@ -229,8 +225,6 @@
         - 1
     ---
     id: 4294967294
-    schemaId: 4294967295
-    databaseId: 4294967295
     name: test
     columns:
       - columnDesc:
@@ -243,7 +237,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _pk_1
+          name: _row_id
         isHidden: true
     pkColumnIds:
       - 1
@@ -330,22 +324,20 @@
         - 1
     ---
     id: 4294967294
-    schemaId: 4294967295
-    databaseId: 4294967295
     name: test
     columns:
       - columnDesc:
           columnType:
             typeName: INT64
             isNullable: true
-          name: "?column?"
+          name: "agg#0"
+        isHidden: true
       - columnDesc:
           columnType:
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _pk_1
-        isHidden: true
+          name: "agg#1"
     pkColumnIds:
       - 0
       - 1
@@ -498,8 +490,6 @@
         - 1
     ---
     id: 4294967294
-    schemaId: 4294967295
-    databaseId: 4294967295
     name: test
     columns:
       - columnDesc:
@@ -512,7 +502,7 @@
             typeName: INT32
             isNullable: true
           columnId: 1
-          name: _pk_1
+          name: "expr#1"
         isHidden: true
     pkColumnIds:
       - 1
