@@ -29,8 +29,9 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::{AggArgs, AggCall, PkDataTypes};
-pub type ManagedMinState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MIN }>;
-pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_MAX }>;
+
+pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
+pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
 
 /// Manages a `BTreeMap` in memory for top N entries, and the state store for remaining entries.
 ///
@@ -53,7 +54,7 @@ pub type ManagedMaxState<S, A> = GenericManagedState<S, A, { variants::EXTREME_M
 /// * The output of an `ExtremeState` is only correct when all changes have been flushed to the
 ///   state store.
 /// * The `RowIDs` must be i64
-pub struct GenericManagedState<S: StateStore, A: Array, const EXTREME_TYPE: usize>
+pub struct GenericExtremeState<S: StateStore, A: Array, const EXTREME_TYPE: usize>
 where
     A::OwnedItem: Ord,
 {
@@ -107,7 +108,7 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()>;
 }
 
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
@@ -343,7 +344,7 @@ where
 
 #[async_trait]
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedTableState<S>
-    for GenericManagedState<S, A, EXTREME_TYPE>
+    for GenericExtremeState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
     for<'a> &'a A: From<&'a ArrayImpl>,
@@ -372,7 +373,7 @@ where
     }
 }
 
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericManagedState<S, A, EXTREME_TYPE>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
 {
@@ -651,7 +652,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
 
-        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
             DataType::Int64,
             Some(3),
@@ -736,7 +737,7 @@ mod tests {
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
 
-        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
             DataType::Int64,
             Some(3),
@@ -916,7 +917,7 @@ mod tests {
 
         let store = MemoryStateStore::new();
         let keyspace = Keyspace::executor_root(store.clone(), 0x2333);
-        let mut managed_state = GenericManagedState::<_, I64Array, EXTREME_TYPE>::new(
+        let mut managed_state = GenericExtremeState::<_, I64Array, EXTREME_TYPE>::new(
             keyspace.clone(),
             DataType::Int64,
             Some(3),
