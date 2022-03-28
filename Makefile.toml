@@ -292,6 +292,9 @@ set -e
 
 cd rust
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
+
+set -ex
+
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
@@ -511,8 +514,17 @@ script = """
 #!/bin/bash
 set -e
 
+
 DIR="$(pwd)"
-INSTALL_PATH="$CARGO_HOME/bin/risedev"
+NAME="${1:-risedev}"
+INSTALL_PATH="$CARGO_HOME/bin/${NAME}"
+
+read -p "Install to ${INSTALL_PATH}? [y/N] " -r
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]
+then
+    exit 1
+fi
 
 cat <<EOF > "${INSTALL_PATH}"
 #!/bin/bash
