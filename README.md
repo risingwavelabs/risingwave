@@ -30,6 +30,16 @@ brew install protobuf
 brew install openssl
 ```
 
+To install components in Debian-based linux systems, run:
+```shell
+sudo apt update
+sudo apt upgrade
+sudo apt install openjdk-11-jdk
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
+sudo apt install postgresql-client
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
 Note that we only tested our code against Java 11. So please use the specific version!
 
 ## Development
@@ -46,7 +56,11 @@ engine, storage engine and meta service.
 RiseDev is the tool for developing RisingWave. Using RiseDev requires tmux.
 
 ```shell
+# macOS
 brew install tmux
+
+# Debian
+sudo apt install tmux
 ```
 
 Then, in the root directory, simply run:
