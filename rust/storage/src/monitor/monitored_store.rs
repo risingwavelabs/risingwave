@@ -78,7 +78,7 @@ where
     type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             self.stats.get_counts.inc();
 
@@ -95,18 +95,17 @@ where
         }
     }
 
-    fn scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ScanFuture<'a, R, B>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            // unimplemented!()
             self.stats.range_scan_counts.inc();
 
             let timer = self.stats.range_scan_duration.start_timer();
@@ -121,30 +120,28 @@ where
         }
     }
 
-    fn reverse_scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn reverse_scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'a, R, B>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            unimplemented!()
-            // self.stats.range_reverse_scan_counts.inc();
-            //
-            // let timer = self.stats.range_reverse_scan_duration.start_timer();
-            // let result = self.inner.scan(key_range, limit, epoch).await?;
-            // timer.observe_duration();
-            //
-            // self.stats
-            //     .range_reverse_scan_size
-            //     .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
-            //
-            // Ok(result)
-            // Ok(vec![])
+            self.stats.range_reverse_scan_counts.inc();
+
+            let timer = self.stats.range_reverse_scan_duration.start_timer();
+            let result = self.inner.scan(key_range, limit, epoch).await?;
+            timer.observe_duration();
+
+            self.stats
+                .range_reverse_scan_size
+                .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
+
+            Ok(result)
         }
     }
 
@@ -178,30 +175,22 @@ where
         }
     }
 
-    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'a, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move {
-            // unimplemented!()
-            self.monitored_iter(self.inner.iter(key_range, epoch)).await
-        }
+        async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
     }
 
-    fn reverse_iter<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        epoch: u64,
-    ) -> Self::ReverseIterFuture<'a, R, B>
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
         async move {
-            unimplemented!()
-            // self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
-            //     .await
+            self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
+                .await
         }
     }
 

@@ -12,7 +12,6 @@ use std::future::Future;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -24,23 +23,22 @@ use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
-pub trait GetFutureTrait<'a> = Future<Output = Result<Option<StorageValue>>> + Send + 'a;
-pub trait ScanFutureTrait<'a, R, B> =
-    Future<Output = Result<Vec<(Bytes, StorageValue)>>> + Send + 'a;
-pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send + 'a;
+pub trait GetFutureTrait<'a> = Future<Output = Result<Option<StorageValue>>> + Send;
+pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, StorageValue)>>> + Send;
+pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
     () => {
-        type GetFuture<'a> = impl GetFutureTrait<'a> + 'a;
-        type ScanFuture<'a, R: 'a, B: 'a> = impl ScanFutureTrait<'a, R, B> + 'a where Self: 'a, R: 'a + Send, B: 'a + Send;
-        type ReverseScanFuture<'a, R: 'a, B: 'a> = impl ScanFutureTrait<'a, R, B> + 'a where Self: 'a, R: 'a + Send, B: 'a + Send;
-        type IngestBatchFuture<'a> = impl EmptyFutureTrait<'a> + 'a where Self: 'a;
-        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a> + 'a where Self: 'a;
-        type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a> + 'a where Self: 'a;
-        type SyncFuture<'a> = impl EmptyFutureTrait<'a> + 'a where Self: 'a;
-        type IterFuture<'a, R: 'a, B: 'a> = impl Future<Output = Result<Self::Iter<'a>>> + Send + 'a where Self: 'a, R: 'a + Send, B: 'a + Send;
-        type ReverseIterFuture<'a, R: 'a, B: 'a> = impl Future<Output = Result<Self::Iter<'a>>> + Send + 'a where Self: 'a, R: 'a + Send, B: 'a + Send;
+        type GetFuture<'a> = impl GetFutureTrait<'a>;
+        type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type ReverseScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
+        type IngestBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
+        type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
+        type IterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+        type ReverseIterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
     }
 }
 
@@ -51,15 +49,13 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type ScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
-        Self: 'a,
-        R: 'a + Send,
-        B: 'a + Send;
+        R: 'static + Send,
+        B: 'static + Send;
 
     type ReverseScanFuture<'a, R, B>: ScanFutureTrait<'a, R, B>
     where
-        Self: 'a,
-        R: 'a + Send,
-        B: 'a + Send;
+        R: 'static + Send,
+        B: 'static + Send;
 
     type IngestBatchFuture<'a>: EmptyFutureTrait<'a>;
 
@@ -69,43 +65,41 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: EmptyFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send + 'a
+    type IterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
     where
-        Self: 'a,
-        R: 'a + Send,
-        B: 'a + Send;
+        R: 'static + Send,
+        B: 'static + Send;
 
-    type ReverseIterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send + 'a
+    type ReverseIterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
     where
-        Self: 'a,
-        R: 'a + Send,
-        B: 'a + Send;
+        R: 'static + Send,
+        B: 'static + Send;
 
     /// Point get a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a>;
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_>;
 
     /// Scan `limit` number of keys from a key range. If `limit` is `None`, scan all elements.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     ///
     /// By default, this simply calls `StateStore::iter` to fetch elements.
-    fn scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ScanFuture<'a, R, B>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
 
-    fn reverse_scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn reverse_scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'a, R, B>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -135,7 +129,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Open and return an iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`.
-    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'a, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;
@@ -143,11 +137,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// Open and return a reversed iterator for given `key_range`.
     /// The returned iterator will iterate data based on a snapshot corresponding to the given
     /// `epoch`
-    fn reverse_iter<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        epoch: u64,
-    ) -> Self::ReverseIterFuture<'a, R, B>
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send;

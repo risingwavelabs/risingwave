@@ -32,18 +32,18 @@ impl StateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter;
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a> {
+    fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
         async move {
             panic!("should not read from the state store!");
         }
     }
 
-    fn scan<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        limit: Option<usize>,
-        epoch: u64,
-    ) -> Self::ScanFuture<'a, R, B>
+    fn scan<R, B>(
+        &self,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -53,12 +53,12 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn reverse_scan<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        limit: Option<usize>,
-        epoch: u64,
-    ) -> Self::ReverseScanFuture<'a, R, B>
+    fn reverse_scan<R, B>(
+        &self,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -88,7 +88,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'a, R, B>
+    fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -98,11 +98,7 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn reverse_iter<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        epoch: u64,
-    ) -> Self::ReverseIterFuture<'a, R, B>
+    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,

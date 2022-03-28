@@ -12,7 +12,6 @@ use std::future::Future;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::ops::RangeBounds;
 
 use async_trait::async_trait;
@@ -45,7 +44,7 @@ impl StateStore for HummockStateStore {
     type Iter<'a> = HummockStateStoreIter<'a>;
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'a> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let value = self.storage.get(key, epoch).await?;
             let value = value.map(Bytes::from);
@@ -54,12 +53,12 @@ impl StateStore for HummockStateStore {
         }
     }
 
-    fn scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ScanFuture<'a, R, B>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -67,12 +66,12 @@ impl StateStore for HummockStateStore {
         async move { collect_from_iter(self.iter(key_range, epoch).await?, limit).await }
     }
 
-    fn reverse_scan<'a, R: 'a, B: 'a>(
-        &'a self,
+    fn reverse_scan<R, B>(
+        &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Self::ReverseScanFuture<'a, R, B>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -106,7 +105,7 @@ impl StateStore for HummockStateStore {
         }
     }
 
-    fn iter<'a, R: 'a, B: 'a>(&'a self, key_range: R, epoch: u64) -> Self::IterFuture<'a, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -119,11 +118,7 @@ impl StateStore for HummockStateStore {
         }
     }
 
-    fn reverse_iter<'a, R: 'a, B: 'a>(
-        &'a self,
-        key_range: R,
-        epoch: u64,
-    ) -> Self::ReverseIterFuture<'a, R, B>
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
