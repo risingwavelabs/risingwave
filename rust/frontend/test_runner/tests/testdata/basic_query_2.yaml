@@ -114,11 +114,10 @@
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) from t;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [($0 + ($1 * $2))], expr_alias: [ ] }
-        BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
-          BatchExchange { order: [], dist: Single }
-            BatchScan { table: t, columns: [v1, v2, v3] }
+    BatchProject { exprs: [($0 + ($1 * $2))], expr_alias: [ ] }
+      BatchSimpleAgg { aggs: [min($0), max($1), count($2)] }
+        BatchExchange { order: [], dist: Single }
+          BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: ["expr#0", "expr#1"(hidden), "expr#2"(hidden), "expr#3"(hidden), "expr#4"(hidden)], pk_columns: ["expr#1", "expr#2", "expr#3", "expr#4"] }
       StreamProject { exprs: [($1 + ($2 * $3)), $0, $1, $2, $3], expr_alias: [ ,  ,  ,  ,  ] }

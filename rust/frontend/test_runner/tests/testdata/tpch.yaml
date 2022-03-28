@@ -164,13 +164,12 @@
       and l_discount between 0.08 - 0.01 and 0.08 + 0.01
       and */ l_quantity < 24;
   batch_plan: |
-    BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0], expr_alias: [revenue] }
-        BatchSimpleAgg { aggs: [sum($0)] }
-          BatchExchange { order: [], dist: Single }
-            BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
-              BatchFilter { predicate: ($0 < 24:Int32) }
-                BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
+    BatchProject { exprs: [$0], expr_alias: [revenue] }
+      BatchSimpleAgg { aggs: [sum($0)] }
+        BatchExchange { order: [], dist: Single }
+          BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
+            BatchFilter { predicate: ($0 < 24:Int32) }
+              BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
   stream_plan: |
     StreamMaterialize { columns: ["revenue", "expr#1"(hidden)], pk_columns: ["expr#1", "revenue"] }
       StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
