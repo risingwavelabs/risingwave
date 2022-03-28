@@ -43,7 +43,7 @@ impl LogicalApply {
         assert!(
             matches!(
                 join_type,
-                JoinType::FullOuter | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+                JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
             ),
             "Invalid join type {:?} for LogicalApply",
             join_type
