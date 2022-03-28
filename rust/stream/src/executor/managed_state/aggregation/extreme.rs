@@ -81,14 +81,14 @@ where
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
 }
 
-/// A trait over all extreme states.
+/// A trait over all table-structured states.
 ///
-/// It is true that this interface also fits to other managed state, but we won't implement
-/// `ManagedExtremeState` for them. We want to reduce the overhead of BoxedFuture. For
-/// ManagedValueState, we can directly forward its async functions to `ManagedStateImpl`, instead of
-/// adding a layer of indirection caused by async traits.
+/// It is true that this interface also fits to value managed state, but we won't implement
+/// `ManagedTableState` for them. We want to reduce the overhead of `BoxedFuture`. For
+/// `ManagedValueState`, we can directly forward its async functions to `ManagedStateImpl`, instead
+/// of adding a layer of indirection caused by async traits.
 #[async_trait]
-pub trait ManagedExtremeState<S: StateStore>: Send + Sync + 'static {
+pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -342,7 +342,7 @@ where
 }
 
 #[async_trait]
-impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedExtremeState<S>
+impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedTableState<S>
     for GenericManagedState<S, A, EXTREME_TYPE>
 where
     A::OwnedItem: Ord,
@@ -406,7 +406,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     row_count: usize,
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
-) -> Result<Box<dyn ManagedExtremeState<S>>> {
+) -> Result<Box<dyn ManagedTableState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
             if agg_call.return_type != *x {
@@ -995,7 +995,7 @@ mod tests {
     }
 
     async fn helper_flush<S: StateStore>(
-        managed_state: &mut impl ManagedExtremeState<S>,
+        managed_state: &mut impl ManagedTableState<S>,
         keyspace: &Keyspace<S>,
         epoch: u64,
     ) {
