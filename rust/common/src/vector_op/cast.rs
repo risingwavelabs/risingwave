@@ -118,8 +118,15 @@ pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper>
     Ok(NaiveDateTimeWrapper::new(elem.0.and_hms(0, 0, 0)))
 }
 
-// Due to the orphan rule, some data can't implement TryFrom trait for basic type.
-// We can only use ToPrimitive Trait
+/// Define the cast function to primitive types.
+///
+/// Due to the orphan rule, some data can't implement `TryFrom` trait for basic type.
+/// We can only use [`ToPrimitive`] trait.
+///
+/// Note: this might be lossy according to the docs from [`ToPrimitive`]:
+/// > On the other hand, conversions with possible precision loss or truncation
+/// are admitted, like an `f32` with a decimal part to an integer type, or
+/// even a large `f64` saturating to `f32` infinity.
 macro_rules! define_cast_to_primitive {
     ($ty:ty) => {
         define_cast_to_primitive! { $ty, $ty }

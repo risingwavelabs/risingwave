@@ -12,9 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::io::Write;
+use std::ops::{Add, Sub};
+
+use byteorder::{BigEndian, WriteBytesExt};
+use num_traits::{CheckedAdd, CheckedSub};
 use serde::{Deserialize, Serialize};
 
 use super::*;
+use crate::error::ErrorCode::IoError;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -89,6 +95,56 @@ impl IntervalUnit {
             days: 0,
             ms,
         }
+    }
+
+    pub fn to_protobuf<T: Write>(self, output: &mut T) -> Result<usize> {
+        {
+            output.write_i32::<BigEndian>(self.months)?;
+            output.write_i32::<BigEndian>(self.days)?;
+            output.write_i64::<BigEndian>(self.ms)?;
+            Ok(16)
+        }
+        .map_err(|e| RwError::from(IoError(e)))
+    }
+}
+
+impl Add for IntervalUnit {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        let months = self.months + rhs.months;
+        let days = self.days + rhs.days;
+        let ms = self.ms + rhs.ms;
+        IntervalUnit { months, days, ms }
+    }
+}
+
+impl CheckedAdd for IntervalUnit {
+    fn checked_add(&self, other: &Self) -> Option<Self> {
+        let months = self.months.checked_add(other.months)?;
+        let days = self.days.checked_add(other.days)?;
+        let ms = self.ms.checked_add(other.ms)?;
+        Some(IntervalUnit { months, days, ms })
+    }
+}
+
+impl Sub for IntervalUnit {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        let months = self.months - rhs.months;
+        let days = self.days - rhs.days;
+        let ms = self.ms - rhs.ms;
+        IntervalUnit { months, days, ms }
+    }
+}
+
+impl CheckedSub for IntervalUnit {
+    fn checked_sub(&self, other: &Self) -> Option<Self> {
+        let months = self.months.checked_sub(other.months)?;
+        let days = self.days.checked_sub(other.days)?;
+        let ms = self.ms.checked_sub(other.ms)?;
+        Some(IntervalUnit { months, days, ms })
     }
 }
 
