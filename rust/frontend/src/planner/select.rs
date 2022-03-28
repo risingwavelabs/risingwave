@@ -54,6 +54,7 @@ impl Planner {
             }
         };
         // Plan the SELECT clause.
+        // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());
         if !group_by.is_empty() || has_agg_call {
             LogicalAgg::create(select_items, aliases, group_by, root)
