@@ -222,6 +222,7 @@ impl Parser {
             Token::Mul => {
                 return Ok(WildcardExpr::Wildcard);
             }
+            // TODO: support (((table.v1).v2).*)
             // parser wildcard field selection expression
             Token::LParen => {
                 let mut expr = self.parse_expr()?;
