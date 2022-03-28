@@ -136,7 +136,9 @@ impl Default for Epoch {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ActorLocalInfo {}
+pub struct ActorLocalInfo {
+    pub finished_epochs: HashSet<u64>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Barrier {
