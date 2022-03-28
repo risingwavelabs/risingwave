@@ -21,6 +21,7 @@ use std::time::Duration;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
@@ -247,8 +248,18 @@ impl LocalVersionManager {
                     return;
                 }
                 Some(version) => {
-                    // TODO: #93 retry instead of unwrap
-                    hummock_meta_client.unpin_version(version.id).await.unwrap();
+                    let retry_strategy = ExponentialBackoff::from_millis(10)
+                        .max_delay(Duration::from_secs(60))
+                        .map(jitter);
+                    tokio_retry::Retry::spawn(retry_strategy, || async {
+                        if let Err(err) = hummock_meta_client.unpin_version(version.id).await {
+                            tracing::warn!("Failed to unpin_version {}. Will retry.", err);
+                            return Err(err);
+                        }
+                        Ok(())
+                    })
+                    .await
+                    .expect("Should retry until unpin_version succeeds");
                     if let Some(local_version_manager) = local_version_manager.upgrade() {
                         local_version_manager.unref_committed_epoch(
                             version.max_committed_epoch,

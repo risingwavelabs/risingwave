@@ -35,6 +35,7 @@ pub use hummock_manager::*;
 use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -83,8 +84,14 @@ where
                             return;
                         }
                         Some(LocalNotification::WorkerDeletion(worker_node)) => {
-                            // TODO: #93 retry instead of unwrap
-                            hummock_manager_ref.release_contexts(vec![worker_node.id]).await.unwrap();
+                            let retry_strategy = ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(60)).map(jitter);
+                            tokio_retry::Retry::spawn(retry_strategy, || async {
+                                if let Err(err) = hummock_manager_ref.release_contexts(vec![worker_node.id]).await {
+                                    tracing::warn!("Failed to release_contexts {}. Will retry.", err);
+                                    return Err(err);
+                                }
+                                Ok(())
+                            }).await.expect("Should retry until release_contexts succeeds");
                             // TODO: #93 notify CompactorManager to remove stale compactor
                         }
                     }

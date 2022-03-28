@@ -27,6 +27,7 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 
 use super::iterator::{ConcatIterator, HummockIterator, MergeIterator};
 use super::key::{get_epoch, Epoch, FullKey};
@@ -328,12 +329,22 @@ impl Compactor {
 
         let is_task_ok = result.is_ok();
 
-        let report_result = context
-            .hummock_meta_client
-            .report_compaction_task(compact_task, is_task_ok)
-            .await;
-
-        report_result?;
+        let retry_strategy = ExponentialBackoff::from_millis(10)
+            .max_delay(Duration::from_secs(60))
+            .map(jitter);
+        tokio_retry::Retry::spawn(retry_strategy, || async {
+            if let Err(err) = context
+                .hummock_meta_client
+                .report_compaction_task(compact_task.clone(), is_task_ok)
+                .await
+            {
+                tracing::warn!("Failed to report_compaction_task {}. Will retry.", err);
+                return Err(err);
+            }
+            Ok(())
+        })
+        .await
+        .expect("Should retry until report_compaction_task succeeds");
 
         if is_task_ok {
             Ok(())
