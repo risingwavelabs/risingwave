@@ -27,6 +27,8 @@ pub struct EqJoinPredicate {
     /// the first is from the left table and the second is from the right table.
     /// now all are normal equal(not null-safe-equal),
     eq_keys: Vec<(InputRef, InputRef)>,
+
+    left_cols_num: usize,
 }
 
 impl fmt::Display for EqJoinPredicate {
@@ -48,10 +50,15 @@ impl fmt::Display for EqJoinPredicate {
 
 impl EqJoinPredicate {
     /// The new method for `JoinPredicate` without any analysis, check or rewrite.
-    pub fn new(other_cond: Condition, eq_keys: Vec<(InputRef, InputRef)>) -> Self {
+    pub fn new(
+        other_cond: Condition,
+        eq_keys: Vec<(InputRef, InputRef)>,
+        left_cols_num: usize,
+    ) -> Self {
         Self {
             other_cond,
             eq_keys,
+            left_cols_num,
         }
     }
 
@@ -72,7 +79,7 @@ impl EqJoinPredicate {
     /// ```
     pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let (eq_keys, other_cond) = on_clause.split_eq_keys(left_cols_num, right_cols_num);
-        Self::new(other_cond, eq_keys)
+        Self::new(other_cond, eq_keys, left_cols_num)
     }
 
     /// Get join predicate's eq conds.
@@ -121,17 +128,19 @@ impl EqJoinPredicate {
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         self.eq_keys
             .iter()
-            .map(|(left, right)| (left.index(), right.index()))
+            .map(|(left, right)| (left.index(), right.index() - self.left_cols_num))
             .collect()
     }
 
     pub fn left_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys.iter().map(|(left, _)| left.index()).collect()
     }
+
+    /// return the eq keys column index **based on the right input schema**
     pub fn right_eq_indexes(&self) -> Vec<usize> {
         self.eq_keys
             .iter()
-            .map(|(_, right)| right.index())
+            .map(|(_, right)| right.index() - self.left_cols_num)
             .collect()
     }
 }
