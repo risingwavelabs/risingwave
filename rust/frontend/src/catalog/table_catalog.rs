@@ -24,7 +24,6 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use super::column_catalog::ColumnCatalog;
 use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
-use crate::handler::create_table::ROWID_NAME;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
@@ -106,15 +105,15 @@ impl From<ProstTable> for TableCatalog {
             OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
         });
         let name = tb.name.clone();
-        // let mut col_names = HashSet::new();
+        let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for catalog in columns.clone() {
             for col_desc in catalog.column_desc.get_column_descs() {
-                // let col_name = col_desc.name.clone();
-                // if !col_names.insert(col_name.clone()) && col_name != ROWID_NAME {
-                //     panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
-                // }
+                let col_name = col_desc.name.clone();
+                if !col_names.insert(col_name.clone()) {
+                    panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+                }
                 let col_id = col_desc.column_id.get_id();
                 col_descs.insert(col_id, col_desc);
             }
