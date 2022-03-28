@@ -52,9 +52,9 @@
           BatchHashJoin { type: Inner, predicate: $1 = $4 }
             BatchExchange { order: [], dist: HashShard([1]) }
               BatchScan { table: t1, columns: [_row_id, v1, v2] }
-            BatchExchange { order: [], dist: HashShard([4]) }
+            BatchExchange { order: [], dist: HashShard([1]) }
               BatchScan { table: t2, columns: [_row_id, v1, v2] }
-        BatchExchange { order: [], dist: HashShard([8]) }
+        BatchExchange { order: [], dist: HashShard([2]) }
           BatchScan { table: t3, columns: [_row_id, v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: ["_row_id", "v1", "v2", "_row_id", "v1", "v2", "_row_id", "v1", "v2"], pk_columns: ["_row_id", "_row_id", "_row_id"] }
@@ -63,9 +63,9 @@
           StreamHashJoin { type: Inner, predicate: $1 = $4 }
             StreamExchange { dist: HashShard([1]) }
               StreamTableScan { table: t1, columns: [_row_id, v1, v2], pk_indices: [0] }
-            StreamExchange { dist: HashShard([4]) }
+            StreamExchange { dist: HashShard([1]) }
               StreamTableScan { table: t2, columns: [_row_id, v1, v2], pk_indices: [0] }
-        StreamExchange { dist: HashShard([8]) }
+        StreamExchange { dist: HashShard([2]) }
           StreamTableScan { table: t3, columns: [_row_id, v1, v2], pk_indices: [0] }
 - sql: |
     create table t1 (v1 int not null, v2 int not null);
@@ -77,7 +77,7 @@
         BatchHashJoin { type: Inner, predicate: $0 = $2 }
           BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t1, columns: [v1, v2] }
-          BatchExchange { order: [], dist: HashShard([2]) }
+          BatchExchange { order: [], dist: HashShard([0]) }
             BatchScan { table: t2, columns: [v1, v2] }
   stream_plan: |
     StreamMaterialize { columns: ["v2", "v2", "expr#2"(hidden), "expr#3"(hidden)], pk_columns: ["expr#2", "expr#3"] }
@@ -85,7 +85,7 @@
         StreamHashJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
             StreamTableScan { table: t1, columns: [v1, v2, _row_id], pk_indices: [2] }
-          StreamExchange { dist: HashShard([3]) }
+          StreamExchange { dist: HashShard([0]) }
             StreamTableScan { table: t2, columns: [v1, v2, _row_id], pk_indices: [2] }
 - sql: select 1
   batch_plan: |

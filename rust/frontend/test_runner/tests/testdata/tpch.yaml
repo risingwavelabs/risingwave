@@ -124,10 +124,10 @@
                           BatchExchange { order: [], dist: HashShard([0]) }
                             BatchFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
-                        BatchExchange { order: [], dist: HashShard([2]) }
+                        BatchExchange { order: [], dist: HashShard([1]) }
                           BatchFilter { predicate:  }
                             BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
-                  BatchExchange { order: [], dist: HashShard([3]) }
+                  BatchExchange { order: [], dist: HashShard([0]) }
                     BatchFilter { predicate:  }
                       BatchScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount] }
   stream_plan: |
@@ -144,10 +144,10 @@
                         StreamExchange { dist: HashShard([0]) }
                           StreamFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
                             StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id], pk_indices: [2] }
-                      StreamExchange { dist: HashShard([3]) }
+                      StreamExchange { dist: HashShard([1]) }
                         StreamFilter { predicate:  }
                           StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id], pk_indices: [4] }
-                StreamExchange { dist: HashShard([5]) }
+                StreamExchange { dist: HashShard([0]) }
                   StreamFilter { predicate:  }
                     StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id], pk_indices: [3] }
 - id: tpch_q6
