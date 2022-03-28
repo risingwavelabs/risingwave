@@ -35,6 +35,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn key(&self) -> &[u8] {
         match self {
             Self::Forward(iter) => iter.key(),
@@ -42,6 +43,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn value(&self) -> &[u8] {
         match self {
             Self::Forward(iter) => iter.value(),
@@ -64,6 +66,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Forward(iter) => iter.is_valid(),
