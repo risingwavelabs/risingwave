@@ -135,25 +135,11 @@ impl Default for Epoch {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct ActorLocalInfo {
-    /// Previous DDLs that are finished in current epoch and current actor. Note that a DDL of MV
-    /// always correspond to an epoch in our system.
-    ///
-    /// Take the creation of an MV for an example, it may last for several epochs to finish.
-    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will push the
-    /// ddl epoch to this field, which can be found by the actor and reported to the meta service
-    /// soon.
-    pub finished_ddl_epochs: HashSet<u64>,
-}
-
 #[derive(Debug, Clone)]
 pub struct Barrier {
     pub epoch: Epoch,
     pub mutation: Option<Arc<Mutation>>,
     pub span: tracing::Span,
-
-    actor_local_info: Option<ActorLocalInfo>,
 }
 
 impl Default for Barrier {
@@ -162,7 +148,6 @@ impl Default for Barrier {
             span: tracing::Span::none(),
             epoch: Epoch::default(),
             mutation: None,
-            actor_local_info: None,
         }
     }
 }
@@ -200,16 +185,6 @@ impl Barrier {
             .as_ref()
             .map(|m| m.is_add_output())
             .unwrap_or(false)
-    }
-
-    pub fn take_actor_local_info(&mut self) -> Option<ActorLocalInfo> {
-        self.actor_local_info.take()
-    }
-
-    /// Get a mutable reference to the barrier's actor local info.
-    #[must_use]
-    pub fn actor_local_info_mut(&mut self) -> &mut ActorLocalInfo {
-        self.actor_local_info.get_or_insert_default()
     }
 }
 
@@ -314,7 +289,6 @@ impl Barrier {
             },
             epoch: Epoch::new(epoch.curr, epoch.prev),
             mutation,
-            actor_local_info: None,
         })
     }
 }

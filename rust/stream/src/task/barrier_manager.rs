@@ -30,6 +30,9 @@ mod tests;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
+pub type DdlFinishNotifierRx = oneshot::Receiver<u64>;
+
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
     /// collected, and there's no way to know whether or when a barrier is finished.
@@ -82,6 +85,22 @@ impl LocalBarrierManager {
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
         debug!("register sender: {}", actor_id);
         self.senders.insert(actor_id, sender);
+    }
+
+    pub fn register_ddl_finish_notifier(&mut self, actor_id: ActorId) -> DdlFinishNotifierTx {
+        let (tx, rx) = oneshot::channel();
+        debug!("register ddl finish notifier: {}", actor_id);
+
+        // TODO: process the reporting
+        tokio::spawn(async move {
+            let ddl_epoch = rx.await.unwrap();
+            info!(
+                "ddl with epoch {} finishes on actor {}",
+                ddl_epoch, actor_id
+            );
+        });
+
+        tx
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
