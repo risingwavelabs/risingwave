@@ -225,27 +225,12 @@ impl LogicalAgg {
         }
     }
 
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(
-            self.input.schema().len(),
-            self.agg_calls().len(),
-            self.group_keys(),
-        )
-    }
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        Self::i2o_col_mapping_inner(
-            self.input.schema().len(),
-            self.agg_calls().len(),
-            self.group_keys(),
-        )
-    }
-
-    /// get the Mapping of columnIndex from input column index to out column index
-    fn o2i_col_mapping_inner(
-        input_len: usize,
-        agg_cal_num: usize,
-        group_keys: &[usize],
-    ) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let agg_cal_num = self.agg_calls().len();
+        let group_keys = self.group_keys();
         let mut map = vec![None; agg_cal_num + group_keys.len()];
         for (i, key) in group_keys.iter().enumerate() {
             map[i] = Some(*key);
@@ -253,14 +238,9 @@ impl LogicalAgg {
         ColIndexMapping::with_target_size(map, input_len)
     }
 
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    fn i2o_col_mapping_inner(
-        input_len: usize,
-        agg_cal_num: usize,
-        group_keys: &[usize],
-    ) -> ColIndexMapping {
-        Self::o2i_col_mapping_inner(input_len, agg_cal_num, group_keys).inverse()
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 
     fn derive_schema(
