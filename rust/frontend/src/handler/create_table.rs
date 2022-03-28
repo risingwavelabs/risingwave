@@ -50,7 +50,7 @@ pub fn gen_create_table_plan(
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
-            name: gen_row_id_column_name(0).to_string(),
+            name: gen_row_id_column_name(0),
             field_descs: vec![],
             type_name: "".to_string(),
         });
@@ -161,7 +161,6 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use super::*;
     use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 

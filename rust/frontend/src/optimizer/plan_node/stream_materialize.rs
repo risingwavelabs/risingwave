@@ -64,9 +64,10 @@ impl StreamMaterialize {
                 continue;
             }
             if !col_names.insert(field.name.clone()) {
-                return Err(InternalError(
-                    format!("column {} specified more than once", field.name).to_string(),
-                )
+                return Err(InternalError(format!(
+                    "column {} specified more than once",
+                    field.name
+                ))
                 .into());
             }
         }

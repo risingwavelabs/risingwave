@@ -19,7 +19,6 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, OrderByExpr, Query};
 
 use crate::binder::{Binder, BoundSetExpr};
-use crate::catalog::{is_row_id_column_name, ROWID_PREFIX};
 use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.

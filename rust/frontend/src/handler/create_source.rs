@@ -55,7 +55,7 @@ pub(super) async fn handle_create_source(
     let mut column_catalogs = vec![ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
-            name: gen_row_id_column_name(0).to_string(),
+            name: gen_row_id_column_name(0),
             column_type: Some(DataType::Int32.to_protobuf()),
             field_descs: vec![],
             type_name: "".to_string(),
