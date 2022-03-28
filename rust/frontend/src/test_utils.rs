@@ -22,7 +22,6 @@ use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::Result;
-use risingwave_meta::manager::SchemaId;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
@@ -34,7 +33,7 @@ use risingwave_sqlparser::parser::Parser;
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
-use crate::catalog::DatabaseId;
+use crate::catalog::{DatabaseId, SchemaId};
 use crate::meta_client::FrontendMetaClient;
 use crate::optimizer::PlanRef;
 use crate::planner::Planner;
