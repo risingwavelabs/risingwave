@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
@@ -25,7 +25,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
-use crate::catalog::gen_row_id_column_name;
+use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ROWID_PREFIX};
 use crate::optimizer::plan_node::StreamSource;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
@@ -56,6 +56,14 @@ pub fn gen_create_table_plan(
         });
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
+            if is_row_id_column_name(&column.name.value) {
+                return Err(ErrorCode::InternalError(format!(
+                    "column name prefixed with {:?} are reserved word.",
+                    ROWID_PREFIX
+                ))
+                .into());
+            }
+
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
