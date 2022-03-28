@@ -134,39 +134,27 @@ impl StreamMaterialize {
         id.get_id() as usize
     }
 }
-struct NameWithIfHidden {
-    pub name: String,
-    pub is_hidden: bool,
-}
-impl fmt::Debug for NameWithIfHidden {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.name)?;
-        if self.is_hidden {
-            write!(f, "(hidden)")?
-        }
-        Ok(())
-    }
-}
+
 impl fmt::Display for StreamMaterialize {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let column_names = self
+            .table()
+            .columns()
+            .iter()
+            .map(|c| c.name_with_hidden())
+            .join(", ");
+
+        let pk_column_names = self
+            .table()
+            .pk_desc()
+            .iter()
+            .map(|c| &c.column_desc.name)
+            .join(", ");
+
         write!(
             f,
-            "StreamMaterialize {{ columns: {:?}, pk_columns: {:?} }}",
-            self.table()
-                .columns()
-                .iter()
-                .cloned()
-                .map(|c| NameWithIfHidden {
-                    name: c.column_desc.name.clone(),
-                    is_hidden: c.is_hidden,
-                })
-                .collect_vec(),
-            self.table()
-                .pk_desc()
-                .iter()
-                .cloned()
-                .map(|c| c.column_desc.name)
-                .collect_vec(),
+            "StreamMaterialize {{ columns: [{}], pk_columns: [{}] }}",
+            column_names, pk_column_names
         )
     }
 }
