@@ -241,7 +241,7 @@ impl LogicalAgg {
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping_inner(
+    fn o2i_col_mapping_inner(
         input_len: usize,
         agg_cal_num: usize,
         group_keys: &[usize],
@@ -255,7 +255,7 @@ impl LogicalAgg {
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping_inner(
+    fn i2o_col_mapping_inner(
         input_len: usize,
         agg_cal_num: usize,
         group_keys: &[usize],

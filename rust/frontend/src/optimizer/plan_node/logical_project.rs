@@ -56,7 +56,7 @@ impl LogicalProject {
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+    fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
             map[i] = match expr {
@@ -69,7 +69,7 @@ impl LogicalProject {
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+    fn i2o_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
         Self::o2i_col_mapping_inner(input_len, exprs).inverse()
     }
 
