@@ -209,6 +209,9 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp => DataType::Timestamp,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Real => DataType::Float32,
+        AstDataType::Array(datatype) => DataType::List {
+            datatype: Box::new(bind_data_type(datatype)?),
+        },
         _ => {
             return Err(ErrorCode::NotImplementedError(format!(
                 "unsupported data type: {:?}",
