@@ -111,34 +111,34 @@ impl SSTableBuilder {
         }
     }
 
-    /// Check if the builder is empty
+    /// Checks if the builder is empty
     pub fn is_empty(&self) -> bool {
         self.data_buf.is_empty()
     }
 
-    /// Calculate the difference of two keys
+    /// Calculates the difference of two keys
     fn key_diff<'a>(&self, key: &'a [u8]) -> &'a [u8] {
         bytes_diff(&self.base_key, key)
     }
 
-    /// Append encoded block bytes to the buffer
+    /// Appends encoded block bytes to the buffer
     fn finish_block(&mut self) {
-        // try to set smallest key of table
+        // Try to set the smallest key of table
         if self.meta.smallest_key.is_empty() {
             self.meta.smallest_key = self.base_key.to_vec();
         }
 
         // ---------- encode block ----------
-        // different behavior: BadgerDB will just return.
+        // Different behavior: BadgerDB will just return.
         assert!(!self.entry_offsets.is_empty());
 
-        // encode offsets list and its length
+        // Encode offsets list and its length
         for offset in &self.entry_offsets {
             self.data_buf.put_u32_le(*offset);
         }
         self.data_buf.put_u32(self.entry_offsets.len() as u32);
 
-        // encode checksum and its length
+        // Encode checksum and its length
         let checksum = checksum(
             self.options.checksum_algo,
             &self.data_buf[self.base_offset as usize..],
@@ -198,11 +198,11 @@ impl SSTableBuilder {
             self.entry_offsets.clear();
         }
 
-        // set largest key
+        // Set the largest key
         self.meta.largest_key.clear();
         self.meta.largest_key.extend_from_slice(key);
 
-        // remove epoch before calculate hash
+        // Remove epoch before calculate hash
         let user_key = user_key(key);
         self.key_hashes.push(farmhash::fingerprint32(user_key));
 
@@ -216,23 +216,23 @@ impl SSTableBuilder {
         assert!(key.len() - diff_key.len() <= u16::MAX as usize);
         assert!(diff_key.len() <= u16::MAX as usize);
 
-        // get header
+        // Get header
         let header = Header {
             overlap: (key.len() - diff_key.len()) as u16,
             diff: diff_key.len() as u16,
         };
         assert!(self.data_buf.len() <= u32::MAX as usize);
 
-        // store current entry's offset
+        // Store current entry's offset
         self.entry_offsets
             .push(self.data_buf.len() as u32 - self.base_offset);
 
-        // entry layout: header, diffKey, value.
+        // Entry layout: header, diffKey, value.
         header.encode(&mut self.data_buf);
         self.data_buf.put_slice(diff_key);
         value.encode(&mut self.data_buf);
 
-        // update estimated size
+        // Update estimated size
         let block_size = value.encoded_len() + diff_key.len() + 4;
         self.meta.estimated_size += block_size as u32;
     }
@@ -251,14 +251,14 @@ impl SSTableBuilder {
         estimated_size as u32 > self.options.table_capacity
     }
 
-    /// Finalize the table to be blocks and metadata
+    /// Finalizes the table to be blocks and metadata
     pub fn finish(mut self) -> (Bytes, SstableMeta) {
         // Append blocks. This will never start a new block.
         self.finish_block();
 
         // TODO: move boundaries and build index if we need to encrypt or compress
 
-        // initial Bloom filter
+        // Initialize bloom filter
         if self.options.bloom_false_positive > 0.0 {
             let bits_per_key =
                 Bloom::bloom_bits_per_key(self.key_hashes.len(), self.options.bloom_false_positive);

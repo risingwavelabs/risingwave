@@ -23,7 +23,7 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-/// A panic state store. If a workload is fully in-memory, we can use this state store, so as to
+/// A panic state store. If a workload is fully in-memory, we can use this state store to
 /// ensure that no data is stored in the state store and no serialization will happen.
 #[derive(Clone, Default)]
 pub struct PanicStateStore;

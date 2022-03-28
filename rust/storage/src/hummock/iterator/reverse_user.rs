@@ -38,13 +38,13 @@ pub struct ReverseUserIterator<'a> {
     /// Last user key value is deleted
     last_delete: bool,
 
-    /// Flag for whether the iterator reach over the right end of the range.
+    /// Flag for whether the iterator reaches over the right end of the range.
     out_of_range: bool,
 
     /// Start and end bounds of user key.
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
-    /// Only read values if `epoch <= self.read_epoch`.
+    /// Only reads values if `epoch <= self.read_epoch`.
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
@@ -52,7 +52,7 @@ pub struct ReverseUserIterator<'a> {
 }
 
 impl<'a> ReverseUserIterator<'a> {
-    /// Create [`UserIterator`] with maximum epoch.
+    /// Creates [`UserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
         iterator: ReverseMergeIterator<'a>,
@@ -61,7 +61,7 @@ impl<'a> ReverseUserIterator<'a> {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
     }
 
-    /// Create [`UserIterator`] with given `read_epoch`.
+    /// Creates [`UserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -96,7 +96,7 @@ impl<'a> ReverseUserIterator<'a> {
         self.out_of_range = false;
     }
 
-    /// Get the iterator move to the next step.
+    /// Gets the iterator move to the next step.
     ///
     /// Returned result:
     /// - if `Ok(())` is returned, it means that the iterator successfully move to the next position
@@ -111,7 +111,7 @@ impl<'a> ReverseUserIterator<'a> {
         //
         // 2. current key != last key.
         //    We have to make a decision for the last key.
-        //    a. If it not deleted, we stop.
+        //    a. If it is not deleted, we stop.
         //    b. Otherwise, we continue to find the next new key.
         //
         // 3. `self.iterator` invalid. The case is the same as 2. However, option b is invalid now.
@@ -182,7 +182,7 @@ impl<'a> ReverseUserIterator<'a> {
         Ok(()) // not valid, EOF
     }
 
-    /// Return the key with the newest version. Thus no version in it, and only the `user_key` will
+    /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
     /// be returned.
     ///
     /// The returned key is de-duplicated and thus it will not output the same key, unless the
@@ -196,15 +196,15 @@ impl<'a> ReverseUserIterator<'a> {
 
     /// The returned value is in the form of user value.
     ///
-    /// Note: before call the function you need to ensure that the iterator is valid.
+    /// Note: before calling the function you need to ensure that the iterator is valid.
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
         self.last_val.as_slice()
     }
 
-    /// Reset the iterating position to the beginning.
+    /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
-        // handle range scan
+        // Handle range scan
         match &self.key_range.1 {
             Included(end_key) => {
                 let full_key = &key_with_epoch(end_key.clone(), 0);
@@ -214,15 +214,15 @@ impl<'a> ReverseUserIterator<'a> {
             Unbounded => self.iterator.rewind().await?,
         };
 
-        // handle multi-version
+        // Handle multi-version
         self.reset();
-        // handle range scan when key < begin_key
+        // Handle range scan when key < begin_key
         self.next().await
     }
 
-    /// Reset the iterating position to the first position where the key >= provided key.
+    /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
-        // handle range scan when key > end_key
+        // Handle range scan when key > end_key
         let user_key = match &self.key_range.1 {
             Included(end_key) => {
                 if end_key.as_slice() < user_key {
@@ -237,15 +237,15 @@ impl<'a> ReverseUserIterator<'a> {
         let full_key = &key_with_epoch(user_key, 0);
         self.iterator.seek(full_key).await?;
 
-        // handle multi-version
+        // Handle multi-version
         self.reset();
-        // handle range scan when key < begin_key
+        // Handle range scan when key < begin_key
         self.next().await
     }
 
-    /// Indicate whether the iterator can be used.
+    /// Indicates whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
-        // handle range scan
+        // Handle range scan
         // key <= end_key is guaranteed by seek/rewind function
         // We remark that there are only three cases out of four combinations:
         // (iterator valid && last_delete false) is impossible

@@ -34,12 +34,12 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// An in-memory state store
 ///
 /// The in-memory state store is a [`BTreeMap`], which maps (key, epoch) to value. It never does GC,
-/// so the memory usage will be high. At the same time, everytime we create a new iterator on
+/// so the memory usage will be high. At the same time, every time we create a new iterator on
 /// `BTreeMap`, it will fully clone the map, so as to act as a snapshot. Therefore, in-memory state
 /// store should never be used in production.
 #[derive(Clone)]
 pub struct MemoryStateStore {
-    /// store (key, epoch) -> value
+    /// Stores (key, epoch) -> value
     inner: Arc<Mutex<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
 }
 
