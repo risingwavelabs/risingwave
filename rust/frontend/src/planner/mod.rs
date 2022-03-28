@@ -16,7 +16,7 @@ use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
 use crate::optimizer::PlanRoot;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 
 mod delete;
 mod insert;
@@ -29,11 +29,11 @@ mod values;
 
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
-    ctx: QueryContextRef,
+    ctx: OptimizerContextRef,
 }
 
 impl Planner {
-    pub fn new(ctx: QueryContextRef) -> Planner {
+    pub fn new(ctx: OptimizerContextRef) -> Planner {
         Planner { ctx }
     }
 
@@ -42,7 +42,7 @@ impl Planner {
         self.plan_statement(stmt)
     }
 
-    pub fn ctx(&self) -> QueryContextRef {
+    pub fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
 }

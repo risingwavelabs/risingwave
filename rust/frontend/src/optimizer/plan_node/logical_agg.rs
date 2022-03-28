@@ -150,25 +150,34 @@ impl ExprRewriter for ExprHandler {
             .collect_vec();
 
         if agg_kind == AggKind::Avg {
-            // Rewrite avg to sum/count.
+            assert_eq!(inputs.len(), 1);
+
+            let left_return_type =
+                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]);
+
+            // Rewrite avg to sum / count.
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Sum,
-                return_type: return_type.clone(),
+                return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
             });
             let left = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type.clone(),
+                left_return_type,
             );
+
+            let right_return_type =
+                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]);
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
-                return_type: DataType::Int64,
+                return_type: right_return_type.clone(),
                 inputs,
             });
+
             let right = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type,
+                right_return_type,
             );
 
             ExprImpl::from(
@@ -233,22 +242,22 @@ impl LogicalAgg {
         }
     }
 
-    /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        let mut map = vec![None; exprs.len()];
-        for (i, expr) in exprs.iter().enumerate() {
-            map[i] = match expr {
-                ExprImpl::InputRef(input) => Some(input.index()),
-                _ => None,
-            }
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let agg_cal_num = self.agg_calls().len();
+        let group_keys = self.group_keys();
+        let mut map = vec![None; agg_cal_num + group_keys.len()];
+        for (i, key) in group_keys.iter().enumerate() {
+            map[i] = Some(*key);
         }
         ColIndexMapping::with_target_size(map, input_len)
     }
 
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping(input_len, exprs).inverse()
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 
     fn derive_schema(
@@ -536,12 +545,12 @@ mod tests {
     };
     use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::ctx::WithId;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_create() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -675,7 +684,7 @@ mod tests {
     ///  TableScan(v2, v3)
     async fn test_prune_all() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -742,7 +751,7 @@ mod tests {
     ///   Agg(max(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
     async fn test_prune_group_key() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -818,7 +827,7 @@ mod tests {
     ///     TableScan(v2, v3)
     async fn test_prune_agg() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),

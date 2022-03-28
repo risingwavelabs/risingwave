@@ -73,6 +73,11 @@ impl Transaction {
     pub(super) fn into_parts(self) -> (Vec<Precondition>, Vec<Operation>) {
         (self.preconditions, self.operations)
     }
+
+    #[cfg(test)]
+    pub fn get_operations(&self) -> &Vec<Operation> {
+        &self.operations
+    }
 }
 
 pub enum Operation {

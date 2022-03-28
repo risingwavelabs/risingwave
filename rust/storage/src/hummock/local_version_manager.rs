@@ -247,7 +247,8 @@ impl LocalVersionManager {
                     return;
                 }
                 Some(version) => {
-                    hummock_meta_client.unpin_version(version.id).await.ok();
+                    // TODO: #93 retry instead of unwrap
+                    hummock_meta_client.unpin_version(version.id).await.unwrap();
                     if let Some(local_version_manager) = local_version_manager.upgrade() {
                         local_version_manager.unref_committed_epoch(
                             version.max_committed_epoch,

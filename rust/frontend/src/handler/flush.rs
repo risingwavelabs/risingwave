@@ -15,9 +15,9 @@
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::Result;
 
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
-pub(super) async fn handle_flush(context: QueryContext) -> Result<PgResponse> {
+pub(super) async fn handle_flush(context: OptimizerContext) -> Result<PgResponse> {
     let client = context.session_ctx.env().meta_client();
     client.flush().await?;
 

@@ -36,20 +36,9 @@ pub struct BatchProject {
 impl BatchProject {
     pub fn new(logical: LogicalProject) -> Self {
         let ctx = logical.base.ctx.clone();
-        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-        let distribution = match logical.input().distribution() {
-            Distribution::HashShard(dists) => {
-                let new_dists = dists
-                    .iter()
-                    .map(|hash_col| i2o.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match new_dists {
-                    Some(new_dists) => Distribution::HashShard(new_dists),
-                    None => Distribution::AnyShard,
-                }
-            }
-            dist => dist.clone(),
-        };
+        let distribution = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(logical.input().distribution());
         // TODO: Derive order from input
         let base = PlanBase::new_batch(
             ctx,
@@ -96,24 +85,18 @@ impl ToDistributedBatch for BatchProject {
         required_order: &Order,
         required_dist: &Distribution,
     ) -> PlanRef {
-        let o2i =
-            LogicalProject::o2i_col_mapping(self.input().schema().len(), self.logical.exprs());
-        let input_dist = match required_dist {
-            Distribution::HashShard(dists) => {
-                let input_dists = dists
-                    .iter()
-                    .map(|hash_col| o2i.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match input_dists {
-                    Some(input_dists) => Distribution::HashShard(input_dists),
-                    None => Distribution::AnyShard,
-                }
-            }
-            dist => dist.clone(),
+        let input_required = match required_dist {
+            Distribution::HashShard(_) => self
+                .logical
+                .o2i_col_mapping()
+                .rewrite_required_distribution(required_dist)
+                .unwrap_or(Distribution::AnyShard),
+            Distribution::AnyShard => Distribution::AnyShard,
+            _ => Distribution::Any,
         };
         let new_input = self
             .input()
-            .to_distributed_with_required(required_order, &input_dist);
+            .to_distributed_with_required(required_order, &input_required);
         let new_logical = self.logical.clone_with_input(new_input);
         let batch_plan = BatchProject::new(new_logical);
         let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into());

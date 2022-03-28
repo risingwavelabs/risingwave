@@ -337,8 +337,11 @@ impl ToBatch for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -373,8 +376,11 @@ impl ToStream for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -408,7 +414,7 @@ mod tests {
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
     use crate::optimizer::property::WithSchema;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text
@@ -426,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -512,7 +518,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -592,7 +598,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: DataType::Int32,

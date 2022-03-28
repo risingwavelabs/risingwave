@@ -36,17 +36,26 @@ impl WithSchema for BatchSeqScan {
 }
 
 impl BatchSeqScan {
-    pub fn new(logical: LogicalScan) -> Self {
+    pub fn new_inner(logical: LogicalScan, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
 
         Self { base, logical }
+    }
+
+    pub fn new(logical: LogicalScan) -> Self {
+        Self::new_inner(logical, Distribution::Any)
+    }
+
+    pub fn new_with_dist(logical: LogicalScan) -> Self {
+        Self::new_inner(logical, Distribution::AnyShard)
+    }
+
+    /// Get a reference to the batch seq scan's logical.
+    #[must_use]
+    pub fn logical(&self) -> &LogicalScan {
+        &self.logical
     }
 }
 
@@ -65,7 +74,7 @@ impl fmt::Display for BatchSeqScan {
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {
-        self.clone().into()
+        Self::new_with_dist(self.logical.clone()).into()
     }
 }
 
