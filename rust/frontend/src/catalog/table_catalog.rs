@@ -159,8 +159,8 @@ mod tests {
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
     use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::gen_row_id_column_name;
     use crate::catalog::table_catalog::TableCatalog;
-    use crate::handler::create_table::ROWID_NAME;
 
     #[test]
     fn test_into_table_catalog() {
@@ -173,7 +173,7 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(ProstColumnDesc {
                         column_id: 0,
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(None).to_string(),
                         field_descs: vec![],
                         column_type: Some(DataType::Int32.to_protobuf()),
                         type_name: String::new(),
@@ -220,7 +220,7 @@ mod tests {
                         column_desc: ColumnDesc {
                             data_type: DataType::Int32,
                             column_id: ColumnId::new(0),
-                            name: ROWID_NAME.to_string(),
+                            name: gen_row_id_column_name(None).to_string(),
                             field_descs: vec![],
                             type_name: String::new()
                         },
@@ -258,7 +258,7 @@ mod tests {
                     column_desc: ColumnDesc {
                         data_type: DataType::Int32,
                         column_id: ColumnId::new(0),
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(None).to_string(),
                         field_descs: vec![],
                         type_name: String::new()
                     },

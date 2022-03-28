@@ -25,12 +25,11 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
+use crate::catalog::gen_row_id_column_name;
 use crate::optimizer::plan_node::StreamSource;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-
-pub const ROWID_NAME: &str = "_row_id";
 
 pub fn gen_create_table_plan(
     session: &SessionImpl,
@@ -51,7 +50,7 @@ pub fn gen_create_table_plan(
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
-            name: ROWID_NAME.to_string(),
+            name: gen_row_id_column_name(None).to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
         });
@@ -155,6 +154,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
+    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -189,7 +189,7 @@ mod tests {
             .collect::<HashMap<&str, DataType>>();
 
         let expected_columns = maplit::hashmap! {
-            ROWID_NAME => DataType::Int64,
+            gen_row_id_column_name(None) => DataType::Int64,
             "v1" => DataType::Int16,
             "v2" => DataType::Int32,
             "v3" => DataType::Int64,
