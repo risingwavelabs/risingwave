@@ -1132,19 +1132,17 @@ where
         let mut to_commit = false;
         for context_id in context_ids.as_ref() {
             tracing::debug!("Release context {}", *context_id);
-
-            let mut task_to_cancel = vec![];
-            for (task_id, assignment) in compact_task_assignment.iter() {
+            for assignment in compact_task_assignment.values() {
                 if assignment.context_id == *context_id {
-                    compact_status.cancel_compact_task(assignment.compact_task.as_ref().unwrap());
-                    task_to_cancel.push(*task_id);
+                    to_commit = compact_status.cancel_compact_task(
+                        assignment
+                            .compact_task
+                            .as_ref()
+                            .expect("compact_task shouldn't be None"),
+                    ) || to_commit;
                 }
             }
-            to_commit = !task_to_cancel.is_empty();
-            for task_id in task_to_cancel {
-                compact_task_assignment.remove(&task_id);
-            }
-
+            compact_task_assignment.retain(|_, v| v.context_id != *context_id);
             to_commit = pinned_versions.remove(context_id).is_some() || to_commit;
             to_commit = pinned_snapshots.remove(context_id).is_some() || to_commit;
         }
@@ -1276,6 +1274,7 @@ where
             let compaction_guard = self.compaction.lock().await;
             let versioning_guard = self.versioning.read().await;
             let compact_status_copy = compaction_guard.compact_status.clone();
+            let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
             let current_version_id_copy = versioning_guard.current_version_id.clone();
             let hummmock_versions_copy = versioning_guard.hummock_versions.clone();
             let pinned_versions_copy = versioning_guard.pinned_versions.clone();
@@ -1284,6 +1283,7 @@ where
             let sst_id_infos_copy = versioning_guard.sstable_id_infos.clone();
             (
                 compact_status_copy,
+                compact_task_assignment_copy,
                 current_version_id_copy,
                 hummmock_versions_copy,
                 pinned_versions_copy,
