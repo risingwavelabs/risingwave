@@ -21,7 +21,7 @@ use risingwave_pb::plan::HashAggNode;
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashAgg {

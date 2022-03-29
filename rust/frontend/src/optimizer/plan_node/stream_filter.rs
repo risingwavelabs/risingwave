@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::FilterNode;
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::WithSchema;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]

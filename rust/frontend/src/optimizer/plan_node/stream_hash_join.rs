@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::HashJoinNode;
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table

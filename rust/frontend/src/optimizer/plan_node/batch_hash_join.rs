@@ -21,7 +21,7 @@ use super::{
     EqJoinPredicate, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
     ToDistributedBatch,
 };
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table

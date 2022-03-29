@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.

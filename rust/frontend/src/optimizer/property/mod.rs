@@ -27,5 +27,3 @@ pub(crate) mod order;
 pub use order::*;
 mod distribution;
 pub use distribution::*;
-mod schema;
-pub use schema::*;

@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{PlanBase, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::session::OptimizerContextRef;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.

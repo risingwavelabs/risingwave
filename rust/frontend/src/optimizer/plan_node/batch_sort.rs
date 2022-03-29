@@ -19,7 +19,7 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnOrder, OrderByNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.

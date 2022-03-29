@@ -16,8 +16,9 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::WithSchema;
+use super::{
+    BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`

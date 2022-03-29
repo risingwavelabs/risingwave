@@ -22,7 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows

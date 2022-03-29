@@ -19,7 +19,6 @@ use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::WithSchema;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.

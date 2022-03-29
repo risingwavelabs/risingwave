@@ -101,6 +101,9 @@ macro_rules! impl_base_delegate {
                  pub fn ctx(&self) -> OptimizerContextRef {
                     self.plan_base().ctx.clone()
                 }
+                pub fn schema(&self) -> &Schema {
+                    &self.plan_base().schema
+                }
                 pub fn pk_indices(&self) -> &[usize] {
                     &self.plan_base().pk_indices
                 }

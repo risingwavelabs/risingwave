@@ -19,7 +19,7 @@ use risingwave_pb::plan::{InsertNode, TableRefId};
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchInsert` implements [`LogicalInsert`]
 #[derive(Debug, Clone)]

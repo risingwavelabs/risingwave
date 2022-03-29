@@ -33,12 +33,14 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use paste::paste;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{Distribution, Order, WithSchema};
+use super::property::{Distribution, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -50,7 +52,6 @@ pub trait PlanNode:
     + Debug
     + Display
     + Downcast
-    + WithSchema
     + ColPrunable
     + ToBatch
     + ToStream
@@ -60,6 +61,17 @@ pub trait PlanNode:
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
     fn convention(&self) -> Convention;
+
+    // TODO: find a better place declear this func
+    fn must_contain_columns(&self, required_cols: &FixedBitSet) {
+        // Having equal length also implies:
+        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
+        assert_eq!(
+            required_cols.len(),
+            self.plan_base().schema.fields().len(),
+            "required cols capacity != columns available",
+        );
+    }
 }
 
 impl_downcast!(PlanNode);
@@ -98,6 +110,9 @@ impl dyn PlanNode {
     }
     pub fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx.clone()
+    }
+    pub fn schema(&self) -> &Schema {
+        &self.plan_base().schema
     }
     pub fn pk_indices(&self) -> &[usize] {
         &self.plan_base().pk_indices

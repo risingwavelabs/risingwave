@@ -20,7 +20,7 @@ use risingwave_pb::plan::{DeleteNode, TableRefId};
 use super::{
     LogicalDelete, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchDelete` implements [`LogicalDelete`]
 #[derive(Debug, Clone)]

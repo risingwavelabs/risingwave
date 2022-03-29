@@ -18,12 +18,11 @@ use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
-    ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to

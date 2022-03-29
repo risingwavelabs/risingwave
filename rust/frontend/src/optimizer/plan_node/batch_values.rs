@@ -20,7 +20,7 @@ use risingwave_pb::plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchValues {

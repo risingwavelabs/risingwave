@@ -19,7 +19,7 @@ use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, Row
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]

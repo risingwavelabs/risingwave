@@ -24,12 +24,12 @@ use risingwave_common::types::DataType;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{
-    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamHashAgg,
-    StreamSimpleAgg, ToBatch, ToStream,
+    BatchHashAgg, BatchSimpleAgg, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    StreamHashAgg, StreamSimpleAgg, ToBatch, ToStream,
 };
 use crate::expr::{AggCall, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMapping;
 
 /// Aggregation Call
