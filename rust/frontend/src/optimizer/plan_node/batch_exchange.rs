@@ -14,12 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ExchangeNode;
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order, WithDistribution, WithOrder};
 
 /// `BatchExchange` imposes a particular distribution on its input
 /// without changing its content.

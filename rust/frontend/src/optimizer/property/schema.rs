@@ -17,7 +17,7 @@ use paste::paste;
 use risingwave_common::catalog::Schema;
 
 use super::super::plan_node::*;
-use crate::{for_all_plan_nodes, for_logical_plan_nodes};
+use crate::for_all_plan_nodes;
 
 pub trait WithSchema {
     fn schema(&self) -> &Schema;

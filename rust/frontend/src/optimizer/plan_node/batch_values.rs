@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::ValuesNode;
