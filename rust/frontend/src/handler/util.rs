@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use num_traits::Float;
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::types::Row;
 use risingwave_common::array::DataChunk;
@@ -21,10 +22,26 @@ use risingwave_common::types::{DataType, ScalarRefImpl};
 
 /// Format scalars according to postgres convention.
 fn pg_value_format(d: ScalarRefImpl) -> String {
-    if let ScalarRefImpl::Bool(b) = d {
-        if b { "t" } else { "f" }.to_string()
+    match d {
+        ScalarRefImpl::Bool(b) => if b { "t" } else { "f" }.to_string(),
+        ScalarRefImpl::Float32(v) => pg_float_format(v),
+        ScalarRefImpl::Float64(v) => pg_float_format(v),
+        _ => d.to_string(),
+    }
+}
+
+fn pg_float_format<T: Float + ToString>(v: T) -> String {
+    if v.is_infinite() {
+        if v.is_sign_positive() {
+            "Infinity"
+        } else {
+            "-Infinity"
+        }
+        .to_string()
+    } else if v.is_nan() {
+        "NaN".to_string()
     } else {
-        d.to_string()
+        v.to_string()
     }
 }
 
@@ -119,5 +136,21 @@ mod tests {
             .collect_vec();
 
         assert_eq!(vec, expected);
+    }
+
+    #[test]
+    fn test_value_format() {
+        use ScalarRefImpl as S;
+
+        let f = pg_value_format;
+        assert_eq!(&f(S::Float32(1_f32.into())), "1");
+        assert_eq!(&f(S::Float32(f32::NAN.into())), "NaN");
+        assert_eq!(&f(S::Float64(f64::NAN.into())), "NaN");
+        assert_eq!(&f(S::Float32(f32::INFINITY.into())), "Infinity");
+        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into())), "-Infinity");
+        assert_eq!(&f(S::Float64(f64::INFINITY.into())), "Infinity");
+        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into())), "-Infinity");
+        assert_eq!(&f(S::Bool(true)), "t");
+        assert_eq!(&f(S::Bool(false)), "f");
     }
 }
