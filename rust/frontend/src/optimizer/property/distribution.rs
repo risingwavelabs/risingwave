@@ -21,7 +21,9 @@ use risingwave_pb::plan::ExchangeInfo;
 use super::super::plan_node::*;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
-use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
+use crate::{
+    for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
@@ -125,36 +127,18 @@ impl Distribution {
     }
 }
 
-pub trait WithDistribution {
-    /// the distribution property of the [`PlanNode`]'s output
-    fn distribution(&self) -> &Distribution;
-}
-
-macro_rules! impl_with_dist_base {
+macro_rules! impl_dist_with_base {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
-            impl WithDistribution for [<$convention $name>] {
-                fn distribution(&self) -> &Distribution {
+            impl [<$convention $name>] {
+                pub fn distribution(&self) -> &Distribution {
                     &self.base.dist
                 }
             }
         })*
     }
 }
-for_batch_plan_nodes! { impl_with_dist_base }
-for_stream_plan_nodes! { impl_with_dist_base }
-macro_rules! impl_with_dist_any {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl WithDistribution for [<$convention $name>] {
-                fn distribution(&self) -> &Distribution {
-                   Distribution::any()
-                }
-            }
-        })*
-    }
-}
-for_logical_plan_nodes! { impl_with_dist_any }
+for_all_plan_nodes! { impl_dist_with_base }
 
 #[cfg(test)]
 mod tests {

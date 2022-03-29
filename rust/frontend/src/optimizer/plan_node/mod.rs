@@ -38,7 +38,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{Order, WithConvention, WithDistribution, WithSchema};
+use super::property::{Distribution, Order, WithConvention, WithSchema};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -51,7 +51,6 @@ pub trait PlanNode:
     + Display
     + Downcast
     + WithConvention
-    + WithDistribution
     + WithSchema
     + WithContext
     + WithId
@@ -91,6 +90,9 @@ impl dyn PlanNode {
 
     pub fn order(&self) -> &Order {
         &self.plan_base().order
+    }
+    pub fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
     }
 
     pub fn pk_indices(&self) -> &[usize] {
