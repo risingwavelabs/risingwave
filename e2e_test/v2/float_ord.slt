@@ -1,54 +1,33 @@
-query T
-values ('Inf'::real)
-----
-Infinity
-
-query T
-values ('-Inf'::real)
-----
--Infinity
-
-query T
-values (('NaN')::real);
-----
-NaN
-
-query T
-values (('-NaN')::real);
-----
-NaN
-
 statement ok
 create table t (v1 real not null);
 
 statement ok
-insert into t values ((+0.0)::real), ((-0.0)::real), (1.0::real), ((-1.0)::real);
+insert into t values (+0.0), (-0.0), (1), (-1);
 
 statement ok
-insert into t values (('Inf')::real);
+insert into t values ('Inf');
 
 statement ok
-insert into t values (('-Inf')::real);
+insert into t values ('-Inf');
 
 statement ok
-insert into t values (('NaN')::real);
+insert into t values ('NaN');
 
 statement ok
-insert into t values (('-NaN')::real);
+insert into t values ('-NaN');
 
-# Flush all the insertions.
 statement ok
 flush;
 
-query TI rowsort
-select v1, count(*) from t group by v1;
+query RI
+select v1, count(*) from t group by v1 order by v1;
 ----
--1 1
--Infinity 1
-0 2
-1 1
-Infinity 1
-NaN 2
+-Infinity   1
+-1          1
+0           2
+1           1
+Infinity    1
+NaN         2
 
 statement ok
 drop table t;

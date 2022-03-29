@@ -176,7 +176,7 @@ pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn deci_to_f32(elem: Decimal) -> Result<OrderedF32> {
+pub fn dec_to_f32(elem: Decimal) -> Result<OrderedF32> {
     // Postgres defines f32 as 6 decimal digits precision
     Ok(elem
         .round_dp(6)
@@ -186,7 +186,7 @@ pub fn deci_to_f32(elem: Decimal) -> Result<OrderedF32> {
 }
 
 #[inline(always)]
-pub fn deci_to_f64(elem: Decimal) -> Result<OrderedF64> {
+pub fn dec_to_f64(elem: Decimal) -> Result<OrderedF64> {
     // Postgres defines f32 as 15 decimal digits precision
     Ok(elem
         .round_dp(15)
