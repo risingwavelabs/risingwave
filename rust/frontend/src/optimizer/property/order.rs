@@ -22,10 +22,8 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::super::plan_node::*;
 use super::Convention;
+use crate::for_all_plan_nodes;
 use crate::optimizer::PlanRef;
-use crate::{
-    for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
-};
 
 #[derive(Debug, Clone, Default)]
 pub struct Order {
