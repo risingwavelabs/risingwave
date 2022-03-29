@@ -17,7 +17,7 @@ use std::iter::once;
 
 use tokio::sync::oneshot;
 
-use super::FinishedDdl;
+use super::{CollectResult, FinishedDdl};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -47,7 +47,7 @@ enum ManagedBarrierStateInner {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: oneshot::Sender<CollectResult>,
     },
 }
 
@@ -99,8 +99,8 @@ impl ManagedBarrierState {
                     collect_notifier, ..
                 } => {
                     // Notify about barrier finishing.
-                    let _ = finished_ddls;
-                    if collect_notifier.send(()).is_err() {
+                    let result = CollectResult { finished_ddls };
+                    if collect_notifier.send(result).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
                 }
@@ -162,7 +162,7 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: oneshot::Sender<CollectResult>,
     ) {
         match self.inner_mut() {
             ManagedBarrierStateInner::Pending { .. } => {

@@ -30,8 +30,20 @@ mod tests;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+#[derive(Debug)]
+pub struct FinishedDdl {
+    pub epoch: u64,
+
+    pub actor_id: ActorId,
+}
+
 pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
 pub type DdlFinishNotifierRx = oneshot::Receiver<u64>;
+
+#[derive(Debug)]
+pub struct CollectResult {
+    pub finished_ddls: Vec<FinishedDdl>,
+}
 
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
@@ -42,13 +54,6 @@ enum BarrierState {
     /// In `Managed` mode, barriers are sent and collected according to the request from meta
     /// service. When the barrier is finished, the caller can be notified about this.
     Managed(ManagedBarrierState),
-}
-
-#[derive(Debug)]
-pub struct FinishedDdl {
-    pub epoch: u64,
-
-    pub actor_id: ActorId,
 }
 
 /// [`LocalBarrierManager`] manages barrier control flow, used by local stream manager.
@@ -99,7 +104,7 @@ impl LocalBarrierManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<Option<oneshot::Receiver<CollectResult>>> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {

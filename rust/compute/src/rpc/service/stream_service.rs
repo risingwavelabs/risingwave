@@ -122,7 +122,8 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
-        self.mgr
+        let _collect_result = self
+            .mgr
             .send_and_collect_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .await
             .map_err(|e| e.to_grpc_status())?;
