@@ -30,6 +30,9 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 16;
 
+const MAGIC: u32 = 0x5785ab73;
+const VERSION: u32 = 1;
+
 pub struct Block {
     /// Uncompressed entries data.
     data: Bytes,
@@ -39,14 +42,34 @@ pub struct Block {
 
 impl Block {
     pub fn decode(buf: Bytes) -> HummockResult<Self> {
+        let mut cursor = buf.len();
+
+        // Check magic number and version.
+        cursor -= 4;
+        let magic = (&buf[cursor..]).get_u32_le();
+        if magic != MAGIC {
+            return Err(HummockError::MagicMismatch {
+                expected: MAGIC,
+                found: magic,
+            }
+            .into());
+        }
+        cursor -= 4;
+        let version = (&buf[cursor..cursor + 4]).get_u32_le();
+        if version != VERSION {
+            return Err(HummockError::InvalidVersion(version).into());
+        }
+
         // Verify checksum.
-        let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
-        xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
+        cursor -= 8;
+        let xxhash64_checksum = (&buf[cursor..cursor + 8]).get_u64_le();
+        xxhash64_verify(&buf[..cursor], xxhash64_checksum)?;
 
         // Decompress.
-        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        cursor -= 1;
+        let compression = CompressionAlgorithm::decode(&mut &buf[cursor..cursor + 1])?;
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(..buf.len() - 9),
+            CompressionAlgorithm::None => buf.slice(..cursor),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = Decoder::new(buf.reader())
                     .map_err(HummockError::decode_error)
@@ -59,12 +82,14 @@ impl Block {
                 Bytes::from(decoded)
             }
         };
+        cursor = buf.len();
 
         // Decode restart points.
-        let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
+        cursor -= 4;
+        let n_restarts = (&buf[cursor..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
         let mut restart_points = Vec::with_capacity(n_restarts as usize);
-        let mut restart_points_buf = &buf[data_len..buf.len() - 4];
+        let mut restart_points_buf = &buf[data_len..cursor];
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
@@ -270,7 +295,7 @@ impl BlockBuilder {
     ///
     /// ```plain
     /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) |
-    /// uncompressed: | compression method (1B) | crc32sum (4B) |
+    /// uncompressed: | compression method (1B) | crc32sum (4B) | version (4B) | MAGIC (4B) |
     /// ```
     ///
     /// # Panics
@@ -302,6 +327,8 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut buf);
         let checksum = xxhash64_checksum(&buf);
         buf.put_u64_le(checksum);
+        buf.put_u32_le(VERSION);
+        buf.put_u32_le(MAGIC);
         buf.freeze()
     }
 
