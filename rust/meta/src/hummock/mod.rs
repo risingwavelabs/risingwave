@@ -17,8 +17,6 @@ mod compactor_manager;
 mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
-#[cfg(test)]
-mod integration_tests;
 mod level_handler;
 #[cfg(test)]
 mod mock_hummock_meta_client;
@@ -37,25 +35,69 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 pub use vacuum::*;
 
+use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::storage::MetaStore;
 
-/// Start hummock's background workers.
-pub fn start_hummock_workers<S>(
+/// Start hummock's asynchronous tasks.
+pub async fn start_hummock_workers<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
     compactor_manager_ref: Arc<CompactorManager>,
     vacuum_trigger_ref: Arc<VacuumTrigger<S>>,
+    notification_manager_ref: NotificationManagerRef,
 ) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
 where
     S: MetaStore,
 {
     vec![
-        start_compaction_trigger(hummock_manager_ref, compactor_manager_ref),
+        start_compaction_trigger(hummock_manager_ref.clone(), compactor_manager_ref.clone()),
         VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
+        subscribe_cluster_membership_change(
+            hummock_manager_ref,
+            compactor_manager_ref,
+            notification_manager_ref,
+        )
+        .await,
     ]
 }
 
+/// Start a task to handle cluster membership change.
+pub async fn subscribe_cluster_membership_change<S>(
+    hummock_manager_ref: Arc<HummockManager<S>>,
+    _compactor_manager_ref: Arc<CompactorManager>,
+    notification_manager_ref: NotificationManagerRef,
+) -> (JoinHandle<()>, UnboundedSender<()>)
+where
+    S: MetaStore,
+{
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    notification_manager_ref.insert_local_sender(tx).await;
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+    let join_handle = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                notification = rx.recv() => {
+                    match notification {
+                        None => {
+                            return;
+                        }
+                        Some(LocalNotification::WorkerDeletion(worker_node)) => {
+                            // TODO: #93 retry instead of unwrap
+                            hummock_manager_ref.release_contexts(vec![worker_node.id]).await.unwrap();
+                            // TODO: #93 notify CompactorManager to remove stale compactor
+                        }
+                    }
+                }
+                _ = shutdown_rx.recv() => {
+                    return;
+                }
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
+}
+
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
-/// Starts a worker to conditionally trigger compaction.
+/// Starts a task to conditionally trigger compaction.
 /// A vacuum trigger is started here too.
 pub fn start_compaction_trigger<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
@@ -85,7 +127,7 @@ where
                     continue;
                 }
                 Err(e) => {
-                    tracing::warn!("failed to get_compact_task {}", e);
+                    tracing::warn!("failed to get_compact_task {:?}", e);
                     continue;
                 }
             };
@@ -104,7 +146,7 @@ where
                     .report_compact_task(compact_task, false)
                     .await
                 {
-                    tracing::warn!("failed to report_compact_task {}", e);
+                    tracing::warn!("failed to report_compact_task {:?}", e);
                 }
                 continue;
             }

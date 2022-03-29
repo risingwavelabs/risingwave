@@ -1,0 +1,11 @@
+SHOW TABLE t
+---
+SHOW TABLE t
+=>
+ShowTable { name: ObjectName([Ident { value: "t", quote_style: None }]) }
+
+SHOW SOURCE t
+---
+SHOW SOURCE t
+=>
+ShowSource { name: ObjectName([Ident { value: "t", quote_style: None }]) }

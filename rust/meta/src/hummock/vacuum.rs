@@ -54,7 +54,7 @@ where
         }
     }
 
-    /// Start a worker to periodically vacuum hummock
+    /// Start a task to periodically vacuum hummock
     pub fn start_vacuum_trigger(
         vacuum: Arc<VacuumTrigger<S>>,
     ) -> (JoinHandle<()>, UnboundedSender<()>)
@@ -75,13 +75,13 @@ where
                     }
                 }
                 if let Err(err) = Self::vacuum_version_metadata(&vacuum).await {
-                    tracing::warn!("vacuum tracked data err {}", err);
+                    tracing::warn!("vacuum tracked data err {:?}", err);
                 }
                 // vacuum_orphan_data can be invoked less frequently.
                 if let Err(err) =
                     Self::vacuum_sst_data(&vacuum, ORPHAN_SST_RETENTION_INTERVAL).await
                 {
-                    tracing::warn!("vacuum orphan data err {}", err);
+                    tracing::warn!("vacuum orphan data err {:?}", err);
                 }
             }
         });

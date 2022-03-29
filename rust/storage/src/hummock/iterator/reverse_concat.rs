@@ -19,7 +19,7 @@ use crate::hummock::ReverseSSTableIterator;
 #[allow(dead_code)]
 pub type ReverseConcatIterator = ConcatIteratorInner<ReverseSSTableIterator>;
 
-/// Mirror the tests used for `SSTableIterator`
+/// Mirrors the tests used for `SSTableIterator`
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

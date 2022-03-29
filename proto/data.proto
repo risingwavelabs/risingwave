@@ -88,8 +88,9 @@ enum ArrayType {
   DATE = 8;
   TIME = 9;
   TIMESTAMP = 10;
-  STRUCT = 11;
-  LIST = 12;
+  INTERVAL = 11;
+  STRUCT = 12;
+  LIST = 13;
 }
 
 message Array {

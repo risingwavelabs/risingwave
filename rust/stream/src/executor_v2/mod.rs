@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod error;
+use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
@@ -32,7 +33,7 @@ pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compact::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
-pub type BoxedMessageStream = BoxStream<'static, Result<Message>>;
+pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 
 /// Static information of an executor.
 #[derive(Debug)]

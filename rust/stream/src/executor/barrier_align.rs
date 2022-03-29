@@ -27,6 +27,7 @@ enum BarrierWaitState {
     Either,
 }
 
+#[derive(Debug)]
 pub enum AlignedMessage {
     Left(Result<StreamChunk>),
     Right(Result<StreamChunk>),

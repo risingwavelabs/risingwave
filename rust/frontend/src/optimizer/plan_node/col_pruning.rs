@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use paste::paste;
 
 use super::*;
-use crate::expr::{ExprImpl, ExprVisitor, InputRef};
+pub use crate::expr::CollectInputRef;
 use crate::{for_batch_plan_nodes, for_stream_plan_nodes};
 
 /// The trait for column pruning, only logical plan node will use it, though all plan node impl it.
@@ -49,24 +49,3 @@ macro_rules! impl_prune_col {
 }
 for_batch_plan_nodes! { impl_prune_col }
 for_stream_plan_nodes! { impl_prune_col }
-
-/// Union all `InputRef`s' indexes in the expression with the initial `input_bits`.
-pub struct CollectInputRef {
-    pub input_bits: FixedBitSet,
-}
-
-impl ExprVisitor for CollectInputRef {
-    fn visit_input_ref(&mut self, expr: &InputRef) {
-        self.input_bits.insert(expr.index());
-    }
-}
-
-impl CollectInputRef {
-    pub fn collect(expr: &ExprImpl, capacity: usize) -> FixedBitSet {
-        let mut visitor = Self {
-            input_bits: FixedBitSet::with_capacity(capacity),
-        };
-        visitor.visit_expr(expr);
-        visitor.input_bits
-    }
-}

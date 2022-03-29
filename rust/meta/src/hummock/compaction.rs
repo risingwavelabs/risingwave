@@ -27,6 +27,7 @@ use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
+use crate::model::Transactional;
 use crate::storage;
 use crate::storage::{MetaStore, Transaction};
 
@@ -75,14 +76,6 @@ impl CompactStatus {
                 Ok(None)
             }
         }
-    }
-
-    pub fn update_in_transaction(&self, trx: &mut Transaction) {
-        trx.put(
-            CompactStatus::cf_name().to_string(),
-            CompactStatus::key().as_bytes().to_vec(),
-            risingwave_pb::hummock::CompactStatus::from(self).encode_to_vec(),
-        );
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {
@@ -402,7 +395,7 @@ impl CompactStatus {
                 Some(delete_table_ids)
             }
             false => {
-                if !self.cancel_compact_task(compact_task.task_id) {
+                if !self.cancel_compact_task(&compact_task) {
                     // The task has been processed previously.
                     return None;
                 }
@@ -412,13 +405,31 @@ impl CompactStatus {
         }
     }
 
-    pub fn cancel_compact_task(&mut self, task_id: u64) -> bool {
-        // TODO: loop only in input levels
+    pub fn cancel_compact_task(&mut self, compact_task: &CompactTask) -> bool {
         let mut changed = false;
-        for level_handler in &mut self.level_handlers {
-            changed = changed || level_handler.unassign_task(task_id);
+        for LevelEntry { level_idx, .. } in &compact_task.input_ssts {
+            changed = changed
+                || self.level_handlers[*level_idx as usize].unassign_task(compact_task.task_id);
         }
         changed
+    }
+}
+
+impl Transactional for CompactStatus {
+    fn upsert_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+        trx.put(
+            CompactStatus::cf_name().to_string(),
+            CompactStatus::key().as_bytes().to_vec(),
+            risingwave_pb::hummock::CompactStatus::from(self).encode_to_vec(),
+        );
+        Ok(())
+    }
+    fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
+        trx.delete(
+            CompactStatus::cf_name().to_string(),
+            CompactStatus::key().as_bytes().to_vec(),
+        );
+        Ok(())
     }
 }
 

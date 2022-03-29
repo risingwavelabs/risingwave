@@ -32,8 +32,8 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
-    NotificationManagerRef,
+    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef,
+    LocalNotification, MetaSrvEnv, NotificationManagerRef,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -228,9 +228,14 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Delete, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
                         .await;
                 }
+
+                // Notify local subscribers
+                self.notification_manager_ref
+                    .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+                    .await;
 
                 Ok(())
             }
@@ -318,7 +323,7 @@ where
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,

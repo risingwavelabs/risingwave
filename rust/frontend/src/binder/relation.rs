@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
@@ -141,7 +142,9 @@ impl Binder {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(
+                        self.bind_subquery_relation(*subquery)?,
+                    )))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -178,12 +181,14 @@ impl Binder {
         let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
-        let columns = columns
-            .into_iter()
-            .map(|c| c.column_desc)
-            .collect::<Vec<ColumnDesc>>();
         self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
+            columns.iter().map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            }),
             table_name.clone(),
         )?;
 
@@ -222,19 +227,20 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType)>,
+        columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
     ) -> Result<()> {
         let begin = self.context.columns.len();
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type))| {
+            .for_each(|(index, (name, data_type, is_hidden))| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
                     begin + index,
                     data_type,
+                    is_hidden,
                 ));
                 self.context
                     .indexs_of
@@ -256,18 +262,20 @@ impl Binder {
         }
     }
 
-    /// Before binding a subquery, we push the current context to the stack and create a new
-    /// context.
+    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// [`BindContext`](super::BindContext) for it.
     ///
-    /// After finishing binding, we pop the previous context from the stack. And
-    /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
-        self.push_context();
+    /// After finishing binding, we update the current context with the output of the subquery.
+    pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
-        self.pop_context();
+        let sub_query_id = self.next_subquery_id();
         self.bind_context(
-            itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
-            UNNAMED_SUBQUERY.to_string(),
+            query
+                .names()
+                .into_iter()
+                .zip_eq(query.data_types().into_iter())
+                .map(|(x, y)| (x, y, false)),
+            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
         )?;
         Ok(BoundSubquery { query })
     }

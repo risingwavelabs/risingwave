@@ -16,14 +16,14 @@ use risingwave_common::catalog::Schema;
 
 use super::PlanNodeId;
 use crate::optimizer::property::{Distribution, Order};
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 
 /// the common fields of all nodes, please make a field named `base` in
 /// every planNode and correctly valued it when construct the planNode.
 #[derive(Clone, Debug)]
 pub struct PlanBase {
     pub id: PlanNodeId,
-    pub ctx: QueryContextRef,
+    pub ctx: OptimizerContextRef,
     pub schema: Schema,
     /// the pk indices of the PlanNode's output, a empty pk_indices vec means there is no pk
     pub pk_indices: Vec<usize>,
@@ -38,7 +38,7 @@ pub struct PlanBase {
     pub append_only: bool,
 }
 impl PlanBase {
-    pub fn new_logical(ctx: QueryContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
+    pub fn new_logical(ctx: OptimizerContextRef, schema: Schema, pk_indices: Vec<usize>) -> Self {
         let id = ctx.next_plan_node_id();
         Self {
             id,
@@ -52,7 +52,7 @@ impl PlanBase {
         }
     }
     pub fn new_stream(
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
         schema: Schema,
         pk_indices: Vec<usize>,
         dist: Distribution,
@@ -71,7 +71,7 @@ impl PlanBase {
         }
     }
     pub fn new_batch(
-        ctx: QueryContextRef,
+        ctx: OptimizerContextRef,
         schema: Schema,
         dist: Distribution,
         order: Order,
