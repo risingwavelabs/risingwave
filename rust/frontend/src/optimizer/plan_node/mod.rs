@@ -64,9 +64,6 @@ pub trait PlanNode:
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
-    }
 }
 
 impl_downcast!(PlanNode);
@@ -95,6 +92,10 @@ impl dyn PlanNode {
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.plan_base().pk_indices
+    }
+
+    pub fn append_only(&self) -> bool {
+        self.plan_base().append_only
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
