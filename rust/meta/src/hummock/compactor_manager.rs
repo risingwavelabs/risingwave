@@ -67,10 +67,9 @@ impl CompactorManagerInner {
 
 /// `CompactorManager` maintains compactors which can process compact task.
 /// A compact task is tracked in `HummockManager::Compaction` via both `CompactStatus` and
-/// `CompactTaskAssignment`. A compact task's lifecycle contains 3 states:
-/// - 1. Assigned: a compact task is assigned to a compactor via
-///   `HummockManager::assign_compact_task`. An assigned compact task can become unassigned again,
-///   for example when the assignee compactor is invalidated.
+/// `CompactTaskAssignment`. A compact task can be in one of these states:
+/// - 1. Assigned: a compact task is assigned to a compactor via `HummockManager::get_compact_task`.
+///   Assigned-->Finished/Cancelled.
 /// - 2. Finished: a assigned task is reported as finished via `CompactStatus::report_compact_task`.
 ///   It's the final state.
 /// - 3. Cancelled: a assigned task is reported as cancelled via
@@ -111,8 +110,9 @@ impl CompactorManager {
         context_id: HummockContextId,
     ) -> Receiver<Result<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
-        self.remove_compactor(context_id);
-        self.inner.write().compactors.push(Arc::new(Compactor {
+        let mut guard = self.inner.write();
+        guard.compactors.retain(|c| c.context_id != context_id);
+        guard.compactors.push(Arc::new(Compactor {
             context_id,
             sender: tx,
         }));
