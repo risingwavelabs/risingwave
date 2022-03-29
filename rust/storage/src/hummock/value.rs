@@ -54,7 +54,7 @@ where
         }
     }
 
-    /// Encode the object
+    /// Encodes the object
     pub fn encode(&self, buffer: &mut impl BufMut) {
         match self {
             HummockValue::Put(val) => {
@@ -69,7 +69,7 @@ where
         }
     }
 
-    /// Get the put value out of the `HummockValue`. If the current value is `Delete`, `None` will
+    /// Gets the put value out of the `HummockValue`. If the current value is `Delete`, `None` will
     /// be returned.
     pub fn into_put_value(self) -> Option<T> {
         match self {
@@ -80,7 +80,7 @@ where
 }
 
 impl HummockValue<Vec<u8>> {
-    /// Decode the object from `Vec<u8>`.
+    /// Decodes the object from `Vec<u8>`.
     pub fn decode(buffer: &mut impl Buf) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
             return Err(HummockError::DecodeError("empty value".to_string()).into());
@@ -101,7 +101,7 @@ impl HummockValue<Vec<u8>> {
 }
 
 impl<'a> HummockValue<&'a [u8]> {
-    /// Decode the object from `&[u8]`.
+    /// Decodes the object from `&[u8]`.
     pub fn from_slice(mut buffer: &'a [u8]) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
             return Err(HummockError::DecodeError("empty value".to_string()).into());

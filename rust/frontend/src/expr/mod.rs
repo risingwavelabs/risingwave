@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Scalar};
 mod input_ref;
 pub use input_ref::*;
@@ -22,6 +23,8 @@ mod function_call;
 pub use function_call::*;
 mod agg_call;
 pub use agg_call::*;
+mod subquery;
+pub use subquery::*;
 mod type_inference;
 use risingwave_pb::expr::ExprNode;
 pub use type_inference::*;
@@ -49,25 +52,26 @@ pub enum ExprImpl {
     Literal(Box<Literal>),
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
+    Subquery(Box<Subquery>),
 }
 
 impl ExprImpl {
     /// A literal int value.
     #[inline(always)]
     pub fn literal_int(v: i32) -> Self {
-        Self::Literal(Box::new(Literal::new(
-            Some(v.to_scalar_value()),
-            DataType::Int32,
-        )))
+        Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
     }
 
     /// A literal boolean value.
     #[inline(always)]
     pub fn literal_bool(v: bool) -> Self {
-        Self::Literal(Box::new(Literal::new(
-            Some(v.to_scalar_value()),
-            DataType::Boolean,
-        )))
+        Literal::new(Some(v.to_scalar_value()), DataType::Boolean).into()
+    }
+
+    /// A `count(*)` aggregate function.
+    #[inline(always)]
+    pub fn count_star() -> Self {
+        AggCall::new(AggKind::Count, vec![]).unwrap().into()
     }
 
     /// Collect all `InputRef`s' indexes in the expression.
@@ -79,6 +83,42 @@ impl ExprImpl {
         visitor.visit_expr(self);
         visitor.collect()
     }
+
+    pub fn has_agg_call(&self) -> bool {
+        struct HasAggCall {
+            has_agg_call: bool,
+        }
+
+        impl ExprVisitor for HasAggCall {
+            fn visit_agg_call(&mut self, _agg_call: &AggCall) {
+                self.has_agg_call = true;
+            }
+        }
+
+        let mut visitor = HasAggCall {
+            has_agg_call: false,
+        };
+        visitor.visit_expr(self);
+        visitor.has_agg_call
+    }
+
+    pub fn has_subquery(&self) -> bool {
+        struct HasSubquery {
+            has_subquery: bool,
+        }
+
+        impl ExprVisitor for HasSubquery {
+            fn visit_subquery(&mut self, _subquery: &Subquery) {
+                self.has_subquery = true;
+            }
+        }
+
+        let mut visitor = HasSubquery {
+            has_subquery: false,
+        };
+        visitor.visit_expr(self);
+        visitor.has_subquery
+    }
 }
 
 impl Expr for ExprImpl {
@@ -88,6 +128,7 @@ impl Expr for ExprImpl {
             ExprImpl::Literal(expr) => expr.return_type(),
             ExprImpl::FunctionCall(expr) => expr.return_type(),
             ExprImpl::AggCall(expr) => expr.return_type(),
+            ExprImpl::Subquery(expr) => expr.return_type(),
         }
     }
 
@@ -97,6 +138,7 @@ impl Expr for ExprImpl {
             ExprImpl::Literal(e) => e.to_protobuf(),
             ExprImpl::FunctionCall(e) => e.to_protobuf(),
             ExprImpl::AggCall(e) => e.to_protobuf(),
+            ExprImpl::Subquery(e) => e.to_protobuf(),
         }
     }
 }
@@ -125,6 +167,12 @@ impl From<AggCall> for ExprImpl {
     }
 }
 
+impl From<Subquery> for ExprImpl {
+    fn from(subquery: Subquery) -> Self {
+        ExprImpl::Subquery(Box::new(subquery))
+    }
+}
+
 /// A custom Debug implementation that is more concise and suitable to use with
 /// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
 /// still available via `{:#?}`.
@@ -136,6 +184,7 @@ impl std::fmt::Debug for ExprImpl {
                 Self::Literal(arg0) => f.debug_tuple("Literal").field(arg0).finish(),
                 Self::FunctionCall(arg0) => f.debug_tuple("FunctionCall").field(arg0).finish(),
                 Self::AggCall(arg0) => f.debug_tuple("AggCall").field(arg0).finish(),
+                Self::Subquery(arg0) => f.debug_tuple("Subquery").field(arg0).finish(),
             };
         }
         match self {
@@ -143,6 +192,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::Literal(x) => write!(f, "{:?}", x),
             Self::FunctionCall(x) => write!(f, "{:?}", x),
             Self::AggCall(x) => write!(f, "{:?}", x),
+            Self::Subquery(x) => write!(f, "{:?}", x),
         }
     }
 }

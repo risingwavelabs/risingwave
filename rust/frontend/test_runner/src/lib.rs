@@ -163,6 +163,16 @@ impl TestCase {
                     Statement::CreateTable { name, columns, .. } => {
                         create_table::handle_create_table(context, name, columns).await?;
                     }
+                    Statement::CreateView {
+                        materialized: true,
+                        or_replace: false,
+                        name,
+                        query,
+                        ..
+                    } => {
+                        create_mv::handle_create_mv(context, name, query).await?;
+                    }
+
                     Statement::Drop(drop_statement) => {
                         let table_object_name = ObjectName(vec![drop_statement.name]);
                         drop_table::handle_drop_table(context, table_object_name).await?;

@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{self};
-use std::iter;
+use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
@@ -90,7 +88,8 @@ impl LogicalJoin {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 left_len + right_len
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
+            JoinType::RightSemi | JoinType::RightAnti => right_len,
         }
     }
 
@@ -102,15 +101,10 @@ impl LogicalJoin {
     ) -> ColIndexMapping {
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::new(
-                    (0..left_len)
-                        .into_iter()
-                        .map(Some)
-                        .chain(iter::repeat(None).take(right_len))
-                        .collect_vec(),
-                )
+                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
         }
     }
 
@@ -124,7 +118,8 @@ impl LogicalJoin {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
         }
     }
 
@@ -175,7 +170,11 @@ impl LogicalJoin {
         )
     }
 
-    fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
+    pub(super) fn derive_schema(
+        left_schema: &Schema,
+        right_schema: &Schema,
+        join_type: JoinType,
+    ) -> Schema {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
         let out_column_num = Self::out_column_num(left_len, right_len, join_type);
@@ -192,7 +191,7 @@ impl LogicalJoin {
         Schema { fields }
     }
 
-    fn derive_pk(
+    pub(super) fn derive_pk(
         left_len: usize,
         right_len: usize,
         left_pk: &[usize],
@@ -273,11 +272,6 @@ impl_plan_tree_node_for_binary! { LogicalJoin }
 impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
-
-        match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {}
-            _ => unimplemented!(),
-        }
 
         let left_len = self.left.schema().fields.len();
 

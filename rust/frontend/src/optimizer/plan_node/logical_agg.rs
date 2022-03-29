@@ -69,6 +69,14 @@ impl PlanAggCall {
             distinct: false,
         }
     }
+
+    pub fn count_star() -> Self {
+        PlanAggCall {
+            agg_kind: AggKind::Count,
+            return_type: DataType::Int64,
+            inputs: vec![],
+        }
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
@@ -385,7 +393,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             .collect();
         let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(agg.schema().len());
+        let out_col_change = ColIndexMapping::identity(agg.schema().len());
         (agg, out_col_change)
     }
 }

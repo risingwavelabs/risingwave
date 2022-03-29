@@ -45,6 +45,8 @@ impl LogicalProject {
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
+            assert!(!expr.has_subquery());
+            assert!(!expr.has_agg_call());
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
@@ -206,7 +208,7 @@ impl PlanTreeNodeUnary for LogicalProject {
             .collect();
         let proj = Self::new(input, exprs, self.expr_alias().to_vec());
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(self.schema().len());
+        let out_col_change = ColIndexMapping::identity(self.schema().len());
         (proj, out_col_change)
     }
 }

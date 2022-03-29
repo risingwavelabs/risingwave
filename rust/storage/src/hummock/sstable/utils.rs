@@ -58,7 +58,7 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
     }
 }
 
-/// Calculate the CRC32 of the given data.
+/// Calculates the CRC32 of the given data.
 #[cfg(not(feature = "blockv2"))]
 fn crc32_checksum(data: &[u8]) -> u64 {
     let mut hasher = crc32fast::Hasher::new();
@@ -66,14 +66,14 @@ fn crc32_checksum(data: &[u8]) -> u64 {
     hasher.finalize() as u64
 }
 
-/// Calculate the ``XxHash`` of the given data.
+/// Calculates the ``XxHash`` of the given data.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
     hasher.finish() as u64
 }
 
-/// Verify the checksum of the data equals the given checksum with xxhash64.
+/// Verifies the checksum of the data equals the given checksum with xxhash64.
 #[cfg(feature = "blockv2")]
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     let data_checksum = xxhash64_checksum(data);
@@ -83,7 +83,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     Ok(())
 }
 
-/// Calculate the checksum of the given `data` using `algo`.
+/// Calculates the checksum of the given `data` using `algo`.
 #[cfg(not(feature = "blockv2"))]
 pub fn checksum(algo: ChecksumAlg, data: &[u8]) -> Checksum {
     let sum = match algo {
@@ -96,7 +96,7 @@ pub fn checksum(algo: ChecksumAlg, data: &[u8]) -> Checksum {
     }
 }
 
-/// Verify the checksum of the data equals the given checksum.
+/// Verifies the checksum of the data equals the given checksum.
 #[cfg(not(feature = "blockv2"))]
 pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
     let data_chksum = match chksum.algo() {
