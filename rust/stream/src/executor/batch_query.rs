@@ -48,6 +48,10 @@ pub struct BatchQueryExecutor<S: StateStore> {
     epoch: Option<u64>,
     /// Logical Operator Info
     op_info: String,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
@@ -82,17 +86,28 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             column_descs,
             Arc::new(StateStoreMetrics::unused()),
         );
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(BatchQueryExecutor::new(
             table,
             params.pk_indices,
             params.op_info,
+            key_indices,
         )))
     }
 }
 
 impl<S: StateStore> BatchQueryExecutor<S> {
-    pub fn new(table: CellBasedTable<S>, pk_indices: PkIndices, op_info: String) -> Self {
-        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
+    pub fn new(
+        table: CellBasedTable<S>,
+        pk_indices: PkIndices,
+        op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info, key_indices)
     }
 
     pub fn new_with_batch_size(
@@ -100,6 +115,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         batch_size: usize,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let schema = table.schema().clone();
         Self {
@@ -110,6 +126,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             schema,
             epoch: None,
             op_info,
+            key_indices,
         }
     }
 }
@@ -179,6 +196,7 @@ mod test {
             vec![0, 1],
             test_batch_size,
             "BatchQueryExecutor".to_string(),
+            vec![],
         );
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
@@ -201,6 +219,7 @@ mod test {
             vec![0, 1],
             test_batch_size,
             "BatchQueryExecutor".to_string(),
+            vec![],
         );
         node.init(u64::MAX).unwrap();
         node.init(0).unwrap();

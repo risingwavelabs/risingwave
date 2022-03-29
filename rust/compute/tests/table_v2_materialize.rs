@@ -170,6 +170,7 @@ async fn test_table_v2_materialize() -> Result<()> {
         all_column_ids.clone(),
         2,
         "MaterializeExecutor".to_string(),
+        vec![],
     );
 
     // 1.

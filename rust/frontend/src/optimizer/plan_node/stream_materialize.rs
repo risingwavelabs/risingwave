@@ -247,6 +247,13 @@ impl ToStreamProst for StreamMaterialize {
                     }
                 })
                 .collect(),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

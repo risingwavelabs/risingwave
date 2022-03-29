@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
@@ -84,6 +85,13 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

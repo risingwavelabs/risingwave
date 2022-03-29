@@ -104,6 +104,10 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -143,6 +147,11 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let cache_size = Some(1024);
         let total_count = (0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(AppendOnlyTopNExecutor::new(
             params.input.remove(0),
             order_types,
@@ -153,6 +162,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             total_count,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -169,6 +179,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         total_count: (usize, usize),
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -218,6 +229,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -501,6 +513,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch
@@ -577,6 +590,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch
@@ -676,6 +690,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch
