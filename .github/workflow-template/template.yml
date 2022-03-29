@@ -119,7 +119,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.1/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
 
@@ -235,7 +235,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.1/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
 
@@ -415,7 +415,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: rustfmt, clippy
+          components: rustfmt
 
       - name: Cache Cargo home
         uses: actions/cache@v2
@@ -444,11 +444,6 @@ jobs:
       - name: Run rust format check
         run: |
           cd rust && cargo fmt --all -- --check
-
-      - name: Run rust clippy check
-        run: |
-          # If new CI checks are added, the one with `--locked` must be run first.
-          cd rust && cargo clippy --all-targets --locked -- -D warnings
 
       - name: Build Rust components
         run: |
@@ -493,7 +488,7 @@ jobs:
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
-          components: llvm-tools-preview
+          components: llvm-tools-preview, clippy
 
       - name: Cache Cargo home
         uses: actions/cache@v2
@@ -511,6 +506,11 @@ jobs:
         run: |
           cargo install cargo-llvm-cov
           cargo install cargo-nextest
+
+      - name: Run rust clippy check
+        run: |
+          # If new CI checks are added, the one with `--locked` must be run first.
+          cd rust && cargo clippy --all-targets --locked -- -D warnings
 
       - name: Run rust test with coverage
         run: |
