@@ -166,8 +166,8 @@ impl LocalBarrierManager {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+            trace!("remove actors {:?} from senders", actors);
             for actor in actors {
-                trace!("remove actor {} from senders", actor);
                 self.senders.remove(actor);
             }
         }

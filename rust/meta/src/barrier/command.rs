@@ -168,7 +168,12 @@ where
                     async move {
                         let mut client = self.clients.get(node).await?;
 
-                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
+                        debug!(
+                            "[{}]drop actors on node {}: {:?}",
+                            request_id,
+                            node_id,
+                            actors.clone()
+                        );
                         let request = DropActorsRequest {
                             request_id,
                             table_ref_id: Some(table_ref_id.to_owned()),
