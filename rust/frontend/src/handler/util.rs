@@ -137,4 +137,20 @@ mod tests {
 
         assert_eq!(vec, expected);
     }
+
+    #[test]
+    fn test_value_format() {
+        use ScalarRefImpl as S;
+
+        let f = pg_value_format;
+        assert_eq!(&f(S::Float32(1_f32.into())), "1");
+        assert_eq!(&f(S::Float32(f32::NAN.into())), "NaN");
+        assert_eq!(&f(S::Float64(f64::NAN.into())), "NaN");
+        assert_eq!(&f(S::Float32(f32::INFINITY.into())), "Infinity");
+        assert_eq!(&f(S::Float32(f32::NEG_INFINITY.into())), "-Infinity");
+        assert_eq!(&f(S::Float64(f64::INFINITY.into())), "Infinity");
+        assert_eq!(&f(S::Float64(f64::NEG_INFINITY.into())), "-Infinity");
+        assert_eq!(&f(S::Bool(true)), "t");
+        assert_eq!(&f(S::Bool(false)), "f");
+    }
 }
