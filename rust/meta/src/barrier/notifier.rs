@@ -5,6 +5,7 @@ use tokio::sync::oneshot;
 
 use crate::model::ActorId;
 
+/// Used for notifying the status of a scheduled command/barrier.
 #[derive(Debug, Default)]
 pub(super) struct Notifier {
     /// Get notified when scheduled barrier is about to send.
@@ -51,10 +52,15 @@ impl Notifier {
     }
 }
 
+/// Stores the notifiers for commands that are not finished yet. Essentially for
+/// `CreateMaterializedView`.
 #[derive(Default)]
 pub(super) struct UnfinishedNotifiers(HashMap<u64, (HashSet<ActorId>, Vec<Notifier>)>);
 
 impl UnfinishedNotifiers {
+    /// Add a command with current `epoch` and `notifiers`, that needs to wait for actors with
+    /// `actor_ids` to report finishing.
+    /// If `actor_ids` is empty, [`Notifier::notify_finished`] will be called immediately.
     pub fn add(
         &mut self,
         epoch: u64,
@@ -79,6 +85,8 @@ impl UnfinishedNotifiers {
         }
     }
 
+    /// Tell that the command with `epoch` has been reported to be finished on given `actors`. If
+    /// we've finished on all actors, [`Notifier::notify_finished`] will be called.
     pub fn finish_actors(&mut self, epoch: u64, actors: impl IntoIterator<Item = ActorId>) {
         use std::collections::hash_map::Entry;
 
