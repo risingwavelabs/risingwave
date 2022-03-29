@@ -241,8 +241,8 @@ impl Compactor {
 
             let epoch = get_epoch(iter_key);
 
-            // Among keys with same user key, only retain keys which satisfy `epoch` >= `watermark`,
-            // and the latest key which satisfies `epoch` < `watermark`
+            // Among keys with same user key, only retain keys which satisfy `epoch` >=
+            // `watermark`, and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
                 if matches!(iter.value(), HummockValue::Delete) && !has_user_key_overlap {
@@ -379,7 +379,10 @@ impl Compactor {
                     .subscribe_compact_tasks()
                     .await
                 {
-                    Ok(stream) => stream,
+                    Ok(stream) => {
+                        tracing::debug!("Succeeded subscribe_compact_tasks.");
+                        stream
+                    }
                     Err(e) => {
                         tracing::warn!("Failed to subscribe_compact_tasks. {}", RwError::from(e));
                         continue 'start_stream;

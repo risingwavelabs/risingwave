@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
@@ -97,6 +98,22 @@ impl Condition {
         }
     }
 
+    /// Convert condition to an expression. If always true, return `None`.
+    pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
+                    .unwrap()
+                    .into();
+            }
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
@@ -114,27 +131,19 @@ impl Condition {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
-        let (mut left, mut right, mut others) = (vec![], vec![], vec![]);
-        self.conjunctions.into_iter().for_each(|expr| {
+        self.group_by::<_, 3>(|expr| {
             let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_subset(&left_bit_map) {
-                left.push(expr)
+                0
             } else if input_bits.is_subset(&right_bit_map) {
-                right.push(expr)
+                1
             } else {
-                others.push(expr)
+                2
             }
-        });
-
-        (
-            Condition { conjunctions: left },
-            Condition {
-                conjunctions: right,
-            },
-            Condition {
-                conjunctions: others,
-            },
-        )
+        })
+        .into_iter()
+        .next_tuple()
+        .unwrap()
     }
 
     #[must_use]
@@ -189,24 +198,43 @@ impl Condition {
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which
     /// are disjoint with columns.
     pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
-        let (mut referencing, mut disjoint) = (vec![], vec![]);
-        self.conjunctions.into_iter().for_each(|expr| {
+        self.group_by::<_, 2>(|expr| {
             let input_bits = expr.collect_input_refs(columns.len());
             if input_bits.is_disjoint(columns) {
-                disjoint.push(expr)
+                1
             } else {
-                referencing.push(expr)
+                0
             }
-        });
+        })
+        .into_iter()
+        .next_tuple()
+        .unwrap()
+    }
 
-        (
-            Condition {
-                conjunctions: referencing,
-            },
-            Condition {
-                conjunctions: disjoint,
-            },
-        )
+    #[must_use]
+    /// Split the condition expressions into `N` groups.
+    /// An expression `expr` is in the `i`-th group if `f(expr)==i`.
+    ///
+    /// # Panics
+    /// Panics if `f(expr)>=N`.
+    pub fn group_by<F, const N: usize>(self, f: F) -> [Self; N]
+    where
+        F: Fn(&ExprImpl) -> usize,
+    {
+        const EMPTY: Vec<ExprImpl> = vec![];
+        let mut groups = [EMPTY; N];
+        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
+            // i-th group
+            let i = f(expr);
+            assert!(i < N);
+            i
+        }) {
+            groups[key].extend(group);
+        }
+
+        groups.map(|group| Condition {
+            conjunctions: group,
+        })
     }
 
     #[must_use]

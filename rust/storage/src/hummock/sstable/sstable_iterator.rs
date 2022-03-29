@@ -57,7 +57,7 @@ impl SSTableIterator {
         }
     }
 
-    /// Seek to a block, and then seek to the key if `seek_key` is given.
+    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
@@ -170,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_iterator() {
-        // build remote table
+        // Build remote table
         let sstable_store = mock_sstable_store();
         let table =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
@@ -228,7 +228,6 @@ mod tests {
         assert!(!sstable_iter.is_valid());
 
         // Seek to < first key
-
         let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();

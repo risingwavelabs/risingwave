@@ -31,12 +31,14 @@ pub struct BatchSimpleAgg {
 impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -86,6 +88,7 @@ impl ToBatchProst for BatchSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            // We treat simple agg as a special sort agg without group keys.
             group_keys: vec![],
         })
     }

@@ -142,7 +142,7 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+        let query_manager = QueryManager::new(worker_node_manager.clone(), false);
         Self {
             catalog_writer,
             catalog_reader,
@@ -157,9 +157,8 @@ impl FrontendEnv {
         opts: &FrontendOpts,
     ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, UnboundedSender<()>)> {
         let config = load_config(opts);
-        tracing::info!("Starting compute node with config {:?}", config);
+        tracing::info!("Starting frontend node with config {:?}", config);
 
-        // TODO: refactor this when we have a separate port option
         let frontend_address: HostAddr = opts
             .client_address
             .as_ref()
@@ -185,7 +184,7 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+        let query_manager = QueryManager::new(worker_node_manager.clone(), opts.dist_query);
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),

@@ -99,7 +99,7 @@ impl ObjectStore for S3ObjectStore {
         })
     }
 
-    /// Permanently delete the whole object.
+    /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> Result<()> {
         self.client
@@ -114,7 +114,7 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
-    /// Create an S3 object store from environment variable.
+    /// Creates an S3 object store from environment variable.
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String) -> Self {
@@ -124,7 +124,7 @@ impl S3ObjectStore {
         Self { client, bucket }
     }
 
-    /// Create a minio client. The server should be like `minio://key:secret@address:port/bucket`.
+    /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
     pub async fn new_with_minio(server: &str) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();

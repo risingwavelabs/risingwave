@@ -21,16 +21,16 @@ use super::version_cmp::VersionedComparator;
 pub type Epoch = u64;
 const EPOCH_LEN: usize = std::mem::size_of::<Epoch>();
 
-/// Convert user key to full key by appending `u64::MAX - epoch` to the user key.
+/// Converts user key to full key by appending `u64::MAX - epoch` to the user key.
 ///
 /// In this way, the keys can be comparable even with the epoch, and a key with a larger
-/// epoch will be smaller and thus be sorted to a upper position.
+/// epoch will be smaller and thus be sorted to an upper position.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: Epoch) -> Vec<u8> {
     let res = (Epoch::MAX - epoch).to_be();
     user_key.reserve(EPOCH_LEN);
     let buf = user_key.chunk_mut();
 
-    // todo: check whether this hack improves performance
+    // TODO: check whether this hack improves performance
     unsafe {
         ptr::copy_nonoverlapping(
             &res as *const _ as *const u8,
@@ -43,7 +43,7 @@ pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: Epoch) -> Vec<u8> {
     user_key
 }
 
-/// Split a full key into its user key part and epoch part.
+/// Splits a full key into its user key part and epoch part.
 #[inline]
 pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     let pos = full_key
@@ -53,11 +53,11 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     full_key.split_at(pos)
 }
 
-/// Extract epoch part from key
+/// Extracts epoch part from key
 pub fn get_epoch(full_key: &[u8]) -> Epoch {
     let mut epoch: Epoch = 0;
 
-    // todo: check whether this hack improves performance
+    // TODO: check whether this hack improves performance
     unsafe {
         let src = &full_key[full_key.len() - EPOCH_LEN..];
         ptr::copy_nonoverlapping(src.as_ptr(), &mut epoch as *mut _ as *mut u8, EPOCH_LEN);

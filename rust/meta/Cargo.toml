@@ -48,6 +48,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }

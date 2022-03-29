@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SetExpr};
 
-use crate::binder::{Binder, BoundQuery, BoundTableSource};
+use super::{BoundQuery, BoundSetExpr};
+use crate::binder::{Binder, BoundTableSource};
 
 #[derive(Debug)]
 pub struct BoundInsert {
@@ -32,12 +33,38 @@ impl Binder {
         _columns: Vec<Ident>,
         source: Query,
     ) -> Result<BoundInsert> {
-        let insert = BoundInsert {
-            table_source: self.bind_table_source(source_name)?,
-            source: self.bind_query(source)?,
+        let table_source = self.bind_table_source(source_name)?;
+
+        let limit = source.get_limit_value();
+        let offset = source.get_offset_value();
+        let expected_types = table_source
+            .columns
+            .iter()
+            .map(|c| c.data_type.clone())
+            .collect();
+
+        let source = match source.body {
+            SetExpr::Values(values) => {
+                let values = self.bind_values(values, Some(expected_types))?;
+                let body = BoundSetExpr::Values(values.into());
+                BoundQuery {
+                    body,
+                    order: vec![],
+                    limit,
+                    offset,
+                }
+            }
+
+            // TODO: insert type cast for select exprs
+            SetExpr::Select(_) => self.bind_query(source)?,
+
+            _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", source.body)).into()),
         };
 
-        // TODO: validate & add casts here
+        let insert = BoundInsert {
+            table_source,
+            source,
+        };
 
         Ok(insert)
     }

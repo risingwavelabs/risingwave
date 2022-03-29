@@ -742,6 +742,16 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// SHOW TABLE
+    ShowTable {
+        /// Table name
+        name: ObjectName,
+    },
+    /// SHOW SOURCE
+    ShowSource {
+        /// Table name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -874,6 +884,14 @@ impl fmt::Display for Statement {
             }
             Statement::Analyze { table_name } => {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::ShowTable { name } => {
+                write!(f, "SHOW TABLE {}", name)?;
+                Ok(())
+            }
+            Statement::ShowSource { name } => {
+                write!(f, "SHOW SOURCE {}", name)?;
                 Ok(())
             }
             Statement::Insert {

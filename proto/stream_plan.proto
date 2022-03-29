@@ -42,16 +42,18 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
+  repeated int32 distribution_keys = 5;
 }
 
 // Remark by Yanghao: for both local and global we use the same node in the protobuf.
 // Local and global aggregator distinguish with each other in PlanNode definition.
 message SimpleAggNode {
   repeated expr.AggCall agg_calls = 1;
+  repeated int32 distribution_keys = 2;
 }
 
 message HashAggNode {
-  repeated expr.InputRefExpr group_keys = 1;
+  repeated int32 distribution_keys = 1;
   repeated expr.AggCall agg_calls = 2;
 }
 
@@ -60,6 +62,7 @@ message TopNNode {
   // 0 means no limit as limit of 0 means this node should be optimized away
   uint64 limit = 2;
   uint64 offset = 3;
+  repeated int32 distribution_keys = 4;
 }
 
 message HashJoinNode {
@@ -67,6 +70,7 @@ message HashJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   expr.ExprNode condition = 4;
+  repeated int32 distribution_keys = 5;
 }
 
 message MergeNode {
@@ -99,7 +103,8 @@ message ChainNode {
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
 message BatchPlanNode {
   plan.TableRefId table_ref_id = 1;
-  repeated plan.ColumnDesc column_descs = 3;
+  repeated plan.ColumnDesc column_descs = 2;
+  repeated int32 distribution_keys = 3;
 }
 
 message StreamNode {

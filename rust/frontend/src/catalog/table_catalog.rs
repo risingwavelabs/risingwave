@@ -22,15 +22,16 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
+use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
-    id: TableId,
-    associated_source_id: Option<TableId>, // TODO: use SourceId
-    name: String,
-    columns: Vec<ColumnCatalog>,
-    pk_desc: Vec<OrderedColumnDesc>,
+    pub id: TableId,
+    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub name: String,
+    pub columns: Vec<ColumnCatalog>,
+    pub pk_desc: Vec<OrderedColumnDesc>,
 }
 
 impl TableCatalog {
@@ -67,6 +68,33 @@ impl TableCatalog {
     /// Get a reference to the table catalog's name.
     pub fn name(&self) -> &str {
         self.name.as_ref()
+    }
+
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
+        let (pk_column_ids, pk_orders) = self
+            .pk_desc()
+            .iter()
+            .map(|col| {
+                (
+                    col.column_desc.column_id.get_id(),
+                    col.order.to_prost() as i32,
+                )
+            })
+            .unzip();
+
+        ProstTable {
+            id: self.id.table_id as u32,
+            schema_id,
+            database_id,
+            name: self.name.clone(),
+            columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            pk_column_ids,
+            pk_orders,
+            dependent_relations: vec![],
+            optional_associated_source_id: self
+                .associated_source_id
+                .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+        }
     }
 }
 
@@ -114,6 +142,7 @@ impl From<ProstTable> for TableCatalog {
         }
     }
 }
+
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
@@ -130,8 +159,8 @@ mod tests {
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
     use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::gen_row_id_column_name;
     use crate::catalog::table_catalog::TableCatalog;
-    use crate::handler::create_table::ROWID_NAME;
 
     #[test]
     fn test_into_table_catalog() {
@@ -144,7 +173,7 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(ProstColumnDesc {
                         column_id: 0,
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(0),
                         field_descs: vec![],
                         column_type: Some(DataType::Int32.to_protobuf()),
                         type_name: String::new(),
@@ -191,7 +220,7 @@ mod tests {
                         column_desc: ColumnDesc {
                             data_type: DataType::Int32,
                             column_id: ColumnId::new(0),
-                            name: ROWID_NAME.to_string(),
+                            name: gen_row_id_column_name(0),
                             field_descs: vec![],
                             type_name: String::new()
                         },
@@ -229,7 +258,7 @@ mod tests {
                     column_desc: ColumnDesc {
                         data_type: DataType::Int32,
                         column_id: ColumnId::new(0),
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(0),
                         field_descs: vec![],
                         type_name: String::new()
                     },

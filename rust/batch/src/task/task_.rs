@@ -25,7 +25,7 @@ use tracing_futures::Instrument;
 
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
-use crate::task::channel::{create_output_channel, BoxChanReceiver, BoxChanSender};
+use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::{BatchEnvironment, BatchManager};
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Default)]
@@ -100,7 +100,7 @@ impl TaskOutputId {
 
 pub struct TaskOutput {
     task_manager: Arc<BatchManager>,
-    receiver: BoxChanReceiver,
+    receiver: ChanReceiverImpl,
     output_id: TaskOutputId,
 }
 
@@ -166,7 +166,7 @@ pub struct BatchTaskExecution {
     state: Mutex<TaskStatus>,
 
     /// Receivers data of the task.   
-    receivers: Mutex<Vec<Option<BoxChanReceiver>>>,
+    receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
     /// Global environment of task execution.
     env: BatchEnvironment,
@@ -199,7 +199,12 @@ impl BatchTaskExecution {
         &self.task_id
     }
 
-    /// `get_data` consumes the data produced by `async_execute`.
+    /// `async_execute` executes the task in background, it spawns a tokio coroutine and returns
+    /// immediately. The result produced by the task will be sent to one or more channels, according
+    /// to a particular shuffling strategy. For example, in hash shuffling, the result will be
+    /// hash partitioned across multiple channels.
+    /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
+    /// such, parallel consumers are able to consume the result idependently.
     pub fn async_execute(&self) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -252,7 +257,7 @@ impl BatchTaskExecution {
         Ok(())
     }
 
-    async fn try_execute(mut root: BoxedExecutor, sender: &mut BoxChanSender) -> Result<()> {
+    async fn try_execute(mut root: BoxedExecutor, sender: &mut ChanSenderImpl) -> Result<()> {
         root.open().await?;
         while let Some(chunk) = root.next().await? {
             if chunk.cardinality() > 0 {

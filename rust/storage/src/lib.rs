@@ -29,6 +29,7 @@
 #![feature(bound_map)]
 #![feature(backtrace)]
 #![feature(map_first_last)]
+#![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 
 pub mod cell_based_row_deserializer;
@@ -40,6 +41,7 @@ pub mod monitor;
 pub mod object;
 pub mod panic_store;
 pub mod storage_value;
+#[macro_use]
 pub mod store;
 pub mod store_impl;
 pub mod table;

@@ -92,7 +92,7 @@ impl Distribution {
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
-    fn satisfies(&self, other: &Distribution) -> bool {
+    pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
             Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
@@ -113,6 +113,15 @@ impl Distribution {
     }
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
+    }
+    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
+    /// valid.
+    pub fn dist_column_indices(&self) -> &[usize] {
+        match self {
+            Distribution::Single => Default::default(),
+            Distribution::HashShard(dists) => dists,
+            _ => unreachable!(),
+        }
     }
 }
 

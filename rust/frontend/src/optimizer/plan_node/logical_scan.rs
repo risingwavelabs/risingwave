@@ -170,13 +170,16 @@ impl ToStream for LogicalScan {
                 for idx in &self.required_col_idx {
                     col_ids.insert(self.table_desc.columns[*idx].column_id);
                 }
+                let mut col_id_to_tb_idx = HashMap::new();
+                for (tb_idx, c) in self.table_desc().columns.iter().enumerate() {
+                    col_id_to_tb_idx.insert(c.column_id, tb_idx);
+                }
                 let col_need_to_add = self
                     .table_desc
                     .pk
                     .iter()
-                    .enumerate()
-                    .filter(|(_idx, c)| !col_ids.contains(&c.column_desc.column_id))
-                    .map(|(idx, _c)| idx)
+                    .filter(|c| !col_ids.contains(&c.column_desc.column_id))
+                    .map(|c| col_id_to_tb_idx.get(&c.column_desc.column_id).unwrap())
                     .collect_vec();
                 let mut required_col_idx = self.required_col_idx.clone();
                 required_col_idx.extend(col_need_to_add);
@@ -188,12 +191,12 @@ impl ToStream for LogicalScan {
                         self.base.ctx.clone(),
                     )
                     .into(),
-                    ColIndexMapping::identical_map(self.schema().len()),
+                    ColIndexMapping::identity(self.schema().len()),
                 )
             }
             false => (
                 self.clone().into(),
-                ColIndexMapping::identical_map(self.schema().len()),
+                ColIndexMapping::identity(self.schema().len()),
             ),
         }
     }

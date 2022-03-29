@@ -22,7 +22,8 @@ use risingwave_common::error::Result;
 
 use super::StateStoreMetrics;
 use crate::storage_value::StorageValue;
-use crate::{StateStore, StateStoreIter};
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 /// A state store wrapper for monitoring metrics.
 #[derive(Clone)]
@@ -70,141 +71,153 @@ where
     }
 }
 
-#[async_trait]
 impl<S> StateStore for MonitoredStateStore<S>
 where
     S: StateStore,
 {
-    type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>>;
+    type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
+    define_state_store_associated_type!();
 
-    async fn get(&self, key: &[u8], epoch: u64) -> Result<Option<StorageValue>> {
-        self.stats.get_counts.inc();
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+        async move {
+            self.stats.get_counts.inc();
 
-        let timer = self.stats.get_duration.start_timer();
-        let value = self.inner.get(key, epoch).await?;
-        timer.observe_duration();
+            let timer = self.stats.get_duration.start_timer();
+            let value = self.inner.get(key, epoch).await?;
+            timer.observe_duration();
 
-        self.stats.get_key_size.observe(key.len() as _);
-        if let Some(value) = value.as_ref() {
-            self.stats.get_value_size.observe(value.len() as _);
+            self.stats.get_key_size.observe(key.len() as _);
+            if let Some(value) = value.as_ref() {
+                self.stats.get_value_size.observe(value.len() as _);
+            }
+
+            Ok(value)
         }
-
-        Ok(value)
     }
 
-    async fn scan<R, B>(
+    fn scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.stats.range_scan_counts.inc();
+        async move {
+            self.stats.range_scan_counts.inc();
 
-        let timer = self.stats.range_scan_duration.start_timer();
-        let result = self.inner.scan(key_range, limit, epoch).await?;
-        timer.observe_duration();
+            let timer = self.stats.range_scan_duration.start_timer();
+            let result = self.inner.scan(key_range, limit, epoch).await?;
+            timer.observe_duration();
 
-        self.stats
-            .range_scan_size
-            .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
+            self.stats
+                .range_scan_size
+                .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
 
-        Ok(result)
+            Ok(result)
+        }
     }
 
-    async fn reverse_scan<R, B>(
+    fn reverse_scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.stats.range_reverse_scan_counts.inc();
+        async move {
+            self.stats.range_reverse_scan_counts.inc();
 
-        let timer = self.stats.range_reverse_scan_duration.start_timer();
-        let result = self.inner.scan(key_range, limit, epoch).await?;
-        timer.observe_duration();
+            let timer = self.stats.range_reverse_scan_duration.start_timer();
+            let result = self.inner.scan(key_range, limit, epoch).await?;
+            timer.observe_duration();
 
-        self.stats
-            .range_reverse_scan_size
-            .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
+            self.stats
+                .range_reverse_scan_size
+                .observe(result.iter().map(|(k, v)| k.len() + v.len()).sum::<usize>() as _);
 
-        Ok(result)
+            Ok(result)
+        }
     }
 
-    async fn ingest_batch(
+    fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()> {
-        if kv_pairs.is_empty() {
-            return Ok(());
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            if kv_pairs.is_empty() {
+                return Ok(());
+            }
+
+            self.stats.write_batch_counts.inc();
+            self.stats
+                .write_batch_tuple_counts
+                .inc_by(kv_pairs.len() as _);
+
+            let total_size = kv_pairs
+                .iter()
+                .map(|(k, v)| k.len() + v.as_ref().map(|v| v.len()).unwrap_or_default())
+                .sum::<usize>();
+
+            let timer = self.stats.write_batch_shared_buffer_time.start_timer();
+            self.inner.ingest_batch(kv_pairs, epoch).await?;
+            timer.observe_duration();
+
+            self.stats.write_batch_size.observe(total_size as _);
+
+            Ok(())
         }
-
-        self.stats.write_batch_counts.inc();
-        self.stats
-            .write_batch_tuple_counts
-            .inc_by(kv_pairs.len() as _);
-
-        let total_size = kv_pairs
-            .iter()
-            .map(|(k, v)| k.len() + v.as_ref().map(|v| v.len()).unwrap_or_default())
-            .sum::<usize>();
-
-        let timer = self.stats.write_batch_shared_buffer_time.start_timer();
-        self.inner.ingest_batch(kv_pairs, epoch).await?;
-        timer.observe_duration();
-
-        self.stats.write_batch_size.observe(total_size as _);
-
-        Ok(())
     }
 
-    async fn iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.monitored_iter(self.inner.iter(key_range, epoch)).await
+        async move { self.monitored_iter(self.inner.iter(key_range, epoch)).await }
     }
 
-    async fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Result<Self::Iter<'_>>
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
-            .await
+        async move {
+            self.monitored_iter(self.inner.reverse_iter(key_range, epoch))
+                .await
+        }
     }
 
-    async fn wait_epoch(&self, epoch: u64) -> Result<()> {
-        self.inner.wait_epoch(epoch).await
+    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { self.inner.wait_epoch(epoch).await }
     }
 
-    async fn sync(&self, epoch: Option<u64>) -> Result<()> {
-        self.stats.write_shared_buffer_sync_counts.inc();
-        let timer = self.stats.write_shared_buffer_sync_time.start_timer();
-        self.inner.sync(epoch).await?;
-        timer.observe_duration();
-        Ok(())
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move {
+            self.stats.write_shared_buffer_sync_counts.inc();
+            let timer = self.stats.write_shared_buffer_sync_time.start_timer();
+            self.inner.sync(epoch).await?;
+            timer.observe_duration();
+            Ok(())
+        }
     }
 
     fn monitored(self, _stats: Arc<StateStoreMetrics>) -> MonitoredStateStore<Self> {
         panic!("the state store is already monitored")
     }
 
-    async fn replicate_batch(
+    fn replicate_batch(
         &self,
         kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
         epoch: u64,
-    ) -> Result<()> {
-        self.inner.replicate_batch(kv_pairs, epoch).await
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { self.inner.replicate_batch(kv_pairs, epoch).await }
     }
 }
 

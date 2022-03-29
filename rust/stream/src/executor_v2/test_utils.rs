@@ -17,8 +17,8 @@ use std::collections::{HashSet, VecDeque};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::RwError;
 
+use super::error::TracedStreamExecutorError;
 use super::{Barrier, Executor, Message, Mutation, PkIndices, StreamChunk};
 
 pub struct MockSource {
@@ -79,7 +79,7 @@ impl MockSource {
 }
 
 impl MockSource {
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let mut epoch = 0;
 

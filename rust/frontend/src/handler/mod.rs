@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement
 
 use crate::session::{OptimizerContext, SessionImpl};
 
-mod create_mv;
+pub mod create_mv;
 mod create_source;
 pub mod create_table;
 pub mod drop_mv;
@@ -28,9 +28,8 @@ pub mod drop_table;
 mod explain;
 mod flush;
 mod query;
+mod show_source;
 pub mod util;
-
-pub use create_mv::{gen_create_mv_plan, MvInfo};
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
     let context = OptimizerContext::new(session.clone());
@@ -42,6 +41,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
+        // Since table and source both have source info, use show_source handler can get column info
+        Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
+        Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
         Statement::Drop(DropStatement {
             object_type: ObjectType::Table,
             name,
