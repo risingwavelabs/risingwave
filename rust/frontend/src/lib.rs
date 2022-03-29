@@ -11,9 +11,23 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+#![warn(clippy::dbg_macro)]
+#![warn(clippy::disallowed_methods)]
+#![warn(clippy::doc_markdown)]
+#![warn(clippy::explicit_into_iter_loop)]
+#![warn(clippy::explicit_iter_loop)]
+#![warn(clippy::inconsistent_struct_constructor)]
+#![warn(clippy::map_flatten)]
+#![warn(clippy::no_effect_underscore_binding)]
+#![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(map_try_insert)]
 #![feature(let_chains)]
+#![feature(negative_impls)]
+#![feature(generators)]
+#![feature(proc_macro_hygiene, stmt_expr_attributes)]
+#![feature(let_else)]
 
 #[macro_use]
 pub mod catalog;
@@ -27,7 +41,9 @@ mod scheduler;
 pub mod session;
 pub mod utils;
 extern crate log;
+mod meta_client;
 pub mod test_utils;
+extern crate risingwave_common;
 
 use std::ffi::OsString;
 use std::iter;
@@ -39,8 +55,17 @@ use session::SessionManagerImpl;
 
 #[derive(Parser, Clone, Debug)]
 pub struct FrontendOpts {
+    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:4566")]
     pub host: String,
+
+    // Optional, we will use listen_address if not specified.
+    #[clap(long)]
+    pub client_address: Option<String>,
+
+    // TODO: This is currently unused.
+    #[clap(long)]
+    pub port: Option<u16>,
 
     #[clap(long, default_value = "http://127.0.0.1:5690")]
     pub meta_addr: String,
@@ -48,6 +73,14 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// Execute query in distributed mode or single mode.
+    ///
+    /// We need this because currently we don't support `set` statement.
+    ///
+    /// TODO: Remove this after `set` statement.
+    #[clap(short, long)]
+    pub dist_query: bool,
 }
 
 impl Default for FrontendOpts {

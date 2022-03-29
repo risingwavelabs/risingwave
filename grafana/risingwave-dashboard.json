@@ -59,7 +59,7 @@
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
 	"id": 2,
-	"iteration": 1647791898832,
+	"iteration": 1648044787564,
 	"links": [],
 	"liveNow": true,
 	"panels": [
@@ -2009,6 +2009,174 @@
 				},
 				{
 					"$$hashKey": "object:91",
+					"format": "short",
+					"logBase": 1,
+					"show": true
+				}
+			],
+			"yaxis": {
+				"align": false
+			}
+		},
+		{
+			"aliasColors": {},
+			"bars": false,
+			"dashLength": 10,
+			"dashes": false,
+			"fill": 1,
+			"fillGradient": 0,
+			"gridPos": {
+				"h": 8,
+				"w": 12,
+				"x": 0,
+				"y": 50
+			},
+			"hiddenSeries": false,
+			"id": 134,
+			"legend": {
+				"avg": false,
+				"current": false,
+				"max": false,
+				"min": false,
+				"show": true,
+				"total": false,
+				"values": false
+			},
+			"lines": true,
+			"linewidth": 1,
+			"nullPointMode": "null",
+			"options": {
+				"alertThreshold": true
+			},
+			"percentage": false,
+			"pluginVersion": "8.3.3",
+			"pointradius": 2,
+			"points": false,
+			"renderer": "flot",
+			"seriesOverrides": [],
+			"spaceLength": 10,
+			"stack": false,
+			"steppedLine": false,
+			"targets": [
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.5, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
+					"interval": "",
+					"legendFormat": "row_seq_scan next p50 (cn: {{instance}})",
+					"refId": "A"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.9, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "p90 (cn: {{instance}})",
+					"refId": "B"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "p99 (cn: {{instance}})",
+					"refId": "C"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, instance) (rate(batch_row_seq_scan_next_duration_sum[1m])) / sum by(le, instance) (rate(batch_row_seq_scan_next_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "row_seq_scan next avg (cn: {{instance}})",
+					"refId": "D"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.50, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "pack cell p50 (cn: {{instance}})",
+					"refId": "N"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.90, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "pack cell p90 (cn: {{instance}})",
+					"refId": "O"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "pack cell p99 (cn: {{instance}})",
+					"refId": "P"
+				},
+				{
+					"datasource": {
+						"type": "prometheus",
+						"uid": "${DS_RISEDEV-PROMETHEUS}"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, instance) (rate(state_store_cell_table_next_pack_cell_duration_sum[1m])) / sum by(le, instance) (rate(state_store_cell_table_next_pack_cell_duration_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "pack cell avg (cn: {{instance}})",
+					"refId": "J"
+				}
+			],
+			"thresholds": [],
+			"timeRegions": [],
+			"title": "row seq scan next duration",
+			"tooltip": {
+				"shared": true,
+				"sort": 0,
+				"value_type": "individual"
+			},
+			"type": "graph",
+			"xaxis": {
+				"mode": "time",
+				"show": true,
+				"values": []
+			},
+			"yaxes": [
+				{
+					"$$hashKey": "object:664",
+					"format": "s",
+					"logBase": 1,
+					"show": true
+				},
+				{
+					"$$hashKey": "object:665",
 					"format": "short",
 					"logBase": 1,
 					"show": true
@@ -6572,7 +6740,7 @@
 			"type": "row"
 		}
 	],
-	"refresh": false,
+	"refresh": "5s",
 	"schemaVersion": 34,
 	"style": "dark",
 	"tags": [],
@@ -6611,6 +6779,6 @@
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 3,
+	"version": 5,
 	"weekStart": ""
 }

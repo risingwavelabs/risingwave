@@ -11,10 +11,18 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::io::Write;
+use std::ops::{Add, Sub};
+
+use byteorder::{BigEndian, WriteBytesExt};
+use bytes::BytesMut;
+use num_traits::{CheckedAdd, CheckedSub};
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
 use super::*;
+use crate::error::ErrorCode::IoError;
 
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
@@ -77,23 +85,121 @@ impl IntervalUnit {
     pub fn from_month(months: i32) -> Self {
         IntervalUnit {
             months,
-            days: 0,
-            ms: 0,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_days(days: i32) -> Self {
+        IntervalUnit {
+            days,
+            ..Default::default()
         }
     }
 
     #[must_use]
     pub fn from_millis(ms: i64) -> Self {
         IntervalUnit {
-            months: 0,
-            days: 0,
             ms,
+            ..Default::default()
         }
+    }
+
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
+        let buf = BytesMut::with_capacity(16);
+        let mut writer = buf.writer();
+        self.to_protobuf(&mut writer).unwrap();
+        writer.into_inner().to_vec()
+    }
+
+    pub fn to_protobuf<T: Write>(&self, output: &mut T) -> Result<usize> {
+        {
+            output.write_i32::<BigEndian>(self.months)?;
+            output.write_i32::<BigEndian>(self.days)?;
+            output.write_i64::<BigEndian>(self.ms)?;
+            Ok(16)
+        }
+        .map_err(|e| RwError::from(IoError(e)))
+    }
+}
+
+impl Add for IntervalUnit {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        let months = self.months + rhs.months;
+        let days = self.days + rhs.days;
+        let ms = self.ms + rhs.ms;
+        IntervalUnit { months, days, ms }
+    }
+}
+
+impl CheckedAdd for IntervalUnit {
+    fn checked_add(&self, other: &Self) -> Option<Self> {
+        let months = self.months.checked_add(other.months)?;
+        let days = self.days.checked_add(other.days)?;
+        let ms = self.ms.checked_add(other.ms)?;
+        Some(IntervalUnit { months, days, ms })
+    }
+}
+
+impl Sub for IntervalUnit {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self {
+        let months = self.months - rhs.months;
+        let days = self.days - rhs.days;
+        let ms = self.ms - rhs.ms;
+        IntervalUnit { months, days, ms }
+    }
+}
+
+impl CheckedSub for IntervalUnit {
+    fn checked_sub(&self, other: &Self) -> Option<Self> {
+        let months = self.months.checked_sub(other.months)?;
+        let days = self.days.checked_sub(other.days)?;
+        let ms = self.ms.checked_sub(other.ms)?;
+        Some(IntervalUnit { months, days, ms })
     }
 }
 
 impl ToString for IntervalUnit {
     fn to_string(&self) -> String {
-        todo!()
+        let years = self.months / 12;
+        let months = self.months % 12;
+        let days = self.days;
+        let hours = self.ms / 1000 / 3600;
+        let minutes = (self.ms / 1000 / 60) % 60;
+        let seconds = ((self.ms % 60000) as f64) / 1000.0;
+        let mut v = SmallVec::<[String; 4]>::new();
+        if years == 1 {
+            v.push(format!("{years} year"));
+        } else if years != 0 {
+            v.push(format!("{years} years"));
+        }
+        if months == 1 {
+            v.push(format!("{months} mon"));
+        } else if months != 0 {
+            v.push(format!("{months} mons"));
+        }
+        if days == 1 {
+            v.push(format!("{days} day"));
+        } else if days != 0 {
+            v.push(format!("{days} days"));
+        }
+        v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
+        v.join(" ")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_string() {
+        let interval =
+            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233);
+        assert_eq!(interval.to_string(), "-1 years -2 mons 3 days 11:45:14.233");
     }
 }

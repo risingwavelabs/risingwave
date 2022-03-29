@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::Result;
 
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
-pub(super) async fn handle_flush(context: QueryContext) -> Result<PgResponse> {
+pub(super) async fn handle_flush(context: OptimizerContext) -> Result<PgResponse> {
     let client = context.session_ctx.env().meta_client();
     client.flush().await?;
 

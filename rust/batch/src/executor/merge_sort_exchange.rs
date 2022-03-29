@@ -11,10 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BinaryHeap;
 use std::marker::PhantomData;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::array::column::Column;
@@ -22,6 +21,7 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, DataChunkRef};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::sort_util::{HeapElem, OrderPair, K_PROCESSING_WINDOW_SIZE};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ExchangeSource as ProstExchangeSource;
@@ -41,7 +41,7 @@ pub(super) type MergeSortExchangeExecutor = MergeSortExchangeExecutorImpl<Defaul
 /// The size of the output is determined both by `K_PROCESSING_WINDOW_SIZE`.
 /// TODO: Does not handle `visibility` for now.
 pub(super) struct MergeSortExchangeExecutorImpl<C> {
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
     env: BatchEnvironment,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunkRef>>,
@@ -200,7 +200,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             NodeBody::MergeSortExchange
         )?;
 
-        let server_addr = *source.env.server_address();
+        let server_addr = source.env.server_address().clone();
 
         let order_pairs = sort_merge_node
             .column_orders
@@ -292,7 +292,7 @@ mod tests {
         }]);
 
         let mut executor = MergeSortExchangeExecutorImpl::<FakeCreateSource> {
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             env: BatchEnvironment::for_test(),
             source_inputs: vec![None; proto_sources.len()],
             order_pairs,

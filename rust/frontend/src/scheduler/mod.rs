@@ -11,8 +11,30 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::sync::Arc;
+
+use crate::session::SessionImpl;
+
 #[allow(dead_code)]
 mod plan_fragmenter;
+pub mod query_manager;
 #[allow(dead_code)]
 pub mod schedule;
+
+/// Context for mpp query execution.
+pub struct ExecutionContext {
+    session: Arc<SessionImpl>,
+}
+
+pub type ExecutionContextRef = Arc<ExecutionContext>;
+
+impl ExecutionContext {
+    pub fn new(session: Arc<SessionImpl>) -> Self {
+        Self { session }
+    }
+
+    pub fn session(&self) -> &SessionImpl {
+        &self.session
+    }
+}

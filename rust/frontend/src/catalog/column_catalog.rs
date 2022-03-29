@@ -11,12 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::borrow::Cow;
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
@@ -42,6 +44,14 @@ impl ColumnCatalog {
     pub fn name(&self) -> &str {
         self.column_desc.name.as_ref()
     }
+
+    /// Convert column catalog to proto
+    pub fn to_protobuf(&self) -> ProstColumnCatalog {
+        ProstColumnCatalog {
+            column_desc: Some(self.column_desc.to_protobuf()),
+            is_hidden: self.is_hidden,
+        }
+    }
 }
 
 impl From<ProstColumnCatalog> for ColumnCatalog {
@@ -49,6 +59,16 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
             is_hidden: prost.is_hidden,
+        }
+    }
+}
+
+impl ColumnCatalog {
+    pub fn name_with_hidden(&self) -> Cow<str> {
+        if self.is_hidden {
+            Cow::Owned(format!("{}(hidden)", self.column_desc.name))
+        } else {
+            Cow::Borrowed(&self.column_desc.name)
         }
     }
 }

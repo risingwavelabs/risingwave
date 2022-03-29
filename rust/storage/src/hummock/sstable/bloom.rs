@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::f64;
@@ -60,21 +60,21 @@ pub struct Bloom<'a> {
 }
 
 impl<'a> Bloom<'a> {
-    /// Create a Bloom filter from a byte slice
+    /// Creates a Bloom filter from a byte slice
     pub fn new(buf: &'a [u8]) -> Self {
         let filter = &buf[..buf.len() - 1];
         let k = buf[buf.len() - 1];
         Self { filter, k }
     }
 
-    /// Get Bloom filter bits per key from entries count and FPR
+    /// Gets Bloom filter bits per key from entries count and FPR
     pub fn bloom_bits_per_key(entries: usize, false_positive_rate: f64) -> usize {
         let size = -1.0 * (entries as f64) * false_positive_rate.ln() / f64::consts::LN_2.powi(2);
         let locs = (f64::consts::LN_2 * size / (entries as f64)).ceil();
         locs as usize
     }
 
-    /// Build Bloom filter from key hashes
+    /// Builds Bloom filter from key hashes
     pub fn build_from_key_hashes(keys: &[u32], bits_per_key: usize) -> Bytes {
         // 0.69 is approximately ln(2)
         let k = ((bits_per_key as f64) * 0.69) as u32;
@@ -100,7 +100,7 @@ impl<'a> Bloom<'a> {
         filter.freeze()
     }
 
-    /// Judge whether the hash value is in the table with the given false positive rate.
+    /// Judges whether the hash value is in the table with the given false positive rate.
     ///
     /// Note:
     ///   - if the return value is true, then the table surely does not have the user key that has

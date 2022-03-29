@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use paste::paste;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
@@ -34,14 +34,13 @@ pub enum Distribution {
 
 static ANY_DISTRIBUTION: Distribution = Distribution::Any;
 
-#[allow(dead_code)]
 impl Distribution {
     pub fn to_prost(&self, output_count: u32) -> ExchangeInfo {
         ExchangeInfo {
             mode: match self {
                 Distribution::Single => DistributionMode::Single,
                 Distribution::Broadcast => DistributionMode::Broadcast,
-                Distribution::HashShard(_keys) => DistributionMode::Hash,
+                Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: Should panic if AnyShard or Any
                 _ => DistributionMode::Hash,
             } as i32,
@@ -93,7 +92,7 @@ impl Distribution {
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
-    fn satisfies(&self, other: &Distribution) -> bool {
+    pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
             Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
@@ -115,10 +114,19 @@ impl Distribution {
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
     }
+    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
+    /// valid.
+    pub fn dist_column_indices(&self) -> &[usize] {
+        match self {
+            Distribution::Single => Default::default(),
+            Distribution::HashShard(dists) => dists,
+            _ => unreachable!(),
+        }
+    }
 }
 
 pub trait WithDistribution {
-    /// the distribution property of the PlanNode's output
+    /// the distribution property of the [`PlanNode`]'s output
     fn distribution(&self) -> &Distribution;
 }
 

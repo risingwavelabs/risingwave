@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -23,6 +23,7 @@ use super::{
     ToDistributedBatch,
 };
 use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and then probes with data from outer (left-side) relation to
@@ -40,18 +41,36 @@ pub struct BatchHashJoin {
 impl BatchHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
-        // TODO: derive from input
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
+        let dist = Self::derive_dist(
+            logical.left().distribution(),
+            logical.right().distribution(),
+            &eq_join_predicate,
+            &logical.l2o_col_mapping(),
         );
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
 
         Self {
             base,
             logical,
             eq_join_predicate,
+        }
+    }
+
+    fn derive_dist(
+        left: &Distribution,
+        right: &Distribution,
+        predicate: &EqJoinPredicate,
+        l2o_mapping: &ColIndexMapping,
+    ) -> Distribution {
+        match (left, right) {
+            (Distribution::Any, Distribution::Any) => Distribution::Any,
+            (Distribution::Single, Distribution::Single) => Distribution::Single,
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
+                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
+                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
+                l2o_mapping.rewrite_provided_distribution(left)
+            }
+            (_, _) => panic!(),
         }
     }
 

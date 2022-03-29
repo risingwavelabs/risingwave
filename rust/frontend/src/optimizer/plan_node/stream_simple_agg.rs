@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
@@ -31,13 +32,17 @@ impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            Distribution::any().clone(),
-        );
-        StreamSimpleAgg { logical, base }
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+
+        // Simple agg executor might change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
+        StreamSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -80,6 +85,13 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

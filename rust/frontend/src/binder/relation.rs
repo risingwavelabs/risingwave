@@ -11,12 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::hash_map::Entry;
 
-use risingwave_common::catalog::{CellBasedTableDesc, ColumnDesc, DEFAULT_SCHEMA_NAME};
+use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
+use risingwave_pb::catalog::source::Info;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };
@@ -47,13 +50,19 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub cell_based_desc: CellBasedTableDesc,
-    pub columns: Vec<ColumnDesc>,
+    pub table_desc: TableDesc,
 }
 
 #[derive(Debug)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
+}
+
+#[derive(Debug)]
+pub struct BoundTableSource {
+    pub name: String,       // explain-only
+    pub source_id: TableId, // TODO: refactor to source id
+    pub columns: Vec<ColumnDesc>,
 }
 
 impl Binder {
@@ -133,7 +142,9 @@ impl Binder {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(
+                        self.bind_subquery_relation(*subquery)?,
+                    )))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -144,7 +155,7 @@ impl Binder {
         }
     }
 
-    /// return the (schema_name, table_name)
+    /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
         let table_name = identifiers
@@ -159,55 +170,77 @@ impl Binder {
 
         Ok((schema_name, table_name))
     }
+
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let table_catalog = {
-            let schema_catalog = self
-                .get_schema_by_name(&schema_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("schema \"{}\"", schema_name)))?;
-            schema_catalog
-                .get_table_by_name(&table_name)
-                .ok_or_else(|| ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name)))?
-                .clone()
-        };
+        let table_catalog =
+            self.catalog
+                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
         let table_id = table_catalog.id();
-        let cell_based_desc = table_catalog.cell_based_table();
+        let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
-        let columns = columns
-            .into_iter()
-            .map(|c| c.column_desc)
-            .collect::<Vec<ColumnDesc>>();
         self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
+            columns.iter().map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            }),
             table_name.clone(),
         )?;
 
         Ok(BoundBaseTable {
             name: table_name,
-            cell_based_desc,
+            table_desc,
             table_id,
+        })
+    }
+
+    pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
+        let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let source = self
+            .catalog
+            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+
+        let source_id = TableId::new(source.id);
+        let table_source_info = try_match_expand!(source.get_info()?, Info::TableSource)?;
+
+        let columns: Vec<ColumnDesc> = table_source_info
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
+            .collect();
+
+        // Note(bugen): do not bind context here.
+
+        Ok(BoundTableSource {
+            name: source_name,
+            source_id,
             columns,
         })
     }
 
-    /// Fill the BindContext for table.
+    /// Fill the [`BindContext`](super::BindContext) for table.
     fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType)>,
+        columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
     ) -> Result<()> {
         let begin = self.context.columns.len();
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type))| {
+            .for_each(|(index, (name, data_type, is_hidden))| {
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
                     begin + index,
                     data_type,
+                    is_hidden,
                 ));
                 self.context
                     .indexs_of
@@ -218,7 +251,7 @@ impl Binder {
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
-                "Duplicated table name: {}",
+                "Duplicated table name while binding context: {}",
                 table_name
             ))
             .into()),
@@ -229,18 +262,20 @@ impl Binder {
         }
     }
 
-    /// Before binding a subquery, we push the current context to the stack and create a new
-    /// context.
+    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// [`BindContext`](super::BindContext) for it.
     ///
-    /// After finishing binding, we pop the previous context from the stack. And
-    /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
-        self.push_context();
+    /// After finishing binding, we update the current context with the output of the subquery.
+    pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
-        self.pop_context();
+        let sub_query_id = self.next_subquery_id();
         self.bind_context(
-            itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
-            UNNAMED_SUBQUERY.to_string(),
+            query
+                .names()
+                .into_iter()
+                .zip_eq(query.data_types().into_iter())
+                .map(|(x, y)| (x, y, false)),
+            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
         )?;
         Ok(BoundSubquery { query })
     }

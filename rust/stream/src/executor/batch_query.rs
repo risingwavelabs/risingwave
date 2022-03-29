@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +13,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
@@ -20,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::monitor::StateStoreMetrics;
 // use risingwave_storage::table::mview::{MViewTable, MViewTableIter};
 use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTableRowIter};
 use risingwave_storage::{Keyspace, StateStore};
@@ -46,6 +48,10 @@ pub struct BatchQueryExecutor<S: StateStore> {
     epoch: Option<u64>,
     /// Logical Operator Info
     op_info: String,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for BatchQueryExecutor<S> {
@@ -75,18 +81,33 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|column_desc| ColumnDesc::from(column_desc.clone()))
             .collect_vec();
         let keyspace = Keyspace::table_root(state_store, &table_id);
-        let table = CellBasedTable::new_adhoc(keyspace, column_descs);
+        let table = CellBasedTable::new_adhoc(
+            keyspace,
+            column_descs,
+            Arc::new(StateStoreMetrics::unused()),
+        );
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(BatchQueryExecutor::new(
             table,
             params.pk_indices,
             params.op_info,
+            key_indices,
         )))
     }
 }
 
 impl<S: StateStore> BatchQueryExecutor<S> {
-    pub fn new(table: CellBasedTable<S>, pk_indices: PkIndices, op_info: String) -> Self {
-        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info)
+    pub fn new(
+        table: CellBasedTable<S>,
+        pk_indices: PkIndices,
+        op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        Self::new_with_batch_size(table, pk_indices, DEFAULT_BATCH_SIZE, op_info, key_indices)
     }
 
     pub fn new_with_batch_size(
@@ -94,6 +115,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
         pk_indices: PkIndices,
         batch_size: usize,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let schema = table.schema().clone();
         Self {
@@ -104,6 +126,7 @@ impl<S: StateStore> BatchQueryExecutor<S> {
             schema,
             epoch: None,
             op_info,
+            key_indices,
         }
     }
 }
@@ -173,6 +196,7 @@ mod test {
             vec![0, 1],
             test_batch_size,
             "BatchQueryExecutor".to_string(),
+            vec![],
         );
         node.init(u64::MAX).unwrap();
         let mut batch_cnt = 0;
@@ -195,6 +219,7 @@ mod test {
             vec![0, 1],
             test_batch_size,
             "BatchQueryExecutor".to_string(),
+            vec![],
         );
         node.init(u64::MAX).unwrap();
         node.init(0).unwrap();

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -172,6 +172,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            distribution_keys: Default::default(),
         })),
         input: vec![filter_node],
         pk_indices: vec![0, 1],
@@ -198,6 +199,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            distribution_keys: Default::default(),
         })),
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
@@ -239,6 +241,7 @@ fn make_stream_node() -> StreamNode {
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
             column_orders: vec![make_column_order(1), make_column_order(2)],
+            distribution_keys: Default::default(),
         })),
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),

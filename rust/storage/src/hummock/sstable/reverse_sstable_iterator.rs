@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
-    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, SeekPos, Sstable,
+    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, Sstable,
     SstableStoreRef,
 };
 
@@ -50,7 +50,7 @@ impl ReverseSSTableIterator {
         }
     }
 
-    /// Seek to a block, and then seek to the key if `seek_key` is given.
+    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
@@ -61,7 +61,7 @@ impl ReverseSSTableIterator {
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
-                block_iter.seek_le(key, SeekPos::Origin);
+                block_iter.seek_le(key);
             } else {
                 block_iter.seek_to_last();
             }
@@ -89,20 +89,11 @@ impl HummockIterator for ReverseSSTableIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.block_iter
-            .as_ref()
-            .expect("no block iter")
-            .key()
-            .expect("invalid iter")
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self
-            .block_iter
-            .as_ref()
-            .expect("no block iter")
-            .value()
-            .expect("invalid iter");
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
 
         HummockValue::from_slice(raw_value).expect("decode error")
     }
@@ -124,7 +115,7 @@ impl HummockIterator for ReverseSSTableIterator {
             .meta
             .block_metas
             .partition_point(|block_meta| {
-                // compare by version comparator
+                // Compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
                 let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
@@ -135,7 +126,7 @@ impl HummockIterator for ReverseSSTableIterator {
 
         self.seek_idx(block_idx, Some(key)).await?;
         if !self.is_valid() {
-            // seek to prev block
+            // Seek to prev block
             self.seek_idx(block_idx - 1, None).await?;
         }
 

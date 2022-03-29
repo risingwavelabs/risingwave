@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -34,6 +34,7 @@ pub(crate) struct MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
+    #[allow(dead_code)]
     pub fn new(
         hummock_manager: Arc<HummockManager<MemStore>>,
         context_id: HummockContextId,
@@ -137,6 +138,7 @@ impl HummockMetaClient for MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
+    #[allow(dead_code)]
     pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
         self.hummock_manager.clone()
     }

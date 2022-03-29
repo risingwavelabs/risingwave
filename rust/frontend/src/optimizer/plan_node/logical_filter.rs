@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -41,15 +41,15 @@ impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
         let ctx = input.ctx();
         for cond in &predicate.conjunctions {
-            assert_input_ref(cond, input.schema().fields().len());
+            assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalFilter {
-            input,
             base,
             predicate,
+            input,
         }
     }
 
@@ -72,6 +72,15 @@ impl PlanTreeNodeUnary for LogicalFilter {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.predicate.clone())
     }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        mut input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let predicate = self.predicate().clone().rewrite_expr(&mut input_col_change);
+        (Self::new(input, predicate), input_col_change)
+    }
 }
 impl_plan_tree_node_for_unary! {LogicalFilter}
 impl fmt::Display for LogicalFilter {
@@ -84,18 +93,17 @@ impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectInputRef {
-            input_bits: required_cols.clone(),
-        };
+        let mut visitor = CollectInputRef::new(required_cols.clone());
         self.predicate.visit_expr(&mut visitor);
+        let input_required_cols = visitor.collect();
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
 
-        if required_cols == &visitor.input_bits {
+        if required_cols == &input_required_cols {
             filter.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
@@ -122,22 +130,26 @@ impl ToStream for LogicalFilter {
         let new_logical = self.clone_with_input(new_input);
         StreamFilter::new(new_logical).into()
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);
+        (filter.into(), out_col_change)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::ctx::WithId;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -152,16 +164,14 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
             Field::with_name(DataType::Int32, "v3"),
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
@@ -177,7 +187,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);
@@ -200,13 +210,11 @@ mod tests {
             ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
             _ => panic!("Expected function call"),
         }
-
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
-        assert_eq!(scan.id().0, 2);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 
     #[tokio::test]
@@ -221,7 +229,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter_no_project() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -237,15 +245,14 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
             ctx,
         );
+
         let predicate: ExprImpl = ExprImpl::FunctionCall(Box::new(
             FunctionCall::new(
                 Type::LessThan,
@@ -256,7 +263,7 @@ mod tests {
             )
             .unwrap(),
         ));
-        let filter = LogicalFilter::new(table_scan.into(), Condition::with_expr(predicate));
+        let filter = LogicalFilter::new(values.into(), Condition::with_expr(predicate));
 
         // Perform the prune
         let mut required_cols = FixedBitSet::with_capacity(3);
@@ -274,10 +281,10 @@ mod tests {
             _ => panic!("Expected function call"),
         }
 
-        let scan = filter.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields().len(), 2);
-        assert_eq!(scan.schema().fields()[0], fields[1]);
-        assert_eq!(scan.schema().fields()[1], fields[2]);
+        let values = filter.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields().len(), 2);
+        assert_eq!(values.schema().fields()[0], fields[1]);
+        assert_eq!(values.schema().fields()[1], fields[2]);
     }
 }

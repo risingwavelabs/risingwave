@@ -11,21 +11,43 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::ObjectName;
 
-use crate::session::QueryContext;
+use crate::binder::Binder;
+use crate::session::OptimizerContext;
 
 pub async fn handle_drop_table(
-    context: QueryContext,
+    context: OptimizerContext,
     table_name: ObjectName,
 ) -> Result<PgResponse> {
-    let _session = context.session_ctx;
-    let _str_table_name = table_name.to_string();
+    let session = context.session_ctx;
+    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
-    // TODO:
+    let catalog_reader = session.env().catalog_reader();
+
+    let (source_id, table_id) = {
+        let reader = catalog_reader.read_guard();
+        let table = reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
+
+        // If associated source is `None`, then it is a normal mview.
+        match table.associated_source_id() {
+            Some(source_id) => (source_id, table.id()),
+            None => {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP MATERIALIZED VIEW` to drop a materialized view.".to_owned(),
+                )))
+            }
+        }
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .drop_materialized_source(source_id.table_id(), table_id)
+        .await?;
+
     Ok(PgResponse::new(
         StatementType::DROP_TABLE,
         0,
@@ -34,24 +56,35 @@ pub async fn handle_drop_table(
     ))
 }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
 
-//     use crate::catalog::local_catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-//     use crate::test_utils::LocalFrontend;
+    use crate::test_utils::LocalFrontend;
 
-//     #[tokio::test]
-//     async fn test_drop_table_handler() {
-//         let sql_create_table = "create table t (v1 smallint);";
-//         let sql_drop_table = "drop table t;";
-//         let frontend = LocalFrontend::new().await;
-//         frontend.run_sql(sql_create_table).await.unwrap();
-//         frontend.run_sql(sql_drop_table).await.unwrap();
+    #[tokio::test]
+    async fn test_drop_table_handler() {
+        let sql_create_table = "create table t (v1 smallint);";
+        let sql_drop_table = "drop table t;";
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql_create_table).await.unwrap();
+        frontend.run_sql(sql_drop_table).await.unwrap();
 
-//         let catalog_manager = frontend.session().env().catalog_mgr();
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
 
-//         assert!(catalog_manager
-//             .get_table(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
-//             .is_none());
-//     }
-// }
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .ok()
+            .cloned();
+        assert!(source.is_none());
+
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .ok()
+            .cloned();
+        assert!(table.is_none());
+    }
+}

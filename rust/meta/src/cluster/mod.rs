@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::cmp;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -31,8 +32,8 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
-    NotificationManagerRef,
+    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef,
+    LocalNotification, MetaSrvEnv, NotificationManagerRef,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -45,6 +46,8 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+
+// TODO: substitute with `HostAddr`
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
@@ -157,25 +160,41 @@ where
         }
     }
 
+    pub async fn deactivate_worker_node(&self, host_address: HostAddress) -> Result<()> {
+        let mut core = self.core.write().await;
+        match core.get_worker_by_host(host_address.clone()) {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Starting as i32 {
+                    return Ok(());
+                }
+                worker.worker_node.state = State::Starting as i32;
+                worker.insert(self.meta_store_ref.as_ref()).await?;
+
+                core.update_worker_node(worker);
+                Ok(())
+            }
+            None => Err(RwError::from(InternalError(
+                "Worker node does not exist!".to_string(),
+            ))),
+        }
+    }
+
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
-            Some(worker) => {
-                let mut worker_node = worker.to_protobuf();
-                if worker_node.state == State::Running as i32 {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Running as i32 {
                     return Ok(());
                 }
-                worker_node.state = State::Running as i32;
-                let worker = Worker::from_protobuf(worker_node.clone());
-
+                worker.worker_node.state = State::Running as i32;
                 worker.insert(self.meta_store_ref.as_ref()).await?;
 
-                core.activate_worker_node(worker);
+                core.update_worker_node(worker.clone());
 
                 // Notify frontends of new compute node.
-                if worker_node.r#type == WorkerType::ComputeNode as i32 {
+                if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Add, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
                         .await;
                 }
 
@@ -209,9 +228,14 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Delete, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
                         .await;
                 }
+
+                // Notify local subscribers
+                self.notification_manager_ref
+                    .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+                    .await;
 
                 Ok(())
             }
@@ -224,7 +248,7 @@ where
     pub async fn heartbeat(&self, worker_id: u32) -> Result<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", worker_id = worker_id, "receive heartbeat");
         let mut core = self.core.write().await;
-        // 1. Get unique key. TODO: avoid this step
+        // 1. Get unique key.
         let key = match core.get_worker_by_id(worker_id) {
             None => {
                 return Ok(());
@@ -233,19 +257,9 @@ where
         };
 
         // 2. Update expire_at
-        let expire_at = SystemTime::now()
-            .add(self.max_heartbeat_interval)
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .expect("Clock may have gone backwards")
-            .as_secs();
-        core.update_worker_ttl(key, expire_at);
+        core.update_worker_ttl(key, self.max_heartbeat_interval);
 
         Ok(())
-    }
-
-    async fn update_worker_ttl(&self, host_address: HostAddress, expire_at: u64) {
-        let mut core = self.core.write().await;
-        core.update_worker_ttl(host_address, expire_at);
     }
 
     pub async fn start_heartbeat_checker(
@@ -269,7 +283,7 @@ where
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("Clock may have gone backwards")
                     .as_secs();
-                let workers_to_init_or_delete = cluster_manager_ref
+                let mut workers_to_init_or_delete = cluster_manager_ref
                     .core
                     .read()
                     .await
@@ -281,18 +295,18 @@ where
                     .filter(|worker| worker.expire_at() < now)
                     .cloned()
                     .collect_vec();
+                // 1. Initialize new workers' expire_at.
+                for worker in
+                    workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
+                {
+                    cluster_manager_ref.core.write().await.update_worker_ttl(
+                        worker.key().expect("illegal key"),
+                        cluster_manager_ref.max_heartbeat_interval,
+                    );
+                }
+                // 2. Delete expired workers.
                 for worker in workers_to_init_or_delete {
                     let key = worker.key().expect("illegal key");
-                    if worker.expire_at() == INVALID_EXPIRE_AT {
-                        // Initialize expire_at
-                        cluster_manager_ref
-                            .update_worker_ttl(
-                                key,
-                                now + cluster_manager_ref.max_heartbeat_interval.as_secs(),
-                            )
-                            .await;
-                        continue;
-                    }
                     match cluster_manager_ref.delete_worker_node(key.clone()).await {
                         Ok(_) => {
                             cluster_manager_ref
@@ -309,7 +323,7 @@ where
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,
@@ -385,6 +399,10 @@ where
         });
         Ok(parallel_units)
     }
+
+    pub async fn get_worker_by_id(&self, id: u32) -> Option<Worker> {
+        self.core.read().await.get_worker_by_id(id)
+    }
 }
 
 pub struct StoredClusterManagerCore {
@@ -452,7 +470,7 @@ impl StoredClusterManagerCore {
             .insert(WorkerKey(worker_node.host.unwrap()), worker);
     }
 
-    fn activate_worker_node(&mut self, worker: Worker) {
+    fn update_worker_node(&mut self, worker: Worker) {
         self.workers
             .insert(WorkerKey(worker.to_protobuf().host.unwrap()), worker);
     }
@@ -510,9 +528,17 @@ impl StoredClusterManagerCore {
         }
     }
 
-    fn update_worker_ttl(&mut self, host_address: HostAddress, expire_at: u64) {
+    fn update_worker_ttl(&mut self, host_address: HostAddress, ttl: Duration) {
         match self.workers.entry(WorkerKey(host_address)) {
             Entry::Occupied(mut worker) => {
+                let expire_at = cmp::max(
+                    worker.get().expire_at(),
+                    SystemTime::now()
+                        .add(ttl)
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("Clock may have gone backwards")
+                        .as_secs(),
+                );
                 worker.get_mut().set_expire_at(expire_at);
             }
             Entry::Vacant(_) => {}
@@ -547,7 +573,7 @@ mod tests {
         let worker_count = 5usize;
         for i in 0..worker_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             let (worker_node, _) = cluster_manager
@@ -564,7 +590,7 @@ mod tests {
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             cluster_manager

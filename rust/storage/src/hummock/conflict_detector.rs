@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
 
 use std::collections::HashSet;
@@ -41,8 +41,8 @@ impl ConflictDetector {
         self.epoch_watermark.load()
     }
 
+    // Sets the new watermark with CAS to enable detection in concurrent update
     pub fn set_watermark(&self, epoch: HummockEpoch) {
-        // set the new watermark with CAS to enable detection in concurrent update
         loop {
             let current_watermark = self.get_epoch_watermark();
             assert!(
@@ -61,7 +61,7 @@ impl ConflictDetector {
         }
     }
 
-    /// Check whether there is key conflict for the given `kv_pairs` and add the key in `kv_pairs`
+    /// Checks whether there is key conflict for the given `kv_pairs` and adds the key in `kv_pairs`
     /// to the tracking history. Besides, whether the `epoch` has been archived will also be checked
     /// to avoid writing to a stale epoch
     pub fn check_conflict_and_track_write_batch(
@@ -87,7 +87,7 @@ impl ConflictDetector {
         }
     }
 
-    /// Archive an epoch. An archived epoch cannot be written anymore.
+    /// Archives an epoch. An archived epoch cannot be written anymore.
     pub fn archive_epoch(&self, epoch: HummockEpoch) {
         self.epoch_history.remove(&epoch);
         self.set_watermark(epoch);

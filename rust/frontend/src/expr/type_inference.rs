@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! This type inference is just to infer the return type of function calls, and make sure the
 //! functionCall expressions have same input type requirement and return type definition as backend.
 use std::collections::HashMap;
@@ -229,6 +229,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             FuncSign::new_binary(expr, t1, t2),
             arithmetic_type_derive(t1, t2),
         );
+    }
+    for t in num_types.clone() {
+        map.insert(FuncSign::new_unary(E::Neg, t), t);
     }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
     build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);

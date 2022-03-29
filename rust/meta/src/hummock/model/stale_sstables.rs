@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use prost::Message;
 use risingwave_pb::hummock::{HummockStaleSstables, HummockVersionRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 
 /// Column family name for stale hummock sstables.
 /// `cf(hummock_stale_sstables)`: `HummockVersionRefId` -> `HummockStaleSstables`
@@ -48,5 +48,3 @@ impl MetadataModel for HummockStaleSstables {
         })
     }
 }
-
-impl Transactional for HummockStaleSstables {}

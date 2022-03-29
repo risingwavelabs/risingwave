@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
@@ -83,6 +83,8 @@ macro_rules! for_all_metrics {
             sst_block_request_miss_counts: GenericCounter<AtomicU64>,
             sst_block_fetch_remote_duration: Histogram,
             sst_block_put_remote_duration: Histogram,
+
+            cell_table_next_pack_cell_duration: Histogram,
         }
     };
 }
@@ -91,9 +93,9 @@ macro_rules! define_state_store_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
         /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
         /// `RocksDBStateStore` and `TikvStateStore`.
-        /// In practice, keep in mind that this represents the whole Hummock utilizations of
-        /// a `RisingWave` instance. More granular utilizations of per `materialization view`
-        /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+        /// In practice, keep in mind that this represents the whole Hummock utilization of
+        /// a `RisingWave` instance. More granular utilization of per `materialization view`
+        /// job or an executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug)]
         pub struct StateStoreMetrics {
             $( pub $name: $type, )*
@@ -123,7 +125,7 @@ impl StateStoreMetrics {
         let get_value_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS.map(|x| x * GET_LATENCY_SCALE).to_vec();
-        // let get_duration_buckets = vec![1.0];
+
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
@@ -382,6 +384,15 @@ impl StateStoreMetrics {
         let sst_block_put_remote_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let buckets = DEFAULT_BUCKETS.to_vec();
+        let opts = histogram_opts!(
+            "state_store_cell_table_next_pack_cell_duration",
+            "Time spent deserializing into a row in cell based table.",
+            buckets
+        );
+        let cell_table_next_pack_cell_duration =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -421,10 +432,12 @@ impl StateStoreMetrics {
             sst_block_request_miss_counts,
             sst_block_fetch_remote_duration,
             sst_block_put_remote_duration,
+
+            cell_table_next_pack_cell_duration,
         }
     }
 
-    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

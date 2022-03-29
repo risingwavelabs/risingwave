@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::Formatter;
 
 use crate::pg_field_descriptor::PgFieldDescriptor;
@@ -33,12 +33,14 @@ pub enum StatementType {
     CREATE_MATERIALIZED_VIEW,
     CREATE_SOURCE,
     DROP_TABLE,
+    DROP_MATERIALIZED_VIEW,
     DROP_STREAM,
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
+    SHOW_SOURCE,
     FLUSH,
     OTHER,
     // EMPTY is used when query statement is empty (e.g. ";").
@@ -100,7 +102,7 @@ impl PgResponse {
     pub fn is_query(&self) -> bool {
         matches!(
             self.stmt_type,
-            StatementType::SELECT | StatementType::EXPLAIN
+            StatementType::SELECT | StatementType::EXPLAIN | StatementType::SHOW_SOURCE
         )
     }
 

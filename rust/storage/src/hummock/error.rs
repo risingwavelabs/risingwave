@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::backtrace::Backtrace;
 
 use risingwave_common::error::{ErrorCode, RwError};
@@ -100,7 +100,7 @@ impl From<prost::DecodeError> for TracedHummockError {
 }
 
 #[derive(Error)]
-#[error("{source:?}\n{backtrace:#}")]
+#[error("{source}")]
 pub struct TracedHummockError {
     #[from]
     source: HummockError,
@@ -109,7 +109,20 @@ pub struct TracedHummockError {
 
 impl std::fmt::Debug for TracedHummockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        use std::error::Error;
+
+        write!(f, "{}", self.source)?;
+        writeln!(f)?;
+        if let Some(backtrace) = self.source.backtrace() {
+            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
+        } else {
+            write!(
+                f,
+                "  backtrace of `TracedHummockError`:\n{}",
+                self.backtrace
+            )?;
+        }
+        Ok(())
     }
 }
 

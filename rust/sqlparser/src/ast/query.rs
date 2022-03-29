@@ -37,6 +37,27 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
+impl Query {
+    pub fn get_limit_value(&self) -> Option<usize> {
+        match self.limit {
+            Some(Expr::Value(Value::Number(ref limit, _))) => limit.parse().ok(),
+            Some(_) => unreachable!(),
+            _ => None,
+        }
+    }
+
+    pub fn get_offset_value(&self) -> Option<usize> {
+        match self.offset {
+            Some(Offset {
+                value: Expr::Value(Value::Number(ref offset, _)),
+                ..
+            }) => offset.parse().ok(),
+            Some(_) => unreachable!(),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref with) = self.with {
@@ -293,8 +314,6 @@ pub enum TableFactor {
         /// and MSSQL. Note that deprecated MSSQL `FROM foo (NOLOCK)` syntax
         /// will also be parsed as `args`.
         args: Vec<FunctionArg>,
-        /// MSSQL-specific `WITH (...)` hints such as NOLOCK.
-        with_hints: Vec<Expr>,
     },
     Derived {
         lateral: bool,
@@ -318,21 +337,13 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            TableFactor::Table {
-                name,
-                alias,
-                args,
-                with_hints,
-            } => {
+            TableFactor::Table { name, alias, args } => {
                 write!(f, "{}", name)?;
                 if !args.is_empty() {
                     write!(f, "({})", display_comma_separated(args))?;
                 }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
-                }
-                if !with_hints.is_empty() {
-                    write!(f, " WITH ({})", display_comma_separated(with_hints))?;
                 }
                 Ok(())
             }

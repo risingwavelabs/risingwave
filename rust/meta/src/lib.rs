@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -21,6 +21,7 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
@@ -28,6 +29,7 @@
 #![feature(let_chains)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_first_last)]
+#![feature(drain_filter)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 mod barrier;
@@ -55,6 +57,7 @@ enum Backend {
 
 #[derive(Debug, Parser)]
 pub struct MetaNodeOpts {
+    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5690")]
     host: String,
 
@@ -71,7 +74,7 @@ pub struct MetaNodeOpts {
     etcd_endpoints: String,
 
     /// Maximum allowed heartbeat interval in ms
-    #[clap(long, default_value = "10000")]
+    #[clap(long, default_value = "60000")]
     max_heartbeat_interval: u32,
 
     #[clap(long)]
@@ -95,7 +98,7 @@ pub async fn start(opts: MetaNodeOpts) {
     };
     let max_heartbeat_interval = Duration::from_millis(opts.max_heartbeat_interval as u64);
 
-    tracing::info!("Starting meta server at {}", addr);
+    tracing::info!("Meta server listening at {}", addr);
     let (join_handle, _shutdown_send) = rpc_serve(
         addr,
         prometheus_addr,

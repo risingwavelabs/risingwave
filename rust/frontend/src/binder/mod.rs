@@ -11,11 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
-
-use crate::catalog::schema_catalog::SchemaCatalog;
 
 mod bind_context;
 mod delete;
@@ -32,7 +30,7 @@ pub use bind_context::BindContext;
 pub use delete::BoundDelete;
 pub use insert::BoundInsert;
 pub use query::BoundQuery;
-pub use relation::{BoundBaseTable, BoundJoin, Relation};
+pub use relation::{BoundBaseTable, BoundJoin, BoundTableSource, Relation};
 pub use select::BoundSelect;
 pub use set_expr::BoundSetExpr;
 pub use statement::BoundStatement;
@@ -50,6 +48,8 @@ pub struct Binder {
     ///
     /// See [`Binder::bind_subquery`] for details.
     upper_contexts: Vec<BindContext>,
+
+    next_subquery_id: usize,
 }
 
 impl Binder {
@@ -59,6 +59,7 @@ impl Binder {
             db_name,
             context: BindContext::new(),
             upper_contexts: vec![],
+            next_subquery_id: 0,
         }
     }
 
@@ -67,9 +68,6 @@ impl Binder {
         self.bind_statement(stmt)
     }
 
-    fn get_schema_by_name(&self, schema_name: &str) -> Option<&SchemaCatalog> {
-        self.catalog.get_schema_by_name(&self.db_name, schema_name)
-    }
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
         self.upper_contexts.push(new_context);
@@ -78,6 +76,12 @@ impl Binder {
     fn pop_context(&mut self) {
         let old_context = self.upper_contexts.pop();
         self.context = old_context.unwrap();
+    }
+
+    fn next_subquery_id(&mut self) -> usize {
+        let id = self.next_subquery_id;
+        self.next_subquery_id += 1;
+        id
     }
 }
 

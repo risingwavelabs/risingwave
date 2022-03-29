@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! `Array` defines all in-memory representations of vectorized execution framework.
 
 mod bool_array;
@@ -41,6 +41,7 @@ pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
+pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
@@ -559,9 +560,10 @@ impl ArrayImpl {
             ProstArrayType::Decimal => {
                 read_string_array::<DecimalArrayBuilder, DecimalValueReader>(array, cardinality)?
             }
-            ProstArrayType::Date => read_naivedate_array(array, cardinality)?,
-            ProstArrayType::Time => read_naivetime_array(array, cardinality)?,
-            ProstArrayType::Timestamp => read_naivedatetime_array(array, cardinality)?,
+            ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
+            ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
+            ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
+            ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
         };

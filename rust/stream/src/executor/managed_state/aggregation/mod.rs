@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Aggregators with state store support
 
 mod value;
@@ -48,12 +48,15 @@ pub fn verify_batch(
     all_lengths.iter().min() == all_lengths.iter().max()
 }
 
-/// All managed state for state aggregation. The managed state will manage the cache and integrate
+/// All managed state for aggregation. The managed state will manage the cache and integrate
 /// the state with the underlying state store. Managed states can only be evicted from outer cache
 /// when they are not dirty.
 pub enum ManagedStateImpl<S: StateStore> {
+    /// States as single scalar value e.g. `COUNT`, `SUM`
     Value(ManagedValueState<S>),
-    Extreme(Box<dyn ManagedExtremeState<S>>),
+
+    /// States as table structure e.g. `MAX`, `STRING_AGG`
+    Table(Box<dyn ManagedTableState<S>>),
 }
 
 impl<S: StateStore> ManagedStateImpl<S> {
@@ -66,7 +69,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     ) -> Result<()> {
         match self {
             Self::Value(state) => state.apply_batch(ops, visibility, data).await,
-            Self::Extreme(state) => state.apply_batch(ops, visibility, data, epoch).await,
+            Self::Table(state) => state.apply_batch(ops, visibility, data, epoch).await,
         }
     }
 
@@ -74,7 +77,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub async fn get_output(&mut self, epoch: u64) -> Result<Datum> {
         match self {
             Self::Value(state) => state.get_output().await,
-            Self::Extreme(state) => state.get_output(epoch).await,
+            Self::Table(state) => state.get_output(epoch).await,
         }
     }
 
@@ -82,7 +85,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub fn is_dirty(&self) -> bool {
         match self {
             Self::Value(state) => state.is_dirty(),
-            Self::Extreme(state) => state.is_dirty(),
+            Self::Table(state) => state.is_dirty(),
         }
     }
 
@@ -90,7 +93,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
     pub fn flush(&mut self, write_batch: &mut WriteBatch<S>) -> Result<()> {
         match self {
             Self::Value(state) => state.flush(write_batch),
-            Self::Extreme(state) => state.flush(write_batch),
+            Self::Table(state) => state.flush(write_batch),
         }
     }
 
@@ -108,7 +111,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                     row_count.is_some(),
                     "should set row_count for value states other than AggKind::RowCount"
                 );
-                Ok(Self::Extreme(
+                Ok(Self::Table(
                     create_streaming_extreme_state(
                         agg_call,
                         keyspace,

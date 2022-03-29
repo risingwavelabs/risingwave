@@ -1288,6 +1288,7 @@ impl Parser {
     // SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
+    // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
@@ -1361,7 +1362,7 @@ impl Parser {
         })
     }
 
-    fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
+    pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         if !self.consume_token(&Token::LParen) || self.consume_token(&Token::RParen) {
@@ -1774,11 +1775,22 @@ impl Parser {
         }
     }
 
-    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example)
+    /// Parse a SQL datatype (in the context of a CREATE TABLE statement for example) and convert
+    /// into an array of that datatype if needed
     pub fn parse_data_type(&mut self) -> Result<DataType, ParserError> {
+        let mut data_type = self.parse_data_type_inner()?;
+        while self.consume_token(&Token::LBracket) {
+            self.expect_token(&Token::RBracket)?;
+            data_type = DataType::Array(Box::new(data_type));
+        }
+        Ok(data_type)
+    }
+
+    /// Parse a SQL datatype
+    pub fn parse_data_type_inner(&mut self) -> Result<DataType, ParserError> {
         match self.next_token() {
             Token::Word(w) => match w.keyword {
-                Keyword::BOOLEAN => Ok(DataType::Boolean),
+                Keyword::BOOLEAN | Keyword::BOOL => Ok(DataType::Boolean),
                 Keyword::FLOAT => Ok(DataType::Float(self.parse_optional_precision()?)),
                 Keyword::REAL => Ok(DataType::Real),
                 Keyword::DOUBLE => {
@@ -2337,7 +2349,25 @@ impl Parser {
         }
     }
 
+    // If first word is table or source, return show table or show source
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
+        let index = self.index;
+        if let Token::Word(w) = self.next_token() {
+            match w.keyword {
+                Keyword::TABLE => {
+                    return Ok(Statement::ShowTable {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                Keyword::SOURCE => {
+                    return Ok(Statement::ShowSource {
+                        name: self.parse_object_name()?,
+                    });
+                }
+                _ => {}
+            }
+        }
+        self.index = index;
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
@@ -2414,13 +2444,6 @@ impl Parser {
                 self.expected("subquery after LATERAL", self.peek_token())?;
             }
             self.parse_derived_table_factor(Lateral)
-        } else if self.parse_keyword(Keyword::TABLE) {
-            // parse table function (SELECT * FROM TABLE (<expr>) [ AS <alias> ])
-            self.expect_token(&Token::LParen)?;
-            let expr = self.parse_expr()?;
-            self.expect_token(&Token::RParen)?;
-            let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            Ok(TableFactor::TableFunction { expr, alias })
         } else if self.consume_token(&Token::LParen) {
             // A left paren introduces either a derived table (i.e., a subquery)
             // or a nested join. It's nearly impossible to determine ahead of
@@ -2470,30 +2493,14 @@ impl Parser {
             }
         } else {
             let name = self.parse_object_name()?;
-            // Postgres, MSSQL: table-valued functions:
+            // Postgres,table-valued functions:
             let args = if self.consume_token(&Token::LParen) {
                 self.parse_optional_args()?
             } else {
                 vec![]
             };
             let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-            // MSSQL-specific table hints:
-            let mut with_hints = vec![];
-            if self.parse_keyword(Keyword::WITH) {
-                if self.consume_token(&Token::LParen) {
-                    with_hints = self.parse_comma_separated(Parser::parse_expr)?;
-                    self.expect_token(&Token::RParen)?;
-                } else {
-                    // rewind, as WITH may belong to the next statement's CTE
-                    self.prev_token();
-                }
-            };
-            Ok(TableFactor::Table {
-                name,
-                alias,
-                args,
-                with_hints,
-            })
+            Ok(TableFactor::Table { name, alias, args })
         }
     }
 

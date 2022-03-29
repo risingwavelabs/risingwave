@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Global Streaming Hash Aggregators
 
 use std::collections::HashMap;
@@ -128,9 +128,9 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
         let key_indices = node
-            .get_group_keys()
+            .get_distribution_keys()
             .iter()
-            .map(|key| key.column_idx as usize)
+            .map(|key| *key as usize)
             .collect::<Vec<_>>();
         let agg_calls: Vec<AggCall> = node
             .get_agg_calls()

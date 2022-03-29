@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -21,10 +21,10 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
-#![feature(map_first_last)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 #[macro_use]
@@ -38,8 +38,17 @@ use clap::Parser;
 /// Command-line arguments for compute-node.
 #[derive(Parser, Debug)]
 pub struct ComputeNodeOpts {
+    // TODO: rename to listen_address and separate out the port.
     #[clap(long, default_value = "127.0.0.1:5688")]
     pub host: String,
+
+    // Optional, we will use listen_address if not specified.
+    #[clap(long)]
+    pub client_address: Option<String>,
+
+    // TODO: This is currently unused.
+    #[clap(long)]
+    pub port: Option<u16>,
 
     #[clap(long, default_value = "in-memory")]
     pub state_store: String,
@@ -68,9 +77,18 @@ use crate::server::compute_node_serve;
 pub async fn start(opts: ComputeNodeOpts) {
     tracing::info!("meta address: {}", opts.meta_address.clone());
 
-    let addr = opts.host.parse().unwrap();
-    tracing::info!("Starting server at {}", addr);
+    let listen_address = opts.host.parse().unwrap();
+    tracing::info!("Server Listening at {}", listen_address);
 
-    let (join_handle, _shutdown_send) = compute_node_serve(addr, opts).await;
+    let client_address = opts
+        .client_address
+        .as_ref()
+        .unwrap_or(&opts.host)
+        .parse()
+        .unwrap();
+    tracing::info!("Client address is {}", client_address);
+
+    let (join_handle, _shutdown_send) =
+        compute_node_serve(listen_address, client_address, opts).await;
     join_handle.await.unwrap();
 }

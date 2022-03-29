@@ -11,14 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 
 use super::super::{HummockResult, HummockValue};
-use super::{BlockIterator, SeekPos, Sstable};
+use super::{BlockIterator, Sstable};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::version_cmp::VersionedComparator;
@@ -57,7 +57,7 @@ impl SSTableIterator {
         }
     }
 
-    /// Seek to a block, and then seek to the key if `seek_key` is given.
+    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
@@ -74,7 +74,7 @@ impl SSTableIterator {
                 .await?;
             let mut block_iter = BlockIterator::new(block);
             if let Some(key) = seek_key {
-                block_iter.seek(key, SeekPos::Origin);
+                block_iter.seek(key);
             } else {
                 block_iter.seek_to_first();
             }
@@ -102,20 +102,11 @@ impl HummockIterator for SSTableIterator {
     }
 
     fn key(&self) -> &[u8] {
-        self.block_iter
-            .as_ref()
-            .expect("no block iter")
-            .key()
-            .expect("invalid iter")
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        let raw_value = self
-            .block_iter
-            .as_ref()
-            .expect("no block iter")
-            .value()
-            .expect("invalid iter");
+        let raw_value = self.block_iter.as_ref().expect("no block iter").value();
 
         HummockValue::from_slice(raw_value).expect("decode error")
     }
@@ -179,7 +170,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_table_iterator() {
-        // build remote table
+        // Build remote table
         let sstable_store = mock_sstable_store();
         let table =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
@@ -237,7 +228,6 @@ mod tests {
         assert!(!sstable_iter.is_valid());
 
         // Seek to < first key
-
         let smallest_key = key_with_epoch(format!("key_aaaa_{:05}", 0).as_bytes().to_vec(), 233);
         sstable_iter.seek(smallest_key.as_slice()).await.unwrap();
         let key = sstable_iter.key();

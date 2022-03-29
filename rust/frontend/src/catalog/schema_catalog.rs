@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
@@ -24,6 +24,7 @@ use crate::catalog::SchemaId;
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {
     id: SchemaId,
+    #[allow(dead_code)]
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
@@ -40,17 +41,17 @@ impl SchemaCatalog {
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
-
     pub fn drop_table(&mut self, id: TableId) {
         let name = self.table_name_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&name).unwrap();
     }
+
     pub fn create_source(&mut self, prost: ProstSource) {
         let name = prost.name.clone();
-        let id = prost.id.into();
+        let id = prost.id;
 
         self.source_by_name.try_insert(name.clone(), prost).unwrap();
-        self.table_name_by_id.try_insert(id, name).unwrap();
+        self.source_name_by_id.try_insert(id, name).unwrap();
     }
     pub fn drop_source(&mut self, id: SourceId) {
         let name = self.source_name_by_id.remove(&id).unwrap();

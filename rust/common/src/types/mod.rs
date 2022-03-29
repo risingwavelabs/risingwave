@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -471,39 +471,39 @@ macro_rules! impl_convert {
                     match val {
                         ScalarRefImpl::$variant_name(scalar_ref) => Ok(scalar_ref),
                         other_scalar => Err(ErrorCode::InternalError(
-                            format!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                            format!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
                         ).into())
                     }
                 }
             }
 
-        paste! {
-            impl ScalarImpl {
-            pub fn [<as_ $suffix_name>](&self) -> &$scalar {
-                match self {
-                Self::$variant_name(ref scalar) => scalar,
-                other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
-                }
-            }
+            paste! {
+                impl ScalarImpl {
+                    pub fn [<as_ $suffix_name>](&self) -> &$scalar {
+                        match self {
+                        Self::$variant_name(ref scalar) => scalar,
+                        other_scalar => panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
+                        }
+                    }
 
-            pub fn [<into_ $suffix_name>](self) -> $scalar {
-                match self {
-                Self::$variant_name(scalar) => scalar,
-                other_scalar =>  panic!("cannot convert ScalarImpl::{} to concrete type", other_scalar.get_ident())
+                    pub fn [<into_ $suffix_name>](self) -> $scalar {
+                        match self {
+                            Self::$variant_name(scalar) => scalar,
+                            other_scalar =>  panic!("cannot convert ScalarImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
+                        }
+                    }
                 }
-            }
-            }
 
-            impl <'scalar> ScalarRefImpl<'scalar> {
-            // Note that this conversion consume self.
-            pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
-                match self {
-                Self::$variant_name(inner) => inner,
-                other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type", other_scalar.get_ident())
+                impl <'scalar> ScalarRefImpl<'scalar> {
+                    // Note that this conversion consume self.
+                    pub fn [<into_ $suffix_name>](self) -> $scalar_ref {
+                        match self {
+                            Self::$variant_name(inner) => inner,
+                            other_scalar => panic!("cannot convert ScalarRefImpl::{} to concrete type {}", other_scalar.get_ident(), stringify!($variant_name))
+                        }
+                    }
                 }
             }
-            }
-        }
         )*
     };
 }

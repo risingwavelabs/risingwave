@@ -11,9 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::alloc::Layout;
 use std::backtrace::Backtrace;
+use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::io::Error as IoError;
@@ -55,6 +56,8 @@ pub enum ErrorCode {
     ),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
+    #[error("Bind error: {0}")]
+    BindError(String),
     #[error("Catalog error: {0}")]
     CatalogError(BoxedError),
     #[error("Out of range")]
@@ -166,6 +169,12 @@ impl From<std::net::AddrParseError> for RwError {
     }
 }
 
+impl From<Infallible> for RwError {
+    fn from(x: Infallible) -> Self {
+        match x {}
+    }
+}
+
 impl Debug for RwError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -216,6 +225,7 @@ impl ErrorCode {
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
+            ErrorCode::BindError(_) => 23,
             ErrorCode::UnknownError(_) => 101,
         }
     }

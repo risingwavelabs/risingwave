@@ -11,14 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::marker::PhantomData;
-use std::net::SocketAddr;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ExchangeSource as ProstExchangeSource, Field as NodeField};
 use risingwave_rpc_client::{ExchangeSource, GrpcExchangeSource};
@@ -32,7 +31,7 @@ pub(super) type ExchangeExecutor = GenericExchangeExecutor<DefaultCreateSource>;
 
 pub struct GenericExchangeExecutor<C> {
     sources: Vec<ProstExchangeSource>,
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
     env: BatchEnvironment,
 
     source_idx: usize,
@@ -64,7 +63,7 @@ impl CreateSource for DefaultCreateSource {
         value: &ProstExchangeSource,
         task_id: TaskId,
     ) -> Result<Box<dyn ExchangeSource>> {
-        let peer_addr = value.get_host()?.to_socket_addr()?;
+        let peer_addr = value.get_host()?.into();
         if is_local_address(env.server_address(), &peer_addr) {
             trace!("Exchange locally [{:?}]", value.get_task_output_id());
             return Ok(Box::new(LocalExchangeSource::create(
@@ -91,7 +90,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
             NodeBody::Exchange
         )?;
 
-        let server_addr = *source.env.server_address();
+        let server_addr = source.env.server_address().clone();
 
         ensure!(!node.get_sources().is_empty());
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
@@ -207,7 +206,7 @@ mod tests {
 
         let mut executor = GenericExchangeExecutor::<FakeCreateSource> {
             sources,
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_idx: 0,
             current_source: None,
             source_creator: PhantomData,

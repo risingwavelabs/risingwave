@@ -11,13 +11,13 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(rustdoc::private_intra_doc_links)]
 //! Defines all kinds of node in the plan tree, each node represent a relational expression.
 //!
 //! We use a immutable style tree structure, every Node are immutable and cannot be modified after
 //! it has been created. If you want to modify the node, such as rewriting the expression in a
-//! ProjectNode or changing a node's input node, you need to create a new node. We use Rc as the
+//! `ProjectNode` or changing a node's input node, you need to create a new node. We use Rc as the
 //! node's reference, and a node just storage its inputs' reference, so change a node just need
 //! create one new node but not the entire sub-tree.
 //!
@@ -64,6 +64,9 @@ pub trait PlanNode:
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
+    fn append_only(&self) -> bool {
+        self.plan_base().append_only
+    }
 }
 
 impl_downcast!(PlanNode);
@@ -124,33 +127,33 @@ impl dyn PlanNode {
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
     pub fn to_stream_prost(&self) -> StreamPlanProst {
-        self.to_stream_prost_identity(true)
+        self.to_stream_prost_auto_fields(true)
     }
 
-    /// Serialize the plan node and its children to a stream plan proto without identity (for
-    /// testing).
-    pub fn to_stream_prost_identity(&self, identity: bool) -> StreamPlanProst {
+    /// Serialize the plan node and its children to a stream plan proto without identity and without
+    /// operator id (for testing).
+    pub fn to_stream_prost_auto_fields(&self, auto_fields: bool) -> StreamPlanProst {
         if let Some(stream_scan) = self.as_stream_table_scan() {
-            return stream_scan.adhoc_to_stream_prost();
+            return stream_scan.adhoc_to_stream_prost(auto_fields);
         }
 
         let node = Some(self.to_stream_prost_body());
         let input = self
             .inputs()
             .into_iter()
-            .map(|plan| plan.to_stream_prost_identity(identity))
+            .map(|plan| plan.to_stream_prost_auto_fields(auto_fields))
             .collect();
         // TODO: support pk_indices and operator_id
         StreamPlanProst {
             input,
-            identity: if identity {
-                format!("{:?}", self)
+            identity: if auto_fields {
+                format!("{}", self)
             } else {
                 "".into()
             },
             node,
-            operator_id: 0,
-            pk_indices: vec![],
+            operator_id: if auto_fields { self.id().0 as u64 } else { 0 },
+            pk_indices: self.pk_indices().iter().map(|x| *x as u32).collect(),
         }
     }
 }
@@ -182,6 +185,7 @@ mod batch_simple_agg;
 mod batch_sort;
 mod batch_values;
 mod logical_agg;
+mod logical_apply;
 mod logical_delete;
 mod logical_filter;
 mod logical_insert;
@@ -198,7 +202,7 @@ mod stream_hash_join;
 mod stream_materialize;
 mod stream_project;
 mod stream_simple_agg;
-mod stream_source_scan;
+mod stream_source;
 mod stream_table_scan;
 
 pub use batch_delete::BatchDelete;
@@ -213,7 +217,8 @@ pub use batch_seq_scan::BatchSeqScan;
 pub use batch_simple_agg::BatchSimpleAgg;
 pub use batch_sort::BatchSort;
 pub use batch_values::BatchValues;
-pub use logical_agg::LogicalAgg;
+pub use logical_agg::{LogicalAgg, PlanAggCall};
+pub use logical_apply::LogicalApply;
 pub use logical_delete::LogicalDelete;
 pub use logical_filter::LogicalFilter;
 pub use logical_insert::LogicalInsert;
@@ -230,7 +235,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_project::StreamProject;
 pub use stream_simple_agg::StreamSimpleAgg;
-pub use stream_source_scan::StreamSourceScan;
+pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 
 use crate::optimizer::property::{WithContext, WithId};
@@ -253,6 +258,7 @@ macro_rules! for_all_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Logical, Agg }
+            ,{ Logical, Apply }
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }
@@ -278,7 +284,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Stream, Project }
             ,{ Stream, Filter }
             ,{ Stream, TableScan }
-            ,{ Stream, SourceScan }
+            ,{ Stream, Source }
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
             ,{ Stream, HashAgg }
@@ -294,6 +300,7 @@ macro_rules! for_logical_plan_nodes {
         $macro! {
             [$($x),*]
             ,{ Logical, Agg }
+            ,{ Logical, Apply }
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }
@@ -342,7 +349,7 @@ macro_rules! for_stream_plan_nodes {
             ,{ Stream, HashJoin }
             ,{ Stream, Exchange }
             ,{ Stream, TableScan }
-            ,{ Stream, SourceScan }
+            ,{ Stream, Source }
             ,{ Stream, HashAgg }
             ,{ Stream, SimpleAgg }
             ,{ Stream, Materialize }
@@ -350,7 +357,7 @@ macro_rules! for_stream_plan_nodes {
     };
 }
 
-/// impl PlanNodeType fn for each node.
+/// impl [`PlanNodeType`] fn for each node.
 macro_rules! enum_plan_node_type {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
@@ -373,7 +380,7 @@ macro_rules! enum_plan_node_type {
 }
 for_all_plan_nodes! { enum_plan_node_type }
 
-/// impl fn plan_ref for each node.
+/// impl fn `plan_ref` for each node.
 macro_rules! impl_plan_ref {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
@@ -392,7 +399,6 @@ for_all_plan_nodes! { impl_plan_ref }
 macro_rules! impl_down_cast_fn {
     ([], $( { $convention:ident, $name:ident }),*) => {
         paste!{
-            #[allow(unused)]
             impl dyn PlanNode {
                 $( pub fn [< as_$convention:snake _ $name:snake>](&self) -> Option<&[<$convention $name>]> {
                     self.downcast_ref::<[<$convention $name>]>()

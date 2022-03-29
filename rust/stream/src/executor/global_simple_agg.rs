@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! Streaming Aggregators
 
 use std::sync::Arc;
@@ -78,6 +78,10 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -107,6 +111,11 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .map(build_agg_call_from_prost)
             .try_collect()?;
         let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(SimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
@@ -114,6 +123,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             params.pk_indices,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -126,6 +136,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -141,6 +152,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -372,6 +384,7 @@ mod tests {
             vec![],
             1,
             "SimpleAggExecutor".to_string(),
+            vec![],
         );
 
         // Consume the init barrier

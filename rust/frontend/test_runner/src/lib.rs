@@ -11,22 +11,19 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 
 //! Data-driven tests.
 #![feature(let_chains)]
 
 mod resolve_id;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_table, drop_table};
+use risingwave_frontend::handler::{create_mv, create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::{QueryContext, QueryContextRef};
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -151,13 +148,13 @@ impl TestCase {
             let statements = Parser::parse_sql(sql).unwrap();
 
             for stmt in statements {
-                let context = QueryContext::new(session.clone());
+                let context = OptimizerContext::new(session.clone());
                 match stmt.clone() {
                     Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                         if result.is_some() {
                             panic!("two queries in one test case");
                         }
-                        let ret = self.apply_query(&stmt, Rc::new(RefCell::new(context)))?;
+                        let ret = self.apply_query(&stmt, context.into())?;
                         if do_check_result {
                             check_result(self, &ret)?;
                         }
@@ -166,6 +163,16 @@ impl TestCase {
                     Statement::CreateTable { name, columns, .. } => {
                         create_table::handle_create_table(context, name, columns).await?;
                     }
+                    Statement::CreateView {
+                        materialized: true,
+                        or_replace: false,
+                        name,
+                        query,
+                        ..
+                    } => {
+                        create_mv::handle_create_mv(context, name, query).await?;
+                    }
+
                     Statement::Drop(drop_statement) => {
                         let table_object_name = ObjectName(vec![drop_statement.name]);
                         drop_table::handle_drop_table(context, table_object_name).await?;
@@ -178,8 +185,12 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
-    fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
-        let session = context.borrow().session_ctx.clone();
+    fn apply_query(
+        &self,
+        stmt: &Statement,
+        context: OptimizerContextRef,
+    ) -> Result<TestCaseResult> {
+        let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
 
         let bound = {
@@ -196,7 +207,9 @@ impl TestCase {
             }
         };
 
-        let logical_plan = match Planner::new(context).plan(bound) {
+        let mut planner = Planner::new(context.clone());
+
+        let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
                 if self.logical_plan.is_some() {
                     ret.logical_plan = Some(explain_plan(&logical_plan.clone().as_subplan()));
@@ -225,14 +238,25 @@ impl TestCase {
 
             // Only generate batch_plan_proto if it is specified in test case
             if self.batch_plan_proto.is_some() {
-                ret.batch_plan_proto = Some(serde_json::to_string_pretty(
+                ret.batch_plan_proto = Some(serde_yaml::to_string(
                     &batch_plan.to_batch_prost_identity(false),
                 )?);
             }
         }
 
         if self.stream_plan.is_some() || self.stream_plan_proto.is_some() {
-            let stream_plan = logical_plan.gen_create_mv_plan();
+            let q = if let Statement::Query(q) = stmt {
+                q.as_ref().clone()
+            } else {
+                return Err(anyhow!("expect a query"));
+            };
+
+            let (stream_plan, table) = create_mv::gen_create_mv_plan(
+                &session,
+                context,
+                Box::new(q),
+                ObjectName(vec!["test".into()]),
+            )?;
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {
@@ -241,9 +265,10 @@ impl TestCase {
 
             // Only generate stream_plan_proto if it is specified in test case
             if self.stream_plan_proto.is_some() {
-                ret.stream_plan_proto = Some(serde_json::to_string_pretty(
-                    &stream_plan.to_stream_prost_identity(false),
-                )?);
+                ret.stream_plan_proto = Some(
+                    serde_yaml::to_string(&stream_plan.to_stream_prost_auto_fields(false))?
+                        + &serde_yaml::to_string(&table)?,
+                );
             }
         }
 

@@ -11,10 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
@@ -29,13 +31,15 @@ pub struct BatchSimpleAgg {
 impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
-        BatchSimpleAgg { logical, base }
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -76,4 +80,16 @@ impl ToDistributedBatch for BatchSimpleAgg {
     }
 }
 
-impl ToBatchProst for BatchSimpleAgg {}
+impl ToBatchProst for BatchSimpleAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::SortAgg(SortAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            // We treat simple agg as a special sort agg without group keys.
+            group_keys: vec![],
+        })
+    }
+}

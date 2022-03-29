@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::process::Command;
 
 use indicatif::{ProgressBar, ProgressStyle};
@@ -49,4 +49,8 @@ pub fn new_spinner() -> ProgressBar {
 
 pub fn complete_spin(pb: &ProgressBar) {
     pb.set_style(ProgressStyle::default_spinner().template("✅ {prefix}: {msg}"));
+}
+
+pub fn fail_spin(pb: &ProgressBar) {
+    pb.set_style(ProgressStyle::default_spinner().template("❗ {prefix}: {msg}"));
 }

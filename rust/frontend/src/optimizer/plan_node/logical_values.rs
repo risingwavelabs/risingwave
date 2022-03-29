@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::sync::Arc;
 use std::{fmt, vec};
 
 use fixedbitset::FixedBitSet;
@@ -20,29 +21,32 @@ use risingwave_common::catalog::Schema;
 use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::property::WithSchema;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
 pub struct LogicalValues {
     pub base: PlanBase,
-    rows: Vec<Vec<ExprImpl>>,
+    rows: Arc<[Vec<ExprImpl>]>,
 }
 
 impl LogicalValues {
-    /// Create a LogicalValues node. Used internally by optimizer.
-    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
+    /// Create a [`LogicalValues`] node. Used internally by optimizer.
+    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: OptimizerContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
             }
         }
         let base = PlanBase::new_logical(ctx, schema, vec![]);
-        Self { rows, base }
+        Self {
+            rows: rows.into(),
+            base,
+        }
     }
 
-    /// Create a LogicalValues node. Used by planner.
-    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
+    /// Create a [`LogicalValues`] node. Used by planner.
+    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
         // No additional checks after binder.
         Self::new(rows, schema, ctx).into()
     }
@@ -91,19 +95,21 @@ impl ToStream for LogicalValues {
     fn to_stream(&self) -> PlanRef {
         unimplemented!("Stream values executor is unimplemented!")
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, crate::utils::ColIndexMapping) {
+        unimplemented!("Stream values executor is unimplemented!")
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
 
     use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, Datum};
 
     use super::*;
     use crate::expr::Literal;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     fn literal(val: i32) -> ExprImpl {
         Literal::new(Datum::Some(val.into()), DataType::Int32).into()
@@ -119,7 +125,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_prune_filter() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

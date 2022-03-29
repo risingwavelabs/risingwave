@@ -11,16 +11,20 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::{Distribution, WithSchema};
+use crate::utils::ColIndexMapping;
 
 /// `BatchHashJoin` implements [`super::LogicalJoin`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
@@ -38,12 +42,24 @@ pub struct StreamHashJoin {
 impl StreamHashJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
         let ctx = logical.base.ctx.clone();
+        // Inner join won't change the append-only behavior of the stream. The rest might.
+        let append_only = match logical.join_type() {
+            JoinType::Inner => logical.left().append_only() && logical.right().append_only(),
+            _ => false,
+        };
+        let dist = Self::derive_dist(
+            logical.left().distribution(),
+            logical.right().distribution(),
+            &eq_join_predicate,
+            &logical.l2o_col_mapping(),
+        );
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.to_vec(),
-            Distribution::any().clone(),
+            dist,
+            append_only,
         );
 
         Self {
@@ -56,6 +72,23 @@ impl StreamHashJoin {
     /// Get a reference to the batch hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
         &self.eq_join_predicate
+    }
+
+    fn derive_dist(
+        left: &Distribution,
+        right: &Distribution,
+        predicate: &EqJoinPredicate,
+        l2o_mapping: &ColIndexMapping,
+    ) -> Distribution {
+        match (left, right) {
+            (Distribution::Single, Distribution::Single) => Distribution::Single,
+            (Distribution::HashShard(_), Distribution::HashShard(_)) => {
+                assert!(left.satisfies(&Distribution::HashShard(predicate.left_eq_indexes())));
+                assert!(right.satisfies(&Distribution::HashShard(predicate.right_eq_indexes())));
+                l2o_mapping.rewrite_provided_distribution(left)
+            }
+            (_, _) => panic!(),
+        }
     }
 }
 
@@ -115,7 +148,18 @@ impl ToStreamProst for StreamHashJoin {
                 .iter()
                 .map(|v| *v as i32)
                 .collect(),
-            condition: Some(self.eq_join_predicate.other_cond().as_expr().to_protobuf()),
+            condition: self
+                .eq_join_predicate
+                .other_cond()
+                .as_expr_unless_true()
+                .map(|x| x.to_protobuf()),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

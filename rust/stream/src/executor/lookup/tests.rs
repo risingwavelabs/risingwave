@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::array::{I32Array, Op};
@@ -32,11 +32,15 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
             data_type: DataType::Int32,
             column_id: ColumnId::new(1),
             name: "rowid_column".to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         },
         ColumnDesc {
             data_type: DataType::Int32,
             column_id: ColumnId::new(2),
             name: "join_column".to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         },
     ]
 }
@@ -121,6 +125,7 @@ async fn create_arrangement(
         column_ids,
         1,
         "ArrangeExecutor".to_string(),
+        vec![],
     ))
 }
 
@@ -141,11 +146,15 @@ async fn create_source() -> Box<dyn Executor + Send> {
             data_type: DataType::Int32,
             column_id: ColumnId::new(1),
             name: "join_column".to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         },
         ColumnDesc {
             data_type: DataType::Int32,
             column_id: ColumnId::new(2),
             name: "rowid_column".to_string(),
+            field_descs: vec![],
+            type_name: "".to_string(),
         },
     ];
 

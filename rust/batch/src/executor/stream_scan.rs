@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt::{Debug, Formatter};
 
 use risingwave_common::array::DataChunk;
@@ -83,6 +83,9 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                 },
                 column_ids,
             )?),
+            SourceImpl::Connector(_) => {
+                panic!("connector source do not support batch query yet")
+            }
             SourceImpl::TableV2(_) => {
                 panic!("use table_scan to scan a table")
             }

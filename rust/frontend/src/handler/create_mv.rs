@@ -11,46 +11,66 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::cell::RefCell;
-use std::rc::Rc;
 
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::{ObjectName, Query, Statement};
+use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_sqlparser::ast::{ObjectName, Query};
 
 use crate::binder::Binder;
+use crate::optimizer::property::Distribution;
+use crate::optimizer::PlanRef;
 use crate::planner::Planner;
-use crate::session::QueryContext;
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 
-pub async fn handle_create_mv(
-    context: QueryContext,
-    name: ObjectName,
+/// Generate create MV plan, return plan and mv table info.
+pub fn gen_create_mv_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
     query: Box<Query>,
-) -> Result<PgResponse> {
-    let (schema_name, table_name) = Binder::resolve_table_name(name.clone())?;
-    let session = context.session_ctx.clone();
-    let (_db_id, _schema_id) = session
+    name: ObjectName,
+) -> Result<(PlanRef, ProstTable)> {
+    let (schema_name, table_name) = Binder::resolve_table_name(name)?;
+    let (database_id, schema_id) = session
         .env()
         .catalog_reader()
         .read_guard()
-        .check_relation_name(session.database(), &schema_name, &table_name)?;
+        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
+
     let bound = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
             session.database().to_string(),
         );
-        binder.bind(Statement::Query(query))?
+        binder.bind_query(*query)?
     };
-    let _catalog_writer = session.env().catalog_writer();
-    let plan = Planner::new(Rc::new(RefCell::new(context)))
-        .plan(bound)?
-        .gen_create_mv_plan()
-        .to_stream_prost();
-    // TODO catalog writer to create mv
 
-    let json_plan = serde_json::to_string(&plan).unwrap();
-    tracing::info!(name= ?name, plan = ?json_plan);
+    let mut plan_root = Planner::new(context).plan_query(bound)?;
+    plan_root.set_required_dist(Distribution::any().clone());
+    let materialize = plan_root.gen_create_mv_plan(table_name)?;
+    let table = materialize.table().to_prost(schema_id, database_id);
+    let plan: PlanRef = materialize.into();
+
+    Ok((plan, table))
+}
+
+pub async fn handle_create_mv(
+    context: OptimizerContext,
+    name: ObjectName,
+    query: Box<Query>,
+) -> Result<PgResponse> {
+    let session = context.session_ctx.clone();
+
+    let (table, stream_plan) = {
+        let (plan, table) = gen_create_mv_plan(&session, context.into(), query, name)?;
+        let stream_plan = plan.to_stream_prost();
+        (table, stream_plan)
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .create_materialized_view(table, stream_plan)
+        .await?;
 
     Ok(PgResponse::new(
         pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW,

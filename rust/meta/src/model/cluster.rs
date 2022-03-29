@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::Result;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 
@@ -24,7 +24,7 @@ pub const INVALID_EXPIRE_AT: u64 = 0;
 
 #[derive(Clone, Debug)]
 pub struct Worker {
-    worker_node: WorkerNode,
+    pub worker_node: WorkerNode,
     expire_at: u64,
 }
 

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use bytes::{Buf, Bytes};
 use prost::Message;
 use risingwave_pb::hummock::Checksum;
@@ -33,7 +33,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Decode block from given bytes
+    /// Decodes block from given bytes
     /// Structure of Block:
     /// ```plain
     /// | Entry 0 | ... | Entry N-1 | Entry 0 offset (4B) | ... | Entry N-1 offset (4B) |
@@ -42,7 +42,7 @@ impl Block {
     pub fn decode(data: Bytes) -> HummockResult<Block> {
         let size = data.len();
 
-        // verify checksum
+        // Verify checksum
         let checksum_len = (&data[size - 4..]).get_u32() as usize;
         let content_len = size - 4 - checksum_len;
         let checksum = Checksum::decode(&data[content_len..content_len + checksum_len])
@@ -52,7 +52,7 @@ impl Block {
         let n_entries = (&data[content_len - 4..content_len]).get_u32() as usize;
         assert!(n_entries > 0);
 
-        // read indices
+        // Read indices
         let data_len = content_len - 4 - n_entries * 4;
         let mut indices = &data[data_len..content_len - 4];
         let mut entry_offsets = Vec::with_capacity(n_entries + 1);
@@ -61,7 +61,6 @@ impl Block {
         }
         entry_offsets.push(data_len as u32);
 
-        // base key
         let base_header = Header::decode(&mut &data[..HEADER_SIZE]);
         let base_key = data.slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
 
@@ -155,28 +154,28 @@ mod tests {
         let mut iter = BlockIterator::new(Arc::new(block0));
 
         iter.seek_to_first();
-        let k0 = iter.key().unwrap();
-        let v0 = iter.value().unwrap();
+        let k0 = iter.key();
+        let v0 = iter.value();
         assert_bytes_eq!(k0, key(0));
         assert_bytes_eq!(v0, put_value_bytes(0));
 
         iter.next();
-        let k1 = iter.key().unwrap();
-        let v1 = iter.value().unwrap();
+        let k1 = iter.key();
+        let v1 = iter.value();
         assert_bytes_eq!(k1, key(1));
         assert_bytes_eq!(v1, put_value_bytes(1));
 
         iter.set_block(Arc::new(block1));
 
         iter.seek_to_first();
-        let k2 = iter.key().unwrap();
-        let v2 = iter.value().unwrap();
+        let k2 = iter.key();
+        let v2 = iter.value();
         assert_bytes_eq!(k2, key(2));
         assert_bytes_eq!(v2, put_value_bytes(2));
 
         iter.next();
-        let k3 = iter.key().unwrap();
-        let v3 = iter.value().unwrap();
+        let k3 = iter.key();
+        let v3 = iter.value();
         assert_bytes_eq!(k3, key(3));
         assert_bytes_eq!(v3, put_value_bytes(3));
     }

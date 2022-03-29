@@ -11,11 +11,11 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use prost::Message;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 
 /// Column family name for hummock version.
 /// `cf(hummock_version)`: `HummockVersionRefId` -> `HummockVersion`
@@ -46,5 +46,3 @@ impl MetadataModel for HummockVersion {
         Ok(HummockVersionRefId { id: self.id })
     }
 }
-
-impl Transactional for HummockVersion {}

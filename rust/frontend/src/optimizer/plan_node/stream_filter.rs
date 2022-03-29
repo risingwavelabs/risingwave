@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use risingwave_common::catalog::Schema;
@@ -19,6 +19,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::property::WithSchema;
 use crate::utils::Condition;
@@ -36,8 +37,15 @@ impl StreamFilter {
         let input = logical.input();
         let pk_indices = logical.base.pk_indices.to_vec();
         let dist = input.distribution().clone();
-        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist);
-        StreamFilter { logical, base }
+        // Filter executor won't change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(
+            ctx,
+            logical.schema().clone(),
+            pk_indices,
+            dist,
+            logical.input().append_only(),
+        );
+        StreamFilter { base, logical }
     }
 
     pub fn predicate(&self) -> &Condition {

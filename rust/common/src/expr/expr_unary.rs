@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 //! For expression that only accept one value as input (e.g. CAST)
 
 use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::*;
+use crate::error::{ErrorCode, Result};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
@@ -59,7 +60,11 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "CAST({:?} AS {:?}) not supported yet!",
+                    $child.return_type(), $ret
+                ))
+                .into());
             }
         }
     };
@@ -68,46 +73,75 @@ macro_rules! gen_cast_impl {
 macro_rules! gen_cast {
     ($($x:tt, )* ) => {
         gen_cast_impl! {
-        [$($x),*],
-        { varchar, date, str_to_date},
-        { varchar, timestamp, str_to_timestamp},
-        { varchar, timestampz, str_to_timestampz},
-        { varchar, int16, str_to_i16},
-        { varchar, int32, str_to_i32},
-        { varchar, int64, str_to_i64},
-        { varchar, float32, str_to_real},
-        { varchar, float64, str_to_double},
-        { varchar, decimal, str_to_decimal},
-        { varchar, boolean, str_to_bool},
-        { boolean, varchar, bool_to_str},
-        // TODO: decide whether nullability-cast should be allowed (#2350)
-        { boolean, boolean, |x| Ok(x)},
-        { int16, int32, general_cast },
-        { int16, int64, general_cast },
-        { int16, float32, general_cast },
-        { int16, float64, general_cast },
-        { int16, decimal, general_cast },
-        { int32, int16, general_cast },
-        { int32, int64, general_cast },
-        { int32, float64, general_cast },
-        { int32, decimal, general_cast },
-        { int64, int16, general_cast },
-        { int64, int32, general_cast },
-        { int64, decimal, general_cast },
-        { float32, float64, general_cast },
-        { float32, decimal, general_cast },
-        { float32, int16, to_i16 },
-        { float32, int32, to_i32 },
-        { float32, int64, to_i64 },
-        { float64, decimal, general_cast },
-        { float64, int16, to_i16 },
-        { float64, int32, to_i32 },
-        { float64, int64, to_i64 },
-        { decimal, decimal, dec_to_dec },
-        { decimal, int16, deci_to_i16 },
-        { decimal, int32, deci_to_i32 },
-        { decimal, int64, deci_to_i64 },
-        { date, timestamp, date_to_timestamp }
+            [$($x),*],
+            // FIXME: We can not unify char and varchar because they are different in PG while share the
+            // same logical type (String type) in our system (#2414).
+            { varchar, date, str_to_date },
+            { varchar, time, str_to_time },
+            { varchar, timestamp, str_to_timestamp },
+            { varchar, timestampz, str_to_timestampz },
+            { varchar, int16, str_parse },
+            { varchar, int32, str_parse },
+            { varchar, int64, str_parse },
+            { varchar, float32, str_parse },
+            { varchar, float64, str_parse },
+            { varchar, decimal, str_parse },
+            { varchar, boolean, str_to_bool },
+            { char,    date, str_to_date },
+            { char,    time, str_to_time },
+            { char,    timestamp, str_to_timestamp },
+            { char,    timestampz, str_to_timestampz },
+            { char,    int16, str_parse },
+            { char,    int32, str_parse },
+            { char,    int64, str_parse },
+            { char,    float32, str_parse },
+            { char,    float64, str_parse },
+            { char,    decimal, str_parse },
+            { char,    boolean, str_to_bool },
+            { varchar, char, str_to_str },
+            { char, char, str_to_str },
+            { char, varchar, str_to_str },
+
+            { boolean, varchar, bool_to_str },
+            { boolean, char, bool_to_str },
+            // TODO: decide whether nullability-cast should be allowed (#2350)
+            { boolean, boolean, |x| Ok(x) },
+
+            { int16, int32, general_cast },
+            { int16, int64, general_cast },
+            { int16, float32, general_cast },
+            { int16, float64, general_cast },
+            { int16, decimal, general_cast },
+            { int32, int16, general_cast },
+            { int32, int64, general_cast },
+            { int32, float32, to_f32 }, // lossy
+            { int32, float64, general_cast },
+            { int32, decimal, general_cast },
+            { int64, int16, general_cast },
+            { int64, int32, general_cast },
+            { int64, float32, to_f32 }, // lossy
+            { int64, float64, to_f64 }, // lossy
+            { int64, decimal, general_cast },
+
+            { float32, float64, general_cast },
+            { float32, decimal, general_cast },
+            { float32, int16, to_i16 },
+            { float32, int32, to_i32 },
+            { float32, int64, to_i64 },
+            { float64, decimal, general_cast },
+            { float64, int16, to_i16 },
+            { float64, int32, to_i32 },
+            { float64, int64, to_i64 },
+            { float64, float32, to_f32 }, // lossy
+
+            { decimal, decimal, dec_to_dec },
+            { decimal, int16, dec_to_i16 },
+            { decimal, int32, dec_to_i32 },
+            { decimal, int64, dec_to_i64 },
+            { decimal, float32, to_f32 },
+            { decimal, float64, to_f64 },
+
+            { date, timestamp, date_to_timestamp }
         }
     };
 }
@@ -130,7 +164,11 @@ macro_rules! gen_neg_impl {
                 ),
             )*
             _ => {
-                unimplemented!("Neg is not supported on {:?}", $child.return_type())
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "Neg is not supported on {:?}",
+                    $child.return_type()
+                ))
+                .into());
             }
         }
     };
@@ -155,104 +193,11 @@ pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
     child_expr: BoxedExpression,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
 
-    match (expr_type, return_type.clone(), child_expr.return_type()) {
-        // FIXME: We can not unify char and varchar because they are different in PG while share the
-        // same logical type (String type) in our system (#2414).
-        (ProstType::Cast, DataType::Date, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveDateArray, _>::new(
-                child_expr,
-                return_type,
-                str_to_date,
-            ))
-        }
-        (ProstType::Cast, DataType::Time, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveTimeArray, _>::new(
-                child_expr,
-                return_type,
-                str_to_time,
-            ))
-        }
-        (ProstType::Cast, DataType::Timestamp, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, NaiveDateTimeArray, _>::new(
-                child_expr,
-                return_type,
-                str_to_timestamp,
-            ))
-        }
-        (ProstType::Cast, DataType::Timestampz, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_timestampz,
-            ))
-        }
-        (ProstType::Cast, DataType::Boolean, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, BoolArray, _>::new(
-                child_expr,
-                return_type,
-                str_to_bool,
-            ))
-        }
-        (ProstType::Cast, DataType::Decimal, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, DecimalArray, _>::new(
-                child_expr,
-                return_type,
-                str_to_decimal,
-            ))
-        }
-        (ProstType::Cast, DataType::Float32, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, F32Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_real,
-            ))
-        }
-        (ProstType::Cast, DataType::Float64, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, F64Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_double,
-            ))
-        }
-        (ProstType::Cast, DataType::Int16, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I16Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_i16,
-            ))
-        }
-        (ProstType::Cast, DataType::Int32, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_i32,
-            ))
-        }
-        (ProstType::Cast, DataType::Int64, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, I64Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_i64,
-            ))
-        }
-        (ProstType::Cast, DataType::Char, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_str,
-            ))
-        }
-        (ProstType::Cast, DataType::Varchar, DataType::Char) => {
-            Box::new(UnaryExpression::<Utf8Array, Utf8Array, _>::new(
-                child_expr,
-                return_type,
-                str_to_str,
-            ))
-        }
-        (ProstType::Cast, _, _) => gen_cast! {child_expr, return_type, },
+    let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
+        (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
         (ProstType::Not, _, _) => {
             Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
                 child_expr,
@@ -309,10 +254,17 @@ pub fn new_unary_expr(
             gen_neg! { child_expr, return_type }
         }
         (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
+
         (expr, ret, child) => {
-            unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
+            return Err(ErrorCode::NotImplementedError(format!(
+                "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
+                expr, child, ret
+            ))
+            .into());
         }
-    }
+    };
+
+    Ok(expr)
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {
@@ -361,13 +313,13 @@ mod tests {
     use crate::array::*;
     use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::types::{NaiveDateWrapper, Scalar};
-    use crate::vector_op::cast::{date_to_timestamp, str_to_i16};
+    use crate::vector_op::cast::{date_to_timestamp, str_parse};
 
     #[test]
     fn test_unary() {
         test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
         test_unary_date::<NaiveDateTimeArray, _>(|x| date_to_timestamp(x).unwrap(), Type::Cast);
-        test_str_to_int16::<I16Array, _>(|x| str_to_i16(x).unwrap());
+        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap());
     }
 
     #[test]

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{expr_node, ExprNode};
 
@@ -44,7 +44,7 @@ pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
-    Ok(new_unary_expr(prost.get_expr_type()?, ret_type, child_expr))
+    new_unary_expr(prost.get_expr_type()?, ret_type, child_expr)
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 // TODO(MrCroxx): This file needs to be refactored.
 
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
-// TODO: Define policy based on use cases (read / comapction / ...).
+// TODO: Define policy based on use cases (read / compaction / ...).
 pub enum CachePolicy {
     Disable,
     Fill,
@@ -37,7 +37,7 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    /// TODO: meta is also supposed to be block, and meta cache will be removed.
+    /// TODO: meta is also supposed to be block based, and meta cache will be removed.
     meta_cache: Cache<u64, SstableMeta>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,

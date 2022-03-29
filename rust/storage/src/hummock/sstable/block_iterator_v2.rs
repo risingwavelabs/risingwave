@@ -1,14 +1,29 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::cmp::Ordering;
 use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 
-use super::{BlockV2, KeyPrefix};
+use super::{Block, KeyPrefix};
+use crate::hummock::version_cmp::VersionedComparator;
 
-/// [`BlockIteratorV2`] is used to read kv pairs in a block.
-pub struct BlockIteratorV2 {
+/// [`BlockIterator`] is used to read kv pairs in a block.
+pub struct BlockIterator {
     /// Block that iterates on.
-    block: Arc<BlockV2>,
+    block: Arc<Block>,
     /// Current restart point index.
     restart_point_index: usize,
     /// Current offset.
@@ -21,8 +36,8 @@ pub struct BlockIteratorV2 {
     entry_len: usize,
 }
 
-impl BlockIteratorV2 {
-    pub fn new(block: Arc<BlockV2>) -> Self {
+impl BlockIterator {
+    pub fn new(block: Arc<Block>) -> Self {
         Self {
             block,
             offset: usize::MAX,
@@ -81,8 +96,8 @@ impl BlockIteratorV2 {
     }
 }
 
-impl BlockIteratorV2 {
-    /// Invalidate current state after reaching a invalid state.
+impl BlockIterator {
+    /// Invalidates current state after reaching a invalid state.
     fn invalidate(&mut self) {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
@@ -91,9 +106,9 @@ impl BlockIteratorV2 {
         self.entry_len = 0;
     }
 
-    /// Move to the next entry.
+    /// Moves to the next entry.
     ///
-    /// Note: Ensure that the current state is valid.
+    /// Note: Ensures that the current state is valid.
     fn next_inner(&mut self) {
         let offset = self.offset + self.entry_len;
         if offset >= self.block.len() {
@@ -114,21 +129,25 @@ impl BlockIteratorV2 {
         }
     }
 
-    /// Move forward until reach the first that equals or larger than the given `key`.
+    /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Less {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
+        {
             self.next_inner();
         }
     }
 
-    /// Move backward until reach the first key that equals or smaller than the given `key`.
+    /// Moves backward until reaching the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
-        while self.is_valid() && (&self.key[..]).cmp(key) == Ordering::Greater {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
+        {
             self.prev_inner();
         }
     }
 
-    /// Move forward until the position reaches the previous position of the given `next_offset` or
+    /// Moves forward until the position reaches the previous position of the given `next_offset` or
     /// the last valid position if exists.
     fn next_until_prev_offset(&mut self, offset: usize) {
         while self.offset + self.entry_len < std::cmp::min(self.block.len(), offset) {
@@ -136,7 +155,7 @@ impl BlockIteratorV2 {
         }
     }
 
-    /// Move to the previous entry.
+    /// Moves to the previous entry.
     ///
     /// Note: Ensure that the current state is valid.
     fn prev_inner(&mut self) {
@@ -152,27 +171,27 @@ impl BlockIteratorV2 {
         self.next_until_prev_offset(origin_offset);
     }
 
-    /// Decode [`KeyPrefix`] at given offset.
+    /// Decodes [`KeyPrefix`] at given offset.
     fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
         KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
-    /// Search the restart point index that the given `key` belongs to.
+    /// Searchs the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         self.block.search_restart_point_by(|probe| {
             let prefix = self.decode_prefix_at(*probe as usize);
             let probe_key = &self.block.data()[prefix.diff_key_range()];
-            (probe_key).cmp(key)
+            VersionedComparator::compare_key(probe_key, key)
         })
     }
 
-    /// Seek to the restart point that the given `key` belongs to.
+    /// Seeks to the restart point that the given `key` belongs to.
     fn seek_restart_point_by_key(&mut self, key: &[u8]) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
 
-    /// Seek to the restart point by given restart point index.
+    /// Seeks to the restart point by given restart point index.
     fn seek_restart_point_by_index(&mut self, index: usize) {
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset);
@@ -186,19 +205,20 @@ impl BlockIteratorV2 {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::hummock::sstable::utils::full_key;
-    use crate::hummock::{BlockV2Builder, BlockV2BuilderOptions};
+    use bytes::BufMut;
 
-    fn build_iterator_for_test() -> BlockIteratorV2 {
-        let options = BlockV2BuilderOptions::default();
-        let mut builder = BlockV2Builder::new(options);
+    use super::*;
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
+
+    fn build_iterator_for_test() -> BlockIterator {
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
         builder.add(&full_key(b"k01", 1), b"v01");
         builder.add(&full_key(b"k02", 2), b"v02");
         builder.add(&full_key(b"k04", 4), b"v04");
         builder.add(&full_key(b"k05", 5), b"v05");
         let buf = builder.build();
-        BlockIteratorV2::new(Arc::new(BlockV2::decode(buf).unwrap()))
+        BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
     }
 
     #[test]
@@ -324,5 +344,12 @@ mod tests {
 
         it.next();
         assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+    }
+
+    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+        buf.put_slice(user_key);
+        buf.put_u64(!epoch);
+        buf.freeze()
     }
 }

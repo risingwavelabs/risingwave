@@ -11,21 +11,29 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
-use crate::optimizer::plan_node::CollectInputRef;
 
 #[derive(Debug, Clone)]
 pub struct Condition {
     /// Condition expressions in conjunction form (combined with `AND`)
     pub conjunctions: Vec<ExprImpl>,
+}
+
+impl IntoIterator for Condition {
+    type Item = ExprImpl;
+    type IntoIter = std::vec::IntoIter<ExprImpl>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.conjunctions.into_iter()
+    }
 }
 
 impl fmt::Display for Condition {
@@ -89,6 +97,22 @@ impl Condition {
         }
     }
 
+    /// Convert condition to an expression. If always true, return `None`.
+    pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
+                    .unwrap()
+                    .into();
+            }
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
@@ -102,17 +126,13 @@ impl Condition {
 
     #[must_use]
     /// Split the condition expressions into 3 groups: left, right and others
-    pub fn split(
-        self,
-        left_col_num: usize,
-        right_col_num: usize,
-    ) -> (Vec<ExprImpl>, Vec<ExprImpl>, Vec<ExprImpl>) {
+    pub fn split(self, left_col_num: usize, right_col_num: usize) -> (Self, Self, Self) {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
         let (mut left, mut right, mut others) = (vec![], vec![], vec![]);
         self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_subset(&left_bit_map) {
                 left.push(expr)
             } else if input_bits.is_subset(&right_bit_map) {
@@ -122,7 +142,87 @@ impl Condition {
             }
         });
 
-        (left, right, others)
+        (
+            Condition { conjunctions: left },
+            Condition {
+                conjunctions: right,
+            },
+            Condition {
+                conjunctions: others,
+            },
+        )
+    }
+
+    #[must_use]
+    /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
+    /// columns from other conditions.
+    ///
+    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    ///
+    /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
+    pub fn split_eq_keys(
+        self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> (Vec<(InputRef, InputRef)>, Self) {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        let (mut eq_keys, mut others) = (vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
+            if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
+                others.push(expr)
+            } else {
+                let mut is_eq_cond = false;
+                if let ExprImpl::FunctionCall(function_call) = expr.clone()
+                    && function_call.get_expr_type() == ExprType::Equal
+                    && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                            function_call.decompose_as_binary()
+                    {
+                        is_eq_cond = true;
+                        if x.index() < y.index() {
+                            eq_keys.push((*x, *y));
+                        } else {
+                            eq_keys.push((*y, *x));
+                        }
+                    }
+                if !is_eq_cond {
+                    others.push(expr)
+                }
+            }
+        });
+
+        (
+            eq_keys,
+            Condition {
+                conjunctions: others,
+            },
+        )
+    }
+
+    #[must_use]
+    /// Split the condition expressions into 2 groups: those referencing `columns` and others which
+    /// are disjoint with columns.
+    pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
+        let (mut referencing, mut disjoint) = (vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = expr.collect_input_refs(columns.len());
+            if input_bits.is_disjoint(columns) {
+                disjoint.push(expr)
+            } else {
+                referencing.push(expr)
+            }
+        });
+
+        (
+            Condition {
+                conjunctions: referencing,
+            },
+            Condition {
+                conjunctions: disjoint,
+            },
+        )
     }
 
     #[must_use]
@@ -202,8 +302,8 @@ mod tests {
             .and(Condition::with_expr(right.clone()))
             .and(Condition::with_expr(left.clone()));
         let res = cond.split(left_col_num, right_col_num);
-        assert_eq!(res.0, vec![left]);
-        assert_eq!(res.1, vec![right]);
-        assert_eq!(res.2, vec![other]);
+        assert_eq!(res.0.conjunctions, vec![left]);
+        assert_eq!(res.1.conjunctions, vec![right]);
+        assert_eq!(res.2.conjunctions, vec![other]);
     }
 }

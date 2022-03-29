@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
-/// Serves as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
+/// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
 pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     /// The iterator of the current table.
     sstable_iter: Option<TI::SSTableIterator>,
@@ -50,7 +50,7 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
         }
     }
 
-    /// Seek to a table, and then seek to the key if `seek_key` is given.
+    /// Seeks to a table, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.tables.len() {
             self.sstable_iter = None;
@@ -117,7 +117,7 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
 
         self.seek_idx(table_idx, Some(key)).await?;
         if !self.is_valid() {
-            // seek to next table
+            // Seek to next table
             self.seek_idx(table_idx + 1, None).await?;
         }
         Ok(())

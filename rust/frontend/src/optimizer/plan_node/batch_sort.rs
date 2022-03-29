@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use itertools::Itertools;
@@ -36,7 +36,7 @@ impl BatchSort {
         let schema = input.schema().clone();
         let dist = input.distribution().clone();
         let base = PlanBase::new_batch(ctx, schema, dist, order);
-        BatchSort { input, base }
+        BatchSort { base, input }
     }
 }
 

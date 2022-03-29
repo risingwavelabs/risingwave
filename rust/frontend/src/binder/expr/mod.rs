@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -20,11 +20,12 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
 mod function;
+mod subquery;
 mod value;
 
 impl Binder {
@@ -68,29 +69,30 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_binary_op(*left, op, *right)?,
             ))),
-            Expr::UnaryOp { op, expr } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_unary_expr(op, *expr)?,
-            ))),
+            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Cast { expr, data_type } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_cast(*expr, data_type)?,
             ))),
             Expr::Function(f) => Ok(self.bind_function(f)?),
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", expr)).into()),
+            Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
+            Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            _ => Err(
+                ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
+            ),
         }
     }
 
-    pub(super) fn bind_unary_expr(
-        &mut self,
-        op: UnaryOperator,
-        expr: Expr,
-    ) -> Result<FunctionCall> {
+    pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
         let func_type = match op {
-            UnaryOperator::Minus => ExprType::Neg,
             UnaryOperator::Not => ExprType::Not,
+            UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::Plus => {
+                return self.rewrite_positive(expr);
+            }
             _ => {
                 return Err(ErrorCode::NotImplementedError(format!(
-                    "unsupported expression: {:?}",
+                    "unsupported unary expression: {:?}",
                     op
                 ))
                 .into())
@@ -98,10 +100,27 @@ impl Binder {
         };
         let expr = self.bind_expr(expr)?;
         let return_type = expr.return_type();
-        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
-            ErrorCode::NotImplementedError(format!("{:?} {:?}", op, return_type)).into()
-        })
+        FunctionCall::new(func_type, vec![expr])
+            .ok_or_else(|| {
+                ErrorCode::NotImplementedError(format!(
+                    "unsupported unary expression {:?} {:?}",
+                    op, return_type
+                ))
+                .into()
+            })
+            .map(|f| f.into())
     }
+
+    /// Directly returns the expression itself if it is a positive number.
+    fn rewrite_positive(&mut self, expr: Expr) -> Result<ExprImpl> {
+        let expr = self.bind_expr(expr)?;
+        let return_type = expr.return_type();
+        if return_type.is_numeric() {
+            return Ok(expr);
+        }
+        return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
+    }
+
     pub(super) fn bind_trim(
         &mut self,
         expr: Expr,
@@ -206,6 +225,9 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp => DataType::Timestamp,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Real => DataType::Float32,
+        AstDataType::Array(datatype) => DataType::List {
+            datatype: Box::new(bind_data_type(datatype)?),
+        },
         _ => {
             return Err(ErrorCode::NotImplementedError(format!(
                 "unsupported data type: {:?}",

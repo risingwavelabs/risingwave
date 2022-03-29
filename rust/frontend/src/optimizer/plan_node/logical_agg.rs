@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 use std::fmt;
 
@@ -69,12 +69,22 @@ impl PlanAggCall {
             distinct: false,
         }
     }
+
+    pub fn count_star() -> Self {
+        PlanAggCall {
+            agg_kind: AggKind::Count,
+            return_type: DataType::Int64,
+            inputs: vec![],
+        }
+    }
 }
 
 /// `LogicalAgg` groups input data by their group keys and computes aggregation functions.
 ///
 /// It corresponds to the `GROUP BY` operator in a SQL query statement together with the aggregate
 /// functions in the `SELECT` clause.
+///
+/// The output schema will first include the group keys and then the aggregation calls.
 #[derive(Clone, Debug)]
 pub struct LogicalAgg {
     pub base: PlanBase,
@@ -140,25 +150,34 @@ impl ExprRewriter for ExprHandler {
             .collect_vec();
 
         if agg_kind == AggKind::Avg {
-            // Rewrite avg to sum/count.
+            assert_eq!(inputs.len(), 1);
+
+            let left_return_type =
+                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]);
+
+            // Rewrite avg to sum / count.
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Sum,
-                return_type: return_type.clone(),
+                return_type: left_return_type.clone(),
                 inputs: inputs.clone(),
             });
             let left = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type.clone(),
+                left_return_type,
             );
+
+            let right_return_type =
+                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]);
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
-                return_type: DataType::Int64,
+                return_type: right_return_type.clone(),
                 inputs,
             });
+
             let right = InputRef::new(
                 self.group_column_index.len() + self.agg_calls.len() - 1,
-                return_type,
+                right_return_type,
             );
 
             ExprImpl::from(
@@ -215,12 +234,30 @@ impl LogicalAgg {
         };
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         Self {
+            base,
             agg_calls,
+            agg_call_alias,
             group_keys,
             input,
-            base,
-            agg_call_alias,
         }
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let agg_cal_num = self.agg_calls().len();
+        let group_keys = self.group_keys();
+        let mut map = vec![None; agg_cal_num + group_keys.len()];
+        for (i, key) in group_keys.iter().enumerate() {
+            map[i] = Some(*key);
+        }
+        ColIndexMapping::with_target_size(map, input_len)
+    }
+
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 
     fn derive_schema(
@@ -308,6 +345,15 @@ impl LogicalAgg {
     pub fn group_keys(&self) -> &[usize] {
         self.group_keys.as_ref()
     }
+
+    pub fn decompose(self) -> (Vec<PlanAggCall>, Vec<Option<String>>, Vec<usize>, PlanRef) {
+        (
+            self.agg_calls,
+            self.agg_call_alias,
+            self.group_keys,
+            self.input,
+        )
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalAgg {
@@ -321,6 +367,34 @@ impl PlanTreeNodeUnary for LogicalAgg {
             self.group_keys().to_vec(),
             input,
         )
+    }
+    #[must_use]
+    fn rewrite_with_input(
+        &self,
+        input: PlanRef,
+        input_col_change: ColIndexMapping,
+    ) -> (Self, ColIndexMapping) {
+        let agg_calls = self
+            .agg_calls
+            .iter()
+            .cloned()
+            .map(|mut agg_call| {
+                agg_call.inputs.iter_mut().for_each(|i| {
+                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                });
+                agg_call
+            })
+            .collect();
+        let group_keys = self
+            .group_keys
+            .iter()
+            .cloned()
+            .map(|key| input_col_change.map(key))
+            .collect();
+        let agg = Self::new(agg_calls, self.agg_call_alias().to_vec(), group_keys, input);
+        // change the input columns index will not change the output column index
+        let out_col_change = ColIndexMapping::identity(agg.schema().len());
+        (agg, out_col_change)
     }
 }
 impl_plan_tree_node_for_unary! {LogicalAgg}
@@ -420,28 +494,63 @@ impl ToStream for LogicalAgg {
             .into()
         }
     }
+
+    fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
+        let (input, input_col_change) = self.input.logical_rewrite_for_stream();
+        let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);
+
+        // To rewrite StreamAgg, there are two things to do:
+        // 1. insert a RowCount(Count with zero argument) at the beginning of agg_calls of
+        // LogicalAgg.
+        // 2. increment the index of agg_calls in `out_col_change` by 1 due to
+        // the insertion of RowCount, and it will be used to rewrite LogicalProject above this
+        // LogicalAgg.
+        // Please note that the index of group keys need not be changed.
+        let (mut agg_calls, mut agg_call_alias, group_keys, input) = agg.decompose();
+        agg_calls.insert(
+            0,
+            PlanAggCall {
+                agg_kind: AggKind::Count,
+                return_type: DataType::Int64,
+                inputs: vec![],
+            },
+        );
+        agg_call_alias.insert(0, None);
+
+        let (mut map, _) = out_col_change.into_parts();
+        map.iter_mut().skip(group_keys.len()).for_each(|index| {
+            if let Some(i) = *index {
+                *index = Some(i + 1);
+            }
+        });
+
+        (
+            LogicalAgg::new(agg_calls, agg_call_alias, group_keys, input).into(),
+            ColIndexMapping::new(map),
+        )
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+
     use std::rc::Rc;
 
-    use risingwave_common::catalog::{Field, TableId};
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::DataType;
 
     use super::*;
     use crate::expr::{
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
     };
-    use crate::optimizer::plan_node::LogicalScan;
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::ctx::WithId;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_create() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -456,14 +565,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
-            Schema { fields },
-            ctx,
-        );
-        let input = Rc::new(table_scan);
+        let values = LogicalValues::new(vec![], Schema { fields }, ctx);
+        let input = Rc::new(values);
         let input_ref_1 = InputRef::new(0, ty.clone());
         let input_ref_2 = InputRef::new(1, ty.clone());
         let input_ref_3 = InputRef::new(2, ty.clone());
@@ -581,7 +684,7 @@ mod tests {
     ///  TableScan(v2, v3)
     async fn test_prune_all() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -596,10 +699,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
@@ -614,7 +715,7 @@ mod tests {
             vec![agg_call],
             vec![Some("min".to_string())],
             vec![1],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune
@@ -633,9 +734,9 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 
     #[tokio::test]
@@ -650,7 +751,7 @@ mod tests {
     ///   Agg(max(input_ref(1))) group by (input_ref(0))
     ///     TableScan(v2, v3)
     async fn test_prune_group_key() {
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {
@@ -666,10 +767,8 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
@@ -684,7 +783,7 @@ mod tests {
             vec![agg_call],
             vec![Some("min".to_string())],
             vec![1],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune
@@ -710,10 +809,9 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![1]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
-        assert_eq!(scan.id().0, 2);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 
     #[tokio::test]
@@ -729,7 +827,7 @@ mod tests {
     ///     TableScan(v2, v3)
     async fn test_prune_agg() {
         let ty = DataType::Int32;
-        let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),
@@ -744,15 +842,14 @@ mod tests {
                 name: "v3".to_string(),
             },
         ];
-        let table_scan = LogicalScan::new(
-            "test".to_string(),
-            TableId::new(0),
-            vec![1.into(), 2.into(), 3.into()],
+        let values = LogicalValues::new(
+            vec![],
             Schema {
                 fields: fields.clone(),
             },
             ctx,
         );
+
         let agg_calls = vec![
             PlanAggCall {
                 agg_kind: AggKind::Min,
@@ -769,7 +866,7 @@ mod tests {
             agg_calls,
             vec![Some("min".to_string()), Some("max".to_string())],
             vec![1, 2],
-            table_scan.into(),
+            values.into(),
         );
 
         // Perform the prune
@@ -794,8 +891,8 @@ mod tests {
         assert_eq!(input_ref_to_column_indices(&agg_call_new.inputs), vec![0]);
         assert_eq!(agg_call_new.return_type, ty);
 
-        let scan = agg_new.input();
-        let scan = scan.as_logical_scan().unwrap();
-        assert_eq!(scan.schema().fields(), &fields[1..]);
+        let values = agg_new.input();
+        let values = values.as_logical_values().unwrap();
+        assert_eq!(values.schema().fields(), &fields[1..]);
     }
 }

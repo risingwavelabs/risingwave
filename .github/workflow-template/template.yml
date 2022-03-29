@@ -119,15 +119,15 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.1/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
 
       - name: Download cargo-make
         run: |
-          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
-          unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
-          mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
+          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
+          unzip ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -d ~
+          mv ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl ~/cargo-make
 
       - name: Prepare RiseDev playground
         run: |
@@ -153,7 +153,7 @@ jobs:
         timeout-minutes: 1
         run: |
           ~/cargo-make/makers ci-start ci-v2
-          sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
 
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -235,15 +235,15 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.0-pre-2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.1/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
 
       - name: Download cargo-make
         run: |
-          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.7/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip
-          unzip ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl.zip -d ~
-          mv ~/cargo-make-v0.35.7-x86_64-unknown-linux-musl ~/cargo-make
+          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
+          unzip ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -d ~
+          mv ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl ~/cargo-make
 
       - uses: actions/download-artifact@v2
         name: Download risingwave binary

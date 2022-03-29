@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -29,7 +29,6 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ExecutorState, PkIndicesRef, StatefulExecutor};
@@ -105,6 +104,10 @@ pub struct AppendOnlyTopNExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for AppendOnlyTopNExecutor<S> {
@@ -144,6 +147,11 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let cache_size = Some(1024);
         let total_count = (0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(AppendOnlyTopNExecutor::new(
             params.input.remove(0),
             order_types,
@@ -154,6 +162,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
             total_count,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -170,6 +179,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
         total_count: (usize, usize),
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -181,8 +191,8 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             .iter()
             .map(|field| field.data_type.clone())
             .collect::<Vec<_>>();
-        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l/".to_vec()));
-        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h/".to_vec()));
+        let lower_sub_keyspace = keyspace.append_u8(b'l');
+        let higher_sub_keyspace = keyspace.append_u8(b'h');
         let ordered_row_deserializer =
             OrderedRowDeserializer::new(pk_data_types, pk_order_types.clone());
         let table_column_descs = row_data_types
@@ -219,6 +229,7 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S> {
             identity: format!("TopNAppendonlyExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -502,6 +513,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch
@@ -578,6 +590,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch
@@ -677,6 +690,7 @@ mod tests {
             (0, 0),
             1,
             "AppendOnlyTopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init epoch

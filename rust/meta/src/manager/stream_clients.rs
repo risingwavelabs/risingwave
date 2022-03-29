@@ -11,13 +11,14 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 use std::time::Duration;
 
 use moka::future::Cache;
 use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
@@ -50,7 +51,7 @@ impl StreamClients {
     pub async fn get(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
         self.clients
             .get_or_try_insert_with(node.id, async {
-                let addr = node.get_host()?.to_socket_addr()?;
+                let addr: HostAddr = node.get_host()?.into();
                 let endpoint = Endpoint::from_shared(format!("http://{}", addr));
                 let client = StreamServiceClient::new(
                     endpoint
@@ -66,10 +67,6 @@ impl StreamClients {
             .map_err(|e| {
                 ErrorCode::InternalError(format!("failed to create compute client: {:?}", e)).into()
             })
-    }
-
-    pub fn get_by_node_id(&self, node_id: &NodeId) -> Option<StreamServiceClient<Channel>> {
-        self.clients.get(node_id)
     }
 }
 

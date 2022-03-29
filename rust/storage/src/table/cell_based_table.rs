@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 #![allow(unused)]
 
@@ -33,6 +33,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
+use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
 
@@ -47,10 +48,10 @@ pub struct CellBasedTable<S: StateStore> {
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
 
-    /// ColumnDesc contains strictly more info than `schema`.
+    /// `ColumnDesc` contains strictly more info than `schema`.
     column_descs: Vec<ColumnDesc>,
 
-    /// Mapping from column Id to column index
+    /// Mapping from column id to column index
     column_id_to_column_index: HashMap<ColumnId, usize>,
 
     pk_serializer: Option<OrderedRowSerializer>,
@@ -58,6 +59,9 @@ pub struct CellBasedTable<S: StateStore> {
     cell_based_row_serializer: CellBasedRowSerializer,
 
     column_ids: Vec<ColumnId>,
+
+    /// Statistics.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
@@ -72,6 +76,7 @@ impl<S: StateStore> CellBasedTable<S> {
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
         ordered_row_serializer: Option<OrderedRowSerializer>,
+        stats: Arc<StateStoreMetrics>,
     ) -> Self {
         let schema = Schema::new(
             column_descs
@@ -90,6 +95,7 @@ impl<S: StateStore> CellBasedTable<S> {
             pk_serializer: ordered_row_serializer,
             cell_based_row_serializer: CellBasedRowSerializer::new(),
             column_ids,
+            stats,
         }
     }
 
@@ -102,152 +108,60 @@ impl<S: StateStore> CellBasedTable<S> {
             keyspace,
             column_descs,
             Some(OrderedRowSerializer::new(order_types)),
+            Arc::new(StateStoreMetrics::unused()),
         )
     }
 
-    /// Create an "adhoc" [`CellBasedTable`] with specified columns.
-    pub fn new_adhoc(keyspace: Keyspace<S>, column_descs: Vec<ColumnDesc>) -> Self {
-        Self::new(keyspace, column_descs, None)
+    /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
+    pub fn new_adhoc(
+        keyspace: Keyspace<S>,
+        column_descs: Vec<ColumnDesc>,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Self {
+        Self::new(keyspace, column_descs, None, stats)
     }
 
     // cell-based interface
-    pub async fn get(&self, pk: Row, column: &ColumnDesc, epoch: u64) -> Result<Option<Datum>> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
-        let state_store_get_res = self
-            .keyspace
-            .state_store()
-            .get(&key.clone(), epoch)
-            .await
-            .unwrap();
-        let column_id = column.column_id.get_id() as usize;
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(vec![column.clone()]);
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        match pk_and_row {
-            Some(pk_row) => {
-                return Ok(Some(pk_row.1.index(column_id).clone()));
-            }
-            None => Ok(None),
-        }
+    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Option<Row>> {
+        // get row by state_store muti get
+        todo!()
     }
 
-    pub async fn get_row(&self, pk: Row, column: &[ColumnDesc], epoch: u64) -> Result<Row> {
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let key = Bytes::from(arrange_key_buf);
-        let state_store_get_res = self
-            .keyspace
-            .state_store()
-            .get(&key.clone(), epoch)
-            .await
-            .unwrap();
-        let mut cell_based_row_deserializer = CellBasedRowDeserializer::new(column.to_vec());
-        let pk_and_row = cell_based_row_deserializer
-            .deserialize(&key, state_store_get_res.unwrap().as_bytes())?;
-        Ok(pk_and_row.map(|(_pk, row)| row).unwrap())
-    }
-
-    pub async fn insert_row(
-        &mut self,
+    pub async fn get_row_scan(
+        &self,
         pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
+        column: &[ColumnDesc],
         epoch: u64,
-    ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        for (key, value) in bytes {
-            match value {
-                Some(val) => local.put(key, val),
-                None => local.delete(key),
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+    ) -> Result<Option<Row>> {
+        // get row by state_store scan
+        todo!()
     }
 
     pub async fn delete_row(&mut self, pk: Row, epoch: u64) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = self.column_ids.clone();
-        let cell_value = None;
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        for (key, value) in bytes {
-            local.delete(key);
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!()
     }
 
-    pub async fn update_row(
-        &mut self,
-        pk: Row,
-        cell_value: Option<Row>,
-        column_descs: &[ColumnDesc],
-        epoch: u64,
-    ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(column_descs);
-        let bytes = self
-            .cell_based_row_serializer
-            .serialize(&arrange_key_buf, cell_value, column_ids)
-            .unwrap();
-        // delete original kv_pairs in state_store
-        for (key, value) in bytes.clone() {
-            local.delete(key);
-        }
-        // write updated kv_pairs in state_store
-        for (key, value) in bytes {
-            match value {
-                Some(val) => local.put(key, val),
-                None => local.delete(key),
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+    pub async fn update_row(&mut self, pk: Row, cell_value: Option<Row>, epoch: u64) -> Result<()> {
+        todo!()
     }
 
-    pub async fn batch_insert_row(
+    pub async fn batch_write_rows(
         &mut self,
         rows: Vec<(Row, Option<Row>)>,
-        column_descs: &[ColumnDesc],
         epoch: u64,
     ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let column_ids = generate_column_id(column_descs);
-        for (pk, cell_values) in rows {
-            let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, column_ids.clone())
-                .unwrap();
-            for (key, value) in bytes {
-                match value {
-                    Some(val) => local.put(key, val),
-                    None => local.delete(key),
-                }
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!();
     }
 
     // The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&self, epoch: u64) -> Result<CellBasedTableRowIter<S>> {
-        CellBasedTableRowIter::new(self.keyspace.clone(), self.column_descs.clone(), epoch).await
+        CellBasedTableRowIter::new(
+            self.keyspace.clone(),
+            self.column_descs.clone(),
+            epoch,
+            self.stats.clone(),
+        )
+        .await
     }
 
     pub async fn get_for_test(&self, pk: Row, column_id: i32, epoch: u64) -> Result<Option<Datum>> {
@@ -298,13 +212,9 @@ fn generate_column_id_to_column_index_mapping(
 }
 
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
-    let mut column_ids = Vec::with_capacity(column_descs.len());
-    for (index, column_desc) in column_descs.iter().enumerate() {
-        column_ids.push(column_desc.column_id);
-    }
-    column_ids
+    column_descs.iter().map(|d| d.column_id).collect()
 }
-// (st1page): May be we will have a "ChunkIter" trait which returns a chunk each time, so the name
+// (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
     keyspace: Keyspace<S>,
@@ -316,16 +226,23 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     done: bool,
     /// Cached error messages after the iteration completes or fails
     err_msg: Option<String>,
-    /// A epoch representing the read snapshot
+    /// An epoch representing the read snapshot
     epoch: u64,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
+    /// Statistics
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
     const SCAN_LIMIT: usize = 1024;
 
-    async fn new(keyspace: Keyspace<S>, table_descs: Vec<ColumnDesc>, epoch: u64) -> Result<Self> {
+    async fn new(
+        keyspace: Keyspace<S>,
+        table_descs: Vec<ColumnDesc>,
+        epoch: u64,
+        stats: Arc<StateStoreMetrics>,
+    ) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
@@ -338,6 +255,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             err_msg: None,
             epoch,
             cell_based_row_deserializer,
+            stats,
         };
         Ok(iter)
     }
@@ -417,6 +335,11 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
         }
 
         loop {
+            let pack_cell_timer = self
+                .stats
+                .cell_table_next_pack_cell_duration
+                .local()
+                .start_timer();
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
                 None => {

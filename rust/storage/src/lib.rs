@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -29,6 +29,7 @@
 #![feature(bound_map)]
 #![feature(backtrace)]
 #![feature(map_first_last)]
+#![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 
 pub mod cell_based_row_deserializer;
@@ -40,6 +41,7 @@ pub mod monitor;
 pub mod object;
 pub mod panic_store;
 pub mod storage_value;
+#[macro_use]
 pub mod store;
 pub mod store_impl;
 pub mod table;
@@ -57,7 +59,7 @@ pub mod tikv;
 #[path = "tikv_mock.rs"]
 pub mod tikv;
 
-pub use keyspace::{Keyspace, Segment};
+pub use keyspace::Keyspace;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

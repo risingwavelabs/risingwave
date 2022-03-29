@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -39,7 +39,6 @@ pub struct SyncItem {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
     Sync(SyncItem),
@@ -53,7 +52,7 @@ pub struct SharedBufferUploader {
     options: Arc<StorageConfig>,
 
     /// Statistics.
-    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    // TODO: separate `HummockStats` from `StateStoreMetrics`.
     stats: Arc<StateStoreMetrics>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
@@ -91,7 +90,7 @@ impl SharedBufferUploader {
         }
     }
 
-    /// Upload buffer batches to S3.
+    /// Uploads buffer batches to S3.
     async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);

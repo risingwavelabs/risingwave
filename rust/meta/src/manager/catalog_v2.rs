@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 #![allow(dead_code)]
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -107,6 +107,11 @@ where
     pub async fn get_catalog(&self) -> Result<Catalog> {
         let core = self.core.lock().await;
         core.get_catalog().await
+    }
+
+    pub async fn list_sources(&self) -> Result<Vec<Source>> {
+        let core = self.core.lock().await;
+        Source::list(&*core.meta_store_ref).await
     }
 
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
@@ -275,8 +280,8 @@ where
             match core.get_ref_count(table_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete table {} because {} other table(s) depends on it.",
-                        table_id,
+                        "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                        table.name,
                         ref_count
                     )
                     .into(),
@@ -380,8 +385,8 @@ where
             match core.get_ref_count(source_id) {
                 Some(ref_count) => Err(CatalogError(
                     anyhow!(
-                        "Fail to delete source {} because {} other table(s) depends on it.",
-                        source_id,
+                        "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                        source.name,
                         ref_count
                     )
                     .into(),
@@ -522,8 +527,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(mview_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete table {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete table `{}` because {} other relation(s) depend on it.",
+                            mview.name,
                             ref_count
                         )
                         .into(),
@@ -533,8 +538,8 @@ where
                 if let Some(ref_count) = core.get_ref_count(source_id) {
                     return Err(CatalogError(
                         anyhow!(
-                            "Fail to delete source {} because {} other table(s) depends on it.",
-                            mview_id,
+                            "Fail to delete source `{}` because {} other relation(s) depend on it.",
+                            source.name,
                             ref_count
                         )
                         .into(),
@@ -544,8 +549,8 @@ where
 
                 // now is safe to delete both mview and source
                 let mut transaction = Transaction::default();
-                Table::delete_in_transaction(mview_id, &mut transaction)?;
-                Source::delete_in_transaction(source_id, &mut transaction)?;
+                mview.delete_in_transaction(&mut transaction)?;
+                source.delete_in_transaction(&mut transaction)?;
                 core.meta_store_ref.txn(transaction).await?;
                 core.drop_table(&mview);
                 core.drop_source(&source);

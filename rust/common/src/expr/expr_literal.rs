@@ -11,8 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::convert::{TryFrom, TryInto};
+use std::io::Cursor;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -22,7 +23,9 @@ use risingwave_pb::data::data_type::{IntervalType, TypeName};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
-use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk};
+use crate::array::{
+    read_interval_unit, Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk,
+};
 use crate::error::ErrorCode::InternalError;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::Expression;
@@ -100,6 +103,7 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
 }
 
 fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
+    // TODO: remove IntervalType later.
     match ty {
         // the unit is months
         Year | YearToMonth | Month => {
@@ -118,7 +122,12 @@ fn make_interval(bytes: &[u8], ty: IntervalType) -> Result<IntervalUnit> {
             let ms = i64::from_be_bytes(bytes);
             Ok(IntervalUnit::from_millis(ms))
         }
-        Invalid => Err(InternalError(format!("Invalid interval type {:?}", ty)).into()),
+        Invalid => {
+            // Invalid means the interval is from the new frontend.
+            // TODO: make this default path later.
+            let mut cursor = Cursor::new(bytes);
+            read_interval_unit(&mut cursor)
+        }
     }
 }
 

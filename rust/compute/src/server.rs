@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,9 +19,11 @@ use std::time::Duration;
 
 use hyper::{Body, Request, Response};
 use prometheus::{Encoder, Registry, TextEncoder};
+use risingwave_batch::executor::monitor::BatchMetrics;
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
 use risingwave_batch::task::{BatchEnvironment, BatchManager};
 use risingwave_common::config::ComputeNodeConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
 use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
@@ -54,18 +56,20 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
 
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
-    addr: SocketAddr,
+    listen_addr: SocketAddr,
+    client_addr: HostAddr,
     opts: ComputeNodeOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
     info!("Starting compute node with config {:?}", config);
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(addr, WorkerType::ComputeNode)
+        .register(client_addr.clone(), WorkerType::ComputeNode)
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -76,10 +80,14 @@ pub async fn compute_node_serve(
             Duration::from_millis(config.server.heartbeat_interval as u64),
         )];
 
+    // Initialize the metrics subsystem.
     let registry = prometheus::Registry::new();
+    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
+    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
+    let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
+
     // Initialize state store.
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
-    let hummock_metrics = Arc::new(HummockMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
     let state_store = StateStoreImpl::new(
         &opts.state_store,
@@ -102,11 +110,10 @@ pub async fn compute_node_serve(
         ));
     }
 
-    let streaming_metrics = Arc::new(StreamingMetrics::new(registry.clone()));
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
     let stream_mgr = Arc::new(StreamManager::new(
-        addr,
+        client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),
     ));
@@ -117,36 +124,42 @@ pub async fn compute_node_serve(
     let batch_env = BatchEnvironment::new(
         source_mgr.clone(),
         batch_mgr.clone(),
-        addr,
+        client_addr.clone(),
         batch_config,
         worker_id,
         state_store.clone(),
+        batch_metrics.clone(),
     );
 
     // Initialize the streaming environment.
     let stream_config = Arc::new(config.streaming.clone());
-    let stream_env =
-        StreamEnvironment::new(source_mgr, addr, stream_config, worker_id, state_store);
+    let stream_env = StreamEnvironment::new(
+        source_mgr,
+        client_addr.clone(),
+        stream_config,
+        worker_id,
+        state_store,
+        shutdown_send.clone(),
+    );
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))
-            .serve_with_shutdown(addr, async move {
+            .serve_with_shutdown(listen_addr, async move {
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},
                     _ = shutdown_recv.recv() => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if shutdown_sender.send(()).is_ok() {
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("shutdown err: {}", err);
+                                    tracing::warn!("shutdown err: {:?}", err);
                                 }
                             }
                         }
@@ -166,7 +179,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(addr).await.unwrap();
+    meta_client.activate(client_addr.clone()).await.unwrap();
 
     (join_handle, shutdown_send)
 }

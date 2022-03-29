@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -113,6 +113,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn inject_barrier(
         &self,
         request: Request<InjectBarrierRequest>,
@@ -132,6 +133,7 @@ impl StreamService for StreamServiceImpl {
         }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn create_source(
         &self,
         request: Request<CreateSourceRequest>,
@@ -163,6 +165,7 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(CreateSourceResponse { status: None }))
     }
 
+    #[cfg_attr(coverage, no_coverage)]
     async fn drop_source(
         &self,
         request: Request<DropSourceRequest>,
@@ -178,5 +181,14 @@ impl StreamService for StreamServiceImpl {
         info!("drop source, id: {}", id);
 
         Ok(Response::new(DropSourceResponse { status: None }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
+    async fn shutdown(
+        &self,
+        _request: Request<ShutdownRequest>,
+    ) -> Result<Response<ShutdownResponse>, Status> {
+        self.env.shutdown();
+        Ok(Response::new(ShutdownResponse { status: None }))
     }
 }

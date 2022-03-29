@@ -11,7 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
+use std::future::Future;
 use std::option::Option;
 
 use risingwave_common::array::DataChunk;
@@ -22,7 +23,7 @@ use risingwave_pb::plan::exchange_info::HashInfo;
 use risingwave_pb::plan::*;
 use tokio::sync::mpsc;
 
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
+use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 
 pub struct HashShuffleSender {
     senders: Vec<mpsc::UnboundedSender<Option<DataChunk>>>,
@@ -85,12 +86,14 @@ fn generate_new_data_chunks(
     Ok(res)
 }
 
-#[async_trait::async_trait]
 impl ChanSender for HashShuffleSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
-        match chunk {
-            Some(c) => self.send_chunk(c).await,
-            None => self.send_done().await,
+    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
+        async move {
+            match chunk {
+                Some(c) => self.send_chunk(c).await,
+                None => self.send_done().await,
+            }
         }
     }
 }
@@ -124,18 +127,20 @@ impl HashShuffleSender {
     }
 }
 
-#[async_trait::async_trait]
 impl ChanReceiver for HashShuffleReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunk>> {
-        match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
-            // Early close should be treated as error.
-            None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            match self.receiver.recv().await {
+                Some(data_chunk) => Ok(data_chunk),
+                // Early close should be treated as error.
+                None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
+            }
         }
     }
 }
 
-pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
+pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
     let hash_info = match shuffle.distribution {
         Some(exchange_info::Distribution::HashInfo(ref v)) => v.clone(),
         _ => exchange_info::HashInfo::default(),
@@ -149,10 +154,10 @@ pub fn new_hash_shuffle_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<B
         senders.push(s);
         receivers.push(r);
     }
-    let channel_sender = Box::new(HashShuffleSender { senders, hash_info }) as BoxChanSender;
+    let channel_sender = ChanSenderImpl::HashShuffle(HashShuffleSender { senders, hash_info });
     let channel_receivers = receivers
         .into_iter()
-        .map(|receiver| Box::new(HashShuffleReceiver { receiver }) as BoxChanReceiver)
+        .map(|receiver| ChanReceiverImpl::HashShuffle(HashShuffleReceiver { receiver }))
         .collect::<Vec<_>>();
     (channel_sender, channel_receivers)
 }

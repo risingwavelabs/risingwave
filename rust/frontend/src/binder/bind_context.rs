@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::HashMap;
 use std::fmt::Display;
 
@@ -24,15 +24,23 @@ pub struct ColumnBinding {
     pub column_name: String,
     pub index: usize,
     pub data_type: DataType,
+    pub is_hidden: bool,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, column_name: String, index: usize, data_type: DataType) -> Self {
+    pub fn new(
+        table_name: String,
+        column_name: String,
+        index: usize,
+        data_type: DataType,
+        is_hidden: bool,
+    ) -> Self {
         ColumnBinding {
             table_name,
             column_name,
             index,
             data_type,
+            is_hidden,
         }
     }
 }

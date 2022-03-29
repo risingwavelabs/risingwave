@@ -1,3 +1,4 @@
+use std::cmp::max;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
 use std::fmt::Debug;
 use std::vec;
 
@@ -20,10 +20,12 @@ use itertools::Itertools;
 use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::optimizer::property::{Distribution, FieldOrder, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
 /// It is used in optimizer for transformation of column index.
+#[derive(Clone)]
 pub struct ColIndexMapping {
     /// The size of the target space, i.e. target index is in the range `(0..target_size)`.
     target_size: usize,
@@ -39,7 +41,7 @@ impl ColIndexMapping {
             Some(target_max) => target_max + 1,
             None => 0,
         };
-        Self { map, target_size }
+        Self { target_size, map }
     }
 
     /// Create a partial mapping which maps from the subscripts range `(0..map.len())` to
@@ -48,7 +50,29 @@ impl ColIndexMapping {
         if let Some(target_max) = map.iter().filter_map(|x| *x).max_by_key(|x| *x) {
             assert!(target_max < target_size)
         };
-        Self { map, target_size }
+        Self { target_size, map }
+    }
+
+    pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
+        (self.map, self.target_size)
+    }
+
+    pub fn identity(size: usize) -> Self {
+        let map = (0..size).into_iter().map(Some).collect();
+        Self::new(map)
+    }
+
+    pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
+        let map = (0..source_size)
+            .into_iter()
+            .map(|i| if i < target_size { Some(i) } else { None })
+            .collect();
+        Self::new(map)
+    }
+
+    pub fn empty(size: usize) -> Self {
+        let map = vec![None; size];
+        Self::new(map)
     }
 
     /// Create a partial mapping which maps range `(0..source_num)` to range
@@ -152,6 +176,29 @@ impl ColIndexMapping {
         Self::with_target_size(map, following.target_size())
     }
 
+    /// Union two mapping, the result mapping `target_size` and source size will be the max size
+    /// ofthe two mappings.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if a source appears in both to mapping
+    #[must_use]
+    pub fn union(&self, other: &Self) -> Self {
+        debug!("union {:?} and {:?}", self, other);
+        let target_size = max(self.target_size(), other.target_size());
+        let source_size = max(self.source_size(), other.source_size());
+        let mut map = vec![None; source_size];
+        for (src, dst) in self.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
+        for (src, dst) in other.mapping_pairs() {
+            assert_eq!(map[src], None);
+            map[src] = Some(dst);
+        }
+        Self::with_target_size(map, target_size)
+    }
+
     /// inverse the mapping, if a target corresponds more than one source, it will choose any one as
     /// it inverse mapping's target
     #[must_use]
@@ -192,6 +239,91 @@ impl ColIndexMapping {
 
     pub fn is_empty(&self) -> bool {
         self.target_size() == 0
+    }
+
+    /// Rewrite the provided order's field index. It will try its best to give the most accurate
+    /// order. Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
+    pub fn rewrite_provided_order(&self, order: &Order) -> Order {
+        let mut mapped_field = vec![];
+        for field in &order.field_order {
+            match self.try_map(field.index) {
+                Some(mapped_index) => mapped_field.push(FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                }),
+                None => break,
+            }
+        }
+        Order {
+            field_order: mapped_field,
+        }
+    }
+
+    /// Rewrite the required order's field index. if it can't give a corresponding
+    /// required order after the column index mapping, it will return None.
+    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will return None
+    pub fn rewrite_required_order(&self, order: &Order) -> Option<Order> {
+        order
+            .field_order
+            .iter()
+            .map(|field| {
+                self.try_map(field.index).map(|mapped_index| FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|mapped_field| Order {
+                field_order: mapped_field,
+            })
+    }
+
+    /// Rewrite the provided distribution's field index. It will try its best to give the most
+    /// accurate distribution.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `AnyShard`.
+    pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
+        match dist {
+            Distribution::HashShard(col_idxes) => {
+                let mapped_dist = col_idxes
+                    .iter()
+                    .map(|col_idx| self.try_map(*col_idx))
+                    .collect::<Option<Vec<_>>>();
+                match mapped_dist {
+                    Some(col_idx) => Distribution::HashShard(col_idx),
+                    None => Distribution::AnyShard,
+                }
+            }
+            _ => dist.clone(),
+        }
+    }
+
+    /// Rewrite the required distribution's field index. if it can't give a corresponding
+    /// required distribution after the column index mapping, it will return None.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
+    pub fn rewrite_required_distribution(&self, dist: &Distribution) -> Option<Distribution> {
+        match dist {
+            Distribution::HashShard(col_idxes) => col_idxes
+                .iter()
+                .map(|col_idx| self.try_map(*col_idx))
+                .collect::<Option<Vec<_>>>()
+                .map(Distribution::HashShard),
+            _ => Some(dist.clone()),
+        }
+    }
+
+    pub fn rewrite_bitset(&self, bitset: &FixedBitSet) -> FixedBitSet {
+        assert_eq!(bitset.len(), self.source_size());
+        let mut ret = FixedBitSet::with_capacity(self.target_size());
+        for i in bitset.ones() {
+            if let Some(i) = self.try_map(i) {
+                ret.insert(i);
+            }
+        }
+        ret
     }
 }
 

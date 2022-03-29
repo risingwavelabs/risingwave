@@ -11,19 +11,30 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundQuery;
+use crate::optimizer::plan_node::LogicalLimit;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
 use crate::planner::Planner;
 
+pub const LIMIT_ALL_COUNT: usize = usize::MAX / 2;
+
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
-        let plan = self.plan_set_expr(query.body)?;
+        let mut plan = self.plan_set_expr(query.body)?;
+        // A logical limit is added if limit, offset or both are specified
+        if query.limit.is_some() || query.offset.is_some() {
+            plan = LogicalLimit::create(
+                plan,
+                query.limit.unwrap_or(LIMIT_ALL_COUNT),
+                query.offset.unwrap_or_default(),
+            )
+        }
         // plan order and limit here
         let order = Order {
             field_order: query.order,

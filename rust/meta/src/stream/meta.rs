@@ -147,13 +147,13 @@ where
             Entry::Occupied(entry) => {
                 TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
                 entry.remove();
-
-                Ok(())
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            Entry::Vacant(_) => {
+                tracing::warn!("table_fragment not exist when dropping: {}", table_id)
+            }
         }
+
+        Ok(())
     }
 
     /// Used in [`crate::barrier::BarrierManager`]
@@ -198,12 +198,15 @@ where
         }
     }
 
-    pub async fn all_node_actors(&self) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    pub async fn all_node_actors(
+        &self,
+        include_inactive: bool,
+    ) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
         for fragments in map.values() {
-            for (node_id, actor_ids) in fragments.node_actors() {
+            for (node_id, actor_ids) in fragments.node_actors(include_inactive) {
                 let node_actor_ids = actor_maps.entry(node_id).or_insert_with(Vec::new);
                 node_actor_ids.extend(actor_ids);
             }

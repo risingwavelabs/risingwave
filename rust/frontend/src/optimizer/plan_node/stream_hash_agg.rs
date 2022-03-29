@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::fmt;
 
 use itertools::Itertools;
@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
+use crate::expr::InputRefDisplay;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -33,18 +33,30 @@ impl StreamHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            Distribution::any().clone(), // TODO
-        );
-        StreamHashAgg { logical, base }
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => panic!(),
+            Distribution::Single => Distribution::Single,
+            Distribution::Broadcast => panic!(),
+            Distribution::AnyShard => panic!(),
+            Distribution::HashShard(_) => {
+                assert!(
+                    input_dist.satisfies(&Distribution::HashShard(logical.group_keys().to_vec()))
+                );
+                logical
+                    .i2o_col_mapping()
+                    .rewrite_provided_distribution(input_dist)
+            }
+        };
+        // Hash agg executor might change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
+        StreamHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
-    pub fn group_keys(&self) -> &[usize] {
+    pub fn distribution_keys(&self) -> &[usize] {
         self.logical.group_keys()
     }
 }
@@ -55,7 +67,7 @@ impl fmt::Display for StreamHashAgg {
             .field(
                 "group_keys",
                 &self
-                    .group_keys()
+                    .distribution_keys()
                     .iter()
                     .copied()
                     .map(InputRefDisplay)
@@ -88,10 +100,10 @@ impl ToStreamProst for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::HashAggNode(HashAggNode {
-            group_keys: self
-                .group_keys()
+            distribution_keys: self
+                .distribution_keys()
                 .iter()
-                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .map(|idx| *idx as i32)
                 .collect_vec(),
             agg_calls: self
                 .agg_calls()

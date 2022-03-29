@@ -11,26 +11,28 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use pgwire::pg_response::PgResponse;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_sqlparser::ast::{ObjectName, Statement};
+use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement};
 
-use crate::session::{QueryContext, SessionImpl};
+use crate::session::{OptimizerContext, SessionImpl};
 
-mod create_mv;
+pub mod create_mv;
 mod create_source;
 pub mod create_table;
+pub mod drop_mv;
 pub mod drop_table;
 mod explain;
 mod flush;
 mod query;
+mod show_source;
 pub mod util;
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
-    let context = QueryContext::new(session.clone());
+    let context = OptimizerContext::new(session.clone());
     match stmt {
         Statement::Explain {
             statement, verbose, ..
@@ -39,9 +41,24 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
-        Statement::Drop(drop_statement) => {
-            let table_object_name = ObjectName(vec![drop_statement.name]);
+        // Since table and source both have source info, use show_source handler can get column info
+        Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
+        Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
+        Statement::Drop(DropStatement {
+            object_type: ObjectType::Table,
+            name,
+            ..
+        }) => {
+            let table_object_name = ObjectName(vec![name]);
             drop_table::handle_drop_table(context, table_object_name).await
+        }
+        Statement::Drop(DropStatement {
+            object_type: ObjectType::MaterializedView,
+            name,
+            ..
+        }) => {
+            let table_object_name = ObjectName(vec![name]);
+            drop_mv::handle_drop_mv(context, table_object_name).await
         }
         Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
             query::handle_query(context, stmt).await

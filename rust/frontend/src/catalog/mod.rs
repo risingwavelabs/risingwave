@@ -11,8 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-#![allow(dead_code)]
+
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 pub(crate) mod catalog_service;
@@ -23,11 +22,23 @@ pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
 pub(crate) mod table_catalog;
 
+#[allow(dead_code)]
 pub(crate) type SourceId = u32;
+
 pub(crate) type DatabaseId = u32;
 pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
+
+pub const ROWID_PREFIX: &str = "_row_id";
+
+pub fn gen_row_id_column_name(idx: usize) -> String {
+    ROWID_PREFIX.to_string() + "#" + &idx.to_string()
+}
+
+pub fn is_row_id_column_name(name: &str) -> bool {
+    name.starts_with(ROWID_PREFIX)
+}
 
 #[derive(Error, Debug)]
 pub enum CatalogError {

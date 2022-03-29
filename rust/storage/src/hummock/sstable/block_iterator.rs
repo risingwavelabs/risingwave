@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::cmp::Ordering::*;
 use std::sync::Arc;
 
@@ -52,7 +52,7 @@ impl BlockIterator {
         }
     }
 
-    /// Replace block inside iterator and reset the iterator
+    /// Replaces block inside iterator and reset the iterator
     pub fn set_block(&mut self, block: Arc<Block>) {
         self.idx = 0;
         self.perv_overlap = 0;
@@ -61,7 +61,7 @@ impl BlockIterator {
         self.block = block;
     }
 
-    /// Update the internal state of the iterator to use the value and key of a given index.
+    /// Updates the internal state of the iterator to use the value and key of a given index.
     ///
     /// If the index is not inside the entries, the function will not fetch the value, and will
     /// return false.
@@ -75,21 +75,19 @@ impl BlockIterator {
         let mut entry_data = self.block.raw_entry(i as usize);
 
         let header = Header::decode(&mut entry_data);
+        let diff_key = &entry_data[..header.diff as usize];
 
-        // TODO: merge this truncate with the following key truncate
         if header.overlap > self.perv_overlap {
             self.key.truncate(self.perv_overlap as usize);
             self.key.extend_from_slice(
                 &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
             );
+        } else {
+            self.key.truncate(header.overlap as usize);
         }
-        self.perv_overlap = header.overlap;
-
-        let diff_key = &entry_data[..header.diff as usize];
-        self.key.truncate(header.overlap as usize);
         self.key.extend_from_slice(diff_key);
         self.val = entry_data.slice(header.diff as usize..);
-
+        self.perv_overlap = header.overlap;
         true
     }
 
@@ -113,8 +111,13 @@ impl BlockIterator {
         lo
     }
 
-    /// Seek to the first entry that is equal or greater than key.
-    pub fn seek(&mut self, key: &[u8], whence: SeekPos) {
+    /// Seeks to the first entry that is equal or greater than key.
+    pub fn seek(&mut self, key: &[u8]) {
+        self.seek_from(key, SeekPos::Origin);
+    }
+
+    /// Seeks to the first entry that is equal or greater than key.
+    pub fn seek_from(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
             SeekPos::Current => self.idx as usize,
@@ -128,8 +131,13 @@ impl BlockIterator {
         self.set_idx(found_entry_idx as isize);
     }
 
-    /// Seek to the first entry that is equal or less than key.
-    pub fn seek_le(&mut self, key: &[u8], whence: SeekPos) {
+    /// Seeks to the first entry that is equal or less than key.
+    pub fn seek_le(&mut self, key: &[u8]) {
+        self.seek_le_from(key, SeekPos::Origin);
+    }
+
+    /// Seeks to the first entry that is equal or less than key.
+    pub fn seek_le_from(&mut self, key: &[u8], whence: SeekPos) {
         let end_index = match whence {
             SeekPos::Origin => self.block.len(),
             SeekPos::Current => self.idx as usize + 1,
@@ -154,7 +162,7 @@ impl BlockIterator {
         self.set_idx(self.block.len() as isize - 1);
     }
 
-    /// Return the key and value of the previous operation
+    /// Returns the key and value of the previous operation
     pub fn data(&self) -> Option<(&[u8], &[u8])> {
         if self.is_valid() {
             Some((&self.key[..], &self.val[..]))
@@ -163,30 +171,32 @@ impl BlockIterator {
         }
     }
 
-    pub fn key(&self) -> Option<&[u8]> {
-        self.data().map(|(k, _v)| k)
+    pub fn key(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.key[..]
     }
 
-    pub fn value(&self) -> Option<&[u8]> {
-        self.data().map(|(_k, v)| v)
+    pub fn value(&self) -> &[u8] {
+        assert!(self.is_valid());
+        &self.val[..]
     }
 
-    /// Check whether the iterator is at the last position
+    /// Checks whether the iterator is at the last position
     pub fn is_last(&self) -> bool {
         self.idx >= 0 && self.idx == (self.block.len() - 1) as isize
     }
-    /// Check whether the iterator is at a valid position
+    /// Checks whether the iterator is at a valid position
     pub fn is_valid(&self) -> bool {
         self.idx >= 0 && self.idx < self.block.len() as isize
     }
 
-    /// Move to the next position
+    /// Moves to the next position
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> bool {
         self.set_idx(self.idx + 1)
     }
 
-    /// Move to the previous position
+    /// Moves to the previous position
     pub fn prev(&mut self) -> bool {
         self.set_idx(self.idx - 1)
     }
@@ -302,23 +312,23 @@ mod tests {
         }
         assert_eq!(idx, 0);
 
-        blk_iter.seek(&Bytes::from("key_test_4"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_4"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_4"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_9"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_9"), SeekPos::Origin);
         assert_eq!(BytesMut::from("key_test_9"), blk_iter.key);
 
-        blk_iter.seek(&Bytes::from("key_test_99"), SeekPos::Origin);
+        blk_iter.seek_from(&Bytes::from("key_test_99"), SeekPos::Origin);
         assert!(blk_iter.data().is_none());
 
         blk_iter.set_idx(3);
-        blk_iter.seek(&Bytes::from("key_test_0"), SeekPos::Current);
+        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Current);
 
         assert_eq!(BytesMut::from("key_test_3"), blk_iter.key);
     }

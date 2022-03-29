@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_pb::expr::expr_node::RexNode;
 
@@ -75,12 +75,13 @@ impl Expr for Literal {
 
 /// Convert a literal value (datum) into protobuf.
 fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
+    let Some(d) = d.as_ref() else {
+        return None;
+    };
+
     use risingwave_pb::expr::*;
 
-    if d.is_none() {
-        return None;
-    }
-    let body = match d.as_ref().unwrap() {
+    let body = match d {
         ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
         ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
         ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
@@ -89,7 +90,7 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
         ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
         ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
         ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
-        ScalarImpl::Interval(_) => todo!(),
+        ScalarImpl::Interval(v) => v.to_protobuf_owned(),
         ScalarImpl::NaiveDate(_) => todo!(),
         ScalarImpl::NaiveDateTime(_) => todo!(),
         ScalarImpl::NaiveTime(_) => todo!(),

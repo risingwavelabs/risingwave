@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
@@ -31,7 +31,7 @@ pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
 pub const GET_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 pub const REPORT_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
 
-/// Define all metrics.
+/// Defines all metrics.
 #[macro_export]
 macro_rules! for_all_hummock_metrics {
     ($macro:tt) => {
@@ -218,7 +218,7 @@ impl HummockMetrics {
         }
     }
 
-    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

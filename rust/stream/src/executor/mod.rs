@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::pin::Pin;
@@ -180,7 +180,7 @@ impl Barrier {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
 
-    pub fn is_add_output(&self) -> bool {
+    pub fn is_add_output_mutation(&self) -> bool {
         self.mutation
             .as_ref()
             .map(|m| m.is_add_output())

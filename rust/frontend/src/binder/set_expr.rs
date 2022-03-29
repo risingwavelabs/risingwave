@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::SetExpr;
@@ -19,7 +19,7 @@ use risingwave_sqlparser::ast::SetExpr;
 use crate::binder::{Binder, BoundSelect, BoundValues};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
-/// BoundSetExprs via set operators (e.g. union).
+/// `BoundSetExpr`s via set operators (e.g. union).
 #[derive(Debug)]
 pub enum BoundSetExpr {
     Select(Box<BoundSelect>),
@@ -53,7 +53,7 @@ impl Binder {
     pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
-            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v)?))),
+            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", set_expr)).into()),
         }
     }

@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::sync::Arc;
 
 use futures::future::try_join_all;
@@ -182,6 +182,8 @@ mod tests {
                 data_type: f.data_type.clone(),
                 column_id: ColumnId::from(i as i32), // use column index as column id
                 name: f.name.clone(),
+                field_descs: vec![],
+                type_name: "".to_string(),
             })
             .collect();
 

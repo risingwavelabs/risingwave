@@ -11,10 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
-use std::hash::Hash;
 
-use risingwave_pb::data::Array as ProstArray;
+use std::hash::Hash;
+use std::mem::size_of;
+
+use risingwave_pb::data::buffer::CompressionType;
+use risingwave_pb::data::{Array as ProstArray, ArrayType, Buffer};
 
 use super::{ArrayMeta, NULL_VAL_FOR_HASH};
 use crate::array::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayIterator};
@@ -67,7 +69,22 @@ impl Array for IntervalArray {
     }
 
     fn to_protobuf(&self) -> ProstArray {
-        unimplemented!("To protobuf of Interval Array is not implemented for now")
+        let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<IntervalUnit>());
+        for v in self.iter() {
+            v.map(|node| node.to_protobuf(&mut output_buffer));
+        }
+        let buffer = Buffer {
+            compression: CompressionType::None as i32,
+            body: output_buffer,
+        };
+        let null_bitmap = self.null_bitmap().to_protobuf();
+        ProstArray {
+            null_bitmap: Some(null_bitmap),
+            values: vec![buffer],
+            array_type: ArrayType::Interval as i32,
+            struct_array_data: None,
+            list_array_data: None,
+        }
     }
 
     fn null_bitmap(&self) -> &Bitmap {

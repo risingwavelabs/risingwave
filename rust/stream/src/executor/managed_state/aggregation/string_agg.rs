@@ -11,7 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
@@ -21,14 +21,13 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::types::{
-    deserialize_datum_not_null_from, serialize_datum_not_null_into, DataType, Datum, ScalarImpl,
-};
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
+use risingwave_common::util::value_encoding::{deserialize_cell_not_null, serialize_cell_not_null};
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::aggregation::ManagedExtremeState;
+use crate::executor::managed_state::aggregation::ManagedTableState;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -118,9 +117,8 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let mut deserializer = memcomparable::Deserializer::new(raw_value.to_bytes());
-            let value =
-                deserialize_datum_not_null_from(DataType::Char, &mut deserializer)?.unwrap();
+            let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+            let value = deserialize_cell_not_null(&mut deserializer, DataType::Char)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
                 raw_key,
@@ -155,7 +153,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
+impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -250,13 +248,10 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (key, value) in std::mem::take(&mut self.cache) {
-            let mut serializer = memcomparable::Serializer::new(vec![]);
             let value = value.into_option();
             match value {
                 Some(val) => {
-                    serialize_datum_not_null_into(&Some(val), &mut serializer)?;
-                    let value = serializer.into_inner();
-                    local.put(key, value);
+                    local.put(key, serialize_cell_not_null(&Some(val))?);
                 }
                 None => {
                     local.delete(key);
@@ -277,7 +272,7 @@ mod tests {
 
     use super::*;
     use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
-    use crate::executor::managed_state::aggregation::ManagedExtremeState;
+    use crate::executor::managed_state::aggregation::ManagedTableState;
     use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(

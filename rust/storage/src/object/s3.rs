@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
 
 use super::{BlockLocation, ObjectMetadata};
@@ -64,15 +65,15 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await.map_err(err)?.into_bytes();
 
-        assert!(
-            block_loc.is_none() || block_loc.as_ref().unwrap().size == val.len(),
-            "mismatched size: expected {}, found {} when reading {} at {:?}",
-            block_loc.as_ref().unwrap().size,
-            val.len(),
-            path,
-            block_loc.as_ref().unwrap()
-        );
-
+        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
+            return Err(RwError::from(InternalError(format!(
+                "mismatched size: expected {}, found {} when reading {} at {:?}",
+                block_loc.as_ref().unwrap().size,
+                val.len(),
+                path,
+                block_loc.as_ref().unwrap()
+            ))));
+        }
         Ok(val)
     }
 
@@ -98,7 +99,7 @@ impl ObjectStore for S3ObjectStore {
         })
     }
 
-    /// Permanently delete the whole object.
+    /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> Result<()> {
         self.client
@@ -113,7 +114,7 @@ impl ObjectStore for S3ObjectStore {
 }
 
 impl S3ObjectStore {
-    /// Create an S3 object store from environment variable.
+    /// Creates an S3 object store from environment variable.
     ///
     /// See [AWS Docs](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html) on how to provide credentials and region from env variable. If you are running compute-node on EC2, no configuration is required.
     pub async fn new(bucket: String) -> Self {
@@ -123,7 +124,7 @@ impl S3ObjectStore {
         Self { client, bucket }
     }
 
-    /// Create a minio client. The server should be like `minio://key:secret@address:port/bucket`.
+    /// Creates a minio client. The server should be like `minio://key:secret@address:port/bucket`.
     pub async fn new_with_minio(server: &str) -> Self {
         let server = server.strip_prefix("minio://").unwrap();
         let (access_key_id, rest) = server.split_once(':').unwrap();

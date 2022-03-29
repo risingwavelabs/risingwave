@@ -11,11 +11,12 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-//
+
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
+use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -27,6 +28,11 @@ use super::{Epoch, EpochGeneratorRef};
 use crate::cluster::WorkerKey;
 
 pub type Notification = std::result::Result<SubscribeResponse, Status>;
+
+#[derive(Clone)]
+pub enum LocalNotification {
+    WorkerDeletion(WorkerNode),
+}
 
 /// Interval before retry when notify fail.
 const NOTIFY_RETRY_INTERVAL: u64 = 10;
@@ -69,6 +75,17 @@ impl NotificationManager {
         core_guard.notify_compute(operation, info).await;
     }
 
+    pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.local_senders.retain(|sender| {
+            if let Err(err) = sender.send(notification.clone()) {
+                tracing::warn!("Failed to notify local subscriber. {}", err);
+                return false;
+            }
+            true
+        });
+    }
+
     /// Tell `NotificationManagerCore` to skip some retry and delete senders.
     pub fn delete_sender(&self, worker_key: WorkerKey) {
         self.tx.send(worker_key).unwrap();
@@ -91,6 +108,11 @@ impl NotificationManager {
         let mut core_guard = self.core.lock().await;
         core_guard.compute_senders.insert(worker_key, sender);
     }
+
+    pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
+        let mut core_guard = self.core.lock().await;
+        core_guard.local_senders.push(sender);
+    }
 }
 
 struct NotificationManagerCore {
@@ -98,6 +120,8 @@ struct NotificationManagerCore {
     frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to compute nodes.
     compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    /// The notification sender to local subscribers.
+    local_senders: Vec<UnboundedSender<LocalNotification>>,
     /// Receiver used in heartbeat check. Receive the worker keys of disconnected workers from
     /// `StoredClusterManager::start_heartbeat_checker`.
     rx: UnboundedReceiver<WorkerKey>,
@@ -110,6 +134,7 @@ impl NotificationManagerCore {
         Self {
             frontend_senders: HashMap::new(),
             compute_senders: HashMap::new(),
+            local_senders: vec![],
             rx,
             epoch_generator,
         }
