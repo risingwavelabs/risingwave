@@ -125,7 +125,7 @@ where
                 Some(compactor) => compactor,
             };
 
-            // 2. Assign a compact task to the compactor.
+            // 2. Get a compact task and assign to the compactor.
             let compact_task = match hummock_manager_ref
                 .get_compact_task(compactor.context_id())
                 .await

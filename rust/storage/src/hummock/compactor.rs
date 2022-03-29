@@ -328,7 +328,6 @@ impl Compactor {
 
         let is_task_ok = result.is_ok();
 
-        // TODO: #93 retry
         let report_result = context
             .hummock_meta_client
             .report_compaction_task(compact_task, is_task_ok)

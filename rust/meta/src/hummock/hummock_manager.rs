@@ -694,6 +694,13 @@ where
             var_txn(compact_status),
             var_txn(compact_task_assignment)
         );
+        for assignment in compact_task_assignment.values() {
+            if assignment.context_id == assignee_context_id {
+                // We allow at most one on-going compact task for each context.
+                return Ok(assignment.compact_task.clone());
+            }
+        }
+
         let compact_task = compact_status.get_compact_task();
         let mut should_commit = false;
         let ret = match compact_task {
@@ -1326,10 +1333,17 @@ where
     }
 
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
-    pub async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
+    async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let active_context_ids = {
+            let compaction_guard = self.compaction.lock().await;
             let versioning_guard = self.versioning.read().await;
             let mut active_context_ids = HashSet::new();
+            active_context_ids.extend(
+                compaction_guard
+                    .compact_task_assignment
+                    .values()
+                    .map(|c| c.context_id),
+            );
             active_context_ids.extend(versioning_guard.pinned_versions.keys());
             active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
             active_context_ids
