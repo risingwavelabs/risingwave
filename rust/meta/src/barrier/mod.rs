@@ -391,6 +391,10 @@ where
         )
         .await?;
 
+        // Schedule a checkpoint immediately.
+        self.do_schedule(Command::checkpoint(), Notifier::default())
+            .await?;
+
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
         finish_rx.await.unwrap(); // Wait for this command to be finished.
 
