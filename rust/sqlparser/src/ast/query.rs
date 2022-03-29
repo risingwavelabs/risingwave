@@ -37,6 +37,27 @@ pub struct Query {
     pub fetch: Option<Fetch>,
 }
 
+impl Query {
+    pub fn get_limit_value(&self) -> Option<usize> {
+        match self.limit {
+            Some(Expr::Value(Value::Number(ref limit, _))) => limit.parse().ok(),
+            Some(_) => unreachable!(),
+            _ => None,
+        }
+    }
+
+    pub fn get_offset_value(&self) -> Option<usize> {
+        match self.offset {
+            Some(Offset {
+                value: Expr::Value(Value::Number(ref offset, _)),
+                ..
+            }) => offset.parse().ok(),
+            Some(_) => unreachable!(),
+            _ => None,
+        }
+    }
+}
+
 impl fmt::Display for Query {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if let Some(ref with) = self.with {

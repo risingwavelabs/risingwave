@@ -16,7 +16,7 @@ statement ok
 create materialized view m3 as select sum(m1.v1) as sum_m1_v1, sum(m1.v2) as sum_m1_v2 from m1;
 
 statement ok
-create materialized view m4 as select m1.v1, m1.v2, m2.v1, m2.v2 from m1 join m2 on m1.v1 = m2.v1;
+create materialized view m4 as select m1.v1 as m1v1, m1.v2 as m1v2, m2.v1 as m2v1, m2.v2 as m2v2 from m1 join m2 on m1.v1 = m2.v1;
 
 statement ok
 flush;

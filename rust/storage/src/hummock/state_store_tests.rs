@@ -76,7 +76,7 @@ async fn test_basic() {
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
 
-    // Write first batch.
+    // Write the first batch.
     hummock_storage
         .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
@@ -93,7 +93,7 @@ async fn test_basic() {
         .unwrap();
     assert_eq!(value, None);
 
-    // Write second batch.
+    // Write the second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
         .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
@@ -104,7 +104,7 @@ async fn test_basic() {
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
-    // Write third batch.
+    // Write the third batch.
     let epoch3 = epoch2 + 1;
     hummock_storage
         .write_batch(batch3.into_iter().map(|(k, v)| (k, v.into())), epoch3)
@@ -122,7 +122,7 @@ async fn test_basic() {
         .unwrap();
     assert_eq!(value, None);
 
-    // write aa bb
+    // Write aa bb
     let mut iter = hummock_storage
         .range_scan(..=b"ee".to_vec(), epoch1)
         .await
@@ -138,7 +138,7 @@ async fn test_basic() {
     // Get the anchor value at the second snapshot
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
-    // update aa, write cc
+    // Update aa, write cc
     let mut iter = hummock_storage
         .range_scan(..=b"ee".to_vec(), epoch2)
         .await
@@ -147,7 +147,7 @@ async fn test_basic() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
 
-    // delete aa, write dd,ee
+    // Delete aa, write dd,ee
     let mut iter = hummock_storage
         .range_scan(..=b"ee".to_vec(), epoch3)
         .await
@@ -210,13 +210,13 @@ async fn test_reload_storage() {
     // epoch 0 is reserved by storage service
     let epoch1: u64 = 1;
 
-    // Write first batch.
+    // Write the first batch.
     hummock_storage
         .write_batch(batch1.into_iter().map(|(k, v)| (k, v.into())), epoch1)
         .await
         .unwrap();
 
-    // Mock somthing happened to storage internal, and storage is reloaded.
+    // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
     let hummock_storage = HummockStorage::with_default_stats(
         Arc::new(default_config_for_test()),
@@ -239,7 +239,7 @@ async fn test_reload_storage() {
         .unwrap();
     assert_eq!(value, None);
 
-    // Write second batch.
+    // Write the second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
         .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
@@ -250,7 +250,7 @@ async fn test_reload_storage() {
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
 
-    // write aa bb
+    // Write aa bb
     let mut iter = hummock_storage
         .range_scan(..=b"ee".to_vec(), epoch1)
         .await
@@ -266,7 +266,7 @@ async fn test_reload_storage() {
     // Get the anchor value at the second snapshot
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
     assert_eq!(Bytes::from(value), Bytes::from("111111"));
-    // update aa, write cc
+    // Update aa, write cc
     let mut iter = hummock_storage
         .range_scan(..=b"ee".to_vec(), epoch2)
         .await

@@ -97,7 +97,7 @@ impl BlockIterator {
 }
 
 impl BlockIterator {
-    /// Invalidate current state after reaching a invalid state.
+    /// Invalidates current state after reaching a invalid state.
     fn invalidate(&mut self) {
         self.offset = self.block.len();
         self.restart_point_index = self.block.restart_point_len();
@@ -106,9 +106,9 @@ impl BlockIterator {
         self.entry_len = 0;
     }
 
-    /// Move to the next entry.
+    /// Moves to the next entry.
     ///
-    /// Note: Ensure that the current state is valid.
+    /// Note: Ensures that the current state is valid.
     fn next_inner(&mut self) {
         let offset = self.offset + self.entry_len;
         if offset >= self.block.len() {
@@ -129,7 +129,7 @@ impl BlockIterator {
         }
     }
 
-    /// Move forward until reach the first that equals or larger than the given `key`.
+    /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
             && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
@@ -138,7 +138,7 @@ impl BlockIterator {
         }
     }
 
-    /// Move backward until reach the first key that equals or smaller than the given `key`.
+    /// Moves backward until reaching the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
             && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
@@ -147,7 +147,7 @@ impl BlockIterator {
         }
     }
 
-    /// Move forward until the position reaches the previous position of the given `next_offset` or
+    /// Moves forward until the position reaches the previous position of the given `next_offset` or
     /// the last valid position if exists.
     fn next_until_prev_offset(&mut self, offset: usize) {
         while self.offset + self.entry_len < std::cmp::min(self.block.len(), offset) {
@@ -155,7 +155,7 @@ impl BlockIterator {
         }
     }
 
-    /// Move to the previous entry.
+    /// Moves to the previous entry.
     ///
     /// Note: Ensure that the current state is valid.
     fn prev_inner(&mut self) {
@@ -171,12 +171,12 @@ impl BlockIterator {
         self.next_until_prev_offset(origin_offset);
     }
 
-    /// Decode [`KeyPrefix`] at given offset.
+    /// Decodes [`KeyPrefix`] at given offset.
     fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
         KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
-    /// Search the restart point index that the given `key` belongs to.
+    /// Searchs the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         self.block.search_restart_point_by(|probe| {
             let prefix = self.decode_prefix_at(*probe as usize);
@@ -185,13 +185,13 @@ impl BlockIterator {
         })
     }
 
-    /// Seek to the restart point that the given `key` belongs to.
+    /// Seeks to the restart point that the given `key` belongs to.
     fn seek_restart_point_by_key(&mut self, key: &[u8]) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
 
-    /// Seek to the restart point by given restart point index.
+    /// Seeks to the restart point by given restart point index.
     fn seek_restart_point_by_index(&mut self, index: usize) {
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset);

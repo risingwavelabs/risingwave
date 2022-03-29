@@ -3559,6 +3559,7 @@ dependencies = [
  "risingwave_pb",
  "rust_decimal",
  "serde",
+ "smallvec",
  "thiserror",
  "tokio",
  "tokio-stream",

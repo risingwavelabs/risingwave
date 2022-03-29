@@ -12,32 +12,69 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_pb::plan::exchange_info::DistributionMode as ShuffleDistributionMode;
 use risingwave_pb::plan::ExchangeInfo;
 
-use crate::task::broadcast_channel::new_broadcast_channel;
-use crate::task::fifo_channel::new_fifo_channel;
-use crate::task::hash_shuffle_channel::new_hash_shuffle_channel;
+use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
+use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};
+use crate::task::hash_shuffle_channel::{
+    new_hash_shuffle_channel, HashShuffleReceiver, HashShuffleSender,
+};
 
-#[async_trait::async_trait]
 pub trait ChanSender: Send {
+    type SendFuture<'a>: Future<Output = Result<()>> + Send
+    where
+        Self: 'a;
     /// This function will block until there's enough resource to process the chunk.
     /// Currently, it will only be called from single thread.
     /// `None` is sent as a mark of the ending of channel.
-    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()>;
+    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
 }
 
-#[async_trait::async_trait]
+pub enum ChanSenderImpl {
+    HashShuffle(HashShuffleSender),
+    Fifo(FifoSender),
+    Broadcast(BroadcastSender),
+}
+
+impl ChanSenderImpl {
+    pub async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
+        match self {
+            Self::HashShuffle(sender) => sender.send(chunk).await,
+            Self::Fifo(sender) => sender.send(chunk).await,
+            Self::Broadcast(sender) => sender.send(chunk).await,
+        }
+    }
+}
+
 pub trait ChanReceiver: Send {
+    type RecvFuture<'a>: Future<Output = Result<Option<DataChunk>>> + Send
+    where
+        Self: 'a;
     /// Returns `None` if there's no more data to read.
     /// Otherwise it will wait until there's data.
-    async fn recv(&mut self) -> Result<Option<DataChunk>>;
+    fn recv(&mut self) -> Self::RecvFuture<'_>;
 }
 
-pub type BoxChanSender = Box<dyn ChanSender>;
-pub type BoxChanReceiver = Box<dyn ChanReceiver>;
+pub enum ChanReceiverImpl {
+    HashShuffle(HashShuffleReceiver),
+    Fifo(FifoReceiver),
+    Broadcast(BroadcastReceiver),
+}
+
+impl ChanReceiverImpl {
+    pub async fn recv(&mut self) -> Result<Option<DataChunk>> {
+        match self {
+            Self::HashShuffle(receiver) => receiver.recv().await,
+            Self::Broadcast(receiver) => receiver.recv().await,
+            Self::Fifo(receiver) => receiver.recv().await,
+        }
+    }
+}
 
 /// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 /// The producer is the local task executor, the consumer is
@@ -45,7 +82,7 @@ pub type BoxChanReceiver = Box<dyn ChanReceiver>;
 /// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,
-) -> Result<(BoxChanSender, Vec<BoxChanReceiver>)> {
+) -> Result<(ChanSenderImpl, Vec<ChanReceiverImpl>)> {
     match shuffle.get_mode()? {
         ShuffleDistributionMode::Single => Ok(new_fifo_channel()),
         ShuffleDistributionMode::Hash => Ok(new_hash_shuffle_channel(shuffle)),

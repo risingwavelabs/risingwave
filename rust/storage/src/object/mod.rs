@@ -34,7 +34,7 @@ pub struct ObjectMetadata {
 }
 
 impl BlockLocation {
-    /// Generate the http bytes range specifer.
+    /// Generates the http bytes range specifier.
     pub fn byte_range_specifier(&self) -> Option<String> {
         Some(format!(
             "bytes={}-{}",
@@ -47,10 +47,10 @@ impl BlockLocation {
 /// The implementation must be thread-safe.
 #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
-    /// Upload the object to `ObjectStore`.
+    /// Uploads the object to `ObjectStore`.
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()>;
 
-    /// If the block_loc is None, the whole object will be return.
+    /// If the `block_loc` is None, the whole object will be return.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2
@@ -58,10 +58,10 @@ pub trait ObjectStore: Send + Sync {
 
     async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>>;
 
-    /// Obtain the object metadata.
+    /// Obtains the object metadata.
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata>;
 
-    /// Delete blob permanently.
+    /// Deletes blob permanently.
     async fn delete(&self, path: &str) -> Result<()>;
 }
 

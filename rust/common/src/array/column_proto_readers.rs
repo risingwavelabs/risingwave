@@ -101,7 +101,7 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> Result<NaiveDateTimeWrapp
     }
 }
 
-fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
+pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> Result<IntervalUnit> {
     {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;

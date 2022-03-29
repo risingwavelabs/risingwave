@@ -68,7 +68,7 @@ impl ScopedLocalVersion {
     }
 }
 
-/// The `LocalVersionManager` maintain a local copy of storage service's hummock version data.
+/// The `LocalVersionManager` maintains a local copy of storage service's hummock version data.
 /// By acquiring a `ScopedLocalVersion`, the `SSTables` of this version is guaranteed to be valid
 /// during the lifetime of `ScopedLocalVersion`. Internally `LocalVersionManager` will pin/unpin the
 /// versions in storage service.
@@ -106,7 +106,7 @@ impl LocalVersionManager {
     ) {
         let unpin_worker_rx = local_version_manager.unpin_worker_rx.lock().take();
         if let Some(unpin_worker_rx) = unpin_worker_rx {
-            // Pin and get latest version.
+            // Pin and get the latest version.
             tokio::spawn(LocalVersionManager::start_pin_worker(
                 Arc::downgrade(&local_version_manager),
                 hummock_meta_client.clone(),
@@ -121,7 +121,7 @@ impl LocalVersionManager {
         }
     }
 
-    /// Update cached version if the new version is of greater id
+    /// Updates cached version if the new version is of greater id
     pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
         let mut guard = self.current_version.write();
@@ -145,9 +145,8 @@ impl LocalVersionManager {
         true
     }
 
-    /// Wait until the local hummock version contains the given committed epoch
+    /// Waits until the local hummock version contains the given committed epoch
     pub async fn wait_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
-        // TODO: review usage of all HummockEpoch::MAX
         if epoch == HummockEpoch::MAX {
             panic!("epoch should not be u64::MAX");
         }
@@ -191,7 +190,7 @@ impl LocalVersionManager {
         Ok(ssts)
     }
 
-    /// Get the iterators on the underlying tables.
+    /// Gets the iterators on the underlying tables.
     pub async fn tables(
         &self,
         levels: &[risingwave_pb::hummock::Level],
@@ -281,7 +280,7 @@ impl LocalVersionManager {
             std::collections::btree_map::Entry::Occupied(e) => {
                 if *e.get() == 1 {
                     if e.key() == &min_epoch {
-                        // Do shared buffer cleanup if the min_epoch is pop
+                        // Clean up shared buffer if the min_epoch is pop
                         shared_buffer_manager.delete_before(min_epoch);
                     }
                     e.remove();
