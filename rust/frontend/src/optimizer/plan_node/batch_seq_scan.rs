@@ -14,25 +14,18 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, RowSeqScanNode};
 
 use super::{PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::LogicalScan;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSeqScan` implements [`super::LogicalScan`] to scan from a row-oriented table
 #[derive(Debug, Clone)]
 pub struct BatchSeqScan {
     pub base: PlanBase,
     logical: LogicalScan,
-}
-
-impl WithSchema for BatchSeqScan {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
 }
 
 impl BatchSeqScan {
