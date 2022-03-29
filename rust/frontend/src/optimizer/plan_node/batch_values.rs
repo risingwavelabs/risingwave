@@ -58,12 +58,6 @@ impl fmt::Display for BatchValues {
     }
 }
 
-impl WithSchema for BatchValues {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchValues {
     fn to_distributed(&self) -> PlanRef {
         Self::with_dist(self.logical().clone(), Distribution::Single).into()

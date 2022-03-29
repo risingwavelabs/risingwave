@@ -67,12 +67,6 @@ impl PlanTreeNodeUnary for BatchFilter {
 
 impl_plan_tree_node_for_unary! { BatchFilter }
 
-impl WithSchema for BatchFilter {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchFilter {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self

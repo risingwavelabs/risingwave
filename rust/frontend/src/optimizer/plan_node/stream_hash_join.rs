@@ -126,12 +126,6 @@ impl PlanTreeNodeBinary for StreamHashJoin {
 
 impl_plan_tree_node_for_binary! { StreamHashJoin }
 
-impl WithSchema for StreamHashJoin {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToStreamProst for StreamHashJoin {
     fn to_stream_prost_body(&self) -> Node {
         Node::HashJoinNode(HashJoinNode {

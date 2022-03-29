@@ -77,12 +77,6 @@ impl StreamSource {
     }
 }
 
-impl WithSchema for StreamSource {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
-
 impl_plan_tree_node_for_leaf! { StreamSource }
 
 impl fmt::Display for StreamSource {

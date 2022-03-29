@@ -29,12 +29,6 @@ pub struct BatchSeqScan {
     logical: LogicalScan,
 }
 
-impl WithSchema for BatchSeqScan {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl BatchSeqScan {
     pub fn new_inner(logical: LogicalScan, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();

@@ -57,13 +57,6 @@ impl StreamTableScan {
         self.logical.table_name()
     }
 }
-
-impl WithSchema for StreamTableScan {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl_plan_tree_node_for_leaf! { StreamTableScan }
 
 impl fmt::Display for StreamTableScan {

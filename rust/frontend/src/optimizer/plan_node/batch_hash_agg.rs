@@ -82,13 +82,6 @@ impl PlanTreeNodeUnary for BatchHashAgg {
     }
 }
 impl_plan_tree_node_for_unary! { BatchHashAgg }
-
-impl WithSchema for BatchHashAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self.input().to_distributed_with_required(

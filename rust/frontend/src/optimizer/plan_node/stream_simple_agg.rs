@@ -68,12 +68,6 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 
-impl WithSchema for StreamSimpleAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToStreamProst for StreamSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;

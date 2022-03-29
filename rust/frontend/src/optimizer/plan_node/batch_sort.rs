@@ -56,12 +56,6 @@ impl PlanTreeNodeUnary for BatchSort {
 }
 impl_plan_tree_node_for_unary! {BatchSort}
 
-impl WithSchema for BatchSort {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
-
 impl ToDistributedBatch for BatchSort {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self

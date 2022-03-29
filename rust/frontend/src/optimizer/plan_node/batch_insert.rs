@@ -61,12 +61,6 @@ impl PlanTreeNodeUnary for BatchInsert {
 
 impl_plan_tree_node_for_unary! { BatchInsert }
 
-impl WithSchema for BatchInsert {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self

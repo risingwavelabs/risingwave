@@ -59,12 +59,6 @@ impl PlanTreeNodeUnary for BatchExchange {
 }
 impl_plan_tree_node_for_unary! {BatchExchange}
 
-impl WithSchema for BatchExchange {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
-
 impl ToDistributedBatch for BatchExchange {
     fn to_distributed(&self) -> PlanRef {
         unreachable!()

@@ -71,12 +71,6 @@ impl PlanTreeNodeUnary for StreamFilter {
 
 impl_plan_tree_node_for_unary! { StreamFilter }
 
-impl WithSchema for StreamFilter {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToStreamProst for StreamFilter {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::FilterNode(FilterNode {

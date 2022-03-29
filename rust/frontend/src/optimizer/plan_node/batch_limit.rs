@@ -56,13 +56,6 @@ impl PlanTreeNodeUnary for BatchLimit {
     }
 }
 impl_plan_tree_node_for_unary! {BatchLimit}
-
-impl WithSchema for BatchLimit {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self

@@ -61,12 +61,6 @@ impl PlanTreeNodeUnary for BatchDelete {
 
 impl_plan_tree_node_for_unary! { BatchDelete }
 
-impl WithSchema for BatchDelete {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchDelete {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self

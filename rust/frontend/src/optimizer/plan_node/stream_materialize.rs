@@ -211,12 +211,6 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
-impl WithSchema for StreamMaterialize {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
-
 impl ToStreamProst for StreamMaterialize {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;

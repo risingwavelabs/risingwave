@@ -114,12 +114,6 @@ impl PlanTreeNodeBinary for BatchHashJoin {
 
 impl_plan_tree_node_for_binary! { BatchHashJoin }
 
-impl WithSchema for BatchHashJoin {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> PlanRef {
         let left = self.left().to_distributed_with_required(
