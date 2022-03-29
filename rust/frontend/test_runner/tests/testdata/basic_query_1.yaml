@@ -12,6 +12,10 @@
   stream_plan: |
     StreamMaterialize { columns: [_row_id, v1, v2], pk_columns: [_row_id] }
       StreamTableScan { table: t, columns: [_row_id, v1, v2], pk_indices: [0] }
+- sql: select interval '100' day
+  batch_plan: |
+    BatchProject { exprs: [IntervalUnit { months: 0, days: 100, ms: 0 }:Interval], expr_alias: [ ] }
+      BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select t2.* from t;
