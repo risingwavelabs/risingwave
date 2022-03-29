@@ -14,7 +14,7 @@ Hummock consists of manager service on meta node, clients on compute nodes, and 
 
 Streaming state store has distinguished workload characteristics.
 
-* Every streaming executor will only read ***and write its own portion of data***, which are multiple consecutive non-overlapping ranges of keys (we call it ***key space***).
+* Every streaming executor will only ***read and write its own portion of data***, which are multiple consecutive non-overlapping ranges of keys (we call it ***key space***).
 * Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, all Hummock API like get, scan only guarantees writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
 * Streaming data are ***committed in serial***. Based on the [barrier-based checkpoint algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm), the states are persisted epoch by epoch. We can tailor the write path specifically for the epoch-based checkpoint workload.
 
