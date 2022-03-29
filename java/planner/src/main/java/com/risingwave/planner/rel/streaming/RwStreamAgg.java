@@ -2,7 +2,6 @@ package com.risingwave.planner.rel.streaming;
 
 import com.risingwave.planner.metadata.RisingWaveRelMetadataQuery;
 import com.risingwave.planner.rel.physical.RwAggregate;
-import com.risingwave.proto.expr.InputRefExpr;
 import com.risingwave.proto.streaming.plan.HashAggNode;
 import com.risingwave.proto.streaming.plan.SimpleAggNode;
 import com.risingwave.proto.streaming.plan.StreamNode;
@@ -67,7 +66,7 @@ public class RwStreamAgg extends RwAggregate implements RisingWaveStreamingRel {
     } else {
       HashAggNode.Builder hashAggNodeBuilder = HashAggNode.newBuilder();
       for (int i = groupSet.nextSetBit(0); i >= 0; i = groupSet.nextSetBit(i + 1)) {
-        hashAggNodeBuilder.addGroupKeys(InputRefExpr.newBuilder().setColumnIdx(i).build());
+        hashAggNodeBuilder.addDistributionKeys(i);
       }
       for (AggregateCall aggCall : aggCalls) {
         hashAggNodeBuilder.addAggCalls(serializeAggCall(aggCall));

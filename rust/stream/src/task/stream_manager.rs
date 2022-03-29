@@ -563,9 +563,9 @@ impl StreamManagerCore {
         trace!("Join non-equi condition: {:?}", condition);
 
         let key_indices = node
-            .get_group_keys()
+            .get_distribution_keys()
             .iter()
-            .map(|key| key.column_idx as usize)
+            .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
         macro_rules! impl_create_hash_join_executor {

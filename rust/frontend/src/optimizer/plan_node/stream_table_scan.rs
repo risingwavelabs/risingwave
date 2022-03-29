@@ -20,7 +20,6 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
-use crate::expr::column_idx_to_inputref_proto;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
@@ -109,12 +108,12 @@ impl StreamTableScan {
                     type_name: "".to_string(),
                 })
                 .collect(),
-            group_keys: self
+            distribution_keys: self
                 .base
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .map(|idx| *idx as i32)
                 .collect_vec(),
         };
 

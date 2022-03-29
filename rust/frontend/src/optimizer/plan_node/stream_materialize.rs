@@ -26,7 +26,6 @@ use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::ColumnId;
-use crate::expr::column_idx_to_inputref_proto;
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Order, WithSchema};
 
@@ -223,12 +222,12 @@ impl ToStreamProst for StreamMaterialize {
                     }
                 })
                 .collect(),
-            group_keys: self
+            distribution_keys: self
                 .base
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .map(|idx| *idx as i32)
                 .collect_vec(),
         })
     }

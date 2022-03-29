@@ -87,9 +87,9 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             Arc::new(StateStoreMetrics::unused()),
         );
         let key_indices = node
-            .get_group_keys()
+            .get_distribution_keys()
             .iter()
-            .map(|key| key.column_idx as usize)
+            .map(|key| *key as usize)
             .collect::<Vec<_>>();
         Ok(Box::new(BatchQueryExecutor::new(
             table,

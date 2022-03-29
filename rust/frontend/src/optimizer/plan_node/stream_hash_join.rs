@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::HashJoinNode;
 
 use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToStreamProst};
-use crate::expr::{column_idx_to_inputref_proto, Expr};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::EqJoinPredicate;
 use crate::optimizer::property::{Distribution, WithSchema};
 use crate::utils::ColIndexMapping;
@@ -149,12 +149,12 @@ impl ToStreamProst for StreamHashJoin {
                 .map(|v| *v as i32)
                 .collect(),
             condition: Some(self.eq_join_predicate.other_cond().as_expr().to_protobuf()),
-            group_keys: self
+            distribution_keys: self
                 .base
                 .dist
                 .dist_column_indices()
                 .iter()
-                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .map(|idx| *idx as i32)
                 .collect_vec(),
         })
     }
