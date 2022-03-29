@@ -16,7 +16,8 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
+use console::style;
 
 use crate::{ExecuteContext, Task};
 
@@ -45,7 +46,12 @@ impl Task for ConfigureTmuxTask {
 
         let mut cmd = self.tmux();
         cmd.arg("-V");
-        ctx.run_command(cmd)?;
+        ctx.run_command(cmd).with_context(|| {
+            format!(
+                "Failed to execute {} command. Did you install tmux?",
+                style("tmux").blue().bold()
+            )
+        })?;
 
         // List previous windows and kill them
         let mut cmd = self.tmux();

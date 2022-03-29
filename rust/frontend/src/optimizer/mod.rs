@@ -25,6 +25,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{LogicalProject, StreamMaterialize};
@@ -170,14 +171,17 @@ impl PlanRoot {
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> StreamMaterialize {
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
         let stream_plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
-                let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
-                self.required_dist =
-                    out_col_change.rewrite_distribution(self.required_dist.clone());
-                self.required_order = out_col_change.rewrite_order(self.required_order.clone());
+                let (plan, out_col_change) = plan.logical_rewrite_for_stream();
+                self.required_dist = out_col_change
+                    .rewrite_required_distribution(&self.required_dist)
+                    .unwrap();
+                self.required_order = out_col_change
+                    .rewrite_required_order(&self.required_order)
+                    .unwrap();
                 self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
                 self.schema = plan.schema().clone();
                 plan.to_stream_with_dist_required(&self.required_dist)

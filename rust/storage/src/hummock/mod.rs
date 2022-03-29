@@ -94,12 +94,12 @@ pub struct HummockStorage {
     /// Manager for immutable shared buffers
     shared_buffer_manager: Arc<SharedBufferManager>,
 
-    /// Statisctics
+    /// Statistics
     stats: Arc<StateStoreMetrics>,
 }
 
 impl HummockStorage {
-    /// Create a [`HummockStorage`] with default stats. Should only used by tests.
+    /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn with_default_stats(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
@@ -117,13 +117,13 @@ impl HummockStorage {
         .await
     }
 
-    /// Create a [`HummockStorage`].
+    /// Creates a [`HummockStorage`].
     pub async fn new(
         options: Arc<StorageConfig>,
         sstable_store: SstableStoreRef,
         local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Self> {
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
@@ -153,7 +153,7 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    /// Get the value of a specified `key`.
+    /// Gets the value of a specified `key`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
@@ -214,11 +214,11 @@ impl HummockStorage {
             .observe(table_counts as f64);
         let mut it = MergeIterator::new(table_iters, self.stats.clone());
 
-        // Use `MergeIterator` to seek for the key with latest version to
+        // Use `MergeIterator` to seek for the key with the latest version to
         // get the latest key.
         it.seek(&key_with_epoch(key.to_vec(), epoch)).await?;
 
-        // Iterator has seeked passed the borders.
+        // Iterator has sought passed the borders.
         if !it.is_valid() {
             return Ok(None);
         }
@@ -233,7 +233,7 @@ impl HummockStorage {
         Ok(value)
     }
 
-    /// Return an iterator that scan from the begin key to the end key
+    /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.
     pub async fn range_scan<R, B>(
         &self,
@@ -245,7 +245,7 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
-        // check epoch validity
+        // Check epoch validity
         validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
@@ -294,7 +294,7 @@ impl HummockStorage {
         ))
     }
 
-    /// Return a reversed iterator that scans from the end key to the begin key
+    /// Returns a reversed iterator that scans from the end key to the begin key
     /// The result is based on a snapshot corresponding to the given `epoch`.
     pub async fn reverse_range_scan<R, B>(
         &self,
@@ -306,7 +306,7 @@ impl HummockStorage {
         B: AsRef<[u8]>,
     {
         let version = self.local_version_manager.get_version()?;
-        // check epoch validity
+        // Check epoch validity
         validate_epoch(version.safe_epoch(), epoch)?;
 
         // Filter out tables that overlap with given `key_range`
@@ -353,7 +353,7 @@ impl HummockStorage {
         ))
     }
 
-    /// Write batch to storage. The batch should be:
+    /// Writes a batch to storage. The batch should be:
     /// * Ordered. KV pairs will be directly written to the table, so it must be ordered.
     /// * Locally unique. There should not be two or more operations on the same key in one write
     ///   batch.
@@ -383,7 +383,7 @@ impl HummockStorage {
         Ok(())
     }
 
-    /// Replicate batch to shared buffer, without uploading to the storage backend.
+    /// Replicates a batch to shared buffer, without uploading to the storage backend.
     pub async fn replicate_batch(
         &self,
         kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,

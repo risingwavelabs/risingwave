@@ -20,7 +20,7 @@ use itertools::Itertools;
 use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
-use crate::optimizer::property::{Distribution, Order};
+use crate::optimizer::property::{Distribution, FieldOrder, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
 ///
@@ -52,14 +52,29 @@ impl ColIndexMapping {
         };
         Self { target_size, map }
     }
+
     pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
         (self.map, self.target_size)
     }
 
-    pub fn identical_map(target_size: usize) -> Self {
-        let map = (0..target_size).into_iter().map(Some).collect();
+    pub fn identity(size: usize) -> Self {
+        let map = (0..size).into_iter().map(Some).collect();
         Self::new(map)
     }
+
+    pub fn identity_or_none(source_size: usize, target_size: usize) -> Self {
+        let map = (0..source_size)
+            .into_iter()
+            .map(|i| if i < target_size { Some(i) } else { None })
+            .collect();
+        Self::new(map)
+    }
+
+    pub fn empty(size: usize) -> Self {
+        let map = vec![None; size];
+        Self::new(map)
+    }
+
     /// Create a partial mapping which maps range `(0..source_num)` to range
     /// `(offset..offset+source_num)`.
     ///
@@ -226,22 +241,77 @@ impl ColIndexMapping {
         self.target_size() == 0
     }
 
-    pub fn rewrite_order(&self, mut order: Order) -> Order {
-        for field in &mut order.field_order {
-            field.index = self.map(field.index)
+    /// Rewrite the provided order's field index. It will try its best to give the most accurate
+    /// order. Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
+    pub fn rewrite_provided_order(&self, order: &Order) -> Order {
+        let mut mapped_field = vec![];
+        for field in &order.field_order {
+            match self.try_map(field.index) {
+                Some(mapped_index) => mapped_field.push(FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                }),
+                None => break,
+            }
         }
-        order
+        Order {
+            field_order: mapped_field,
+        }
     }
 
-    pub fn rewrite_distribution(&mut self, dist: Distribution) -> Distribution {
+    /// Rewrite the required order's field index. if it can't give a corresponding
+    /// required order after the column index mapping, it will return None.
+    /// Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
+    /// Order(0,1,2) with mapping(0->1,2->0) will return None
+    pub fn rewrite_required_order(&self, order: &Order) -> Option<Order> {
+        order
+            .field_order
+            .iter()
+            .map(|field| {
+                self.try_map(field.index).map(|mapped_index| FieldOrder {
+                    index: mapped_index,
+                    direct: field.direct,
+                })
+            })
+            .collect::<Option<Vec<_>>>()
+            .map(|mapped_field| Order {
+                field_order: mapped_field,
+            })
+    }
+
+    /// Rewrite the provided distribution's field index. It will try its best to give the most
+    /// accurate distribution.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `AnyShard`.
+    pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
         match dist {
-            Distribution::HashShard(mut col_idxes) => {
-                for idx in &mut col_idxes {
-                    *idx = self.map(*idx);
+            Distribution::HashShard(col_idxes) => {
+                let mapped_dist = col_idxes
+                    .iter()
+                    .map(|col_idx| self.try_map(*col_idx))
+                    .collect::<Option<Vec<_>>>();
+                match mapped_dist {
+                    Some(col_idx) => Distribution::HashShard(col_idx),
+                    None => Distribution::AnyShard,
                 }
-                Distribution::HashShard(col_idxes)
             }
-            _ => dist,
+            _ => dist.clone(),
+        }
+    }
+
+    /// Rewrite the required distribution's field index. if it can't give a corresponding
+    /// required distribution after the column index mapping, it will return None.
+    /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
+    /// HashShard(0,1,2), with mapping(0->1,2->0) will return None.
+    pub fn rewrite_required_distribution(&self, dist: &Distribution) -> Option<Distribution> {
+        match dist {
+            Distribution::HashShard(col_idxes) => col_idxes
+                .iter()
+                .map(|col_idx| self.try_map(*col_idx))
+                .collect::<Option<Vec<_>>>()
+                .map(Distribution::HashShard),
+            _ => Some(dist.clone()),
         }
     }
 

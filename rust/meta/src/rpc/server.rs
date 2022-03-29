@@ -229,7 +229,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         vacuum_trigger_ref.clone(),
     );
     let notification_srv = NotificationServiceImpl::new(
-        notification_manager,
+        notification_manager.clone(),
         catalog_manager_v2_ref,
         cluster_manager.clone(),
         epoch_generator_ref.clone(),
@@ -239,16 +239,23 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.boot_metrics_service(prometheus_addr);
     }
 
-    let mut sub_tasks: Vec<(JoinHandle<()>, UnboundedSender<()>)> = vec![
-        #[cfg(not(test))]
-        StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
-            .await,
-    ];
-    sub_tasks.extend(hummock::start_hummock_workers(
-        hummock_manager,
-        compactor_manager,
-        vacuum_trigger_ref,
-    ));
+    let mut sub_tasks = vec![];
+    sub_tasks.extend(
+        hummock::start_hummock_workers(
+            hummock_manager,
+            compactor_manager,
+            vacuum_trigger_ref,
+            notification_manager.clone(),
+        )
+        .await,
+    );
+    #[cfg(not(test))]
+    {
+        sub_tasks.push(
+            StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
+                .await,
+        );
+    }
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
@@ -269,10 +276,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
                         _ = tokio::signal::ctrl_c() => {},
                         _ = shutdown_recv.recv() => {
                             for (join_handle, shutdown_sender) in sub_tasks {
-                                if shutdown_sender.send(()).is_ok() {
-                                    if let Err(err) = join_handle.await {
-                                        tracing::warn!("shutdown err: {:?}", err);
-                                    }
+                                if let Err(err) = shutdown_sender.send(()) {
+                                    tracing::warn!("Failed to send shutdown: {:?}", err);
+                                    continue;
+                                }
+                                if let Err(err) = join_handle.await {
+                                    tracing::warn!("Failed to join shutdown: {:?}", err);
                                 }
                             }
                         },

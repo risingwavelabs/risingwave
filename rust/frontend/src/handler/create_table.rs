@@ -16,7 +16,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
@@ -25,12 +25,11 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
+use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ROWID_PREFIX};
 use crate::optimizer::plan_node::StreamSource;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
-
-pub const ROWID_NAME: &str = "_row_id";
 
 pub fn gen_create_table_plan(
     session: &SessionImpl,
@@ -51,12 +50,20 @@ pub fn gen_create_table_plan(
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
             column_id: ColumnId::new(0),
-            name: ROWID_NAME.to_string(),
+            name: gen_row_id_column_name(0),
             field_descs: vec![],
             type_name: "".to_string(),
         });
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
+            if is_row_id_column_name(&column.name.value) {
+                return Err(ErrorCode::InternalError(format!(
+                    "column name prefixed with {:?} are reserved word.",
+                    ROWID_PREFIX
+                ))
+                .into());
+            }
+
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
@@ -106,7 +113,7 @@ pub fn gen_create_table_plan(
             Order::any().clone(),
             required_cols,
         )
-        .gen_create_mv_plan(table_name)
+        .gen_create_mv_plan(table_name)?
     };
     let table = materialize.table().to_prost(schema_id, database_id);
 
@@ -128,8 +135,11 @@ pub async fn handle_create_table(
         (plan, source, table)
     };
 
-    let json_plan = serde_json::to_string_pretty(&plan).unwrap();
-    log::debug!("name={}, plan=\n{}", table_name, json_plan);
+    log::trace!(
+        "name={}, plan=\n{}",
+        table_name,
+        serde_json::to_string_pretty(&plan).unwrap()
+    );
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer
@@ -151,7 +161,7 @@ mod tests {
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
-    use super::*;
+    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -185,8 +195,9 @@ mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
+        let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
-            ROWID_NAME => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Int64,
             "v1" => DataType::Int16,
             "v2" => DataType::Int32,
             "v3" => DataType::Int64,

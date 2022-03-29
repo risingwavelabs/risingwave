@@ -97,6 +97,22 @@ impl Condition {
         }
     }
 
+    /// Convert condition to an expression. If always true, return `None`.
+    pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
+                    .unwrap()
+                    .into();
+            }
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;

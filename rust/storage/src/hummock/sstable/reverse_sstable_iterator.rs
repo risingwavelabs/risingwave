@@ -50,7 +50,7 @@ impl ReverseSSTableIterator {
         }
     }
 
-    /// Seek to a block, and then seek to the key if `seek_key` is given.
+    /// Seeks to a block, and then seeks to the key if `seek_key` is given.
     async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
         if idx >= self.sst.block_count() as isize || idx < 0 {
             self.block_iter = None;
@@ -115,7 +115,7 @@ impl HummockIterator for ReverseSSTableIterator {
             .meta
             .block_metas
             .partition_point(|block_meta| {
-                // compare by version comparator
+                // Compare by version comparator
                 // Note: we are comparing against the `smallest_key` of the `block`, thus the
                 // partition point should be `prev(<=)` instead of `<`.
                 let ord = VersionedComparator::compare_key(block_meta.smallest_key.as_slice(), key);
@@ -126,7 +126,7 @@ impl HummockIterator for ReverseSSTableIterator {
 
         self.seek_idx(block_idx, Some(key)).await?;
         if !self.is_valid() {
-            // seek to prev block
+            // Seek to prev block
             self.seek_idx(block_idx - 1, None).await?;
         }
 
