@@ -23,13 +23,18 @@ use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
 use crate::executor::ExecutorBuilder;
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{DdlFinishNotifierTx, ExecutorParams, StreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
-    Init,
-    ReadingSnapshot,
-    ReadingMView,
+    Init {
+        notifier: DdlFinishNotifierTx,
+    },
+    ReadingSnapshot {
+        notifier: DdlFinishNotifierTx,
+        create_epoch: u64,
+    },
+    ReadingMview,
 }
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -54,7 +59,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        stream: &mut StreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
         let snapshot = params.input.remove(1);
@@ -65,12 +70,19 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // TODO(bugen): how can we know the way of mapping?
         let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
 
+        // For notifying about creation finish.
+        let notifier = stream
+            .context
+            .lock_barrier_manager()
+            .register_ddl_finish_notifier(params.actor_id);
+
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
         let schema = snapshot.schema().clone();
         Ok(Box::new(ChainExecutor::new(
             snapshot,
             mview,
+            notifier,
             schema,
             column_idxs,
             params.op_info,
@@ -82,6 +94,7 @@ impl ChainExecutor {
     pub fn new(
         snapshot: Box<dyn Executor>,
         mview: Box<dyn Executor>,
+        notifier: DdlFinishNotifierTx,
         schema: Schema,
         column_idxs: Vec<usize>,
         op_info: String,
@@ -89,7 +102,7 @@ impl ChainExecutor {
         Self {
             snapshot,
             mview,
-            state: ChainState::Init,
+            state: ChainState::Init { notifier },
             schema,
             column_idxs,
             op_info,
@@ -124,15 +137,25 @@ impl ChainExecutor {
     async fn read_snapshot(&mut self) -> Result<Message> {
         let msg = self.snapshot.next().await;
         match msg {
-            Err(e) => {
-                // TODO: Refactor this once we find a better way to know the upstream is done.
-                if let ErrorCode::Eof = e.inner() {
-                    self.state = ChainState::ReadingMView;
-                    return self.read_mview().await;
+            Err(e) if matches!(e.inner(), ErrorCode::Eof) => {
+                // We've consumed the snapshot.
+                // Turn to `ReadingMview` and report that we've finished the creation (for a
+                // workaround).
+                match std::mem::replace(&mut self.state, ChainState::ReadingMview) {
+                    ChainState::ReadingSnapshot {
+                        notifier,
+                        create_epoch,
+                    } => {
+                        notifier
+                            .send(create_epoch)
+                            .expect("failed to notify finished");
+                        return self.read_mview().await;
+                    }
+                    _ => unreachable!(),
                 }
-                Err(e)
             }
-            Ok(msg) => Ok(msg),
+
+            _ => msg,
         }
     }
 
@@ -144,15 +167,26 @@ impl ChainExecutor {
             )
             .into()),
             Message::Barrier(barrier) => {
-                if barrier.is_add_output() {
+                // FIXME: we should check whether this is exactly the creation barrier
+                if barrier.is_add_output_mutation() {
                     // If the barrier is a conf change from mview side, init snapshot from its epoch
                     // and set its state to reading snapshot.
                     self.snapshot.init(barrier.epoch.prev)?;
-                    self.state = ChainState::ReadingSnapshot;
+
+                    // FIXME: remove this borrow checker workaround of `replace`
+                    match std::mem::replace(&mut self.state, ChainState::ReadingMview) {
+                        ChainState::Init { notifier } => {
+                            self.state = ChainState::ReadingSnapshot {
+                                notifier,
+                                create_epoch: barrier.epoch.curr,
+                            };
+                        }
+                        _ => unreachable!(),
+                    }
                 } else {
                     // If the barrier is not a conf change, means snapshot already read and state
                     // should be set to reading mview.
-                    self.state = ChainState::ReadingMView;
+                    self.state = ChainState::ReadingMview;
                 }
                 Ok(Message::Barrier(barrier))
             }
@@ -161,9 +195,9 @@ impl ChainExecutor {
 
     async fn next_inner(&mut self) -> Result<Message> {
         match &self.state {
-            ChainState::Init => self.init().await,
-            ChainState::ReadingSnapshot => self.read_snapshot().await,
-            ChainState::ReadingMView => self.read_mview().await,
+            ChainState::Init { .. } => self.init().await,
+            ChainState::ReadingSnapshot { .. } => self.read_snapshot().await,
+            ChainState::ReadingMview => self.read_mview().await,
         }
     }
 }
@@ -200,6 +234,7 @@ mod test {
     use risingwave_common::column_nonnull;
     use risingwave_common::error::{ErrorCode, Result, RwError};
     use risingwave_common::types::DataType;
+    use tokio::sync::oneshot;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
@@ -298,18 +333,26 @@ mod test {
             ],
         ));
 
-        let mut chain =
-            ChainExecutor::new(first, second, schema, vec![0], "ChainExecutor".to_string());
+        let (finish_tx, mut finish_rx) = oneshot::channel();
+
+        let mut chain = ChainExecutor::new(
+            first,
+            second,
+            finish_tx,
+            schema,
+            vec![0],
+            "ChainExecutor".to_string(),
+        );
+
         let mut count = 0;
-        loop {
-            let k = &chain.next().await.unwrap();
+        while let Message::Chunk(ck) = chain.next().await.unwrap() {
             count += 1;
-            if let Message::Chunk(ck) = k {
-                let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
-                assert_eq!(target, count);
-            } else {
-                assert!(matches!(k, Message::Barrier(_)));
-                return;
+            let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
+            assert_eq!(target, count);
+
+            // Already consumed the snapshot.
+            if target == 3 {
+                finish_rx.try_recv().expect("should report finished");
             }
         }
     }
