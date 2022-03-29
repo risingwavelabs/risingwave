@@ -159,7 +159,7 @@ where
     S: MetaStore,
 {
     const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
+        Duration::from_millis(if cfg!(debug_assertions) { 500 } else { 100 });
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
     /// Create a new [`BarrierManager`].
@@ -219,6 +219,7 @@ where
                     // Notify about collected first.
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
 
+                    // Then try to finish the barrier for Create MVs.
                     let actors_to_finish = command_ctx.actors_to_finish();
                     unfinished.add(new_epoch, actors_to_finish, notifiers);
                     for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
@@ -310,7 +311,7 @@ where
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
-                        "inject barrier request: {:#?}", request
+                        "inject barrier request: {:?}", request
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.

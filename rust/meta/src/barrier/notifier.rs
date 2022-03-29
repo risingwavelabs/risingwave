@@ -67,10 +67,14 @@ impl UnfinishedNotifiers {
             // The barrier can be finished immediately.
             notifiers.into_iter().for_each(Notifier::notify_finished);
         } else {
-            let old = self
-                .0
-                .insert(epoch, (actor_ids, notifiers.into_iter().collect()));
+            tracing::debug!(
+                "actors to be finished for DDL with epoch {}: {:?}",
+                epoch,
+                actor_ids
+            );
 
+            let notifiers = notifiers.into_iter().collect();
+            let old = self.0.insert(epoch, (actor_ids, notifiers));
             assert!(old.is_none());
         }
     }
@@ -78,17 +82,16 @@ impl UnfinishedNotifiers {
     pub fn finish_actors(&mut self, epoch: u64, actors: impl IntoIterator<Item = ActorId>) {
         use std::collections::hash_map::Entry;
 
-        tracing::debug!("finish actors for epoch {}", epoch);
-
         match self.0.entry(epoch) {
             Entry::Occupied(mut o) => {
                 actors.into_iter().for_each(|a| {
+                    tracing::debug!("finish actor {} for DDL with epoch {}", a, epoch);
                     o.get_mut().0.remove(&a);
                 });
 
                 // All actors finished.
                 if o.get().0.is_empty() {
-                    tracing::debug!("finish all for epoch {}", epoch);
+                    tracing::debug!("finish all actors for DDL with epoch {}!", epoch);
 
                     let notifiers = o.remove().1;
                     notifiers.into_iter().for_each(Notifier::notify_finished);
