@@ -26,7 +26,7 @@ use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
 use risingwave_stream::executor::Message;
-use risingwave_stream::task::StreamManager;
+use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -36,7 +36,7 @@ const EXCHANGE_BUFFER_SIZE: usize = 1024;
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<StreamManager>,
+    stream_mgr: Arc<LocalStreamManager>,
 }
 
 type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
@@ -99,7 +99,7 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<StreamManager>) -> Self {
+    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<LocalStreamManager>) -> Self {
         ExchangeServiceImpl {
             batch_mgr: mgr,
             stream_mgr,

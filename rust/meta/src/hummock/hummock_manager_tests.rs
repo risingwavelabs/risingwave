@@ -44,7 +44,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     let version_id = FIRST_VERSION_ID;
     let epoch = INVALID_EPOCH;
 
-    assert!(HummockPinnedVersion::list(&*env.meta_store_ref())
+    assert!(HummockPinnedVersion::list(env.meta_store())
         .await?
         .is_empty());
     for _ in 0..2 {
@@ -57,7 +57,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         assert_eq!(0, hummock_version.levels[0].table_ids.len());
         assert_eq!(0, hummock_version.levels[1].table_ids.len());
 
-        let pinned_versions = HummockPinnedVersion::list(&*env.meta_store_ref()).await?;
+        let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await?;
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
         assert_eq!(pinned_versions[0].context_id, context_id);
         assert_eq!(pinned_versions[0].version_id.len(), 1);
@@ -71,13 +71,13 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .await
             .unwrap();
         assert_eq!(
-            pin_versions_sum(&HummockPinnedVersion::list(&*env.meta_store_ref()).await?),
+            pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await?),
             0
         );
     }
 
     assert_eq!(
-        pin_snapshots_sum(&HummockPinnedSnapshot::list(&*env.meta_store_ref()).await?),
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await?),
         0
     );
     for _ in 0..2 {
@@ -86,7 +86,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .await
             .unwrap();
         assert_eq!(pin_result.epoch, epoch);
-        let pinned_snapshots = HummockPinnedSnapshot::list(&*env.meta_store_ref()).await?;
+        let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await?;
         assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
         assert_eq!(pinned_snapshots[0].context_id, context_id);
         assert_eq!(pinned_snapshots[0].snapshot_id.len(), 1);
@@ -99,7 +99,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .await
             .unwrap();
         assert_eq!(
-            pin_snapshots_sum(&HummockPinnedSnapshot::list(&*env.meta_store_ref()).await?),
+            pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await?),
             0
         );
     }
@@ -132,11 +132,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // check safe epoch in hummock verison
-    let version_id1 = CurrentHummockVersionId::get(env.meta_store_ref().as_ref())
+    let version_id1 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();
     let hummock_version1 = HummockVersion::select(
-        env.meta_store_ref().as_ref(),
+        env.meta_store(),
         &HummockVersionRefId {
             id: version_id1.id(),
         },
@@ -175,12 +175,12 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .unwrap());
 
     // check safe epoch in hummock verison
-    let version_id2 = CurrentHummockVersionId::get(env.meta_store_ref().as_ref())
+    let version_id2 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();
 
     let hummock_version2 = HummockVersion::select(
-        env.meta_store_ref().as_ref(),
+        env.meta_store(),
         &HummockVersionRefId {
             id: version_id2.id(),
         },
@@ -210,12 +210,12 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .unwrap());
 
     // check safe epoch in hummock verison after success compaction
-    let version_id3 = CurrentHummockVersionId::get(env.meta_store_ref().as_ref())
+    let version_id3 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();
 
     let hummock_version3 = HummockVersion::select(
-        env.meta_store_ref().as_ref(),
+        env.meta_store(),
         &HummockVersionRefId {
             id: version_id3.id(),
         },
@@ -476,19 +476,11 @@ async fn test_release_context_resource() -> Result<()> {
     let context_id_2 = worker_node_2.id;
 
     assert_eq!(
-        pin_versions_sum(
-            &HummockPinnedVersion::list(&*env.meta_store_ref())
-                .await
-                .unwrap()
-        ),
+        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         0
     );
     assert_eq!(
-        pin_snapshots_sum(
-            &HummockPinnedSnapshot::list(&*env.meta_store_ref())
-                .await
-                .unwrap()
-        ),
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
         0
     );
     hummock_manager
@@ -508,33 +500,21 @@ async fn test_release_context_resource() -> Result<()> {
         .await
         .unwrap();
     assert_eq!(
-        pin_versions_sum(
-            &HummockPinnedVersion::list(&*env.meta_store_ref())
-                .await
-                .unwrap()
-        ),
+        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         2
     );
     assert_eq!(
-        pin_snapshots_sum(
-            &HummockPinnedSnapshot::list(&*env.meta_store_ref())
-                .await
-                .unwrap()
-        ),
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
         2
     );
     hummock_manager
         .release_contexts(&vec![context_id_1])
         .await
         .unwrap();
-    let pinned_versions = HummockPinnedVersion::list(&*env.meta_store_ref())
-        .await
-        .unwrap();
+    let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await.unwrap();
     assert_eq!(pin_versions_sum(&pinned_versions), 1);
     assert_eq!(pinned_versions[0].context_id, context_id_2);
-    let pinned_snapshots = HummockPinnedSnapshot::list(&*env.meta_store_ref())
-        .await
-        .unwrap();
+    let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await.unwrap();
     assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
     assert_eq!(pinned_snapshots[0].context_id, context_id_2);
     // it's OK to call again
@@ -547,19 +527,11 @@ async fn test_release_context_resource() -> Result<()> {
         .await
         .unwrap();
     assert_eq!(
-        pin_versions_sum(
-            &HummockPinnedVersion::list(env.meta_store_ref().as_ref())
-                .await
-                .unwrap()
-        ),
+        pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         0
     );
     assert_eq!(
-        pin_snapshots_sum(
-            &HummockPinnedSnapshot::list(&*env.meta_store_ref())
-                .await
-                .unwrap()
-        ),
+        pin_snapshots_sum(&HummockPinnedSnapshot::list(env.meta_store()).await.unwrap()),
         0
     );
     Ok(())

@@ -126,17 +126,17 @@ impl StreamActorBuilder {
 pub struct StreamGraphBuilder<S> {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
     /// (ctx) fragment manager.
-    fragment_manager_ref: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> StreamGraphBuilder<S>
 where
     S: MetaStore,
 {
-    pub fn new(fragment_manager_ref: FragmentManagerRef<S>) -> Self {
+    pub fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
             actor_builders: BTreeMap::new(),
-            fragment_manager_ref,
+            fragment_manager,
         }
     }
 
@@ -307,7 +307,7 @@ where
                 match table_sink_map.entry(table_id) {
                     Entry::Vacant(v) => {
                         let actor_ids = self
-                            .fragment_manager_ref
+                            .fragment_manager
                             .blocking_get_table_sink_actor_ids(&table_id)?;
                         v.insert(actor_ids).clone()
                     }
@@ -318,7 +318,7 @@ where
 
             dispatch_upstreams.extend(upstream_actor_ids.iter());
             let chain_upstream_table_node_actors = self
-                .fragment_manager_ref
+                .fragment_manager
                 .blocking_table_node_actors(&table_id)?;
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()

@@ -27,7 +27,7 @@ use risingwave_storage::table::cell_based_table::{CellBasedTable, CellBasedTable
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 const DEFAULT_BATCH_SIZE: usize = 100;
 
@@ -71,7 +71,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         state_store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::BatchPlanNode)?;
         let table_id = TableId::from(&node.table_ref_id);

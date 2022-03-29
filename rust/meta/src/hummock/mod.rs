@@ -39,21 +39,21 @@ use crate::storage::MetaStore;
 
 /// Start hummock's asynchronous tasks.
 pub async fn start_hummock_workers<S>(
-    hummock_manager_ref: Arc<HummockManager<S>>,
-    compactor_manager_ref: Arc<CompactorManager>,
-    vacuum_trigger_ref: Arc<VacuumTrigger<S>>,
-    notification_manager_ref: NotificationManagerRef,
+    hummock_manager: HummockManagerRef<S>,
+    compactor_manager: Arc<CompactorManager>,
+    vacuum_trigger: Arc<VacuumTrigger<S>>,
+    notification_manager: NotificationManagerRef,
 ) -> Vec<(JoinHandle<()>, UnboundedSender<()>)>
 where
     S: MetaStore,
 {
     vec![
-        start_compaction_trigger(hummock_manager_ref.clone(), compactor_manager_ref.clone()),
-        VacuumTrigger::start_vacuum_trigger(vacuum_trigger_ref),
+        start_compaction_trigger(hummock_manager.clone(), compactor_manager.clone()),
+        VacuumTrigger::start_vacuum_trigger(vacuum_trigger),
         subscribe_cluster_membership_change(
-            hummock_manager_ref,
-            compactor_manager_ref,
-            notification_manager_ref,
+            hummock_manager,
+            compactor_manager,
+            notification_manager,
         )
         .await,
     ]
@@ -61,15 +61,15 @@ where
 
 /// Start a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
-    hummock_manager_ref: Arc<HummockManager<S>>,
-    compactor_manager_ref: Arc<CompactorManager>,
-    notification_manager_ref: NotificationManagerRef,
+    hummock_manager: Arc<HummockManager<S>>,
+    compactor_manager: Arc<CompactorManager>,
+    notification_manager: NotificationManagerRef,
 ) -> (JoinHandle<()>, UnboundedSender<()>)
 where
     S: MetaStore,
 {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    notification_manager_ref.insert_local_sender(tx).await;
+    notification_manager.insert_local_sender(tx).await;
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         loop {
@@ -82,13 +82,13 @@ where
                         Some(LocalNotification::WorkerDeletion(worker_node)) => {
                             let retry_strategy = ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(60)).map(jitter);
                             tokio_retry::Retry::spawn(retry_strategy, || async {
-                                if let Err(err) = hummock_manager_ref.release_contexts(vec![worker_node.id]).await {
+                                if let Err(err) = hummock_manager.release_contexts(vec![worker_node.id]).await {
                                     tracing::warn!("Failed to release_contexts {}. Will retry.", err);
                                     return Err(err);
                                 }
                                 Ok(())
                             }).await.expect("Should retry until release_contexts succeeds");
-                            compactor_manager_ref.remove_compactor(worker_node.id);
+                            compactor_manager.remove_compactor(worker_node.id);
                         }
                     }
                 }
@@ -104,8 +104,8 @@ where
 const COMPACT_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Starts a worker to conditionally trigger compaction.
 pub fn start_compaction_trigger<S>(
-    hummock_manager_ref: Arc<HummockManager<S>>,
-    compactor_manager_ref: Arc<CompactorManager>,
+    hummock_manager: HummockManagerRef<S>,
+    compactor_manager: Arc<CompactorManager>,
 ) -> (JoinHandle<()>, UnboundedSender<()>)
 where
     S: MetaStore,
@@ -125,7 +125,7 @@ where
             }
 
             // 1. Pick a compactor.
-            let compactor = match compactor_manager_ref.next_compactor() {
+            let compactor = match compactor_manager.next_compactor() {
                 None => {
                     continue;
                 }
@@ -133,7 +133,7 @@ where
             };
 
             // 2. Get a compact task and assign to the compactor.
-            let compact_task = match hummock_manager_ref
+            let compact_task = match hummock_manager
                 .get_compact_task(compactor.context_id())
                 .await
             {
@@ -164,7 +164,7 @@ where
                 }
                 Err(err) => {
                     tracing::warn!("Failed to send compaction task. {}", err);
-                    compactor_manager_ref.remove_compactor(compactor.context_id());
+                    compactor_manager.remove_compactor(compactor.context_id());
                     // We don't need to explicitly cancel the compact task here.
                     // Either the compactor will reestablish the stream and fetch this unfinished
                     // compact task, or the compactor will lose connection and
@@ -189,10 +189,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_compaction_trigger() {
-        let (_, hummock_manager_ref, _, _) = setup_compute_env(80).await;
-        let compactor_manager_ref = Arc::new(CompactorManager::new());
+        let (_, hummock_manager, _, _) = setup_compute_env(80).await;
+        let compactor_manager = Arc::new(CompactorManager::new());
         let (join_handle, shutdown_sender) =
-            start_compaction_trigger(hummock_manager_ref, compactor_manager_ref);
+            start_compaction_trigger(hummock_manager, compactor_manager);
         shutdown_sender.send(()).unwrap();
         join_handle.await.unwrap();
     }

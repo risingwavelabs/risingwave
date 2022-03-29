@@ -27,7 +27,7 @@ use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, ExecutorBuilder, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -56,7 +56,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
 

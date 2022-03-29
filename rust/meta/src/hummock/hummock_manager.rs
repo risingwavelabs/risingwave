@@ -32,14 +32,14 @@ use risingwave_storage::hummock::{
 };
 use tokio::sync::{Mutex, RwLock};
 
-use crate::cluster::StoredClusterManagerRef;
+use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
 };
-use crate::manager::{IdCategory, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{Error, MetaStore, Transaction};
@@ -50,10 +50,9 @@ use crate::storage::{Error, MetaStore, Transaction};
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
 // - Call `abort_multi_var` if the ValTransaction is no longer needed
-pub struct HummockManager<S> {
-    meta_store_ref: Arc<S>,
-    id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    cluster_manager_ref: StoredClusterManagerRef<S>,
+pub struct HummockManager<S: MetaStore> {
+    env: MetaSrvEnv<S>,
+    cluster_manager: ClusterManagerRef<S>,
     // When trying to locks compaction and versioning at the same time, compaction lock should
     // be requested before versioning lock.
     compaction: Mutex<Compaction>,
@@ -61,6 +60,8 @@ pub struct HummockManager<S> {
 
     metrics: Arc<MetaMetrics>,
 }
+
+pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
 
 struct Compaction {
     compact_status: CompactStatus,
@@ -80,7 +81,7 @@ macro_rules! commit_multi_var {
                     $val_txn.apply_to_txn(&mut trx)?;
                 )*
                 // Commit to state store
-                $hummock_mgr.commit_trx($hummock_mgr.meta_store_ref.as_ref(), trx, $context_id)
+                $hummock_mgr.commit_trx($hummock_mgr.env.meta_store(), trx, $context_id)
                 .await?;
                 // Upon successful commit, commit the change to local in-mem state
                 $(
@@ -158,12 +159,11 @@ where
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Result<HummockManager<S>> {
         let instance = HummockManager {
-            meta_store_ref: env.meta_store_ref(),
-            id_gen_manager_ref: env.id_gen_manager_ref(),
+            env,
             versioning: RwLock::new(Versioning {
                 current_version_id: CurrentHummockVersionId::new(),
                 hummock_versions: Default::default(),
@@ -177,7 +177,7 @@ where
                 compact_task_assignment: Default::default(),
             }),
             metrics,
-            cluster_manager_ref,
+            cluster_manager,
         };
 
         instance.load_meta_store_state().await?;
@@ -189,24 +189,23 @@ where
     /// Load state from meta store.
     async fn load_meta_store_state(&self) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
-        compaction_guard.compact_status = CompactStatus::get(self.meta_store_ref.as_ref())
+        compaction_guard.compact_status = CompactStatus::get(self.env.meta_store())
             .await?
             .unwrap_or_else(CompactStatus::new);
 
         compaction_guard.compact_task_assignment =
-            CompactTaskAssignment::list(self.meta_store_ref.as_ref())
+            CompactTaskAssignment::list(self.env.meta_store())
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap().id, assigned))
                 .collect();
 
         let mut versioning_guard = self.versioning.write().await;
-        versioning_guard.current_version_id =
-            CurrentHummockVersionId::get(self.meta_store_ref.as_ref())
-                .await?
-                .unwrap_or_else(CurrentHummockVersionId::new);
+        versioning_guard.current_version_id = CurrentHummockVersionId::get(self.env.meta_store())
+            .await?
+            .unwrap_or_else(CurrentHummockVersionId::new);
 
-        versioning_guard.hummock_versions = HummockVersion::list(self.meta_store_ref.as_ref())
+        versioning_guard.hummock_versions = HummockVersion::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|version| (version.id, version))
@@ -230,31 +229,30 @@ where
                 max_committed_epoch: INVALID_EPOCH,
                 safe_epoch: INVALID_EPOCH,
             };
-            init_version.insert(self.meta_store_ref.as_ref()).await?;
+            init_version.insert(self.env.meta_store()).await?;
             versioning_guard
                 .hummock_versions
                 .insert(init_version.id, init_version);
         }
 
-        versioning_guard.pinned_versions = HummockPinnedVersion::list(self.meta_store_ref.as_ref())
+        versioning_guard.pinned_versions = HummockPinnedVersion::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|p| (p.context_id, p))
             .collect();
-        versioning_guard.pinned_snapshots =
-            HummockPinnedSnapshot::list(self.meta_store_ref.as_ref())
-                .await?
-                .into_iter()
-                .map(|p| (p.context_id, p))
-                .collect();
+        versioning_guard.pinned_snapshots = HummockPinnedSnapshot::list(self.env.meta_store())
+            .await?
+            .into_iter()
+            .map(|p| (p.context_id, p))
+            .collect();
 
-        versioning_guard.stale_sstables = HummockStaleSstables::list(self.meta_store_ref.as_ref())
+        versioning_guard.stale_sstables = HummockStaleSstables::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|s| (s.version_id, s))
             .collect();
 
-        versioning_guard.sstable_id_infos = SstableIdInfo::list(self.meta_store_ref.as_ref())
+        versioning_guard.sstable_id_infos = SstableIdInfo::list(self.env.meta_store())
             .await?
             .into_iter()
             .map(|s| (s.id, s))
@@ -268,19 +266,19 @@ where
     /// valid, which means the worker node is not a valid member of the cluster.
     async fn commit_trx(
         &self,
-        meta_store_ref: &S,
+        meta_store: &S,
         mut trx: Transaction,
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
-            if let Some(worker) = self.cluster_manager_ref.get_worker_by_id(context_id).await {
+            if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
                 trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
             } else {
                 // The worker is not found in cluster.
                 return Err(Error::TransactionAbort().into());
             }
         }
-        meta_store_ref.txn(trx).await.map_err(Into::into)
+        meta_store.txn(trx).await.map_err(Into::into)
     }
 
     /// Pin a hummock version that is greater than `last_pinned`. The pin belongs to `context_id`
@@ -436,7 +434,7 @@ where
 
     fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
         self.metrics
-            .level_compact_frequence
+            .level_compact_frequency
             .get_metric_with_label_values(&[&(String::from("L")
                 + &compact_metrics
                     .read_level_n
@@ -1080,7 +1078,8 @@ where
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         // TODO id_gen_manager generates u32, we need u64
         let sstable_id = self
-            .id_gen_manager_ref
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::HummockSSTableId }>()
             .await
             .map(|id| id as HummockSSTableId)?;
@@ -1092,7 +1091,7 @@ where
             meta_create_timestamp: INVALID_TIMESTAMP,
             meta_delete_timestamp: INVALID_TIMESTAMP,
         };
-        new_sst_id_info.insert(self.meta_store_ref.as_ref()).await?;
+        new_sst_id_info.insert(self.env.meta_store()).await?;
 
         // Update in-mem state after transaction succeeds.
         versioning_guard
@@ -1352,7 +1351,7 @@ where
         let mut invalid_context_ids = vec![];
         for active_context_id in &active_context_ids {
             if self
-                .cluster_manager_ref
+                .cluster_manager
                 .get_worker_by_id(*active_context_id)
                 .await
                 .is_none()
