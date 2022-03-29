@@ -402,6 +402,7 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse {
                 request_id: "".to_string(),
                 status: None,
+                finished_ddls: vec![],
             }))
         }
 

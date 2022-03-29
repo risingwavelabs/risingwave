@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use risingwave_common::error::Result;
+use risingwave_pb::stream_service::inject_barrier_response::FinishedDdl as ProstFinishedDdl;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -35,6 +36,15 @@ pub struct FinishedDdl {
     pub epoch: u64,
 
     pub actor_id: ActorId,
+}
+
+impl From<FinishedDdl> for ProstFinishedDdl {
+    fn from(f: FinishedDdl) -> Self {
+        Self {
+            epoch: f.epoch,
+            actor_id: f.actor_id,
+        }
+    }
 }
 
 pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
