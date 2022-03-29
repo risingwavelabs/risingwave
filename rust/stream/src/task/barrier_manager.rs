@@ -44,6 +44,13 @@ enum BarrierState {
     Managed(ManagedBarrierState),
 }
 
+#[derive(Debug)]
+pub struct FinishedDdl {
+    pub epoch: u64,
+
+    pub actor_id: ActorId,
+}
+
 /// [`LocalBarrierManager`] manages barrier control flow, used by local stream manager.
 /// Specifically, [`LocalBarrierManager`] serve barrier injection from meta server, send the
 /// barriers to and collect them from all actors, and finally report the progress.
@@ -76,46 +83,13 @@ impl LocalBarrierManager {
 
     /// Create a [`LocalBarrierManager`] with managed mode.
     pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::Pending {
-            last_epoch: None, // TODO: specify last epoch
-        }))
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::new()))
     }
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
         debug!("register sender: {}", actor_id);
         self.senders.insert(actor_id, sender);
-    }
-
-    /// Create a notifier for DDL finish. When an executor/actor finishes its DDL job, it can report
-    /// that using this notifier.
-    /// Note that a DDL of MV always corresponds to an epoch in our system.
-    ///
-    /// Take the creation of an MV for an example, it may last for several epochs to finish.
-    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will send the
-    /// DDL epoch using this notifier, which can be collected by the barrier manager and reported to
-    /// the meta service soon.
-    pub fn register_ddl_finish_notifier(&mut self, actor_id: ActorId) -> DdlFinishNotifierTx {
-        let (tx, rx) = oneshot::channel();
-        debug!("register ddl finish notifier: {}", actor_id);
-
-        // TODO: process the reporting
-        tokio::spawn(async move {
-            match rx.await {
-                Ok(ddl_epoch) => {
-                    info!(
-                        "ddl with epoch {} finishes on actor {}",
-                        ddl_epoch, actor_id
-                    )
-                }
-                Err(_) => info!(
-                    "ddl notifier for actor {} dropped, are we recovering?",
-                    actor_id
-                ),
-            }
-        });
-
-        tx
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
@@ -188,6 +162,18 @@ impl LocalBarrierManager {
         }
 
         Ok(())
+    }
+
+    pub fn finish_ddl(&mut self, ddl_epoch: u64, actor_id: ActorId) {
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => managed_state.finished_ddls.push(FinishedDdl {
+                epoch: ddl_epoch,
+                actor_id,
+            }),
+        }
     }
 }
 

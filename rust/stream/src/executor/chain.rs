@@ -71,10 +71,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         let column_idxs: Vec<usize> = node.column_ids.iter().map(|id| *id as usize).collect();
 
         // For notifying about creation finish.
-        let notifier = stream
-            .context
-            .lock_barrier_manager()
-            .register_ddl_finish_notifier(params.actor_id);
+        let notifier = stream.context.register_ddl_finish_notifier(params.actor_id);
 
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
