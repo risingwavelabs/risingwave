@@ -73,6 +73,14 @@ pub struct FrontendOpts {
     /// No given `config_path` means to use default config.
     #[clap(long, default_value = "")]
     pub config_path: String,
+
+    /// Execute query in distributed mode or single mode.
+    ///
+    /// We need this because currently we don't support `set` statement.
+    ///
+    /// TODO: Remove this after `set` statement.
+    #[clap(short, long)]
+    pub dist_query: bool,
 }
 
 impl Default for FrontendOpts {
