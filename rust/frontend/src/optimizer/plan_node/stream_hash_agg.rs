@@ -20,7 +20,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::expr::{column_idx_to_inputref_proto, InputRefDisplay};
+use crate::expr::InputRefDisplay;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 #[derive(Debug, Clone)]
@@ -56,7 +56,7 @@ impl StreamHashAgg {
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
-    pub fn group_keys(&self) -> &[usize] {
+    pub fn distribution_keys(&self) -> &[usize] {
         self.logical.group_keys()
     }
 }
@@ -67,7 +67,7 @@ impl fmt::Display for StreamHashAgg {
             .field(
                 "group_keys",
                 &self
-                    .group_keys()
+                    .distribution_keys()
                     .iter()
                     .copied()
                     .map(InputRefDisplay)
@@ -100,10 +100,10 @@ impl ToStreamProst for StreamHashAgg {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::HashAggNode(HashAggNode {
-            group_keys: self
-                .group_keys()
+            distribution_keys: self
+                .distribution_keys()
                 .iter()
-                .map(|idx| column_idx_to_inputref_proto(*idx))
+                .map(|idx| *idx as i32)
                 .collect_vec(),
             agg_calls: self
                 .agg_calls()
