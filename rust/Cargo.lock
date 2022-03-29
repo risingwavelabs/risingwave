@@ -3815,6 +3815,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-retry",
  "tokio-stream",
  "tonic",
  "tower",

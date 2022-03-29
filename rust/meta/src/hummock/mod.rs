@@ -31,6 +31,7 @@ pub use hummock_manager::*;
 use itertools::Itertools;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
 pub use vacuum::*;
 
 use crate::manager::{LocalNotification, NotificationManagerRef};
@@ -61,7 +62,7 @@ where
 /// Start a task to handle cluster membership change.
 pub async fn subscribe_cluster_membership_change<S>(
     hummock_manager_ref: Arc<HummockManager<S>>,
-    _compactor_manager_ref: Arc<CompactorManager>,
+    compactor_manager_ref: Arc<CompactorManager>,
     notification_manager_ref: NotificationManagerRef,
 ) -> (JoinHandle<()>, UnboundedSender<()>)
 where
@@ -79,9 +80,15 @@ where
                             return;
                         }
                         Some(LocalNotification::WorkerDeletion(worker_node)) => {
-                            // TODO: #93 retry instead of unwrap
-                            hummock_manager_ref.release_contexts(vec![worker_node.id]).await.unwrap();
-                            // TODO: #93 notify CompactorManager to remove stale compactor
+                            let retry_strategy = ExponentialBackoff::from_millis(10).max_delay(Duration::from_secs(60)).map(jitter);
+                            tokio_retry::Retry::spawn(retry_strategy, || async {
+                                if let Err(err) = hummock_manager_ref.release_contexts(vec![worker_node.id]).await {
+                                    tracing::warn!("Failed to release_contexts {}. Will retry.", err);
+                                    return Err(err);
+                                }
+                                Ok(())
+                            }).await.expect("Should retry until release_contexts succeeds");
+                            compactor_manager_ref.remove_compactor(worker_node.id);
                         }
                     }
                 }
@@ -157,13 +164,11 @@ where
                 }
                 Err(err) => {
                     tracing::warn!("Failed to send compaction task. {}", err);
-                    // Cancel the compact task and remove the compactor.
-                    // TODO: #93 retry
-                    hummock_manager_ref
-                        .report_compact_task(compact_task.clone(), false)
-                        .await
-                        .unwrap();
                     compactor_manager_ref.remove_compactor(compactor.context_id());
+                    // We don't need to explicitly cancel the compact task here.
+                    // Either the compactor will reestablish the stream and fetch this unfinished
+                    // compact task, or the compactor will lose connection and
+                    // its assigned compact task will be cancelled.
                 }
             }
         }

@@ -116,12 +116,12 @@ impl CompactorManager {
             context_id,
             sender: tx,
         }));
-        tracing::debug!("Added compactor {}", context_id);
+        tracing::info!("Added compactor {}", context_id);
         rx
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
-        tracing::debug!("Removed compactor {}", context_id);
+        tracing::info!("Removed compactor {}", context_id);
         self.inner
             .write()
             .compactors
