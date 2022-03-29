@@ -446,8 +446,8 @@
             pkIndices:
               - 0
             hashAggNode:
-              groupKeys:
-                - {}
+              distributionKeys:
+                - 0
               aggCalls:
                 - type: COUNT
                   returnType:
@@ -490,6 +490,8 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
+      distributionKeys:
         - 1
     ---
     id: 4294967294

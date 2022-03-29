@@ -230,6 +230,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             arithmetic_type_derive(t1, t2),
         );
     }
+    for t in num_types.clone() {
+        map.insert(FuncSign::new_unary(E::Neg, t), t);
+    }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
     build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
     build_binary_funcs(

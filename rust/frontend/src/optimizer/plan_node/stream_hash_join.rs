@@ -14,6 +14,7 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -152,6 +153,13 @@ impl ToStreamProst for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_protobuf()),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

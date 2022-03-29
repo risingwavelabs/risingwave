@@ -562,6 +562,12 @@ impl StreamManagerCore {
         };
         trace!("Join non-equi condition: {:?}", condition);
 
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
         macro_rules! impl_create_hash_join_executor {
             ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
                 |typ| match typ {
@@ -575,6 +581,7 @@ impl StreamManagerCore {
                         params.executor_id,
                         condition,
                         params.op_info,
+                        key_indices,
                     )) as Box<dyn Executor>, )*
                     _ => todo!("Join type {:?} not implemented", typ),
                 }
