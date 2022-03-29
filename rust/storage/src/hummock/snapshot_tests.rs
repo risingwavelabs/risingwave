@@ -116,15 +116,13 @@ async fn gen_and_upload_table_with_sstable_store(
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        let mut it = $storage
-            .range_scan::<_, Vec<u8>>($range, $epoch)
-            .await
-            .unwrap();
-        it.rewind().await.unwrap();
+        let mut it = $storage.iter::<_, Vec<u8>>($range, $epoch).await.unwrap();
         let mut count = 0;
-        while it.is_valid() {
-            count += 1;
-            it.next().await.unwrap();
+        loop {
+            match it.next().await.unwrap() {
+                Some(_) => count += 1,
+                None => break,
+            }
         }
         assert_eq!(count, $expect_count);
     }};
@@ -133,14 +131,15 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_reverse_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .reverse_range_scan::<_, Vec<u8>>($range, $epoch)
+            .reverse_iter::<_, Vec<u8>>($range, $epoch)
             .await
             .unwrap();
-        it.rewind().await.unwrap();
         let mut count = 0;
-        while it.is_valid() {
-            count += 1;
-            it.next().await.unwrap();
+        loop {
+            match it.next().await.unwrap() {
+                Some(_) => count += 1,
+                None => break,
+            }
         }
         assert_eq!(count, $expect_count);
     }};
