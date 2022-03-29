@@ -280,7 +280,7 @@ where
         Ok(())
     }
 
-    /// Flush means waiting for the next barrier to finish.
+    /// Flush means waiting for the next barrier to collect.
     pub async fn flush(&self) -> Result<()> {
         let start = Instant::now();
 
