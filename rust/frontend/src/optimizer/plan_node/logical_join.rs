@@ -202,8 +202,9 @@ impl LogicalJoin {
         let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
         left_pk
             .iter()
-            .map(|index| l2o.map(*index))
-            .chain(right_pk.iter().map(|index| r2o.map(*index)))
+            .map(|index| l2o.try_map(*index))
+            .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
+            .flatten()
             .collect()
     }
     /// Get a reference to the logical join's on.
