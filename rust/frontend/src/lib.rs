@@ -79,7 +79,7 @@ pub struct FrontendOpts {
     /// We need this because currently we don't support `set` statement.
     ///
     /// TODO: Remove this after `set` statement.
-    #[clap(long, default_value = "false")]
+    #[clap(short, long)]
     pub dist_query: bool,
 }
 

@@ -39,8 +39,12 @@ impl QueryManager {
     pub fn new(worker_node_manager: WorkerNodeManagerRef, dist_query: bool) -> Self {
         Self {
             worker_node_manager,
-            dist_query
+            dist_query,
         }
+    }
+
+    pub fn dist_query(&self) -> bool {
+        self.dist_query
     }
 
     /// Schedule query to single node.
