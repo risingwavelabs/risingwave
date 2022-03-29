@@ -76,10 +76,12 @@ where
 
         let req = request.into_inner();
 
-        tracing::debug!(
-            plan = serde_json::to_string(&req).unwrap().as_str(),
-            "create materialized view"
-        );
+        // Enable this tracing for debugging.
+        //
+        // tracing::debug!(
+        //     plan = serde_json::to_string(&req).unwrap().as_str(),
+        //     "create materialized view"
+        // );
 
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();

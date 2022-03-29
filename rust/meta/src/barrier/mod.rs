@@ -325,7 +325,7 @@ where
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
-                        "inject barrier request: {:#?}", request
+                        "inject barrier request: {:?}", request
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.
