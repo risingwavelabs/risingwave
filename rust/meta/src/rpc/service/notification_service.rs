@@ -23,13 +23,13 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
 use crate::cluster::{ClusterManagerRef, WorkerKey};
-use crate::manager::{CatalogManagerRef, EpochGeneratorRef, Notification, NotificationManagerRef};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, Notification};
 use crate::storage::MetaStore;
 pub struct NotificationServiceImpl<S: MetaStore> {
-    notification_manager: NotificationManagerRef,
+    env: MetaSrvEnv<S>,
+
     catalog_manager: CatalogManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-    epoch_generator: EpochGeneratorRef,
 }
 
 impl<S> NotificationServiceImpl<S>
@@ -37,16 +37,14 @@ where
     S: MetaStore,
 {
     pub fn new(
-        notification_manager: NotificationManagerRef,
+        env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        epoch_generator: EpochGeneratorRef,
     ) -> Self {
         Self {
-            notification_manager,
+            env,
             catalog_manager,
             cluster_manager,
-            epoch_generator,
         }
     }
 }
@@ -71,7 +69,8 @@ where
 
         match worker_type {
             WorkerType::ComputeNode => {
-                self.notification_manager
+                self.env
+                    .notification_manager()
                     .insert_compute_sender(WorkerKey(host_address), tx)
                     .await
             }
@@ -98,10 +97,11 @@ where
                     status: None,
                     operation: Operation::Snapshot as i32,
                     info: Some(Info::FeSnapshot(meta_snapshot)),
-                    version: self.epoch_generator.generate().into_inner(),
+                    version: self.env.epoch_generator().generate().into_inner(),
                 }))
                 .unwrap();
-                self.notification_manager
+                self.env
+                    .notification_manager()
                     .insert_frontend_sender(WorkerKey(host_address), tx)
                     .await
             }

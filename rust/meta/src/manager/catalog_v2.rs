@@ -29,7 +29,7 @@ use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
 use super::IdCategory;
-use crate::manager::{MetaSrvEnv, NotificationManagerRef};
+use crate::manager::MetaSrvEnv;
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -43,8 +43,6 @@ pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
 
 pub struct CatalogManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-    notification_manager: NotificationManagerRef,
-
     core: Mutex<CatalogManagerCore<S>>,
 }
 
@@ -54,14 +52,10 @@ impl<S> CatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        notification_manager: NotificationManagerRef,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let catalog_manager = Self {
             core: Mutex::new(CatalogManagerCore::new(env.clone()).await?),
             env,
-            notification_manager,
         };
         catalog_manager.init().await?;
         Ok(catalog_manager)
@@ -127,7 +121,8 @@ where
             core.add_database(database);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::DatabaseV2(database.to_owned()))
                 .await
                 .into_inner();
@@ -148,7 +143,8 @@ where
             core.drop_database(&database);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::DatabaseV2(database))
                 .await
                 .into_inner();
@@ -168,7 +164,8 @@ where
             core.add_schema(schema);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::SchemaV2(schema.to_owned()))
                 .await
                 .into_inner();
@@ -189,7 +186,8 @@ where
             core.drop_schema(&schema);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::SchemaV2(schema))
                 .await
                 .into_inner();
@@ -227,7 +225,8 @@ where
             core.add_table(table);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
@@ -266,7 +265,8 @@ where
             }
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
@@ -301,7 +301,8 @@ where
                     }
 
                     let version = self
-                        .notification_manager
+                        .env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::TableV2(table))
                         .await
                         .into_inner();
@@ -338,7 +339,8 @@ where
             core.add_source(source);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -371,7 +373,8 @@ where
             core.add_source(source);
 
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -403,7 +406,8 @@ where
                     core.drop_source(&source);
 
                     let version = self
-                        .notification_manager
+                        .env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::Source(source))
                         .await
                         .into_inner();
@@ -465,12 +469,14 @@ where
             core.add_source(source);
             core.add_table(mview);
 
-            self.notification_manager
+            self.env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
-                .notification_manager
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -564,11 +570,13 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.notification_manager
+                self.env
+                    .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::TableV2(mview))
                     .await;
                 let version = self
-                    .notification_manager
+                    .env
+                    .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::Source(source))
                     .await
                     .into_inner();

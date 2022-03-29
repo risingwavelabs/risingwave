@@ -33,7 +33,6 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{
     HashDispatchManager, HashDispatchManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
-    NotificationManagerRef,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -69,7 +68,6 @@ pub struct ClusterManager<S: MetaStore> {
 
     max_heartbeat_interval: Duration,
     dispatch_manager: HashDispatchManagerRef<S>,
-    notification_manager: NotificationManagerRef,
 
     core: RwLock<ClusterManagerCore>,
 }
@@ -78,11 +76,7 @@ impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        notification_manager: NotificationManagerRef,
-        max_heartbeat_interval: Duration,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
         let meta_store = env.meta_store_ref();
         let core = ClusterManagerCore::new(meta_store.clone()).await?;
         let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
@@ -92,7 +86,6 @@ where
         Ok(Self {
             env,
             dispatch_manager,
-            notification_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -192,7 +185,8 @@ where
 
                 // Notify frontends of new compute node.
                 if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.notification_manager
+                    self.env
+                        .notification_manager()
                         .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
                         .await;
                 }
@@ -226,13 +220,15 @@ where
 
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.notification_manager
+                    self.env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
                         .await;
                 }
 
                 // Notify local subscribers
-                self.notification_manager
+                self.env
+                    .notification_manager()
                     .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
                     .await;
 
@@ -309,7 +305,8 @@ where
                     match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(_) => {
                             cluster_manager
-                                .notification_manager
+                                .env
+                                .notification_manager()
                                 .delete_sender(WorkerKey(key.clone()));
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
@@ -548,7 +545,6 @@ mod tests {
 
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::manager::NotificationManager;
     use crate::storage::MemStore;
 
     #[tokio::test]
@@ -556,13 +552,9 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            ClusterManager::new(
-                env.clone(),
-                Arc::new(NotificationManager::new(env.epoch_generator_ref())),
-                Duration::new(0, 0),
-            )
-            .await
-            .unwrap(),
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
         );
 
         let mut worker_nodes = Vec::new();

@@ -28,7 +28,7 @@ use risingwave_storage::hummock::{
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::{HummockManager, HummockManagerRef};
-use crate::manager::{MetaSrvEnv, NotificationManager};
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
@@ -167,13 +167,9 @@ pub async fn setup_compute_env(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        ClusterManager::new(
-            env.clone(),
-            Arc::new(NotificationManager::new(env.epoch_generator_ref())),
-            Duration::from_secs(1),
-        )
-        .await
-        .unwrap(),
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
+            .await
+            .unwrap(),
     );
     let hummock_manager = Arc::new(
         HummockManager::new(

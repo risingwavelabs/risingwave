@@ -38,9 +38,7 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{
-    CatalogManager, MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
-};
+use crate::manager::{CatalogManager, MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -118,15 +116,10 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
-    let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
     let cluster_manager = Arc::new(
-        ClusterManager::new(
-            env.clone(),
-            notification_manager.clone(),
-            max_heartbeat_interval,
-        )
-        .await
-        .unwrap(),
+        ClusterManager::new(env.clone(), max_heartbeat_interval)
+            .await
+            .unwrap(),
     );
     let hummock_manager = Arc::new(
         hummock::HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
@@ -147,15 +140,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let catalog_manager = Arc::new(
-        StoredCatalogManager::new(meta_store.clone(), notification_manager.clone())
+        StoredCatalogManager::new(meta_store.clone(), env.notification_manager_ref())
             .await
             .unwrap(),
     );
-    let catalog_manager_v2 = Arc::new(
-        CatalogManager::new(env.clone(), notification_manager.clone())
-            .await
-            .unwrap(),
-    );
+    let catalog_manager_v2 = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
@@ -216,19 +205,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         fragment_manager.clone(),
         cluster_manager.clone(),
         source_manager,
-        env,
+        env.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
         vacuum_trigger.clone(),
     );
-    let notification_srv = NotificationServiceImpl::new(
-        notification_manager.clone(),
-        catalog_manager_v2,
-        cluster_manager.clone(),
-        epoch_generator.clone(),
-    );
+    let notification_manager = env.notification_manager_ref();
+    let notification_srv =
+        NotificationServiceImpl::new(env, catalog_manager_v2, cluster_manager.clone());
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -240,7 +226,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             hummock_manager,
             compactor_manager,
             vacuum_trigger,
-            notification_manager.clone(),
+            notification_manager,
         )
         .await,
     );

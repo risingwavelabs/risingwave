@@ -322,7 +322,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{CatalogManager, MetaSrvEnv, NotificationManager};
+    use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -457,16 +457,8 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager =
-                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
-            let cluster_manager = Arc::new(
-                ClusterManager::new(
-                    env.clone(),
-                    notification_manager.clone(),
-                    Duration::from_secs(3600),
-                )
-                .await?,
-            );
+            let cluster_manager =
+                Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,
@@ -477,8 +469,7 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let catalog_manager =
-                Arc::new(CatalogManager::new(env.clone(), notification_manager).await?);
+            let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let hummock_manager = Arc::new(
                 HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())

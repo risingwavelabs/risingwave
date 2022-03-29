@@ -167,16 +167,13 @@ mod test {
 
     use super::*;
     use crate::cluster::ClusterManager;
-    use crate::manager::{MetaSrvEnv, NotificationManager};
+    use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_schedule() -> Result<()> {
         let env = MetaSrvEnv::for_test().await;
-        let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
-        let cluster_manager = Arc::new(
-            ClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
-                .await?,
-        );
+        let cluster_manager =
+            Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
 
         let node_count = 4;
         for i in 0..node_count {
