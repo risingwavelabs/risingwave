@@ -24,15 +24,23 @@ pub struct ColumnBinding {
     pub column_name: String,
     pub index: usize,
     pub data_type: DataType,
+    pub is_hidden: bool,
 }
 
 impl ColumnBinding {
-    pub fn new(table_name: String, column_name: String, index: usize, data_type: DataType) -> Self {
+    pub fn new(
+        table_name: String,
+        column_name: String,
+        index: usize,
+        data_type: DataType,
+        is_hidden: bool,
+    ) -> Self {
         ColumnBinding {
             table_name,
             column_name,
             index,
             data_type,
+            is_hidden,
         }
     }
 }

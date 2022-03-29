@@ -131,7 +131,7 @@ pub(super) async fn handle_create_source(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
@@ -147,7 +147,7 @@ mod tests {
 
     /// Returns the file.
     /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
-    fn create_proto_file() -> NamedTempFile {
+    pub fn create_proto_file() -> NamedTempFile {
         static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
     package test;

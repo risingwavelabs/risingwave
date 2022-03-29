@@ -216,7 +216,7 @@ impl PlanTreeNodeUnary for LogicalProject {
             .collect();
         let proj = Self::new(input, exprs, self.expr_alias().to_vec());
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(self.schema().len());
+        let out_col_change = ColIndexMapping::identity(self.schema().len());
         (proj, out_col_change)
     }
 }
