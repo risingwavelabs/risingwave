@@ -53,7 +53,6 @@ struct CompactorManagerInner {
     /// We use round-robin approach to assign tasks to compactors.
     /// This field indexes the compactor which the next task should be assigned to.
     next_compactor: usize,
-    // TODO: #1263 subscribe to cluster membership change.
 }
 
 impl CompactorManagerInner {
@@ -70,9 +69,9 @@ impl CompactorManagerInner {
 /// `CompactTaskAssignment`. A compact task can be in one of these states:
 /// - 1. Assigned: a compact task is assigned to a compactor via `HummockManager::get_compact_task`.
 ///   Assigned-->Finished/Cancelled.
-/// - 2. Finished: a assigned task is reported as finished via `CompactStatus::report_compact_task`.
-///   It's the final state.
-/// - 3. Cancelled: a assigned task is reported as cancelled via
+/// - 2. Finished: an assigned task is reported as finished via
+///   `CompactStatus::report_compact_task`. It's the final state.
+/// - 3. Cancelled: an assigned task is reported as cancelled via
 ///   `CompactStatus::report_compact_task`. It's the final state.
 pub struct CompactorManager {
     inner: parking_lot::RwLock<CompactorManagerInner>,

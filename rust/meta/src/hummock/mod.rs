@@ -169,6 +169,9 @@ where
                     // Either the compactor will reestablish the stream and fetch this unfinished
                     // compact task, or the compactor will lose connection and
                     // its assigned compact task will be cancelled.
+                    // TODO: Currently the reestablished compactor won't retrieve the on-going
+                    // compact task until it is picked by next_compactor. This can leave the compact
+                    // task remain unfinished for some time.
                 }
             }
         }
