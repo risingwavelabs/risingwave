@@ -24,7 +24,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::{Keyspace, Segment, StateStore};
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
@@ -154,9 +154,9 @@ impl<S: StateStore> TopNExecutor<S> {
             })
             .collect::<Vec<_>>();
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
-        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l".to_vec()));
-        let middle_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"m".to_vec()));
-        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h".to_vec()));
+        let lower_sub_keyspace = keyspace.append_u8(b'l');
+        let middle_sub_keyspace = keyspace.append_u8(b'm');
+        let higher_sub_keyspace = keyspace.append_u8(b'h');
         let managed_lowest_state = ManagedTopNState::<S, TOP_N_MAX>::new(
             cache_size,
             total_count.0,

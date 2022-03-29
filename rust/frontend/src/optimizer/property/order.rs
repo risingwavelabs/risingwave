@@ -16,8 +16,9 @@ use std::fmt;
 
 use itertools::Itertools;
 use paste::paste;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
-use risingwave_pb::plan::OrderType;
+use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::super::plan_node::*;
 use super::Convention;
@@ -35,7 +36,7 @@ impl Order {
     }
 
     /// Convert into protobuf.
-    pub fn to_protobuf(&self) -> Vec<(InputRefExpr, OrderType)> {
+    pub fn to_protobuf(&self) -> Vec<(InputRefExpr, ProstOrderType)> {
         self.field_order
             .iter()
             .map(FieldOrder::to_protobuf)
@@ -43,7 +44,7 @@ impl Order {
     }
 
     /// Convert into the format of vec of ids and vec of orders.
-    pub fn to_protobuf_id_and_order(&self) -> (Vec<i32>, Vec<OrderType>) {
+    pub fn to_protobuf_id_and_order(&self) -> (Vec<i32>, Vec<ProstOrderType>) {
         (
             self.field_order.iter().map(|x| x.index as i32).collect(),
             self.field_order
@@ -94,7 +95,7 @@ impl FieldOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> (InputRefExpr, OrderType) {
+    pub fn to_protobuf(&self) -> (InputRefExpr, ProstOrderType) {
         let input_ref_expr = InputRefExpr {
             column_idx: self.index as i32,
         };
@@ -109,11 +110,21 @@ impl fmt::Display for FieldOrder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Copy)]
 pub enum Direction {
     Asc,
     Desc,
     Any, // only used in order requirement
+}
+
+impl From<Direction> for OrderType {
+    fn from(dir: Direction) -> Self {
+        match dir {
+            Direction::Asc => OrderType::Ascending,
+            Direction::Desc => OrderType::Descending,
+            Direction::Any => OrderType::Ascending,
+        }
+    }
 }
 
 impl fmt::Display for Direction {
@@ -128,10 +139,10 @@ impl fmt::Display for Direction {
 }
 
 impl Direction {
-    pub fn to_protobuf(&self) -> OrderType {
+    pub fn to_protobuf(&self) -> ProstOrderType {
         match self {
-            Self::Asc => OrderType::Ascending,
-            Self::Desc => OrderType::Descending,
+            Self::Asc => ProstOrderType::Ascending,
+            Self::Desc => ProstOrderType::Descending,
             _ => unimplemented!(),
         }
     }
@@ -185,7 +196,7 @@ impl Order {
 }
 
 pub trait WithOrder {
-    /// the order property of the PlanNode's output
+    /// the order property of the [`PlanNode`]'s output
     fn order(&self) -> &Order;
 }
 

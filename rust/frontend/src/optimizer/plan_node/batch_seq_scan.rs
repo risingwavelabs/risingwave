@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{CellBasedTableDesc, ColumnDesc as ProstColumnDesc, RowSeqScanNode};
@@ -37,17 +36,26 @@ impl WithSchema for BatchSeqScan {
 }
 
 impl BatchSeqScan {
-    pub fn new(logical: LogicalScan) -> Self {
+    pub fn new_inner(logical: LogicalScan, dist: Distribution) -> Self {
         let ctx = logical.base.ctx.clone();
         // TODO: derive from input
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
 
-        Self { logical, base }
+        Self { base, logical }
+    }
+
+    pub fn new(logical: LogicalScan) -> Self {
+        Self::new_inner(logical, Distribution::Any)
+    }
+
+    pub fn new_with_dist(logical: LogicalScan) -> Self {
+        Self::new_inner(logical, Distribution::AnyShard)
+    }
+
+    /// Get a reference to the batch seq scan's logical.
+    #[must_use]
+    pub fn logical(&self) -> &LogicalScan {
+        &self.logical
     }
 }
 
@@ -66,29 +74,23 @@ impl fmt::Display for BatchSeqScan {
 
 impl ToDistributedBatch for BatchSeqScan {
     fn to_distributed(&self) -> PlanRef {
-        self.clone().into()
+        Self::new_with_dist(self.logical.clone()).into()
     }
 }
 
 impl ToBatchProst for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
-        // TODO(bugen): directly store `ColumnDesc`s in logical scan.
         let column_descs = self
             .logical
-            .columns()
+            .column_descs()
             .iter()
-            .zip_eq(self.logical.schema().fields())
-            .map(|(column_id, field)| ProstColumnDesc {
-                column_type: field.data_type().to_protobuf().into(),
-                column_id: column_id.get_id(),
-                name: field.name.clone(),
-            })
+            .map(ProstColumnDesc::from)
             .collect();
 
         NodeBody::RowSeqScan(RowSeqScanNode {
             table_desc: Some(CellBasedTableDesc {
-                table_id: self.logical.table_id(),
-                pk: vec![], // not used
+                table_id: self.logical.table_desc().table_id.into(),
+                pk: vec![], // TODO:
             }),
             column_descs,
         })

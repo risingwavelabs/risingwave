@@ -57,6 +57,7 @@ impl ExchangeSource for LocalExchangeSource {
 
 #[cfg(test)]
 mod tests {
+    use std::net::SocketAddr;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
     use std::thread::sleep;
@@ -112,7 +113,7 @@ mod tests {
     async fn test_exchange_client() {
         let rpc_called = Arc::new(AtomicBool::new(false));
         let server_run = Arc::new(AtomicBool::new(false));
-        let addr = "127.0.0.1:12345".parse().unwrap();
+        let addr: SocketAddr = "127.0.0.1:12345".parse().unwrap();
 
         // Start a server.
         let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
@@ -135,7 +136,7 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
 
         let mut src = GrpcExchangeSource::create(
-            addr,
+            addr.into(),
             TaskOutputId {
                 task_id: Some(TaskId::default()),
                 ..Default::default()

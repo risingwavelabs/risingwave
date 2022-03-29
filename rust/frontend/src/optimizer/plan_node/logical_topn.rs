@@ -38,10 +38,10 @@ impl LogicalTopN {
         let pk_indices = input.pk_indices().to_vec();
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalTopN {
+            base,
             input,
             limit,
             offset,
-            base,
             order,
         }
     }
@@ -70,7 +70,9 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 input,
                 self.limit,
                 self.offset,
-                input_col_change.rewrite_order(self.order.clone()),
+                input_col_change
+                    .rewrite_required_order(&self.order)
+                    .unwrap(),
             ),
             input_col_change,
         )
@@ -101,7 +103,7 @@ impl ColPrunable for LogicalTopN {
                 .iter()
                 .map(|fo| FieldOrder {
                     index: mapping.map(fo.index),
-                    direct: fo.direct.clone(),
+                    direct: fo.direct,
                 })
                 .collect(),
         };

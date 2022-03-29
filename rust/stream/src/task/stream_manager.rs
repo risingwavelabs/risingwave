@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::Debug;
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
@@ -26,7 +25,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
-use risingwave_common::util::addr::is_local_address;
+use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -44,7 +43,7 @@ use crate::task::{
 
 #[cfg(test)]
 lazy_static::lazy_static! {
-    pub static ref LOCAL_TEST_ADDR: SocketAddr = "127.0.0.1:2333".parse().unwrap();
+    pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
 pub type ActorHandle = JoinHandle<()>;
@@ -130,7 +129,7 @@ impl StreamManager {
     }
 
     pub fn new(
-        addr: SocketAddr,
+        addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -177,7 +176,7 @@ impl StreamManager {
                 // TODO: Handle sync failure by propagating it
                 // back to global barrier manager
                 Err(e) => panic!(
-                    "Failed to sync state store after receving barrier {:?} due to {}",
+                    "Failed to sync state store after receiving barrier {:?} due to {}",
                     barrier, e
                 ),
             }
@@ -316,7 +315,7 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
 
 impl StreamManagerCore {
     fn new(
-        addr: SocketAddr,
+        addr: HostAddr,
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
@@ -376,8 +375,7 @@ impl StreamManagerCore {
             .downstream_actor_id
             .iter()
             .map(|down_id| {
-                let host_addr = self.get_actor_info(down_id)?.get_host()?;
-                let downstream_addr = host_addr.to_socket_addr()?;
+                let downstream_addr = self.get_actor_info(down_id)?.get_host()?.into();
                 new_output(&self.context, downstream_addr, actor_id, down_id)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -640,9 +638,8 @@ impl StreamManagerCore {
                 if *up_id == 0 {
                     Ok(self.mock_source.1.take().unwrap())
                 } else {
-                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?;
-                    let upstream_socket_addr = upstream_addr.to_socket_addr()?;
-                    if !is_local_address(&upstream_socket_addr, &self.context.addr) {
+                    let upstream_addr = self.get_actor_info(up_id)?.get_host()?.into();
+                    if !is_local_address(&upstream_addr, &self.context.addr) {
                         // Get the sender for `RemoteInput` to forward received messages to
                         // receivers in `ReceiverExecutor` or
                         // `MergerExecutor`.
@@ -655,7 +652,7 @@ impl StreamManagerCore {
                         tokio::spawn(async move {
                             let init_client = async move {
                                 let remote_input = RemoteInput::create(
-                                    pool.get_client_for_addr(&upstream_socket_addr).await?,
+                                    pool.get_client_for_addr(upstream_addr).await?,
                                     (up_id, actor_id),
                                     sender,
                                 )

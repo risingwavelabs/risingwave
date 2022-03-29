@@ -63,7 +63,7 @@ where
         }
     }
 
-    /// Start a worker to periodically vacuum hummock
+    /// Start a task to periodically vacuum hummock
     pub fn start_vacuum_trigger(
         vacuum: Arc<VacuumTrigger<S>>,
     ) -> (JoinHandle<()>, UnboundedSender<()>)
@@ -247,7 +247,7 @@ where
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }
-        tracing::debug!("Finished vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::debug!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
     }
 }

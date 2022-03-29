@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
@@ -26,7 +27,8 @@ impl Binder {
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
-            .collect::<Result<Vec<ExprImpl>>>()?;
+            .flatten_ok()
+            .try_collect()?;
 
         if f.name.0.len() == 1 {
             let function_name = f.name.0.get(0).unwrap();
@@ -92,15 +94,15 @@ impl Binder {
         Ok(())
     }
 
-    fn bind_function_expr_arg(&mut self, arg_expr: FunctionArgExpr) -> Result<ExprImpl> {
+    fn bind_function_expr_arg(&mut self, arg_expr: FunctionArgExpr) -> Result<Vec<ExprImpl>> {
         match arg_expr {
-            FunctionArgExpr::Expr(expr) => self.bind_expr(expr),
+            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
-            FunctionArgExpr::Wildcard => todo!(),
+            FunctionArgExpr::Wildcard => Ok(vec![]),
         }
     }
 
-    fn bind_function_arg(&mut self, arg: FunctionArg) -> Result<ExprImpl> {
+    fn bind_function_arg(&mut self, arg: FunctionArg) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
             FunctionArg::Named { .. } => todo!(),

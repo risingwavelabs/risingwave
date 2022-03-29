@@ -3,6 +3,9 @@
 use std::net::{AddrParseError, SocketAddr};
 
 use crate::common::HostAddress;
+use crate::data::data_type::TypeName;
+use crate::data::DataType;
+use crate::plan::ColumnDesc;
 
 impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
@@ -12,6 +15,14 @@ impl crate::common::HostAddress {
 }
 
 impl<'a> TryInto<SocketAddr> for &'a HostAddress {
+    type Error = AddrParseError;
+
+    fn try_into(self) -> Result<SocketAddr, AddrParseError> {
+        self.to_socket_addr()
+    }
+}
+
+impl TryInto<SocketAddr> for HostAddress {
     type Error = AddrParseError;
 
     fn try_into(self) -> Result<SocketAddr, AddrParseError> {
@@ -55,5 +66,50 @@ impl crate::catalog::Source {
             self.get_info().unwrap(),
             crate::catalog::source::Info::TableSource(_)
         )
+    }
+
+    /// Return column_descs from source info
+    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+        let catalogs = match self.get_info().unwrap() {
+            crate::catalog::source::Info::StreamSource(info) => &info.columns,
+            crate::catalog::source::Info::TableSource(info) => &info.columns,
+        };
+        catalogs
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap())
+            .collect()
+    }
+}
+
+impl crate::plan::ColumnDesc {
+    // Used for test
+    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
+        Self {
+            column_type: Some(data_type),
+            column_id,
+            name: name.to_string(),
+            ..Default::default()
+        }
+    }
+
+    // Used for test
+    pub fn new_struct(
+        name: &str,
+        column_id: i32,
+        type_name: &str,
+        fields: Vec<ColumnDesc>,
+    ) -> Self {
+        Self {
+            column_type: Some(DataType {
+                type_name: TypeName::Struct as i32,
+                is_nullable: true,
+                ..Default::default()
+            }),
+            column_id,
+            name: name.to_string(),
+            type_name: type_name.to_string(),
+            field_descs: fields,
+        }
     }
 }

@@ -12,63 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::{BufMut, Bytes};
+use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 
 use crate::hummock::key::next_key;
 use crate::storage_value::StorageValue;
 use crate::StateStore;
-
-/// Represents a unit part of [`Keyspace`].
-#[derive(Clone, Debug)]
-pub enum Segment {
-    /// Segment with fixed length can be encoded directly.
-    FixedLength(Vec<u8>),
-
-    /// Segment with variant length should be prepended the length of itself.
-    VariantLength(Vec<u8>),
-}
-
-impl Segment {
-    fn root(prefix: u8) -> Self {
-        Self::FixedLength(prefix.to_be_bytes().to_vec())
-    }
-
-    pub fn u16(id: u16) -> Self {
-        Self::FixedLength(id.to_be_bytes().to_vec())
-    }
-
-    pub fn u32(id: u32) -> Self {
-        Self::FixedLength(id.to_be_bytes().to_vec())
-    }
-
-    pub fn u64(id: u64) -> Self {
-        Self::FixedLength(id.to_be_bytes().to_vec())
-    }
-
-    /// A segment without any special encoding. Only use this when you are sure that the segment is
-    /// at the last place.
-    pub fn raw(prefix: Vec<u8>) -> Self {
-        Self::FixedLength(prefix)
-    }
-
-    /// Encode this segment to a mutable buffer.
-    pub fn encode(&self, buf: &mut impl BufMut) {
-        match self {
-            Segment::FixedLength(fixed) => buf.put(fixed.as_slice()),
-            Segment::VariantLength(variant) => {
-                buf.put_u16(
-                    variant
-                        .len()
-                        .try_into()
-                        .expect("segment length out of u16 range"),
-                );
-                buf.put_slice(variant.as_slice());
-            }
-        }
-    }
-}
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
 #[derive(Clone)]
@@ -80,7 +30,7 @@ pub struct Keyspace<S: StateStore> {
 }
 
 impl<S: StateStore> Keyspace<S> {
-    /// Create a shared root [`Keyspace`] for all executors of the same operator.
+    /// Creates a shared root [`Keyspace`] for all executors of the same operator.
     ///
     /// By design, all executors of the same operator should share the same keyspace in order to
     /// support scaling out, and ensure not to overlap with each other. So we use `operator_id`
@@ -89,65 +39,81 @@ impl<S: StateStore> Keyspace<S> {
     /// Note: when using shared keyspace, be caution to scan the keyspace since states of other
     /// executors might be scanned as well.
     pub fn shared_executor_root(store: S, operator_id: u64) -> Self {
-        let mut root = Self {
-            store,
-            prefix: Vec::with_capacity(9),
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(9);
+            buf.put_u8(b's');
+            buf.put_u64(operator_id);
+            buf.to_vec()
         };
-        root.push(Segment::root(b's'));
-        root.push(Segment::u64(operator_id));
-        root
+        Self { store, prefix }
     }
 
-    /// Create a root [`Keyspace`] for an executor.
+    /// Creates a root [`Keyspace`] for an executor.
     pub fn executor_root(store: S, executor_id: u64) -> Self {
-        let mut root = Self {
-            store,
-            prefix: Vec::with_capacity(9),
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(9);
+            buf.put_u8(b'e');
+            buf.put_u64(executor_id);
+            buf.to_vec()
         };
-        root.push(Segment::root(b'e'));
-        root.push(Segment::u64(executor_id));
-        root
+        Self { store, prefix }
     }
 
-    /// Create a root [`Keyspace`] for a table.
+    /// Creates a root [`Keyspace`] for a table.
     pub fn table_root(store: S, id: &TableId) -> Self {
-        let mut root = Self {
-            store,
-            prefix: Vec::with_capacity(5),
+        let prefix = {
+            let mut buf = BytesMut::with_capacity(5);
+            buf.put_u8(b't');
+            buf.put_u32(id.table_id);
+            buf.to_vec()
         };
-        root.push(Segment::root(b't'));
-        root.push(Segment::u32(id.table_id));
-        root
+        Self { store, prefix }
     }
 
-    /// Push a [`Segment`] to this keyspace.
-    pub fn push(&mut self, segment: Segment) {
-        segment.encode(&mut self.prefix);
+    /// Appends more bytes to the prefix and returns a new `Keyspace`
+    #[must_use]
+    pub fn append(&self, mut bytes: Vec<u8>) -> Self {
+        let mut prefix = self.prefix.clone();
+        prefix.append(&mut bytes);
+        Self {
+            store: self.store.clone(),
+            prefix,
+        }
     }
 
-    /// Treat the keyspace as a single key, and return the key.
+    #[must_use]
+    pub fn append_u8(&self, val: u8) -> Self {
+        self.append(val.to_be_bytes().to_vec())
+    }
+
+    #[must_use]
+    pub fn append_u16(&self, val: u16) -> Self {
+        self.append(val.to_be_bytes().to_vec())
+    }
+
+    /// Treats the keyspace as a single key, and returns the key.
     pub fn key(&self) -> &[u8] {
         &self.prefix
     }
 
-    /// Treat the keyspace as a single key, and get its value.
+    /// Treats the keyspace as a single key, and gets its value.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn value(&self, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefix, epoch).await
     }
 
-    /// Concatenate this keyspace and the given key to produce a prefixed key.
+    /// Concatenates this keyspace and the given key to produce a prefixed key.
     pub fn prefixed_key(&self, key: impl AsRef<[u8]>) -> Vec<u8> {
         [self.prefix.as_slice(), key.as_ref()].concat()
     }
 
-    /// Get from the keyspace with the `prefixed_key` of given key.
+    /// Gets from the keyspace with the `prefixed_key` of given key.
     /// The returned value is based on a snapshot corresponding to the given `epoch`
     pub async fn get(&self, key: impl AsRef<[u8]>, epoch: u64) -> Result<Option<StorageValue>> {
         self.store.get(&self.prefixed_key(key), epoch).await
     }
 
-    /// Scan `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
+    /// Scans `limit` keys from the keyspace and get their values. If `limit` is None, all keys of
     /// the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan(
@@ -159,7 +125,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(range, limit, epoch).await
     }
 
-    /// Scan `limit` keys from the keyspace using a inclusive `start_key` and get their values. If
+    /// Scans `limit` keys from the keyspace using an inclusive `start_key` and get their values. If
     /// `limit` is None, all keys of the given prefix will be scanned.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     pub async fn scan_with_start_key(
@@ -178,7 +144,7 @@ impl<S: StateStore> Keyspace<S> {
         self.store.scan(range, limit, epoch).await
     }
 
-    /// Scan from the keyspace, and then strip the prefix of this keyspace.
+    /// Scans from the keyspace, and then strips the prefix of this keyspace.
     /// The returned values are based on a snapshot corresponding to the given `epoch`
     ///
     /// See also: [`Keyspace::scan`]
@@ -194,23 +160,15 @@ impl<S: StateStore> Keyspace<S> {
         Ok(pairs)
     }
 
-    /// Get an iterator with the prefix of this keyspace.
+    /// Gets an iterator with the prefix of this keyspace.
     /// The returned iterator will iterate data from a snapshot corresponding to the given `epoch`
     pub async fn iter(&'_ self, epoch: u64) -> Result<S::Iter<'_>> {
         let range = self.prefix.to_owned()..next_key(self.prefix.as_slice());
         self.store.iter(range, epoch).await
     }
 
-    /// Get the underlying state store.
+    /// Gets the underlying state store.
     pub fn state_store(&self) -> S {
         self.store.clone()
-    }
-
-    /// Get a sub-keyspace by pushing a [`Segment`].
-    #[must_use]
-    pub fn with_segment(&self, segment: Segment) -> Self {
-        let mut new_keyspace = self.clone();
-        new_keyspace.push(segment);
-        new_keyspace
     }
 }

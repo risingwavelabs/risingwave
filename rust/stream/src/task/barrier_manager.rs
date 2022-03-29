@@ -30,6 +30,9 @@ mod tests;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
+pub type DdlFinishNotifierRx = oneshot::Receiver<u64>;
+
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
     /// collected, and there's no way to know whether or when a barrier is finished.
@@ -84,9 +87,39 @@ impl LocalBarrierManager {
         self.senders.insert(actor_id, sender);
     }
 
+    /// Create a notifier for DDL finish. When an executor/actor finishes its DDL job, it can report
+    /// that using this notifier.
+    /// Note that a DDL of MV always corresponds to an epoch in our system.
+    ///
+    /// Take the creation of an MV for an example, it may last for several epochs to finish.
+    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will send the
+    /// DDL epoch using this notifier, which can be collected by the barrier manager and reported to
+    /// the meta service soon.
+    pub fn register_ddl_finish_notifier(&mut self, actor_id: ActorId) -> DdlFinishNotifierTx {
+        let (tx, rx) = oneshot::channel();
+        debug!("register ddl finish notifier: {}", actor_id);
+
+        // TODO: process the reporting
+        tokio::spawn(async move {
+            match rx.await {
+                Ok(ddl_epoch) => {
+                    info!(
+                        "ddl with epoch {} finishes on actor {}",
+                        ddl_epoch, actor_id
+                    )
+                }
+                Err(_) => info!(
+                    "ddl notifier for actor {} dropped, are we recovering?",
+                    actor_id
+                ),
+            }
+        });
+
+        tx
+    }
+
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
-    // TODO: async collect barrier flush state from hummock.
     pub fn send_barrier(
         &mut self,
         barrier: &Barrier,

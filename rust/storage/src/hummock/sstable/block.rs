@@ -33,7 +33,7 @@ pub struct Block {
 }
 
 impl Block {
-    /// Decode block from given bytes
+    /// Decodes block from given bytes
     /// Structure of Block:
     /// ```plain
     /// | Entry 0 | ... | Entry N-1 | Entry 0 offset (4B) | ... | Entry N-1 offset (4B) |
@@ -42,7 +42,7 @@ impl Block {
     pub fn decode(data: Bytes) -> HummockResult<Block> {
         let size = data.len();
 
-        // verify checksum
+        // Verify checksum
         let checksum_len = (&data[size - 4..]).get_u32() as usize;
         let content_len = size - 4 - checksum_len;
         let checksum = Checksum::decode(&data[content_len..content_len + checksum_len])
@@ -52,7 +52,7 @@ impl Block {
         let n_entries = (&data[content_len - 4..content_len]).get_u32() as usize;
         assert!(n_entries > 0);
 
-        // read indices
+        // Read indices
         let data_len = content_len - 4 - n_entries * 4;
         let mut indices = &data[data_len..content_len - 4];
         let mut entry_offsets = Vec::with_capacity(n_entries + 1);
@@ -61,7 +61,6 @@ impl Block {
         }
         entry_offsets.push(data_len as u32);
 
-        // base key
         let base_header = Header::decode(&mut &data[..HEADER_SIZE]);
         let base_key = data.slice(HEADER_SIZE..HEADER_SIZE + base_header.diff as usize);
 

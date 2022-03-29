@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::time::Duration;
 
 use futures::StreamExt;
 use log::trace;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::plan::exchange_info::DistributionMode;
 use risingwave_pb::plan::{ExchangeInfo, PlanFragment, PlanNode, TaskId, TaskOutputId};
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
@@ -35,28 +35,23 @@ use tonic::Streaming;
 pub struct ComputeClient {
     pub exchange_client: ExchangeServiceClient<Channel>,
     pub task_client: TaskServiceClient<Channel>,
-    pub addr: SocketAddr,
+    pub addr: HostAddr,
 }
 
 impl ComputeClient {
-    pub async fn new<S>(s: S) -> Result<Self>
-    where
-        S: TryInto<SocketAddr>,
-        RwError: From<<S as TryInto<std::net::SocketAddr>>::Error>,
-    {
-        let addr = &s.try_into()?;
-        let channel = Endpoint::from_shared(format!("http://{}", *addr))
+    pub async fn new(addr: HostAddr) -> Result<Self> {
+        let channel = Endpoint::from_shared(format!("http://{}", &addr))
             .map_err(|e| InternalError(format!("{}", e)))?
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .to_rw_result_with(format!("failed to connect to {}", *addr))?;
+            .to_rw_result_with(format!("failed to connect to {}", &addr))?;
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
         Ok(Self {
-            addr: *addr,
             exchange_client,
             task_client,
+            addr,
         })
     }
 
@@ -145,7 +140,7 @@ pub struct GrpcExchangeSource {
 }
 
 impl GrpcExchangeSource {
-    pub async fn create(addr: SocketAddr, output_id: TaskOutputId) -> Result<Self> {
+    pub async fn create(addr: HostAddr, output_id: TaskOutputId) -> Result<Self> {
         let client = ComputeClient::new(addr).await?;
         client.get_data(output_id).await
     }

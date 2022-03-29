@@ -5,6 +5,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+assert-impl = "0.1"
 async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
@@ -12,6 +13,8 @@ clap = { version = "3", features = ["derive"] }
 downcast-rs = "1.2"
 dyn-clone = "1.0.4"
 fixedbitset = "0.4.1"
+futures = "0.3"
+futures-async-stream = "0.2"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"

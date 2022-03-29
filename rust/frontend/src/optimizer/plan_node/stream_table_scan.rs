@@ -20,11 +20,10 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::StreamNode as ProstStreamPlan;
 
 use super::{LogicalScan, PlanBase, PlanNodeId, ToStreamProst};
-use crate::catalog::ColumnId;
 use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
-/// to chain + merge node (for upstream materialize) + batch table scan when converting to MView
+/// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
 // TODO: rename to `StreamChain`
 #[derive(Debug, Clone)]
@@ -38,36 +37,24 @@ impl StreamTableScan {
     pub fn new(logical: LogicalScan) -> Self {
         let ctx = logical.base.ctx.clone();
 
-        let batch_plan_id;
-        {
-            let mut ctx = ctx.borrow_mut();
-            batch_plan_id = ctx.get_id();
-        }
+        let batch_plan_id = ctx.next_plan_node_id();
         // TODO: derive from input
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
-            vec![0], // TODO
+            logical.base.pk_indices.clone(),
             Distribution::Single,
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
-            logical,
             base,
+            logical,
             batch_plan_id,
         }
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.logical.table_id()
-    }
-
     pub fn table_name(&self) -> &str {
         self.logical.table_name()
-    }
-
-    pub fn columns(&self) -> &[ColumnId] {
-        self.logical.columns()
     }
 }
 
@@ -98,25 +85,27 @@ impl ToStreamProst for StreamTableScan {
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self, identity: bool) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self, auto_fields: bool) -> ProstStreamPlan {
         use risingwave_pb::plan::*;
         use risingwave_pb::stream_plan::*;
 
         let batch_plan_node = BatchPlanNode {
             table_ref_id: Some(TableRefId {
-                table_id: self.logical.table_id() as i32,
+                table_id: self.logical.table_desc().table_id.table_id as i32,
                 schema_ref_id: Default::default(),
             }),
             column_descs: self
                 .schema()
                 .fields()
                 .iter()
-                .zip_eq(self.logical.columns().iter())
+                .zip_eq(self.logical.column_descs().iter())
                 .zip_eq(self.logical.column_names().iter())
-                .map(|((field, column_id), column_name)| ColumnDesc {
+                .map(|((field, col), column_name)| ColumnDesc {
                     column_type: Some(field.data_type().to_protobuf()),
-                    column_id: column_id.get_id(),
+                    column_id: col.column_id.into(),
                     name: column_name.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
                 })
                 .collect(),
         };
@@ -132,19 +121,47 @@ impl StreamTableScan {
                 },
                 ProstStreamPlan {
                     node: Some(ProstStreamNode::BatchPlanNode(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: if identity { "BatchPlanNode" } else { "" }.into(),
+                    operator_id: if auto_fields {
+                        self.batch_plan_id.0 as u64
+                    } else {
+                        0
+                    },
+                    identity: if auto_fields { "BatchPlanNode" } else { "" }.into(),
                     pk_indices: pk_indices.clone(),
                     input: vec![],
                 },
             ],
-            node: Some(ProstStreamNode::ChainNode(
-                // TODO: how to fill the chain node body?
-                Default::default(),
-            )),
+            node: Some(ProstStreamNode::ChainNode(ChainNode {
+                table_ref_id: Some(TableRefId {
+                    table_id: self.logical.table_desc().table_id.table_id as i32,
+                    schema_ref_id: None, // TODO: fill schema ref id
+                }),
+                // The fields from upstream
+                upstream_fields: self
+                    .logical
+                    .table_desc()
+                    .columns
+                    .iter()
+                    .map(|x| Field {
+                        data_type: Some(x.data_type.to_protobuf()),
+                        name: x.name.clone(),
+                    })
+                    .collect(),
+                // The column idxs need to be forwarded to the downstream
+                column_ids: self
+                    .logical
+                    .column_descs()
+                    .iter()
+                    .map(|x| x.column_id.get_id())
+                    .collect(),
+            })),
             pk_indices,
-            operator_id: self.base.id.0 as u64,
-            identity: if identity {
+            operator_id: if auto_fields {
+                self.base.id.0 as u64
+            } else {
+                0
+            },
+            identity: if auto_fields {
                 format!("{}", self)
             } else {
                 "".into()

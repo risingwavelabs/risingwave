@@ -22,10 +22,13 @@
 #![warn(clippy::map_flatten)]
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
+#![deny(unused_must_use)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(let_chains)]
+#![feature(exact_size_is_empty)]
+#![feature(type_alias_impl_trait)]
 #![cfg_attr(coverage, feature(no_coverage))]
 
 pub mod execution;

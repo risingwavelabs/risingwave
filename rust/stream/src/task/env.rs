@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::SocketAddr;
 use std::sync::Arc;
 
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub(crate) type WorkerNodeId = u32;
 
@@ -26,7 +27,7 @@ pub(crate) type WorkerNodeId = u32;
 #[derive(Clone, Debug)]
 pub struct StreamEnvironment {
     /// Endpoint the stream manager listens on.
-    server_addr: SocketAddr,
+    server_addr: HostAddr,
 
     /// Reference to the source manager.
     source_manager: SourceManagerRef,
@@ -39,15 +40,19 @@ pub struct StreamEnvironment {
 
     /// State store for table scanning.
     state_store: StateStoreImpl,
+
+    /// Shutdown sender for current stream service.
+    shutdown_sender: Option<UnboundedSender<()>>,
 }
 
 impl StreamEnvironment {
     pub fn new(
         source_manager: SourceManagerRef,
-        server_addr: SocketAddr,
+        server_addr: HostAddr,
         config: Arc<StreamingConfig>,
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
+        shutdown_sender: UnboundedSender<()>,
     ) -> Self {
         StreamEnvironment {
             server_addr,
@@ -55,6 +60,7 @@ impl StreamEnvironment {
             config,
             worker_id,
             state_store,
+            shutdown_sender: Some(shutdown_sender),
         }
     }
 
@@ -65,17 +71,18 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::StateStoreMetrics;
 
         StreamEnvironment {
-            server_addr: SocketAddr::V4("127.0.0.1:5688".parse().unwrap()),
+            server_addr: "127.0.0.1:5688".parse().unwrap(),
             source_manager: Arc::new(MemSourceManager::new()),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(
                 StateStoreMetrics::unused(),
             )),
+            shutdown_sender: None,
         }
     }
 
-    pub fn server_address(&self) -> &SocketAddr {
+    pub fn server_address(&self) -> &HostAddr {
         &self.server_addr
     }
 
@@ -97,5 +104,9 @@ impl StreamEnvironment {
 
     pub fn state_store(&self) -> StateStoreImpl {
         self.state_store.clone()
+    }
+
+    pub fn shutdown(&self) {
+        self.shutdown_sender.as_ref().unwrap().send(()).unwrap();
     }
 }

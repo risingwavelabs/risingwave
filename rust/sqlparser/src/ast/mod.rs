@@ -738,6 +738,16 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// SHOW TABLE
+    ShowTable {
+        /// Table name
+        name: ObjectName,
+    },
+    /// SHOW SOURCE
+    ShowSource {
+        /// Table name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -870,6 +880,14 @@ impl fmt::Display for Statement {
             }
             Statement::Analyze { table_name } => {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::ShowTable { name } => {
+                write!(f, "SHOW TABLE {}", name)?;
+                Ok(())
+            }
+            Statement::ShowSource { name } => {
+                write!(f, "SHOW SOURCE {}", name)?;
                 Ok(())
             }
             Statement::Insert {
@@ -1416,6 +1434,7 @@ impl fmt::Display for Function {
 pub enum ObjectType {
     Table,
     View,
+    MaterializedView,
     Index,
     Schema,
 }
@@ -1425,6 +1444,7 @@ impl fmt::Display for ObjectType {
         f.write_str(match self {
             ObjectType::Table => "TABLE",
             ObjectType::View => "VIEW",
+            ObjectType::MaterializedView => "MATERIALIZED VIEW",
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
         })
@@ -1437,6 +1457,8 @@ impl ParseTo for ObjectType {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
             ObjectType::View
+        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            ObjectType::MaterializedView
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {

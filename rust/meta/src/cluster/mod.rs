@@ -32,8 +32,8 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
-    NotificationManagerRef,
+    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef,
+    LocalNotification, MetaSrvEnv, NotificationManagerRef,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -46,6 +46,8 @@ pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
 
 /// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+
+// TODO: substitute with `HostAddr`
 #[derive(Debug)]
 pub struct WorkerKey(pub HostAddress);
 
@@ -158,25 +160,41 @@ where
         }
     }
 
+    pub async fn deactivate_worker_node(&self, host_address: HostAddress) -> Result<()> {
+        let mut core = self.core.write().await;
+        match core.get_worker_by_host(host_address.clone()) {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Starting as i32 {
+                    return Ok(());
+                }
+                worker.worker_node.state = State::Starting as i32;
+                worker.insert(self.meta_store_ref.as_ref()).await?;
+
+                core.update_worker_node(worker);
+                Ok(())
+            }
+            None => Err(RwError::from(InternalError(
+                "Worker node does not exist!".to_string(),
+            ))),
+        }
+    }
+
     pub async fn activate_worker_node(&self, host_address: HostAddress) -> Result<()> {
         let mut core = self.core.write().await;
         match core.get_worker_by_host(host_address.clone()) {
-            Some(worker) => {
-                let mut worker_node = worker.to_protobuf();
-                if worker_node.state == State::Running as i32 {
+            Some(mut worker) => {
+                if worker.worker_node.state == State::Running as i32 {
                     return Ok(());
                 }
-                worker_node.state = State::Running as i32;
-                let worker = Worker::from_protobuf(worker_node.clone());
-
+                worker.worker_node.state = State::Running as i32;
                 worker.insert(self.meta_store_ref.as_ref()).await?;
 
-                core.activate_worker_node(worker);
+                core.update_worker_node(worker.clone());
 
                 // Notify frontends of new compute node.
-                if worker_node.r#type == WorkerType::ComputeNode as i32 {
+                if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Add, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
                         .await;
                 }
 
@@ -210,9 +228,14 @@ where
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
                     self.notification_manager_ref
-                        .notify_frontend(Operation::Delete, &Info::Node(worker_node))
+                        .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
                         .await;
                 }
+
+                // Notify local subscribers
+                self.notification_manager_ref
+                    .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+                    .await;
 
                 Ok(())
             }
@@ -300,7 +323,7 @@ where
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,
@@ -447,7 +470,7 @@ impl StoredClusterManagerCore {
             .insert(WorkerKey(worker_node.host.unwrap()), worker);
     }
 
-    fn activate_worker_node(&mut self, worker: Worker) {
+    fn update_worker_node(&mut self, worker: Worker) {
         self.workers
             .insert(WorkerKey(worker.to_protobuf().host.unwrap()), worker);
     }
@@ -550,7 +573,7 @@ mod tests {
         let worker_count = 5usize;
         for i in 0..worker_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             let (worker_node, _) = cluster_manager
@@ -567,7 +590,7 @@ mod tests {
         let worker_to_delete_count = 4usize;
         for i in 0..worker_to_delete_count {
             let fake_host_address = HostAddress {
-                host: "127.0.0.1".to_string(),
+                host: "localhost".to_string(),
                 port: 5000 + i as i32,
             };
             cluster_manager

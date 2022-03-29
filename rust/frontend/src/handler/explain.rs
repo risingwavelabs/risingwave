@@ -12,29 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use pgwire::pg_field_descriptor::{PgFieldDescriptor, TypeOid};
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
-use super::create_mv::{gen_create_mv_plan, MvInfo};
+use super::create_mv::gen_create_mv_plan;
+use super::create_table::gen_create_table_plan;
 use crate::binder::Binder;
 use crate::planner::Planner;
-use crate::session::QueryContext;
+use crate::session::OptimizerContext;
 
 pub(super) fn handle_explain(
-    context: QueryContext,
+    context: OptimizerContext,
     stmt: Statement,
     _verbose: bool,
 ) -> Result<PgResponse> {
-    let context = Rc::new(RefCell::new(context));
-    let session = context.borrow().session_ctx.clone();
+    let session = context.session_ctx.clone();
     // bind, plan, optimize, and serialize here
-    let mut planner = Planner::new(context);
+    let mut planner = Planner::new(context.into());
 
     let plan = match stmt {
         Statement::CreateView {
@@ -43,15 +40,12 @@ pub(super) fn handle_explain(
             query,
             name,
             ..
-        } => {
-            gen_create_mv_plan(
-                &*session,
-                &mut planner,
-                *query,
-                MvInfo::with_name(name.to_string()),
-            )?
-            .0
+        } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
+
+        Statement::CreateTable { name, columns, .. } => {
+            gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0
         }
+
         stmt => {
             let bound = {
                 let mut binder = Binder::new(

@@ -75,11 +75,6 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
 }
 
 #[inline(always)]
-pub fn str_to_decimal(elem: &str) -> Result<Decimal> {
-    Decimal::from_str(elem).map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-
-#[inline(always)]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
     Ok(NaiveTimeWrapper::new(
         NaiveTime::parse_from_str(elem, "%H:%M:%S")
@@ -103,30 +98,19 @@ pub fn str_to_timestampz(elem: &str) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn str_to_real(elem: &str) -> Result<OrderedF32> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-
-#[inline(always)]
-pub fn str_to_double(elem: &str) -> Result<OrderedF64> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i16(elem: &str) -> Result<i16> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i32(elem: &str) -> Result<i32> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
-}
-#[inline(always)]
-pub fn str_to_i64(elem: &str) -> Result<i64> {
-    elem.parse()
-        .map_err(|e| RwError::from(ParseError(Box::new(e))))
+pub fn str_parse<T>(elem: &str) -> Result<T>
+where
+    T: FromStr,
+    <T as FromStr>::Err: std::fmt::Display,
+{
+    elem.parse().map_err(|e| {
+        RwError::from(InternalError(format!(
+            "Can't cast {:?} to {:?}: {}",
+            elem,
+            type_name::<T>(),
+            e
+        )))
+    })
 }
 
 #[inline(always)]
@@ -134,49 +118,60 @@ pub fn date_to_timestamp(elem: NaiveDateWrapper) -> Result<NaiveDateTimeWrapper>
     Ok(NaiveDateTimeWrapper::new(elem.0.and_hms(0, 0, 0)))
 }
 
-// Due to the orphan rule, some data can't implement TryFrom trait for basic type.
-// We can only use ToPrimitive Trait
-#[inline(always)]
-pub fn to_i16<T1>(elem: T1) -> Result<i16>
-where
-    T1: ToPrimitive + std::fmt::Debug,
-{
-    elem.to_i16()
-        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i16", elem))))
+/// Define the cast function to primitive types.
+///
+/// Due to the orphan rule, some data can't implement `TryFrom` trait for basic type.
+/// We can only use [`ToPrimitive`] trait.
+///
+/// Note: this might be lossy according to the docs from [`ToPrimitive`]:
+/// > On the other hand, conversions with possible precision loss or truncation
+/// are admitted, like an `f32` with a decimal part to an integer type, or
+/// even a large `f64` saturating to `f32` infinity.
+macro_rules! define_cast_to_primitive {
+    ($ty:ty) => {
+        define_cast_to_primitive! { $ty, $ty }
+    };
+    ($ty:ty, $wrapper_ty:ty) => {
+        paste::paste! {
+            #[inline(always)]
+            pub fn [<to_ $ty>]<T>(elem: T) -> Result<$wrapper_ty>
+            where
+                T: ToPrimitive + std::fmt::Debug,
+            {
+                elem.[<to_ $ty>]()
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "Can't cast {:?} to {}",
+                            elem,
+                            std::any::type_name::<$ty>()
+                        )))
+                    })
+                    .map(Into::into)
+            }
+        }
+    };
 }
 
-#[inline(always)]
-pub fn to_i32<T1>(elem: T1) -> Result<i32>
-where
-    T1: ToPrimitive + std::fmt::Debug,
-{
-    elem.to_i32()
-        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i32", elem))))
-}
-
-#[inline(always)]
-pub fn to_i64<T1>(elem: T1) -> Result<i64>
-where
-    T1: ToPrimitive + std::fmt::Debug,
-{
-    elem.to_i64()
-        .ok_or_else(|| RwError::from(InternalError(format!("Can't cast {:?} to i64", elem))))
-}
+define_cast_to_primitive! { i16 }
+define_cast_to_primitive! { i32 }
+define_cast_to_primitive! { i64 }
+define_cast_to_primitive! { f32, OrderedF32 }
+define_cast_to_primitive! { f64, OrderedF64 }
 
 // In postgresSql, the behavior of casting decimal to integer is rounding.
 // We should write them separately
 #[inline(always)]
-pub fn deci_to_i16(elem: Decimal) -> Result<i16> {
+pub fn dec_to_i16(elem: Decimal) -> Result<i16> {
     to_i16(elem.round_dp(0))
 }
 
 #[inline(always)]
-pub fn deci_to_i32(elem: Decimal) -> Result<i32> {
+pub fn dec_to_i32(elem: Decimal) -> Result<i32> {
     to_i32(elem.round_dp(0))
 }
 
 #[inline(always)]
-pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
+pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
 }
 
@@ -184,12 +179,14 @@ pub fn deci_to_i64(elem: Decimal) -> Result<i64> {
 pub fn general_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
+    <T1 as TryInto<T2>>::Error: std::fmt::Display,
 {
-    elem.try_into().map_err(|_| {
+    elem.try_into().map_err(|e| {
         RwError::from(InternalError(format!(
-            "Can't cast {:?} to {:?}",
+            "Can't cast {:?} to {:?}: {}",
             &elem,
-            type_name::<T2>()
+            type_name::<T2>(),
+            e
         )))
     })
 }

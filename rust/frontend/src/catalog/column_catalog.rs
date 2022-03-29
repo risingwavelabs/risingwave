@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ColumnCatalog {
     pub column_desc: ColumnDesc,
     pub is_hidden: bool,
@@ -57,6 +59,16 @@ impl From<ProstColumnCatalog> for ColumnCatalog {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
             is_hidden: prost.is_hidden,
+        }
+    }
+}
+
+impl ColumnCatalog {
+    pub fn name_with_hidden(&self) -> Cow<str> {
+        if self.is_hidden {
+            Cow::Owned(format!("{}(hidden)", self.column_desc.name))
+        } else {
+            Cow::Borrowed(&self.column_desc.name)
         }
     }
 }

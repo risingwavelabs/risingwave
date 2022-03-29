@@ -14,14 +14,14 @@
 
 use fixedbitset::FixedBitSet;
 
-use super::ExprImpl;
+use super::{ExprImpl, ExprVisitor, InputRef};
 use crate::expr::ExprType;
 
 fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
     match expr {
         ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
             let (_, exprs, _) = func_call.decompose();
-            for expr in exprs.into_iter() {
+            for expr in exprs {
                 to_conjunctions_inner(expr, rets);
             }
         }
@@ -39,27 +39,47 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     rets
 }
 
-/// give a expression, and get all columns in its input_ref expressions.
-/// **Panics** if **bit** is out of bounds of the FixedBitSet.
-pub fn get_inputs_col_index(expr: &ExprImpl, cols: &mut FixedBitSet) {
-    match expr {
-        ExprImpl::FunctionCall(func_call) => {
-            for expr in func_call.inputs() {
-                get_inputs_col_index(expr, cols);
-            }
-        }
-        ExprImpl::AggCall(agg_call) => {
-            for expr in agg_call.inputs() {
-                get_inputs_col_index(expr, cols);
-            }
-        }
-        ExprImpl::InputRef(input_ref) => cols.insert(input_ref.index()),
-        _ => {}
+/// give a expression, and check all columns in its `input_ref` expressions less than the input
+/// column number.
+macro_rules! assert_input_ref {
+    ($expr:expr, $input_col_num:expr) => {
+        let _ = $expr.collect_input_refs($input_col_num);
+    };
+}
+pub(crate) use assert_input_ref;
+
+/// Collect all `InputRef`s' indexes in the expression.
+///
+/// # Panics
+/// Panics if an `InputRef`'s index is out of bounds of the [`FixedBitSet`].
+pub struct CollectInputRef {
+    /// All `InputRef`s' indexes are inserted into the [`FixedBitSet`].
+    input_bits: FixedBitSet,
+}
+
+impl ExprVisitor for CollectInputRef {
+    fn visit_input_ref(&mut self, expr: &InputRef) {
+        self.input_bits.insert(expr.index());
     }
 }
-/// give a expression, and check all columns in its input_ref expressions less than the input
-/// column number.
-pub fn assert_input_ref(expr: &ExprImpl, input_col_num: usize) {
-    let mut cols = FixedBitSet::with_capacity(input_col_num);
-    let _cols = get_inputs_col_index(expr, &mut cols);
+
+impl CollectInputRef {
+    /// Creates a `CollectInputRef` with an initial `input_bits`.
+    pub fn new(initial_input_bits: FixedBitSet) -> Self {
+        CollectInputRef {
+            input_bits: initial_input_bits,
+        }
+    }
+
+    /// Creates an empty `CollectInputRef` with the given capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        CollectInputRef {
+            input_bits: FixedBitSet::with_capacity(capacity),
+        }
+    }
+
+    /// Returns the collected indexes by the `CollectInputRef`.
+    pub fn collect(self) -> FixedBitSet {
+        self.input_bits
+    }
 }

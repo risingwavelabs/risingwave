@@ -23,12 +23,11 @@ use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
-use risingwave_storage::keyspace::Segment;
 use risingwave_storage::{Keyspace, StateStore};
 use serde::{Deserialize, Serialize};
 
 /// This is a row with a match degree
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JoinRow {
     pub row: Row,
     degree: u64,
@@ -158,8 +157,7 @@ impl<S: StateStore> JoinHashMap<S> {
     fn get_state_keyspace(&self, key: &HashKeyType) -> Keyspace<S> {
         // TODO: in pure in-memory engine, we should not do this serialization.
         let key_encoded = key.serialize().unwrap();
-        self.keyspace
-            .with_segment(Segment::VariantLength(key_encoded))
+        self.keyspace.append(key_encoded)
     }
 
     /// Returns a mutable reference to the value of the key in the memory, if does not exist, look

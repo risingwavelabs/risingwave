@@ -270,8 +270,6 @@ mod tests {
         let res = tikv_storage.ingest_batch(batch1, epoch1).await;
         assert!(res.is_ok());
 
-        // let gc_res = tikv_storage.gc().await;
-        // assert!(gc_res.is_ok());
         // get "aa"
         let value = tikv_storage.get(&anchor, epoch1).await.unwrap().unwrap();
         assert_eq!(value, Bytes::from("000"));

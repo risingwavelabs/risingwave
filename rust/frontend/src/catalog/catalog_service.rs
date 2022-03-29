@@ -64,6 +64,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn create_source(&self, source: ProstSource) -> Result<()>;
 
     async fn drop_materialized_source(&self, source_id: u32, table_id: TableId) -> Result<()>;
+
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -97,6 +99,15 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
+    // TODO: maybe here to pass a materialize plan node
+    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()> {
+        let (_, version) = self
+            .meta_client
+            .create_materialized_view(table, plan)
+            .await?;
+        self.wait_version(version).await
+    }
+
     async fn create_materialized_source(
         &self,
         source: ProstSource,
@@ -106,15 +117,6 @@ impl CatalogWriter for CatalogWriterImpl {
         let (_, _, version) = self
             .meta_client
             .create_materialized_source(source, table, plan)
-            .await?;
-        self.wait_version(version).await
-    }
-
-    // TODO: maybe here to pass a materialize plan node
-    async fn create_materialized_view(&self, table: ProstTable, plan: StreamNode) -> Result<()> {
-        let (_, version) = self
-            .meta_client
-            .create_materialized_view(table, plan)
             .await?;
         self.wait_version(version).await
     }
@@ -129,6 +131,11 @@ impl CatalogWriter for CatalogWriterImpl {
             .meta_client
             .drop_materialized_source(source_id, table_id)
             .await?;
+        self.wait_version(version).await
+    }
+
+    async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
+        let version = self.meta_client.drop_materialized_view(table_id).await?;
         self.wait_version(version).await
     }
 }

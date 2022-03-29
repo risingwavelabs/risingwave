@@ -15,7 +15,7 @@
 use prost::Message;
 use risingwave_pb::hummock::{CompactTaskAssignment, CompactTaskRefId};
 
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 
 /// `cf(compact_task_assignment)`: `CompactTaskRefId` -> `CompactTaskAssignment`
 const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
@@ -47,5 +47,3 @@ impl MetadataModel for CompactTaskAssignment {
         })
     }
 }
-
-impl Transactional for CompactTaskAssignment {}

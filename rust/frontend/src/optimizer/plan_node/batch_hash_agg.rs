@@ -16,6 +16,8 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
@@ -31,13 +33,19 @@ pub struct BatchHashAgg {
 impl BatchHashAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
-        BatchHashAgg { logical, base }
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            Distribution::Broadcast => panic!(),
+            Distribution::AnyShard => Distribution::AnyShard,
+            Distribution::HashShard(_) => logical
+                .i2o_col_mapping()
+                .rewrite_provided_distribution(input_dist),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
+        BatchHashAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
@@ -91,4 +99,20 @@ impl ToDistributedBatch for BatchHashAgg {
     }
 }
 
-impl ToBatchProst for BatchHashAgg {}
+impl ToBatchProst for BatchHashAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::HashAgg(HashAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            group_keys: self
+                .group_keys()
+                .iter()
+                .clone()
+                .map(|index| *index as u32)
+                .collect(),
+        })
+    }
+}
