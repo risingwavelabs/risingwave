@@ -139,6 +139,8 @@ impl ChainExecutor {
         match msg {
             // TODO(Croxx): Refactor this once we find a better way to know the upstream is done.
             Err(e) if matches!(e.inner(), ErrorCode::Eof) => {
+                // We've consumed the snapshot. Turn to `ReadingMview` and report that we've
+                // finished the creation (for a workaround).
                 match std::mem::replace(&mut self.state, ChainState::ReadingMview) {
                     ChainState::ReadingSnapshot {
                         notifier,
@@ -165,6 +167,7 @@ impl ChainExecutor {
             )
             .into()),
             Message::Barrier(barrier) => {
+                // FIXME: we should check whether this is exactly the creation barrier
                 if barrier.is_add_output_mutation() {
                     // If the barrier is a conf change from mview side, init snapshot from its epoch
                     // and set its state to reading snapshot.
