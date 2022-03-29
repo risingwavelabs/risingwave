@@ -125,45 +125,7 @@ impl<S: StateStore> CellBasedTable<S> {
     // cell-based interface
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         // get row by state_store muti get
-        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let column_ids = generate_column_id(&self.column_descs);
-        let mut row = Vec::with_capacity(column_ids.len());
-        let key = &serialize_pk(pk, pk_serializer)?;
-        let state_store_get_res = self.keyspace.state_store().get(key, epoch).await?;
-
-        let all_none_special_key = &[
-            &serialize_pk(pk, pk_serializer)?[..],
-            &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
-        ]
-        .concat();
-        let all_none_res = self.keyspace.get(&all_none_special_key, epoch).await?;
-        if all_none_res.is_some() {
-            return Ok(Some(Row::new(vec![None; column_ids.len()])));
-        }
-        for column_id in column_ids {
-            let key = &[
-                &serialize_pk(pk, pk_serializer)?[..],
-                &serialize_column_id(&column_id)?,
-            ]
-            .concat();
-            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
-            let column_index = self
-                .column_id_to_column_index
-                .get(&column_id)
-                .expect("column id not found");
-            if let Some(state_store_get_res) = state_store_get_res {
-                let mut de = value_encoding::Deserializer::new(state_store_get_res.to_bytes());
-                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-                row.push(cell);
-            } else {
-                row.push(None);
-            }
-        }
-        // row does not exist
-        if row == vec![None; self.column_ids.len()] {
-            return Ok(None);
-        }
-        Ok(Some(Row::new(row)))
+        todo!()
     }
 
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
