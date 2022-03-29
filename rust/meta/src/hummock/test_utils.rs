@@ -55,7 +55,11 @@ where
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     let (test_tables_2, _) = generate_test_tables(
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],

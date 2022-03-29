@@ -114,10 +114,10 @@ pub async fn compute_node_serve(
     // A hummock compactor is deployed along with compute node for now.
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
         sub_tasks.push(Compactor::start_compactor(
-            hummock.inner().storage.options().clone(),
-            hummock.inner().storage.local_version_manager().clone(),
-            hummock.inner().storage.hummock_meta_client().clone(),
-            hummock.inner().storage.sstable_store(),
+            hummock.inner().options().clone(),
+            hummock.inner().local_version_manager().clone(),
+            hummock.inner().hummock_meta_client().clone(),
+            hummock.inner().sstable_store(),
             state_store_metrics,
         ));
     }

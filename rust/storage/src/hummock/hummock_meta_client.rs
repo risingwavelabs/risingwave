@@ -212,7 +212,9 @@ impl HummockMetaClient for RpcHummockMetaClient {
             .meta_client
             .to_owned()
             .inner
-            .subscribe_compact_tasks(SubscribeCompactTasksRequest {})
+            .subscribe_compact_tasks(SubscribeCompactTasksRequest {
+                context_id: self.meta_client.worker_id(),
+            })
             .await
             .map_err(HummockError::meta_error)?;
         Ok(stream)

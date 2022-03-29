@@ -113,7 +113,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
     let context_id = worker_node.id;
 
     // No compaction task available.
-    let task = hummock_manager.get_compact_task().await?;
+    let task = hummock_manager.get_compact_task(context_id).await?;
     assert_eq!(task, None);
 
     // Add some sstables and commit.
@@ -124,6 +124,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
         .unwrap();
+
+    // No compaction task available. Uncommitted sst won't be compacted.
+    let task = hummock_manager.get_compact_task(context_id).await?;
+    assert_eq!(task, None);
+
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // check safe epoch in hummock verison
@@ -143,7 +148,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -183,7 +192,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
     assert!(hummock_manager
