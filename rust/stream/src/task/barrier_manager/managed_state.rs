@@ -17,7 +17,7 @@ use std::iter::once;
 
 use tokio::sync::oneshot;
 
-use super::{CollectResult, FinishedDdl};
+use super::{CollectResult, FinishedCreateMview};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
@@ -56,7 +56,7 @@ enum ManagedBarrierStateInner {
 pub(super) struct ManagedBarrierState {
     inner: ManagedBarrierStateInner,
 
-    pub finished_ddls: Vec<FinishedDdl>,
+    pub finished_create_mviews: Vec<FinishedCreateMview>,
 }
 
 impl ManagedBarrierState {
@@ -67,7 +67,7 @@ impl ManagedBarrierState {
                 // TODO: specify last epoch
                 last_epoch: None,
             },
-            finished_ddls: Default::default(),
+            finished_create_mviews: Default::default(),
         }
     }
 
@@ -94,14 +94,16 @@ impl ManagedBarrierState {
                     last_epoch: Some(epoch),
                 },
             );
-            let finished_ddls = std::mem::take(&mut self.finished_ddls);
+            let finished_create_mviews = std::mem::take(&mut self.finished_create_mviews);
 
             match state {
                 ManagedBarrierStateInner::Issued {
                     collect_notifier, ..
                 } => {
                     // Notify about barrier finishing.
-                    let result = CollectResult { finished_ddls };
+                    let result = CollectResult {
+                        finished_create_mviews,
+                    };
                     if collect_notifier.send(result).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)
                     }

@@ -128,15 +128,15 @@ impl StreamService for StreamServiceImpl {
             .await
             .map_err(|e| e.to_grpc_status())?;
 
-        let finished_ddls = collect_result
-            .finished_ddls
+        let finished_create_mviews = collect_result
+            .finished_create_mviews
             .into_iter()
             .map(Into::into)
             .collect();
 
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
-            finished_ddls,
+            finished_create_mviews,
             status: None,
         }))
     }
