@@ -23,7 +23,9 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use super::super::plan_node::*;
 use super::Convention;
 use crate::optimizer::PlanRef;
-use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
+use crate::{
+    for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct Order {
@@ -195,37 +197,18 @@ impl Order {
     }
 }
 
-pub trait WithOrder {
-    /// the order property of the [`PlanNode`]'s output
-    fn order(&self) -> &Order;
-}
-
-macro_rules! impl_with_order_base {
+macro_rules! impl_order_with_base {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
-            impl WithOrder for [<$convention $name>] {
-                fn order(&self) -> &Order {
+            impl [<$convention $name>] {
+                pub fn order(&self) -> &Order {
                     &self.base.order
                 }
             }
         })*
     }
 }
-for_batch_plan_nodes! { impl_with_order_base }
-
-macro_rules! impl_with_order_any {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl WithOrder for [<$convention $name>] {
-                fn order(&self) -> &Order {
-                    Order::any()
-                }
-            }
-        })*
-    }
-}
-for_logical_plan_nodes! { impl_with_order_any }
-for_stream_plan_nodes! { impl_with_order_any }
+for_all_plan_nodes! { impl_order_with_base }
 
 #[cfg(test)]
 mod tests {
