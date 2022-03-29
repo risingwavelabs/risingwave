@@ -101,11 +101,18 @@ impl LocalBarrierManager {
 
         // TODO: process the reporting
         tokio::spawn(async move {
-            let ddl_epoch = rx.await.unwrap();
-            info!(
-                "ddl with epoch {} finishes on actor {}",
-                ddl_epoch, actor_id
-            );
+            match rx.await {
+                Ok(ddl_epoch) => {
+                    info!(
+                        "ddl with epoch {} finishes on actor {}",
+                        ddl_epoch, actor_id
+                    )
+                }
+                Err(_) => info!(
+                    "ddl notifier for actor {} dropped, are we recovering?",
+                    actor_id
+                ),
+            }
         });
 
         tx

@@ -137,10 +137,10 @@ impl ChainExecutor {
     async fn read_snapshot(&mut self) -> Result<Message> {
         let msg = self.snapshot.next().await;
         match msg {
-            // TODO(Croxx): Refactor this once we find a better way to know the upstream is done.
             Err(e) if matches!(e.inner(), ErrorCode::Eof) => {
-                // We've consumed the snapshot. Turn to `ReadingMview` and report that we've
-                // finished the creation (for a workaround).
+                // We've consumed the snapshot.
+                // Turn to `ReadingMview` and report that we've finished the creation (for a
+                // workaround).
                 match std::mem::replace(&mut self.state, ChainState::ReadingMview) {
                     ChainState::ReadingSnapshot {
                         notifier,
