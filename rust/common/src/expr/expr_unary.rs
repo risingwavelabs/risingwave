@@ -18,6 +18,7 @@ use risingwave_pb::expr::expr_node::Type as ProstType;
 
 use super::template::{UnaryBytesExpression, UnaryExpression};
 use crate::array::*;
+use crate::error::{ErrorCode, Result};
 use crate::expr::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use crate::expr::pg_sleep::PgSleepExpression;
 use crate::expr::template::UnaryNullableExpression;
@@ -59,7 +60,11 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                unimplemented!("CAST({:?} AS {:?}) not supported yet!", $child.return_type(), $ret)
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "CAST({:?} AS {:?}) not supported yet!",
+                    $child.return_type(), $ret
+                ))
+                .into());
             }
         }
     };
@@ -109,10 +114,13 @@ macro_rules! gen_cast {
             { int16, decimal, general_cast },
             { int32, int16, general_cast },
             { int32, int64, general_cast },
+            { int32, float32, to_f32 }, // lossy
             { int32, float64, general_cast },
             { int32, decimal, general_cast },
             { int64, int16, general_cast },
             { int64, int32, general_cast },
+            { int64, float32, to_f32 }, // lossy
+            { int64, float64, to_f64 }, // lossy
             { int64, decimal, general_cast },
 
             { float32, float64, general_cast },
@@ -124,13 +132,14 @@ macro_rules! gen_cast {
             { float64, int16, to_i16 },
             { float64, int32, to_i32 },
             { float64, int64, to_i64 },
+            { float64, float32, to_f32 }, // lossy
 
             { decimal, decimal, dec_to_dec },
-            { decimal, int16, deci_to_i16 },
-            { decimal, int32, deci_to_i32 },
-            { decimal, int64, deci_to_i64 },
-            { decimal, float32, deci_to_f32 },
-            { decimal, float64, deci_to_f64 },
+            { decimal, int16, dec_to_i16 },
+            { decimal, int32, dec_to_i32 },
+            { decimal, int64, dec_to_i64 },
+            { decimal, float32, to_f32 },
+            { decimal, float64, to_f64 },
 
             { date, timestamp, date_to_timestamp }
         }
@@ -155,7 +164,11 @@ macro_rules! gen_neg_impl {
                 ),
             )*
             _ => {
-                unimplemented!("Neg is not supported on {:?}", $child.return_type())
+                return Err(ErrorCode::NotImplementedError(format!(
+                    "Neg is not supported on {:?}",
+                    $child.return_type()
+                ))
+                .into());
             }
         }
     };
@@ -180,10 +193,10 @@ pub fn new_unary_expr(
     expr_type: ProstType,
     return_type: DataType,
     child_expr: BoxedExpression,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     use crate::expr::data_types::*;
 
-    match (expr_type, return_type.clone(), child_expr.return_type()) {
+    let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
         (ProstType::Cast, _, _) => gen_cast! { child_expr, return_type, },
         (ProstType::Not, _, _) => {
             Box::new(UnaryNullableExpression::<BoolArray, BoolArray, _>::new(
@@ -241,10 +254,17 @@ pub fn new_unary_expr(
             gen_neg! { child_expr, return_type }
         }
         (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
+
         (expr, ret, child) => {
-            unimplemented!("The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet!", expr, child, ret)
+            return Err(ErrorCode::NotImplementedError(format!(
+                "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
+                expr, child, ret
+            ))
+            .into());
         }
-    }
+    };
+
+    Ok(expr)
 }
 
 pub fn new_length_default(expr_ia1: BoxedExpression, return_type: DataType) -> BoxedExpression {

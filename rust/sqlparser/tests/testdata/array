@@ -1,29 +1,30 @@
-SELECT ARRAY[a, b, c]::foo;
+CREATE TABLE t(a int[]);
 ---
-SELECT CAST(ARRAY[a, b, c] AS foo)
+CREATE TABLE t (a INT[])
 =>
-Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Cast { expr: Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]), data_type: Custom(ObjectName([Ident { value: "foo", quote_style: None }])) })], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "a", quote_style: None }, data_type: Array(Int(None)), collation: None, options: [] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
 
-SELECT ARRAY[a, b, c];
+CREATE TABLE t(a int[][]);
 ---
-SELECT ARRAY[a, b, c]
+CREATE TABLE t (a INT[][])
 =>
-Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Identifier(Ident { value: "a", quote_style: None }), Identifier(Ident { value: "b", quote_style: None }), Identifier(Ident { value: "c", quote_style: None })]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "a", quote_style: None }, data_type: Array(Array(Int(None))), collation: None, options: [] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
 
-SELECT {1, 2, 3};
+CREATE TABLE t(a int[][][]);
 ---
-SELECT ARRAY[1, 2, 3]
+CREATE TABLE t (a INT[][][])
 =>
-Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3", false))]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+CreateTable { or_replace: false, temporary: false, if_not_exists: false, name: ObjectName([Ident { value: "t", quote_style: None }]), columns: [ColumnDef { name: Ident { value: "a", quote_style: None }, data_type: Array(Array(Array(Int(None)))), collation: None, options: [] }], constraints: [], table_properties: [], with_options: [], query: None, like: None }
 
-SELECT {{1, 2}, {3, 4}, {5, 6}};
+CREATE TABLE t(a int[);
 ---
-SELECT ARRAY[ARRAY[1, 2], ARRAY[3, 4], ARRAY[5, 6]]
-=>
-Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Array([Value(Number("1", false)), Value(Number("2", false))]), Array([Value(Number("3", false)), Value(Number("4", false))]), Array([Value(Number("5", false)), Value(Number("6", false))])]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+sql parser error: Expected ], found: )
 
-SELECT ARRAY[1, 2, 3.0];
+CREATE TABLE t(a int[[]);
 ---
-SELECT ARRAY[1, 2, 3.0]
-=>
-Query(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Array([Value(Number("1", false)), Value(Number("2", false)), Value(Number("3.0", false))]))], from: [], lateral_views: [], selection: None, group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None })
+sql parser error: Expected ], found: [
+
+CREATE TABLE t(a int]);
+---
+sql parser error: Expected ',' or ')' after column definition, found: ]
+                    

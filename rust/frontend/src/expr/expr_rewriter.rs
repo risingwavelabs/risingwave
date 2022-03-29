@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AggCall, ExprImpl, FunctionCall, InputRef, Literal};
+use super::{AggCall, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
 
 /// By default, `ExprRewriter` simply traverses the expression tree and leaves nodes unchanged.
 /// Implementations can override a subset of methods and perform transformation on some particular
@@ -24,6 +24,7 @@ pub trait ExprRewriter {
             ExprImpl::Literal(inner) => self.rewrite_literal(*inner),
             ExprImpl::FunctionCall(inner) => self.rewrite_function_call(*inner),
             ExprImpl::AggCall(inner) => self.rewrite_agg_call(*inner),
+            ExprImpl::Subquery(inner) => self.rewrite_subquery(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -47,5 +48,8 @@ pub trait ExprRewriter {
     }
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         input_ref.into()
+    }
+    fn rewrite_subquery(&mut self, subquery: Subquery) -> ExprImpl {
+        subquery.into()
     }
 }

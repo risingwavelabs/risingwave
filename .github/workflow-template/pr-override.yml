@@ -5,8 +5,6 @@ name: CI
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - '**.md'
 
 concurrency:
   group: environment-${{ github.ref }}
