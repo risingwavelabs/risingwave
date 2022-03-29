@@ -40,7 +40,7 @@ const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24
 ///   `SstableIdInfo::meta_delete_timestamp` and delete asynchronously.
 /// - 4.2 Or if step 3 didn't happen after some time, the SST is delete as orphan data
 ///   asynchronously.
-pub struct VacuumTrigger<S> {
+pub struct VacuumTrigger<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: Arc<CompactorManager>,

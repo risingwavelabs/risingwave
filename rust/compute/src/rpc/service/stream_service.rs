@@ -20,7 +20,7 @@ use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamEnvironment, LocalStreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]

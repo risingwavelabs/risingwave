@@ -34,9 +34,7 @@ use risingwave_pb::stream_service::{
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{
-    CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, StreamClient, TableId,
-};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, StreamClient, TableId};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};

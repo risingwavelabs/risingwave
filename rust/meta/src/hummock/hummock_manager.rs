@@ -194,7 +194,7 @@ where
             .unwrap_or_else(CompactStatus::new);
 
         compaction_guard.compact_task_assignment =
-            CompactTaskAssignment::list(self.meta_store_ref.as_ref())
+            CompactTaskAssignment::list(self.env.meta_store())
                 .await?
                 .into_iter()
                 .map(|assigned| (assigned.key().unwrap().id, assigned))

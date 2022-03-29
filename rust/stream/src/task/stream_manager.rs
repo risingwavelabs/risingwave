@@ -133,7 +133,11 @@ impl LocalStreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        Self::with_core(LocalStreamManagerCore::new(addr, state_store, streaming_metrics))
+        Self::with_core(LocalStreamManagerCore::new(
+            addr,
+            state_store,
+            streaming_metrics,
+        ))
     }
 
     #[cfg(test)]
@@ -249,7 +253,8 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn update_actor_info(
         &self,
         req: stream_service::BroadcastActorInfoTableRequest,
@@ -258,7 +263,8 @@ impl LocalStreamManager {
         core.update_actor_info(req)
     }
 
-    /// This function could only be called once during the lifecycle of `LocalStreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)

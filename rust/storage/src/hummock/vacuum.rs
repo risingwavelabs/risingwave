@@ -68,7 +68,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_vacuum_tracked_data() {
-        let sstable_store_ref = Arc::new(SstableStore::new(
+        let sstable_store = Arc::new(SstableStore::new(
             Arc::new(InMemObjectStore::new()),
             String::from("test_dir"),
             Arc::new(StateStoreMetrics::unused()),
@@ -81,7 +81,7 @@ mod tests {
             let sstable = gen_default_test_sstable(
                 default_builder_opt_for_test(),
                 *sstable_id,
-                sstable_store_ref.clone(),
+                sstable_store.clone(),
             )
             .await;
             sstables.push(sstable);
@@ -97,7 +97,7 @@ mod tests {
                 .collect_vec(),
         };
         Vacuum::vacuum(
-            sstable_store_ref,
+            sstable_store,
             vacuum_task,
             Arc::new(MockHummockMetaClient::new(Arc::new(
                 MockHummockMetaService::new(),

@@ -34,7 +34,7 @@ use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::{StreamEnvironment, LocalStreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tower::make::Shared;

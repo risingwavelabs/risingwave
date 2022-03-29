@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use risingwave_common::error::tonic_err;
 use risingwave_common::try_match_expand;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
@@ -24,7 +22,7 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{ClusterManagerRef};
+use crate::cluster::ClusterManagerRef;
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
