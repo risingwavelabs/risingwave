@@ -199,7 +199,12 @@ impl BatchTaskExecution {
         &self.task_id
     }
 
-    /// `get_data` consumes the data produced by `async_execute`.
+    /// `async_execute` executes the task in background, it spawns a tokio coroutine and returns
+    /// immediately. The result produced by the task will be sent to one or more channels, according
+    /// to a particular shuffling strategy. For example, in hash shuffling, the result will be
+    /// hash partitioned across multiple channels.
+    /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
+    /// such, parallel consumers are able to consume the result idependently.
     pub fn async_execute(&self) -> Result<()> {
         trace!(
             "Prepare executing plan [{:?}]: {}",

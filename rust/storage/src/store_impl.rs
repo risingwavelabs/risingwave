@@ -21,7 +21,7 @@ use risingwave_rpc_client::MetaClient;
 
 use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::{HummockStateStore, SstableStore};
+use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{HummockMetrics, MonitoredStateStore as Monitored, StateStoreMetrics};
 use crate::object::{InMemObjectStore, ObjectStore, S3ObjectStore};
@@ -40,7 +40,7 @@ pub enum StateStoreImpl {
     /// * `hummock+s3://bucket`
     /// * `hummock+minio://KEY:SECRET@minio-ip:port`
     /// * `hummock+memory` (should only be used in 1 compute node mode)
-    HummockStateStore(Monitored<HummockStateStore>),
+    HummockStateStore(Monitored<HummockStorage>),
     /// In-memory B-Tree state store. Should only be used in unit and integration tests. If you
     /// want speed up e2e test, you should use Hummock in-memory mode instead. Also, this state
     /// store misses some critical implementation to ensure the correctness of persisting streaming
@@ -93,8 +93,6 @@ impl StateStoreImpl {
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
-                use crate::hummock::HummockStorage;
-
                 let object_store = match hummock {
                     s3 if s3.starts_with("hummock+s3://") => Arc::new(
                         S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
@@ -123,20 +121,18 @@ impl StateStoreImpl {
                     config.data_directory.to_string(),
                     state_store_stats.clone(),
                 ));
-                let inner = HummockStateStore::new(
-                    HummockStorage::new(
-                        config.clone(),
-                        sstable_store.clone(),
-                        Arc::new(LocalVersionManager::new(sstable_store)),
-                        Arc::new(RpcHummockMetaClient::new(
-                            meta_client,
-                            hummock_stats.clone(),
-                        )),
-                        state_store_stats.clone(),
-                    )
-                    .await
-                    .map_err(RwError::from)?,
-                );
+                let inner = HummockStorage::new(
+                    config.clone(),
+                    sstable_store.clone(),
+                    Arc::new(LocalVersionManager::new(sstable_store)),
+                    Arc::new(RpcHummockMetaClient::new(
+                        meta_client,
+                        hummock_stats.clone(),
+                    )),
+                    state_store_stats.clone(),
+                )
+                .await
+                .map_err(RwError::from)?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 
