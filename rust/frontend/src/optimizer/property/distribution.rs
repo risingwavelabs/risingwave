@@ -12,14 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use paste::paste;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::for_all_plan_nodes;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
 
@@ -124,19 +122,6 @@ impl Distribution {
         }
     }
 }
-
-macro_rules! impl_dist_with_base {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl [<$convention $name>] {
-                pub fn distribution(&self) -> &Distribution {
-                    &self.base.dist
-                }
-            }
-        })*
-    }
-}
-for_all_plan_nodes! { impl_dist_with_base }
 
 #[cfg(test)]
 mod tests {

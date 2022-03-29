@@ -15,14 +15,12 @@
 use std::fmt;
 
 use itertools::Itertools;
-use paste::paste;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::super::plan_node::*;
 use super::Convention;
-use crate::for_all_plan_nodes;
 use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, Default)]
@@ -194,19 +192,6 @@ impl Order {
         self.field_order.is_empty()
     }
 }
-
-macro_rules! impl_order_with_base {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl [<$convention $name>] {
-                pub fn order(&self) -> &Order {
-                    &self.base.order
-                }
-            }
-        })*
-    }
-}
-for_all_plan_nodes! { impl_order_with_base }
 
 #[cfg(test)]
 mod tests {
