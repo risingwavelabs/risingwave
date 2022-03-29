@@ -183,7 +183,9 @@ impl AggExecutor for LocalSimpleAggExecutor {
             .iter_mut()
             .zip_eq(builders.iter_mut())
             .try_for_each(|(state, builder)| -> Result<_> {
-                builder.append_datum(&state.get_output()?)?;
+                let data = state.get_output()?;
+                trace!("append_datum: {:?}", data);
+                builder.append_datum(&data)?;
                 state.reset();
                 Ok(())
             })?;
