@@ -27,7 +27,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use serde::{Deserialize, Serialize};
 
 /// This is a row with a match degree
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct JoinRow {
     pub row: Row,
     degree: u64,

@@ -17,11 +17,11 @@ use std::fmt::{Debug, Formatter};
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_common::expr::BoxedExpression;
 
-use super::{Executor, ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper};
+use super::{Executor, ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper, StreamExecutorResult};
 use crate::executor::PkIndicesRef;
+use crate::executor_v2::error::StreamExecutorError;
 
 pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
 
@@ -70,13 +70,16 @@ impl Debug for SimpleFilterExecutor {
 }
 
 impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk> {
-        let chunk = chunk.compact()?;
+    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
+        let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();
         let data_chunk = DataChunk::builder().columns(columns).build();
 
-        let pred_output = self.expr.eval(&data_chunk)?;
+        let pred_output = self
+            .expr
+            .eval(&data_chunk)
+            .map_err(StreamExecutorError::eval_error)?;
 
         let (columns, visibility) = data_chunk.into_parts();
 
@@ -141,7 +144,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
             panic!("unmatched type: filter expr returns a non-null array");
         }
 
-        let visibility = (new_visibility).try_into()?;
+        let visibility = new_visibility
+            .try_into()
+            .map_err(StreamExecutorError::eval_error)?;
         let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
         Ok(new_chunk)
     }

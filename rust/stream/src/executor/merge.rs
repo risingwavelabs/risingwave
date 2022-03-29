@@ -142,6 +142,7 @@ impl Executor for ReceiverExecutor {
             .expect(
                 "upstream channel closed unexpectedly, please check error in upstream executors",
             ); // TODO: remove unwrap
+
         Ok(msg)
     }
 

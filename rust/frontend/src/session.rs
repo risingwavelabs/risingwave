@@ -142,7 +142,7 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+        let query_manager = QueryManager::new(worker_node_manager.clone(), false);
         Self {
             catalog_writer,
             catalog_reader,
@@ -184,7 +184,7 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        let query_manager = QueryManager::new(worker_node_manager.clone());
+        let query_manager = QueryManager::new(worker_node_manager.clone(), opts.dist_query);
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),

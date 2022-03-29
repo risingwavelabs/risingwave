@@ -27,6 +27,8 @@ use crate::optimizer::property::{Direction, FieldOrder};
 pub struct BoundQuery {
     pub body: BoundSetExpr,
     pub order: Vec<FieldOrder>,
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
 }
 
 impl BoundQuery {
@@ -56,6 +58,8 @@ impl Binder {
     }
 
     fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
+        let limit = query.get_limit_value();
+        let offset = query.get_offset_value();
         let body = self.bind_set_expr(query.body)?;
         let mut name_to_index = HashMap::new();
         match &body {
@@ -71,7 +75,12 @@ impl Binder {
             .into_iter()
             .map(|order_by_expr| self.bind_order_by_expr(order_by_expr, &name_to_index))
             .collect::<Result<_>>()?;
-        Ok(BoundQuery { body, order })
+        Ok(BoundQuery {
+            body,
+            order,
+            limit,
+            offset,
+        })
     }
 
     fn bind_order_by_expr(

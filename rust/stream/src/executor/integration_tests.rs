@@ -151,6 +151,7 @@ async fn test_merger_sum_aggr() {
         vec![],
         2,
         "SimpleAggExecutor".to_string(),
+        vec![],
     );
 
     let projection = ProjectExecutor::new(

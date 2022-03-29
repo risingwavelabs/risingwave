@@ -161,6 +161,10 @@ pub struct HashJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> std::fmt::Debug for HashJoinExecutor<S, T> {
@@ -243,6 +247,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         executor_id: u64,
         cond: Option<RowExpression>,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let debug_l = format!("{:#?}", &input_l);
         let debug_r = format!("{:#?}", &input_r);
@@ -318,6 +323,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -673,6 +679,7 @@ mod tests {
             1,
             None,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -876,6 +883,7 @@ mod tests {
             1,
             None,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -1121,6 +1129,7 @@ mod tests {
             1,
             None,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -1370,6 +1379,7 @@ mod tests {
             1,
             None,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -1569,6 +1579,7 @@ mod tests {
             1,
             None,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -1823,6 +1834,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right
@@ -2077,6 +2089,7 @@ mod tests {
             1,
             cond,
             "HashJoinExecutor".to_string(),
+            vec![],
         );
 
         // push the init barrier for left and right

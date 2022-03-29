@@ -26,7 +26,7 @@ use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use crate::binder::expr::bind_data_type;
-use crate::handler::create_table::ROWID_NAME;
+use crate::catalog::gen_row_id_column_name;
 use crate::session::OptimizerContext;
 
 fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
@@ -55,7 +55,7 @@ pub(super) async fn handle_create_source(
     let mut column_catalogs = vec![ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
-            name: ROWID_NAME.to_string(),
+            name: gen_row_id_column_name(0),
             column_type: Some(DataType::Int32.to_protobuf()),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -142,6 +142,7 @@ pub mod tests {
 
     use super::*;
     use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -220,8 +221,9 @@ pub mod tests {
             let city_type = DataType::Struct {
                 fields: vec![DataType::Varchar, DataType::Varchar].into(),
             };
+            let row_id_col_name = gen_row_id_column_name(0);
             let expected_columns = maplit::hashmap! {
-                ROWID_NAME => DataType::Int32,
+                row_id_col_name.as_str() => DataType::Int32,
                 "id" => DataType::Int32,
                 "country.zipcode" => DataType::Varchar,
                 "zipcode" => DataType::Int64,
