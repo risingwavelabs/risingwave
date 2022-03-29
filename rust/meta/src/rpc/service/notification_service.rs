@@ -22,13 +22,13 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::{StoredClusterManagerRef, WorkerKey};
+use crate::cluster::{ClusterManagerRef, WorkerKey};
 use crate::manager::{CatalogManagerRef, EpochGeneratorRef, Notification, NotificationManagerRef};
 use crate::storage::MetaStore;
-pub struct NotificationServiceImpl<S> {
+pub struct NotificationServiceImpl<S: MetaStore> {
     notification_manager: NotificationManagerRef,
     catalog_manager: CatalogManagerRef<S>,
-    cluster_manager: StoredClusterManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
     epoch_generator: EpochGeneratorRef,
 }
 
@@ -39,7 +39,7 @@ where
     pub fn new(
         notification_manager: NotificationManagerRef,
         catalog_manager: CatalogManagerRef<S>,
-        cluster_manager: StoredClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         epoch_generator: EpochGeneratorRef,
     ) -> Self {
         Self {

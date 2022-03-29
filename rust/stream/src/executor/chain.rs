@@ -23,7 +23,7 @@ use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
 use crate::executor::ExecutorBuilder;
-use crate::task::{DdlFinishNotifierTx, ExecutorParams, StreamManagerCore};
+use crate::task::{DdlFinishNotifierTx, ExecutorParams, LocalStreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
@@ -59,7 +59,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
         let snapshot = params.input.remove(1);

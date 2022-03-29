@@ -20,17 +20,17 @@ use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamEnvironment, StreamManager};
+use risingwave_stream::task::{StreamEnvironment, LocalStreamManager};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mgr: Arc<StreamManager>,
+    mgr: Arc<LocalStreamManager>,
     env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: StreamEnvironment) -> Self {
+    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }

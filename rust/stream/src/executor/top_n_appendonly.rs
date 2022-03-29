@@ -35,7 +35,7 @@ use super::{ExecutorState, PkIndicesRef, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, StreamChunk};
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 #[async_trait]
 pub trait TopNExecutorBase: StatefulExecutor {
@@ -129,7 +129,7 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::AppendOnlyTopNNode)?;
         let order_types: Vec<_> = node

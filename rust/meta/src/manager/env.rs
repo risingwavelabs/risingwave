@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
-use crate::manager::{EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef};
+use crate::manager::{
+    EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
+};
 #[cfg(test)]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
@@ -31,10 +34,13 @@ where
 {
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef<S>,
+
     /// meta store.
     meta_store: Arc<S>,
+
     /// epoch generator.
     epoch_generator: EpochGeneratorRef,
+
     /// stream clients memoization.
     stream_clients: StreamClientsRef,
 }
@@ -60,16 +66,32 @@ where
         self.meta_store.clone()
     }
 
+    pub fn meta_store(&self) -> &S {
+        self.meta_store.deref()
+    }
+
     pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
         self.id_gen_manager.clone()
+    }
+
+    pub fn id_gen_manager(&self) -> &IdGeneratorManager<S> {
+        self.id_gen_manager.deref()
     }
 
     pub fn epoch_generator_ref(&self) -> EpochGeneratorRef {
         self.epoch_generator.clone()
     }
 
+    pub fn epoch_generator(&self) -> &dyn EpochGenerator {
+        self.epoch_generator.deref()
+    }
+
     pub fn stream_clients_ref(&self) -> StreamClientsRef {
         self.stream_clients.clone()
+    }
+
+    pub fn stream_clients(&self) -> &StreamClients {
+        self.stream_clients.deref()
     }
 }
 

@@ -23,19 +23,19 @@ pub struct Vacuum {}
 
 impl Vacuum {
     pub async fn vacuum(
-        sstable_store_ref: SstableStoreRef,
+        sstable_store: SstableStoreRef,
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> risingwave_common::error::Result<()> {
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
-            sstable_store_ref
+            sstable_store
                 .store()
-                .delete(sstable_store_ref.get_sst_meta_path(*sst_id).as_str())
+                .delete(sstable_store.get_sst_meta_path(*sst_id).as_str())
                 .await?;
-            sstable_store_ref
+            sstable_store
                 .store()
-                .delete(sstable_store_ref.get_sst_data_path(*sst_id).as_str())
+                .delete(sstable_store.get_sst_data_path(*sst_id).as_str())
                 .await?;
         }
 

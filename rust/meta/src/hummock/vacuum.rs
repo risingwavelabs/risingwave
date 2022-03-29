@@ -24,7 +24,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use crate::hummock::model::{sstable_id_info, INVALID_TIMESTAMP};
-use crate::hummock::{CompactorManager, HummockManager};
+use crate::hummock::{CompactorManager, HummockManagerRef};
 use crate::storage::MetaStore;
 
 /// Vacuum is triggered at this rate.
@@ -32,9 +32,9 @@ const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
 /// Orphan SST will be deleted after this interval.
 const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 
-pub struct VacuumTrigger<S> {
-    hummock_manager_ref: Arc<HummockManager<S>>,
-    compactor_manager_ref: Arc<CompactorManager>,
+pub struct VacuumTrigger<S: MetaStore> {
+    hummock_manager: HummockManagerRef<S>,
+    compactor_manager: Arc<CompactorManager>,
     /// Orphan sst ids which have been dispatched to vacuum nodes but are not replied yet.
     pending_orphan_sst_ids: parking_lot::RwLock<HashSet<HummockSSTableId>>,
 }
@@ -44,12 +44,12 @@ where
     S: MetaStore,
 {
     pub fn new(
-        hummock_manager_ref: Arc<HummockManager<S>>,
-        compactor_manager_ref: Arc<CompactorManager>,
+        hummock_manager: HummockManagerRef<S>,
+        compactor_manager: Arc<CompactorManager>,
     ) -> Self {
         Self {
-            hummock_manager_ref,
-            compactor_manager_ref,
+            hummock_manager,
+            compactor_manager,
             pending_orphan_sst_ids: Default::default(),
         }
     }
@@ -100,14 +100,14 @@ where
         vacuum: &VacuumTrigger<S>,
     ) -> risingwave_common::error::Result<u64> {
         let mut vacuum_count: u64 = 0;
-        let version_ids = vacuum.hummock_manager_ref.list_version_ids_asc().await?;
+        let version_ids = vacuum.hummock_manager.list_version_ids_asc().await?;
         if version_ids.is_empty() {
             return Ok(0);
         }
         // Iterate version ids in ascending order. Skip the greatest version id.
         for version_id in version_ids.iter().take(version_ids.len() - 1) {
             let pin_count = vacuum
-                .hummock_manager_ref
+                .hummock_manager
                 .get_version_pin_count(*version_id)
                 .await?;
             if pin_count > 0 {
@@ -117,10 +117,7 @@ where
 
             // Delete version metadata and mark SST as orphan (set meta_delete_timestamp).
             // TODO delete in batch
-            vacuum
-                .hummock_manager_ref
-                .delete_version(*version_id)
-                .await?;
+            vacuum.hummock_manager.delete_version(*version_id).await?;
             vacuum_count += 1;
         }
         Ok(vacuum_count)
@@ -153,7 +150,7 @@ where
                 // 2. If no pending sst ids, then fetch new ones.
                 let now = sstable_id_info::get_timestamp_now();
                 let ssts_to_delete = vacuum
-                    .hummock_manager_ref
+                    .hummock_manager
                     .list_sstable_id_infos()
                     .await?
                     .into_iter()
@@ -183,7 +180,7 @@ where
 
         // Select a vacuum node to process the task
         if !vacuum
-            .compactor_manager_ref
+            .compactor_manager
             .try_assign_compact_task(
                 None,
                 Some(VacuumTask {
@@ -211,7 +208,7 @@ where
             .cloned()
             .collect_vec();
         if !deleted_sst_ids.is_empty() {
-            self.hummock_manager_ref
+            self.hummock_manager
                 .delete_sstable_ids(&deleted_sst_ids)
                 .await?;
             self.pending_orphan_sst_ids

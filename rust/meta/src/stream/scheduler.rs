@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
@@ -22,13 +21,13 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use crate::cluster::{NodeId, NodeLocations, StoredClusterManager};
+use crate::cluster::{ClusterManagerRef, NodeId, NodeLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
 /// [`Scheduler`] defines schedule logic for mv actors.
-pub struct Scheduler<S> {
-    cluster_manager: Arc<StoredClusterManager<S>>,
+pub struct Scheduler<S: MetaStore> {
+    cluster_manager: ClusterManagerRef<S>,
     /// Round robin counter for singleton fragments
     single_rr: AtomicUsize,
 }
@@ -99,7 +98,7 @@ impl<S> Scheduler<S>
 where
     S: MetaStore,
 {
-    pub fn new(cluster_manager: Arc<StoredClusterManager<S>>) -> Self {
+    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
         Self {
             cluster_manager,
             single_rr: AtomicUsize::new(0),
@@ -158,6 +157,7 @@ where
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
     use std::time::Duration;
 
     use itertools::Itertools;
@@ -166,6 +166,7 @@ mod test {
     use risingwave_pb::stream_plan::StreamActor;
 
     use super::*;
+    use crate::cluster::ClusterManager;
     use crate::manager::{MetaSrvEnv, NotificationManager};
 
     #[tokio::test]
@@ -173,7 +174,7 @@ mod test {
         let env = MetaSrvEnv::for_test().await;
         let notification_manager = Arc::new(NotificationManager::new(env.epoch_generator_ref()));
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
+            ClusterManager::new(env.clone(), notification_manager, Duration::from_secs(3600))
                 .await?,
         );
 

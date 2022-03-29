@@ -33,25 +33,22 @@ use risingwave_pb::stream_service::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManagerRef;
+use crate::cluster::ClusterManagerRef;
 use crate::manager::{
-    CatalogManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv, SourceId, StreamClient,
-    StreamClientsRef, TableId,
+    CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, StreamClient, TableId,
 };
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
 
 #[derive(Clone)]
-pub struct DdlServiceImpl<S> {
-    id_gen_manager: IdGeneratorManagerRef<S>,
-    catalog_manager: CatalogManagerRef<S>,
-    stream_manager: StreamManagerRef<S>,
-    cluster_manager: StoredClusterManagerRef<S>,
-    fragment_manager: FragmentManagerRef<S>,
+pub struct DdlServiceImpl<S: MetaStore> {
+    env: MetaSrvEnv<S>,
 
-    /// Clients to stream service on compute nodes
-    stream_clients: StreamClientsRef,
+    catalog_manager: CatalogManagerRef<S>,
+    stream_manager: GlobalStreamManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> DdlServiceImpl<S>
@@ -61,17 +58,16 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
-        stream_manager: StreamManagerRef<S>,
-        cluster_manager: StoredClusterManagerRef<S>,
+        stream_manager: GlobalStreamManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         Self {
-            id_gen_manager: env.id_gen_manager_ref(),
+            env,
             catalog_manager,
             stream_manager,
             cluster_manager,
             fragment_manager,
-            stream_clients: env.stream_clients_ref(),
         }
     }
 }
@@ -87,7 +83,8 @@ where
     ) -> Result<Response<CreateDatabaseResponse>, Status> {
         let req = request.into_inner();
         let id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Database }>()
             .await
             .map_err(tonic_err)? as u32;
@@ -129,7 +126,8 @@ where
     ) -> Result<Response<CreateSchemaResponse>, Status> {
         let req = request.into_inner();
         let id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Schema }>()
             .await
             .map_err(tonic_err)? as u32;
@@ -172,7 +170,8 @@ where
         let mut source = request.into_inner().source.unwrap();
 
         let id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
@@ -237,7 +236,8 @@ where
 
         // 0. Generate an id from mview.
         let id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
@@ -382,7 +382,7 @@ where
         let all_stream_clients = try_join_all(
             all_compute_nodes
                 .iter()
-                .map(|worker| self.stream_clients.get(worker)),
+                .map(|worker| self.env.stream_clients().get(worker)),
         )
         .await?
         .into_iter();
@@ -454,7 +454,7 @@ where
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
         let mut fragmenter = StreamFragmenter::new(
-            self.id_gen_manager.clone(),
+            self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             hash_mapping,
         );
@@ -487,7 +487,8 @@ where
     ) -> RwResult<(SourceId, TableId, CatalogVersion)> {
         // Generate source id.
         let source_id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Table }>() // TODO: use source category
             .await? as u32;
         source.id = source_id;
@@ -531,7 +532,8 @@ where
 
         // Generate mview id.
         let mview_id = self
-            .id_gen_manager
+            .env
+            .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await? as u32;
         mview.id = mview_id;

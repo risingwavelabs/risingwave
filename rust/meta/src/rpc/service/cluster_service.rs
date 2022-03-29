@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
+
 
 use risingwave_common::error::tonic_err;
 use risingwave_common::try_match_expand;
@@ -24,23 +24,20 @@ use risingwave_pb::meta::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::{ClusterManagerRef};
 use crate::storage::MetaStore;
 
 #[derive(Clone)]
-pub struct ClusterServiceImpl<S>
-where
-    S: MetaStore,
-{
-    scm: Arc<StoredClusterManager<S>>,
+pub struct ClusterServiceImpl<S: MetaStore> {
+    cluster_manager: ClusterManagerRef<S>,
 }
 
 impl<S> ClusterServiceImpl<S>
 where
     S: MetaStore,
 {
-    pub fn new(scm: Arc<StoredClusterManager<S>>) -> Self {
-        ClusterServiceImpl { scm }
+    pub fn new(cluster_manager: ClusterManagerRef<S>) -> Self {
+        ClusterServiceImpl { cluster_manager }
     }
 }
 
@@ -58,7 +55,7 @@ where
         let host = try_match_expand!(req.host, Some, "AddWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
         let (worker_node, _added) = self
-            .scm
+            .cluster_manager
             .add_worker_node(host, worker_type)
             .await
             .map_err(|e| e.to_grpc_status())?;
@@ -75,7 +72,7 @@ where
         let req = request.into_inner();
         let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
-        self.scm
+        self.cluster_manager
             .activate_worker_node(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
@@ -89,7 +86,7 @@ where
         let req = request.into_inner();
         let host = try_match_expand!(req.host, Some, "ActivateWorkerNodeRequest::host is empty")
             .map_err(|e| e.to_grpc_status())?;
-        self.scm
+        self.cluster_manager
             .delete_worker_node(host)
             .await
             .map_err(|e| e.to_grpc_status())?;
@@ -107,7 +104,10 @@ where
         } else {
             Some(risingwave_pb::common::worker_node::State::Running)
         };
-        let node_list = self.scm.list_worker_node(worker_type, worker_state).await;
+        let node_list = self
+            .cluster_manager
+            .list_worker_node(worker_type, worker_state)
+            .await;
         Ok(Response::new(ListAllNodesResponse {
             status: None,
             nodes: node_list,
