@@ -90,7 +90,7 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
         ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
         ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
         ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
-        ScalarImpl::Interval(v) => v.to_protobuf_owned().unwrap(),
+        ScalarImpl::Interval(v) => v.to_protobuf_owned(),
         ScalarImpl::NaiveDate(_) => todo!(),
         ScalarImpl::NaiveDateTime(_) => todo!(),
         ScalarImpl::NaiveTime(_) => todo!(),

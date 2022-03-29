@@ -105,11 +105,11 @@ impl IntervalUnit {
         }
     }
 
-    pub fn to_protobuf_owned(&self) -> Result<Vec<u8>> {
+    pub fn to_protobuf_owned(&self) -> Vec<u8> {
         let buf = BytesMut::with_capacity(16);
         let mut writer = buf.writer();
-        self.to_protobuf(&mut writer)?;
-        Ok(writer.into_inner().to_vec())
+        self.to_protobuf(&mut writer).unwrap();
+        writer.into_inner().to_vec()
     }
 
     pub fn to_protobuf<T: Write>(&self, output: &mut T) -> Result<usize> {
