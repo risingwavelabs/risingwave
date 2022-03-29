@@ -19,11 +19,9 @@ use risingwave_pb::plan::exchange_info::{
 use risingwave_pb::plan::ExchangeInfo;
 
 use super::super::plan_node::*;
+use crate::for_all_plan_nodes;
 use crate::optimizer::property::{Convention, Order};
 use crate::optimizer::PlanRef;
-use crate::{
-    for_all_plan_nodes, for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes,
-};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
