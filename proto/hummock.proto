@@ -210,7 +210,7 @@ message CompactStatus {
 
 message CompactTaskAssignment {
   CompactTask compact_task = 1;
-  HummockContextRefId context_id = 2;
+  uint32 context_id = 2;
 }
 
 message CompactTaskRefId {

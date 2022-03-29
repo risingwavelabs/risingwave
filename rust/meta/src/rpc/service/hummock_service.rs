@@ -209,8 +209,7 @@ where
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
         let rx = self
             .compactor_manager
-            .add_compactor(request.into_inner().context_id)
-            .await;
+            .add_compactor(request.into_inner().context_id);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

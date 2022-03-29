@@ -113,7 +113,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
     let context_id = worker_node.id;
 
     // No compaction task available.
-    let task = hummock_manager.get_compact_task().await?;
+    let task = hummock_manager.get_compact_task(context_id).await?;
     assert_eq!(task, None);
 
     // Add some sstables and commit.
@@ -126,7 +126,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .unwrap();
 
     // No compaction task available. Uncommitted sst won't be compacted.
-    let task = hummock_manager.get_compact_task().await?;
+    let task = hummock_manager.get_compact_task(context_id).await?;
     assert_eq!(task, None);
 
     hummock_manager.commit_epoch(epoch).await.unwrap();
@@ -148,7 +148,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
@@ -188,7 +192,11 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
     assert!(hummock_manager
@@ -879,59 +887,4 @@ async fn test_retryable_pin_snapshot() {
         .await
         .unwrap();
     assert_eq!(snapshot_3.epoch, snapshot_2.epoch + 2);
-}
-
-#[tokio::test]
-async fn test_assign_compaction_task() {
-    let (_env, hummock_manager, cluster_manager, worker_node) = setup_compute_env(80).await;
-    let context_id = worker_node.id;
-
-    assert!(hummock_manager.get_compact_task().await.unwrap().is_none());
-
-    // Add some SSTs and commit.
-    let epoch: u64 = 1;
-    let table_id = 1;
-    let (one_table, _) = generate_test_tables(epoch, vec![table_id]);
-    hummock_manager
-        .add_tables(context_id, one_table.clone(), epoch)
-        .await
-        .unwrap();
-    hummock_manager.commit_epoch(epoch).await.unwrap();
-
-    // Get a compact task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
-    hummock_manager
-        .assign_compact_task(context_id, compact_task.task_id)
-        .await
-        .unwrap();
-    // No more compact task.
-    assert!(hummock_manager.get_compact_task().await.unwrap().is_none());
-
-    // The compact task is unassigned.
-    hummock_manager
-        .release_contexts(vec![context_id])
-        .await
-        .unwrap();
-    // Get a compact task.
-    let compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
-    hummock_manager
-        .assign_compact_task(context_id, compact_task.task_id)
-        .await
-        .unwrap();
-
-    // No more compact task.
-    assert!(hummock_manager.get_compact_task().await.unwrap().is_none());
-
-    // The compact task is unassigned.
-    cluster_manager
-        .delete_worker_node(worker_node.host.unwrap())
-        .await
-        .unwrap();
-    assert_eq!(
-        hummock_manager.release_invalid_contexts().await.unwrap(),
-        vec![context_id]
-    );
-
-    // Get a compact task.
-    assert!(hummock_manager.get_compact_task().await.unwrap().is_some());
 }

@@ -17,11 +17,7 @@ mod compactor_manager;
 mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
-#[cfg(test)]
-mod integration_tests;
 mod level_handler;
-#[cfg(test)]
-mod mock_hummock_meta_client;
 mod model;
 #[cfg(test)]
 pub mod test_utils;
@@ -72,15 +68,27 @@ where
                 _ = min_interval.tick() => {},
                 // Shutdown compactor
                 _ = shutdown_rx.recv() => {
-                    tracing::info!("compaction trigger is shutting down");
+                    tracing::info!("Compaction trigger is shutting down");
                     return;
                 }
             }
 
-            // Get a compact task and assign it to a compactor
-            let compact_task = match hummock_manager_ref.get_compact_task().await {
+            // 1. Pick a compactor.
+            let compactor = match compactor_manager_ref.next_compactor() {
+                None => {
+                    continue;
+                }
+                Some(compactor) => compactor,
+            };
+
+            // 2. Assign a compact task to the compactor.
+            let compact_task = match hummock_manager_ref
+                .get_compact_task(compactor.context_id())
+                .await
+            {
                 Ok(Some(compact_task)) => compact_task,
                 Ok(None) => {
+                    // No compact task available.
                     continue;
                 }
                 Err(err) => {
@@ -88,26 +96,30 @@ where
                     continue;
                 }
             };
-            let input_ssts = compact_task
-                .input_ssts
-                .iter()
-                .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
-                .collect_vec();
-            match compactor_manager_ref
-                .try_assign_compact_task(Some(compact_task), None, hummock_manager_ref.as_ref())
-                .await
-            {
-                Ok(assigned) => {
-                    if let Some(assigned) = assigned {
-                        tracing::debug!(
-                            "Try to compact SSTs {:?} in worker {}.",
-                            input_ssts,
-                            assigned
-                        );
-                    }
+
+            // 3. Send the compact task to the compactor.
+            match compactor.send_task(Some(compact_task.clone()), None).await {
+                Ok(_) => {
+                    let input_ssts = compact_task
+                        .input_ssts
+                        .iter()
+                        .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                        .collect_vec();
+                    tracing::debug!(
+                        "Try to compact SSTs {:?} in worker {}.",
+                        input_ssts,
+                        compactor.context_id()
+                    );
                 }
                 Err(err) => {
-                    tracing::warn!("Failed to assign_compact_task. {}", err);
+                    tracing::warn!("Failed to send compaction task. {}", err);
+                    // Cancel the compact task and remove the compactor.
+                    // TODO: #93 retry
+                    hummock_manager_ref
+                        .report_compact_task(compact_task.clone(), false)
+                        .await
+                        .unwrap();
+                    compactor_manager_ref.remove_compactor(compactor.context_id());
                 }
             }
         }

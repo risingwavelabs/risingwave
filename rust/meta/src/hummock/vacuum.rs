@@ -28,7 +28,7 @@ use crate::hummock::{CompactorManager, HummockManager};
 use crate::storage::MetaStore;
 
 /// Vacuum is triggered at this rate.
-const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(10);
+const VACUUM_TRIGGER_INTERVAL: Duration = Duration::from_secs(30);
 /// Orphan SST will be deleted after this interval.
 const ORPHAN_SST_RETENTION_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24);
 
@@ -79,18 +79,18 @@ where
                     _ = min_trigger_interval.tick() => {},
                     // Shutdown vacuum
                     _ = shutdown_rx.recv() => {
-                        tracing::info!("vacuum is shutting down");
+                        tracing::info!("Vacuum is shutting down");
                         return;
                     }
                 }
                 if let Err(err) = Self::vacuum_version_metadata(&vacuum).await {
-                    tracing::warn!("vacuum tracked data err {}", err);
+                    tracing::warn!("Vacuum tracked data error {}", err);
                 }
                 // vacuum_orphan_data can be invoked less frequently.
                 if let Err(err) =
                     Self::vacuum_sst_data(&vacuum, ORPHAN_SST_RETENTION_INTERVAL).await
                 {
-                    tracing::warn!("vacuum orphan data err {}", err);
+                    tracing::warn!("Vacuum orphan data error {}", err);
                 }
             }
         });
@@ -147,7 +147,7 @@ where
         vacuum: &VacuumTrigger<S>,
         orphan_sst_retention_interval: Duration,
     ) -> risingwave_common::error::Result<Vec<HummockSSTableId>> {
-        // Select orphan SSTs.
+        // Select SSTs to delete.
         let ssts_to_delete = {
             // 1. Retry the pending SSTs first.
             // It is possible some vacuum workers have been asked to vacuum these SSTs previously,
@@ -193,28 +193,40 @@ where
             }
         };
 
-        // Select a vacuum node to process the task
-        match vacuum
-            .compactor_manager_ref
-            .try_assign_compact_task(
+        // 1. Pick a worker.
+        let compactor = match vacuum.compactor_manager_ref.next_compactor() {
+            None => {
+                return Ok(vec![]);
+            }
+            Some(compactor) => compactor,
+        };
+
+        // 2. Send task.
+        match compactor
+            .send_task(
                 None,
                 Some(VacuumTask {
                     // The SST id doesn't necessarily have a counterpart SST file in S3, but
                     // it's OK trying to delete it.
                     sstable_ids: ssts_to_delete.clone(),
                 }),
-                vacuum.hummock_manager_ref.as_ref(),
             )
-            .await?
+            .await
         {
-            None => Ok(vec![]),
-            Some(assignee) => {
+            Ok(_) => {
                 tracing::debug!(
                     "Try to vacuum SSTs {:?} in worker {}.",
                     ssts_to_delete,
-                    assignee
+                    compactor.context_id()
                 );
                 Ok(ssts_to_delete)
+            }
+            Err(err) => {
+                tracing::warn!("Failed to send vacuum task. {}", err);
+                vacuum
+                    .compactor_manager_ref
+                    .remove_compactor(compactor.context_id());
+                Ok(vec![])
             }
         }
     }
@@ -235,6 +247,7 @@ where
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }
+        tracing::debug!("Finished vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
     }
 }
@@ -324,7 +337,7 @@ mod tests {
                 .len(),
             0
         );
-        let _receiver = compactor_manager.add_compactor(0).await;
+        let _receiver = compactor_manager.add_compactor(0);
         // 4. 2 expired SST ids.
         let sst_ids = VacuumTrigger::vacuum_sst_data(&vacuum, Duration::from_secs(0))
             .await
@@ -361,7 +374,7 @@ mod tests {
             hummock_manager.clone(),
             compactor_manager.clone(),
         ));
-        let _receiver = compactor_manager.add_compactor(0).await;
+        let _receiver = compactor_manager.add_compactor(0);
 
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
         // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3:

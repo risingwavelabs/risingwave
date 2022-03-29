@@ -636,20 +636,13 @@ where
         Ok(())
     }
 
-    /// `get_compact_task` picks a compact task to process.
+    /// `get_compact_task` picks a compact task and assign it to `context_id`.
     /// Return None if no compact task is available.
-    pub async fn get_compact_task(&self) -> Result<Option<CompactTask>> {
+    pub async fn get_compact_task(
+        &self,
+        assignee_context_id: HummockContextId,
+    ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = self.compaction.lock().await;
-        // 1. Try to pick a compact task that is found previously but not assigned yet.
-        if let Some(compact_task_assignment) = compaction_guard
-            .compact_task_assignment
-            .values()
-            .find(|c| c.context_id.is_none())
-        {
-            return Ok(compact_task_assignment.compact_task.clone());
-        }
-
-        // 2. Try to find a new compact task.
         let mut compact_status_copy = compaction_guard.compact_status.clone();
         let compact_task = compact_status_copy.get_compact_task();
         let ret = match compact_task {
@@ -657,7 +650,7 @@ where
             Some(mut compact_task) => {
                 let new_compact_task_assignment = CompactTaskAssignment {
                     compact_task: Some(compact_task.clone()),
-                    context_id: None,
+                    context_id: assignee_context_id,
                 };
                 let mut transaction = Transaction::default();
                 // compact_status has been modified by get_compact_task so update is required.
@@ -847,7 +840,7 @@ where
             }
 
             tracing::debug!(
-                "Finish hummock compaction task {}, compact {} SSTs {:?} to {} SSTs {:?}",
+                "Finished hummock compaction task {}, compact {} SSTs {:?} to {} SSTs {:?}",
                 compact_task_id,
                 input_sst_ids.len(),
                 input_sst_ids,
@@ -865,7 +858,7 @@ where
                 .compact_task_assignment
                 .remove(&compact_task_id);
 
-            tracing::debug!("Cancel hummock compaction task {}", compact_task_id);
+            tracing::debug!("Cancelled hummock compaction task {}", compact_task_id);
         }
 
         self.trigger_sst_stat(&compaction_guard.compact_status);
@@ -1091,17 +1084,22 @@ where
             let mut versioning_guard = self.versioning.write().await;
             let mut transaction = Transaction::default();
             let mut to_commit = false;
-            let mut modified_compact_task_assignment = vec![];
-            for assignment in compaction_guard.compact_task_assignment.values() {
-                if let Some(ref assigned_context_id) = assignment.context_id {
-                    if assigned_context_id.id == *context_id {
-                        let mut assignment_copy = assignment.clone();
-                        assignment_copy.context_id = None;
-                        assignment_copy.upsert_in_transaction(&mut transaction)?;
-                        modified_compact_task_assignment.push(assignment_copy);
-                        to_commit = true;
-                    }
+            let mut cancalled_compact_tasks = vec![];
+            let mut compact_status_copy = compaction_guard.compact_status.clone();
+            for (task_id, assignment) in &compaction_guard.compact_task_assignment {
+                if assignment.context_id == *context_id {
+                    // Delete assignment and cancel task.
+                    CompactTaskAssignment::delete_in_transaction(
+                        CompactTaskRefId { id: *task_id },
+                        &mut transaction,
+                    )?;
+                    compact_status_copy.cancel_compact_task(*task_id);
+                    cancalled_compact_tasks.push(*task_id);
+                    to_commit = true;
                 }
+            }
+            if !cancalled_compact_tasks.is_empty() {
+                compact_status_copy.update_in_transaction(&mut transaction);
             }
             if let Some(pinned_version) = versioning_guard.pinned_versions.get(context_id) {
                 HummockPinnedVersion::delete_in_transaction(
@@ -1129,11 +1127,12 @@ where
                 .await?;
 
             // Update in-mem state after transaction succeeds.
-            for compact_task_assignment in modified_compact_task_assignment {
+            for compact_task_id in cancalled_compact_tasks {
                 compaction_guard
                     .compact_task_assignment
-                    .insert(compact_task_assignment.key()?.id, compact_task_assignment);
+                    .remove(&compact_task_id);
             }
+            compaction_guard.compact_status = compact_status_copy;
             versioning_guard.pinned_versions.remove(context_id);
             versioning_guard.pinned_snapshots.remove(context_id);
 
@@ -1327,8 +1326,7 @@ where
                 compaction_guard
                     .compact_task_assignment
                     .values()
-                    .filter_map(|c| c.context_id.clone())
-                    .map(|c| c.id),
+                    .map(|c| c.context_id),
             );
             active_context_ids.extend(versioning_guard.pinned_versions.keys());
             active_context_ids.extend(versioning_guard.pinned_snapshots.keys());
@@ -1350,47 +1348,5 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
-    }
-
-    /// `assign_compact_task` assigns a compact task to a context. The compact task will be
-    /// unassigned if the context is invalidated.
-    pub async fn assign_compact_task(
-        &self,
-        context_id: HummockContextId,
-        task_id: u64,
-    ) -> Result<()> {
-        let mut compaction_guard = self.compaction.lock().await;
-        match compaction_guard.compact_task_assignment.get(&task_id) {
-            None => {
-                return Err(ErrorCode::InternalError(format!(
-                    "Compact task {} is not found.",
-                    task_id
-                ))
-                .into());
-            }
-            Some(compact_task) => match compact_task.context_id {
-                None => {
-                    let mut copy_compact_task_assignment = compact_task.clone();
-                    copy_compact_task_assignment.context_id =
-                        Some(HummockContextRefId { id: context_id });
-                    let mut transaction = Transaction::default();
-                    copy_compact_task_assignment.upsert_in_transaction(&mut transaction)?;
-                    self.commit_trx(self.meta_store_ref.as_ref(), transaction, Some(context_id))
-                        .await?;
-                    compaction_guard.compact_task_assignment.insert(
-                        copy_compact_task_assignment.key()?.id,
-                        copy_compact_task_assignment,
-                    );
-                    Ok(())
-                }
-                Some(ref assigned_context_id) => {
-                    return Err(ErrorCode::InternalError(format!(
-                        "Compact task {} has been assigned to context {}.",
-                        task_id, assigned_context_id.id
-                    ))
-                    .into());
-                }
-            },
-        }
     }
 }
