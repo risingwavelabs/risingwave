@@ -26,12 +26,20 @@ struct QueryResultFetcher {
 #[derive(Clone)]
 pub struct QueryManager {
     worker_node_manager: WorkerNodeManagerRef,
+    /// Option to specify how to execute query, in single or distributed mode.
+    ///
+    /// This should be a session variable, but currently we don't support `set` statement, so we
+    /// pass in startup environment.
+    ///
+    /// TODO: Remove this after we support `set` statement.
+    dist_query: bool,
 }
 
 impl QueryManager {
-    pub fn new(worker_node_manager: WorkerNodeManagerRef) -> Self {
+    pub fn new(worker_node_manager: WorkerNodeManagerRef, dist_query: bool) -> Self {
         Self {
             worker_node_manager,
+            dist_query
         }
     }
 
