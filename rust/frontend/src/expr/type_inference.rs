@@ -242,6 +242,16 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Boolean],
         T::Boolean,
     );
+
+    // Date comparisons
+    build_binary_funcs(&mut map, &cmp_exprs, &[T::Date], &[T::Date], T::Boolean);
+    // Date minus and plus
+    map.insert(FuncSign::new_binary(E::Add, T::Date, T::Interval), T::Date);
+    map.insert(
+        FuncSign::new_binary(E::Subtract, T::Date, T::Interval),
+        T::Date,
+    );
+
     build_binary_funcs(
         &mut map,
         &[E::And, E::Or],
