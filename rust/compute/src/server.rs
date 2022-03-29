@@ -159,7 +159,7 @@ pub async fn compute_node_serve(
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if shutdown_sender.send(()).is_ok() {
                                 if let Err(err) = join_handle.await {
-                                    tracing::warn!("shutdown err: {}", err);
+                                    tracing::warn!("shutdown err: {:?}", err);
                                 }
                             }
                         }
