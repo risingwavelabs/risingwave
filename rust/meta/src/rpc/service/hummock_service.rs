@@ -205,9 +205,11 @@ where
 
     async fn subscribe_compact_tasks(
         &self,
-        _request: Request<SubscribeCompactTasksRequest>,
+        request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let rx = self.compactor_manager.add_compactor().await;
+        let rx = self
+            .compactor_manager
+            .add_compactor(request.into_inner().context_id);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

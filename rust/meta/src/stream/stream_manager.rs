@@ -398,10 +398,7 @@ mod tests {
             &self,
             _request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            Ok(Response::new(InjectBarrierResponse {
-                request_id: "".to_string(),
-                status: None,
-            }))
+            Ok(Response::new(InjectBarrierResponse::default()))
         }
 
         async fn create_source(
