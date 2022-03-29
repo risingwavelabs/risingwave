@@ -41,7 +41,7 @@ pub struct LogicalProject {
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(&exprs, &expr_alias);
+        let schema = Self::derive_schema(&exprs, &expr_alias, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
             assert_input_ref!(expr, input.schema().fields().len());
@@ -126,13 +126,21 @@ impl LogicalProject {
         LogicalProject::new(input, exprs, alias).into()
     }
 
-    fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
+    fn derive_schema(
+        exprs: &[ExprImpl],
+        expr_alias: &[Option<String>],
+        input_schema: &Schema,
+    ) -> Schema {
+        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
         let fields = exprs
             .iter()
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
-                let name = alias.clone().unwrap_or(format!("expr#{}", id));
+                let name = alias.clone().unwrap_or(match o2i.try_map(id) {
+                    Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
+                    None => format!("expr#{}", id),
+                });
                 Field {
                     name,
                     data_type: expr.return_type(),

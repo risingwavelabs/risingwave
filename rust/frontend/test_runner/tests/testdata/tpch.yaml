@@ -80,7 +80,7 @@
         StreamHashAgg { group_keys: [$0, $1], aggs: [count, sum($2), sum($3), sum($4), sum($5), sum($6), count($6), sum($7), count($7), sum($8), count($8), count] }
           StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $0, $1, $2, $6], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
             StreamExchange { dist: HashShard([4, 5]) }
-              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, _row_id], pk_indices: [6] }
+              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, _row_id#0], pk_indices: [6] }
 - id: tpch_q3
   before:
     - create_tables
@@ -143,13 +143,13 @@
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
                           StreamFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
-                            StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id], pk_indices: [2] }
+                            StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
                       StreamExchange { dist: HashShard([1]) }
                         StreamFilter { predicate:  }
-                          StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id], pk_indices: [4] }
+                          StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id#0], pk_indices: [4] }
                 StreamExchange { dist: HashShard([0]) }
                   StreamFilter { predicate:  }
-                    StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id], pk_indices: [3] }
+                    StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id#0], pk_indices: [3] }
 - id: tpch_q6
   before:
     - create_tables
@@ -171,9 +171,9 @@
             BatchFilter { predicate: ($0 < 24:Int32) }
               BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount] }
   stream_plan: |
-    StreamMaterialize { columns: [revenue, expr#1(hidden)], pk_columns: [expr#1, revenue] }
+    StreamMaterialize { columns: [revenue, agg#0(hidden)], pk_columns: [agg#0, revenue] }
       StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
         StreamSimpleAgg { aggs: [count, sum($0)] }
           StreamProject { exprs: [($1 * $2), $3], expr_alias: [ ,  ] }
             StreamFilter { predicate: ($0 < 24:Int32) }
-              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, _row_id], pk_indices: [3] }
+              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, _row_id#0], pk_indices: [3] }
