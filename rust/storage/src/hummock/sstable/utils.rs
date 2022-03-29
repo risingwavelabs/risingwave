@@ -179,6 +179,19 @@ pub trait BufExt: Buf {
     }
 }
 
+pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
+    let len = slice.len() as u32;
+    buf.put_u32_le(len);
+    buf.put_slice(slice);
+}
+
+pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
+    let len = buf.get_u32_le() as usize;
+    let v = (&buf[..len]).to_vec();
+    buf.advance(len);
+    v
+}
+
 #[cfg(feature = "blockv2")]
 impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
 
