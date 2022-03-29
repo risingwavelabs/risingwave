@@ -52,8 +52,6 @@ pub trait PlanNode:
     + Downcast
     + WithConvention
     + WithSchema
-    + WithContext
-    + WithId
     + ColPrunable
     + ToBatch
     + ToStream
@@ -88,17 +86,21 @@ impl dyn PlanNode {
         Ok(output)
     }
 
+    pub fn id(&self) -> PlanNodeId {
+        self.plan_base().id
+    }
+    pub fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx.clone()
+    }
+    pub fn pk_indices(&self) -> &[usize] {
+        &self.plan_base().pk_indices
+    }
     pub fn order(&self) -> &Order {
         &self.plan_base().order
     }
     pub fn distribution(&self) -> &Distribution {
         &self.plan_base().dist
     }
-
-    pub fn pk_indices(&self) -> &[usize] {
-        &self.plan_base().pk_indices
-    }
-
     pub fn append_only(&self) -> bool {
         self.plan_base().append_only
     }
@@ -244,7 +246,7 @@ pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 
-use crate::optimizer::property::{WithContext, WithId};
+use crate::session::OptimizerContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]

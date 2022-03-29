@@ -148,7 +148,6 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::optimizer::property::ctx::WithId;
     use crate::session::OptimizerContext;
 
     #[tokio::test]

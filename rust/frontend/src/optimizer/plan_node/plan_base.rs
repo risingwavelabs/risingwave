@@ -95,13 +95,24 @@ macro_rules! impl_base_delegate {
     ([], $( { $convention:ident, $name:ident }),*) => {
         $(paste! {
             impl [<$convention $name>] {
+                pub fn id(&self) -> PlanNodeId {
+                    self.plan_base().id
+                }
+                 pub fn ctx(&self) -> OptimizerContextRef {
+                    self.plan_base().ctx.clone()
+                }
+                pub fn pk_indices(&self) -> &[usize] {
+                    &self.plan_base().pk_indices
+                }
                 pub fn order(&self) -> &Order {
-                    &self.base.order
+                    &self.plan_base().order
                 }
                 pub fn distribution(&self) -> &Distribution {
-                    &self.base.dist
+                    &self.plan_base().dist
                 }
-
+                pub fn append_only(&self) -> bool {
+                    self.plan_base().append_only
+                }
             }
         })*
     }

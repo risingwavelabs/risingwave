@@ -544,7 +544,6 @@ mod tests {
         assert_eq_input_ref, input_ref_to_column_indices, AggCall, ExprType, FunctionCall,
     };
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::optimizer::property::ctx::WithId;
     use crate::session::OptimizerContext;
 
     #[tokio::test]
