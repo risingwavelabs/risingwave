@@ -38,7 +38,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{Distribution, Order, WithConvention, WithSchema};
+use super::property::{Distribution, Order, WithSchema};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -50,7 +50,6 @@ pub trait PlanNode:
     + Debug
     + Display
     + Downcast
-    + WithConvention
     + WithSchema
     + ColPrunable
     + ToBatch
@@ -60,6 +59,7 @@ pub trait PlanNode:
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
+    fn convention(&self) -> Convention;
 }
 
 impl_downcast!(PlanNode);
@@ -67,6 +67,13 @@ pub type PlanRef = Rc<dyn PlanNode>;
 
 #[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
+
+#[derive(Debug, PartialEq)]
+pub enum Convention {
+    Logical,
+    Batch,
+    Stream,
+}
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
@@ -381,6 +388,9 @@ macro_rules! enum_plan_node_type {
                 }
                 fn plan_base(&self) -> &PlanBase {
                     &self.base
+                }
+                fn convention(&self) -> Convention {
+                    Convention::$convention
                 }
             })*
         }

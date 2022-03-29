@@ -18,7 +18,7 @@ use risingwave_pb::plan::exchange_info::{
 use risingwave_pb::plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::optimizer::property::{Convention, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq)]

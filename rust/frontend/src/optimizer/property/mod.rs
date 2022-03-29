@@ -23,8 +23,6 @@
 //! (such as an optimizer based on the Volcano/Cascades model).
 //!
 //! [PlanNode]: super::plan_node::PlanNode
-mod convention;
-pub use convention::*;
 pub(crate) mod order;
 pub use order::*;
 mod distribution;

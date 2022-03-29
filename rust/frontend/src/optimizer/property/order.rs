@@ -20,7 +20,6 @@ use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::super::plan_node::*;
-use super::Convention;
 use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, Default)]
