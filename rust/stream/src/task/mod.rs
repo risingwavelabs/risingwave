@@ -114,6 +114,7 @@ impl SharedContext {
         tokio::spawn(async move {
             match rx.await {
                 Ok(ddl_epoch) => {
+                    // Report to the local barrier manager.
                     barrier_manager.lock().finish_ddl(ddl_epoch, actor_id);
                 }
                 Err(_) => info!(

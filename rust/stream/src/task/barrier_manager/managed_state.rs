@@ -21,6 +21,7 @@ use super::{CollectResult, FinishedDdl};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
+/// The state machine of local barrier manager.
 #[derive(Debug)]
 enum ManagedBarrierStateInner {
     /// Currently no barrier on the flight.
@@ -59,6 +60,7 @@ pub(super) struct ManagedBarrierState {
 }
 
 impl ManagedBarrierState {
+    /// Create a barrier manager state. This will be called only once.
     pub(super) fn new() -> Self {
         Self {
             inner: ManagedBarrierStateInner::Pending {

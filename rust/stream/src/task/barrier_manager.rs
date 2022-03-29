@@ -31,10 +31,14 @@ mod tests;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
+/// Represents the DDL with `epoch` is finished on the actor with `actor_id`.
 #[derive(Debug)]
 pub struct FinishedDdl {
+    /// The epoch of the configuration change barrier for this DDL.
     pub epoch: u64,
 
+    /// The id of the actor that is responsible for running this DDL. Usually the actor of
+    /// [`ChainExecutor`] for creating MV.
     pub actor_id: ActorId,
 }
 
@@ -47,11 +51,14 @@ impl From<FinishedDdl> for ProstFinishedDdl {
     }
 }
 
+/// To notify about the finish of an DDL with the `u64` epoch.
 pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
 pub type DdlFinishNotifierRx = oneshot::Receiver<u64>;
 
+/// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
 pub struct CollectResult {
+    /// Finished DDLs in current epoch.
     pub finished_ddls: Vec<FinishedDdl>,
 }
 
@@ -179,6 +186,9 @@ impl LocalBarrierManager {
         Ok(())
     }
 
+    /// Report that a DDL with given `ddl_epoch` is finished on the actor with `actor_id`. This will
+    /// be piggybacked by the collection of current/next barrier and then be reported to the meta
+    /// service.
     pub fn finish_ddl(&mut self, ddl_epoch: u64, actor_id: ActorId) {
         match &mut self.state {
             #[cfg(test)]
