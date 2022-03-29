@@ -32,7 +32,7 @@ macro_rules! impl_flush_status {
                 Insert(T),
             }
 
-            impl<T> $struct_name<T> {
+            impl<T: std::fmt::Debug> $struct_name<T> {
                 pub fn is_delete(&self) -> bool {
                     matches!(self, Self::Delete)
                 }
@@ -63,7 +63,7 @@ macro_rules! impl_flush_status {
                 }
 
                 /// Insert an entry and modify the corresponding flush state
-                pub fn do_insert<K: Ord>(entry: $entry_type, value: T) {
+                pub fn do_insert<K: Ord + std::fmt::Debug>(entry: $entry_type, value: T) {
                     match entry {
                         <$entry_type>::Vacant(e) => {
                             // No-op -> Insert
@@ -74,14 +74,14 @@ macro_rules! impl_flush_status {
                                 // Delete -> DeleteInsert
                                 e.insert(Self::DeleteInsert(value));
                             } else {
-                                panic!("invalid flush status");
+                                panic!("invalid flush status: double insert {:?} -> {:?}", e.key(), value);
                             }
                         }
                     }
                 }
 
                     /// Delete an entry and modify the corresponding flush state
-                pub fn do_delete<K: Ord>(entry: $entry_type) {
+                pub fn do_delete<K: Ord + std::fmt::Debug>(entry: $entry_type) {
                     match entry {
                         <$entry_type>::Vacant(e) => {
                             // No-op -> Delete
@@ -95,7 +95,7 @@ macro_rules! impl_flush_status {
                                 // DeleteInsert -> Delete
                                 e.insert(Self::Delete);
                             } else {
-                                panic!("invalid flush status");
+                                panic!("invalid flush status: double delete {:?}", e.key());
                             }
                         }
                     }
