@@ -9,22 +9,22 @@
           - input:
               - mergeNode: {}
               - pkIndices:
-                  - 0
+                  - 1
                 batchPlanNode:
                   tableRefId:
                     tableId: 1
                   columnDescs:
                     - columnType:
-                        typeName: INT64
-                        isNullable: true
-                      name: _row_id
-                    - columnType:
                         typeName: INT32
                         isNullable: true
                       columnId: 1
                       name: v1
+                    - columnType:
+                        typeName: INT64
+                        isNullable: true
+                      name: "_row_id#0"
             pkIndices:
-              - 0
+              - 1
             chainNode:
               tableRefId:
                 tableId: 1
@@ -32,16 +32,16 @@
                 - dataType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
                 - dataType:
                     typeName: INT32
                     isNullable: true
                   name: v1
               columnIds:
-                - 0
                 - 1
+                - 0
         pkIndices:
-          - 0
+          - 1
         filterNode:
           searchCondition:
             exprType: LESS_THAN
@@ -54,8 +54,7 @@
                   returnType:
                     typeName: INT32
                     isNullable: true
-                  inputRef:
-                    columnIdx: 1
+                  inputRef: {}
                 - exprType: CONSTANT_VALUE
                   returnType:
                     typeName: INT32
@@ -63,11 +62,12 @@
                   constant:
                     body: AAAAAQ==
     pkIndices:
-      - 0
+      - 1
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
-          inputRef: {}
+          inputRef:
+            columnIdx: 1
           returnType:
             typeName: INT64
             isNullable: true
@@ -80,17 +80,18 @@
     columns:
       - columnDesc:
           columnType:
-            typeName: INT64
-            isNullable: true
-          name: _row_id
-      - columnDesc:
-          columnType:
             typeName: INT32
             isNullable: true
-          columnId: 1
           name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 1
+          name: "_row_id#0"
+        isHidden: true
     pkColumnIds:
-      - 0
+      - 1
     pkOrders:
       - ASCENDING
 - sql: |
@@ -103,22 +104,22 @@
       - input:
           - mergeNode: {}
           - pkIndices:
-              - 0
+              - 1
             batchPlanNode:
               tableRefId:
                 tableId: 1
               columnDescs:
                 - columnType:
-                    typeName: INT64
-                    isNullable: true
-                  name: _row_id
-                - columnType:
                     typeName: INT32
                     isNullable: true
                   columnId: 1
                   name: v1
+                - columnType:
+                    typeName: INT64
+                    isNullable: true
+                  name: "_row_id#0"
         pkIndices:
-          - 0
+          - 1
         chainNode:
           tableRefId:
             tableId: 1
@@ -126,20 +127,21 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: _row_id
+              name: "_row_id#0"
             - dataType:
                 typeName: INT32
                 isNullable: true
               name: v1
           columnIds:
-            - 0
             - 1
+            - 0
     pkIndices:
-      - 0
+      - 1
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
-          inputRef: {}
+          inputRef:
+            columnIdx: 1
           returnType:
             typeName: INT64
             isNullable: true
@@ -152,17 +154,18 @@
     columns:
       - columnDesc:
           columnType:
-            typeName: INT64
-            isNullable: true
-          name: _row_id
-      - columnDesc:
-          columnType:
             typeName: INT32
             isNullable: true
-          columnId: 1
           name: v1
+      - columnDesc:
+          columnType:
+            typeName: INT64
+            isNullable: true
+          columnId: 1
+          name: "_row_id#0"
+        isHidden: true
     pkColumnIds:
-      - 0
+      - 1
     pkOrders:
       - ASCENDING
 - sql: |
@@ -188,7 +191,7 @@
                 - columnType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
         pkIndices:
           - 1
         chainNode:
@@ -198,7 +201,7 @@
             - dataType:
                 typeName: INT64
                 isNullable: true
-              name: _row_id
+              name: "_row_id#0"
             - dataType:
                 typeName: INT32
                 isNullable: true
@@ -237,7 +240,7 @@
             typeName: INT64
             isNullable: true
           columnId: 1
-          name: _row_id
+          name: "_row_id#0"
         isHidden: true
     pkColumnIds:
       - 1
@@ -267,7 +270,7 @@
                     - columnType:
                         typeName: INT64
                         isNullable: true
-                      name: _row_id
+                      name: "_row_id#0"
             pkIndices:
               - 1
             chainNode:
@@ -277,7 +280,7 @@
                 - dataType:
                     typeName: INT64
                     isNullable: true
-                  name: _row_id
+                  name: "_row_id#0"
                 - dataType:
                     typeName: INT32
                     isNullable: true
@@ -376,7 +379,7 @@
                                 - columnType:
                                     typeName: INT64
                                     isNullable: true
-                                  name: _row_id
+                                  name: "_row_id#0"
                         pkIndices:
                           - 2
                         chainNode:
@@ -386,7 +389,7 @@
                             - dataType:
                                 typeName: INT64
                                 isNullable: true
-                              name: _row_id
+                              name: "_row_id#0"
                             - dataType:
                                 typeName: INT32
                                 isNullable: true
@@ -414,7 +417,7 @@
                         - dataType:
                             typeName: INT64
                             isNullable: true
-                          name: _row_id
+                          name: "_row_id#0"
                       strategy:
                         type: HASH
                         columnIndices:
@@ -502,7 +505,7 @@
             typeName: INT32
             isNullable: true
           columnId: 1
-          name: "expr#1"
+          name: v2
         isHidden: true
     pkColumnIds:
       - 1

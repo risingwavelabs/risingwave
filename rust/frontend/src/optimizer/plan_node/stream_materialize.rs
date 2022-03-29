@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
@@ -25,7 +28,7 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::ColumnId;
+use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
 use crate::optimizer::property::{Order, WithSchema};
 
@@ -39,22 +42,56 @@ pub struct StreamMaterialize {
 }
 
 impl StreamMaterialize {
-    fn derive_plan_base(input: &PlanRef) -> PlanBase {
+    fn derive_plan_base(input: &PlanRef) -> Result<PlanBase> {
         let ctx = input.ctx();
-        let schema = input.schema();
+
+        let schema = Self::derive_schema(input.schema())?;
         let pk_indices = input.pk_indices();
 
-        PlanBase::new_stream(
+        Ok(PlanBase::new_stream(
             ctx,
-            schema.clone(),
+            schema,
             pk_indices.to_vec(),
             input.distribution().clone(),
             input.append_only(),
-        )
+        ))
+    }
+
+    fn derive_schema(schema: &Schema) -> Result<Schema> {
+        let mut col_names = HashSet::new();
+        for field in schema.fields() {
+            if is_row_id_column_name(&field.name) {
+                continue;
+            }
+            if !col_names.insert(field.name.clone()) {
+                return Err(InternalError(format!(
+                    "column {} specified more than once",
+                    field.name
+                ))
+                .into());
+            }
+        }
+        let mut row_id_count = 0;
+        let fields = schema
+            .fields()
+            .iter()
+            .map(|field| match is_row_id_column_name(&field.name) {
+                true => {
+                    let field = Field {
+                        data_type: field.data_type.clone(),
+                        name: gen_row_id_column_name(row_id_count),
+                    };
+                    row_id_count += 1;
+                    field
+                }
+                false => field.clone(),
+            })
+            .collect();
+        Ok(Schema { fields })
     }
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
-        let base = Self::derive_plan_base(&input);
+        let base = Self::derive_plan_base(&input).unwrap();
         Self { base, input, table }
     }
 
@@ -64,8 +101,8 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-    ) -> Self {
-        let base = Self::derive_plan_base(&input);
+    ) -> Result<Self> {
+        let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
@@ -115,7 +152,7 @@ impl StreamMaterialize {
             pk_desc,
         };
 
-        Self { base, input, table }
+        Ok(Self { base, input, table })
     }
 
     /// Get a reference to the stream materialize's table.

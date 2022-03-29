@@ -35,6 +35,8 @@ impl Binder {
     ) -> Result<BoundInsert> {
         let table_source = self.bind_table_source(source_name)?;
 
+        let limit = source.get_limit_value();
+        let offset = source.get_offset_value();
         let expected_types = table_source
             .columns
             .iter()
@@ -48,6 +50,8 @@ impl Binder {
                 BoundQuery {
                     body,
                     order: vec![],
+                    limit,
+                    offset,
                 }
             }
 

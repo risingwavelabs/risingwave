@@ -15,15 +15,15 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
 
+use super::error::{StreamExecutorResult, TracedStreamExecutorError};
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
 
 /// Executor which can handle [`StreamChunk`]s one by one.
 pub trait SimpleExecutor: Send + 'static {
     /// convert a single chunk to another chunk.
     // TODO: How about use `map_filter_chunk` and output chunk optionally?
-    fn map_chunk(&mut self, chunk: StreamChunk) -> Result<StreamChunk>;
+    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;
@@ -66,7 +66,7 @@ impl<E> SimpleExecutorWrapper<E>
 where
     E: SimpleExecutor,
 {
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
         let input = self.input.execute();
         let mut inner = self.inner;
