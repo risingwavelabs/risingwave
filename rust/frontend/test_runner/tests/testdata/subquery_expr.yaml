@@ -61,7 +61,7 @@
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+              LogicalProject { exprs: [$1], expr_alias: [x] }
                 LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t1(x int);
@@ -86,7 +86,7 @@
           LogicalScan { table: t, columns: [_row_id, x] }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }
             LogicalAgg { group_keys: [], agg_calls: [count] }
-              LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, x] }
+              LogicalProject { exprs: [$1], expr_alias: [x] }
                 LogicalScan { table: t, columns: [_row_id, x] }
 - sql: |
     create table t1(x int);

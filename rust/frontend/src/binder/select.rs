@@ -132,7 +132,7 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::bind_columns(&self.context.columns[..])?;
+                    let (exprs, names) = Self::bind_visible_columns(&self.context.columns[..])?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -149,6 +149,25 @@ impl Binder {
                     InputRef::new(column.index, column.data_type.clone()).into(),
                     Some(column.column_name.clone()),
                 )
+            })
+            .unzip();
+        Ok(bound_columns)
+    }
+
+    pub fn bind_visible_columns(
+        columns: &[ColumnBinding],
+    ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
+        let bound_columns = columns
+            .iter()
+            .filter_map(|column| {
+                if !column.is_hidden {
+                    Some((
+                        InputRef::new(column.index, column.data_type.clone()).into(),
+                        Some(column.column_name.clone()),
+                    ))
+                } else {
+                    None
+                }
             })
             .unzip();
         Ok(bound_columns)
