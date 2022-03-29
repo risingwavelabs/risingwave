@@ -14,13 +14,13 @@
 
 use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -69,9 +69,7 @@ impl Binder {
             Expr::BinaryOp { left, op, right } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_binary_op(*left, op, *right)?,
             ))),
-            Expr::UnaryOp { op, expr } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_unary_expr(op, *expr)?,
-            ))),
+            Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
             Expr::Nested(expr) => self.bind_expr(*expr),
             Expr::Cast { expr, data_type } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_cast(*expr, data_type)?,
@@ -79,23 +77,22 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", expr)).into()),
+            _ => Err(
+                ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
+            ),
         }
     }
 
-    pub(super) fn bind_unary_expr(
-        &mut self,
-        op: UnaryOperator,
-        expr: Expr,
-    ) -> Result<FunctionCall> {
+    pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
         let func_type = match op {
             UnaryOperator::Not => ExprType::Not,
-            UnaryOperator::Plus | UnaryOperator::Minus => {
-                return self.rewrite_pos_neg(op, expr);
+            UnaryOperator::Minus => ExprType::Neg,
+            UnaryOperator::Plus => {
+                return self.rewrite_positive(expr);
             }
             _ => {
                 return Err(ErrorCode::NotImplementedError(format!(
-                    "unsupported expression: {:?}",
+                    "unsupported unary expression: {:?}",
                     op
                 ))
                 .into())
@@ -103,28 +100,25 @@ impl Binder {
         };
         let expr = self.bind_expr(expr)?;
         let return_type = expr.return_type();
-        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
-            ErrorCode::NotImplementedError(format!("{:?} {:?}", op, return_type)).into()
-        })
+        FunctionCall::new(func_type, vec![expr])
+            .ok_or_else(|| {
+                ErrorCode::NotImplementedError(format!(
+                    "unsupported unary expression {:?} {:?}",
+                    op, return_type
+                ))
+                .into()
+            })
+            .map(|f| f.into())
     }
 
-    /// Rewrite `+1.0` to `Int16(0) + 1.0`, `-1.0` to `Int16(0) - 1.0`.
-    /// This is a trick as all numerics added with Int16(0) remain its original type.
-    fn rewrite_pos_neg(&mut self, op: UnaryOperator, expr: Expr) -> Result<FunctionCall> {
-        let func_type = match op {
-            UnaryOperator::Minus => ExprType::Subtract,
-            UnaryOperator::Plus => ExprType::Add,
-            _ => unreachable!(),
-        };
+    /// Directly returns the expression itself if it is a positive number.
+    fn rewrite_positive(&mut self, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
         let return_type = expr.return_type();
-        if !return_type.is_numeric() {
-            return Err(ErrorCode::InvalidInputSyntax(format!("{} {:?}", op, return_type)).into());
+        if return_type.is_numeric() {
+            return Ok(expr);
         }
-        let zero = Literal::new(Some(ScalarImpl::Int16(0)), DataType::Int16).into();
-        FunctionCall::new(func_type, vec![zero, expr]).ok_or_else(|| {
-            ErrorCode::NotImplementedError(format!("{} {:?}", op, return_type)).into()
-        })
+        return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
     }
 
     pub(super) fn bind_trim(

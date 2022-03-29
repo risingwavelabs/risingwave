@@ -48,7 +48,7 @@
 - sql: |
     select +1.0, -2.0;
   batch_plan: |
-    BatchProject { exprs: [(0:Int16 + Normalized(1.0):Decimal), (0:Int16 - Normalized(2.0):Decimal)], expr_alias: [ ,  ] }
+    BatchProject { exprs: [Normalized(1.0):Decimal, Neg(Normalized(2.0):Decimal)], expr_alias: [ ,  ] }
       BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 int);
