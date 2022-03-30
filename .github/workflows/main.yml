@@ -69,6 +69,7 @@ jobs:
   stop-runner-a:
     name: ec2-stop-a
     needs:
+      - start-runner-a
       - compute-node-build-dev
       - end-to-end-risedev-dev
     runs-on: ubuntu-latest
@@ -91,6 +92,7 @@ jobs:
   stop-runner-b:
     name: ec2-stop-b
     needs:
+      - start-runner-b
       - compute-node-test
     runs-on: ubuntu-latest
     if: ${{ always() }}
@@ -135,7 +137,7 @@ jobs:
   stop-runner-c:
     name: ec2-stop-c
     needs:
-      - compute-node-build-release
+      - start-runner-c
       - end-to-end-risedev-release
     runs-on: ubuntu-latest
     if: ${{ always() }}
@@ -253,7 +255,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
-          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
@@ -358,7 +360,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
-          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
@@ -447,7 +449,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
-          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:

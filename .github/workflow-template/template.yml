@@ -67,6 +67,7 @@ jobs:
   stop-runner-a:
     name: ec2-stop-a
     needs:
+      - start-runner-a
       - compute-node-build-dev
       - end-to-end-risedev-dev
     runs-on: ubuntu-latest
@@ -90,6 +91,7 @@ jobs:
   stop-runner-b:
     name: ec2-stop-b
     needs:
+      - start-runner-b
       - compute-node-test
     runs-on: ubuntu-latest
     if: ${{ always() }} # required to stop the runner even if the error happened in the previous jobs
