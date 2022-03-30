@@ -31,3 +31,7 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   --output `pwd`/tests/regress/output \
   --schedule `pwd`/tests/regress/data/schedule
 ```
+
+# Reference
+
+The `data` folder contains test cases migrated from [postgres](https://github.com/postgres/postgres/).
