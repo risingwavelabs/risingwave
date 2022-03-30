@@ -27,7 +27,7 @@ impl Planner {
         let source_id = delete.table_source.source_id;
         let scan = self.plan_base_table(delete.table)?;
         let input = if let Some(expr) = delete.selection {
-            LogicalFilter::create(scan, expr)?
+            LogicalFilter::create_with_expr(scan, expr)
         } else {
             scan
         };

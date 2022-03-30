@@ -31,7 +31,7 @@ impl Rule for FilterProjectRule {
         let predicate = filter.predicate().clone().rewrite_expr(&mut subst);
 
         let input = project.input();
-        let pushed_filter = LogicalFilter::filter_if_need(input, predicate);
+        let pushed_filter = LogicalFilter::create(input, predicate);
         Some(project.clone_with_input(pushed_filter.into()).into())
     }
 }

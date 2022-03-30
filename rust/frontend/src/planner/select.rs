@@ -95,7 +95,7 @@ impl Planner {
     /// [`LogicalJoin`] using [`substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
-            return LogicalFilter::create(input, where_clause);
+            return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }
 
         let (subquery_conjunctions, not_subquery_conjunctions, others) =
@@ -154,7 +154,7 @@ impl Planner {
             Ok(input)
         } else {
             let (input, others) = self.substitute_subqueries(input, others.conjunctions)?;
-            Ok(LogicalFilter::filter_if_need(
+            Ok(LogicalFilter::create(
                 input,
                 Condition {
                     conjunctions: others,

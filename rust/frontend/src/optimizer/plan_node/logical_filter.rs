@@ -52,8 +52,8 @@ impl LogicalFilter {
         }
     }
 
-    /// check if the predicate is always true
-    pub fn filter_if_need(input: PlanRef, predicate: Condition) -> PlanRef {
+    /// Create a `LogicalFilter` unless the predicate is always true
+    pub fn create(input: PlanRef, predicate: Condition) -> PlanRef {
         if predicate.always_true() {
             input
         } else {
@@ -62,9 +62,9 @@ impl LogicalFilter {
     }
 
     /// the function will check if the predicate is bool expression
-    pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
+    pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
         let predicate = Condition::with_expr(predicate);
-        Ok(Self::new(input, predicate).into())
+        Self::new(input, predicate).into()
     }
 
     /// Get the predicate of the logical join.
