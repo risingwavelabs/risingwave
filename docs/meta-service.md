@@ -2,9 +2,9 @@
 
 ## Background
 
-RisingWave provides both real-time analytical query as well as high-concurrent access to Materailized Views. Therefore, both the front-end and compute nodes are designed to be scalable, and they may share the same set of host machines or not, depending on cluster size and whether the user cares about resource isolation.
+RisingWave provides both real-time analytical query as well as high-concurrent access to Materialized Views. Therefore, both the front-end and compute nodes are designed to be scalable, and they may share the same set of host machines or not, depending on cluster size and whether the user cares about resource isolation.
 
-Meanwhile, components such as metadata provider, scheduler, monitoring are more suitable for a centralized design. For example, a typical on-premise deployment may look like below, where the boxes means minimal unit of deployment (VM or container).
+Meanwhile, components such as metadata provider, scheduler, monitoring are more suitable for a centralized design. For example, a typical on-premise deployment may look like below, where the dotted boxes represent minimal unit of deployment (VM or container).
 
 ![Cluster Deployment](./images/meta-service/cluster-deployment.svg)
 
@@ -29,13 +29,13 @@ To execute a DDL statement like `CREATE` or `DROP TABLE`, the front-end sends an
 
 ### Storage
 
-Hummock, as an LSM-Tree-based storage, stores it the mapping from version to the set of SSTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
+Hummock, as an LSM-Tree-based storage, stores the mapping from version to the set of SSTable files in Meta Service. See more details in the [overview of State Store](./state-store-overview.md).
 
 ## Push on Updates
 
 There are 2 choices for how to distribute information across multiple nodes. 
 
-* *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others' acknowledges before continuing. 
+* *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing. 
 * *Pull*: When data changes, the master node does nothing. Other nodes may not have the latest information, so they need to ask the master node every time.
 
 Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on front-end and compute nodes. 
