@@ -20,9 +20,8 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::{parse_checksum_algo, StorageConfig};
-use risingwave_pb::common::WorkerType;
-use risingwave_rpc_client::MetaClient;
-use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
+use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
 use crate::utils::display_stats::print_statistics;
@@ -117,7 +116,6 @@ fn preprocess_options(opts: &mut Opts) {
 async fn main() {
     let mut opts = Opts::parse();
     let state_store_stats = Arc::new(StateStoreMetrics::unused());
-    let hummock_stats = Arc::new(HummockMetrics::unused());
 
     println!("Configurations before preprocess:\n {:?}", &opts);
     preprocess_options(&mut opts);
@@ -133,25 +131,21 @@ async fn main() {
         write_conflict_detection_enabled: false,
     });
 
-    let meta_address = "http://127.0.0.1:5690";
-    let mut hummock_meta_client = MetaClient::new(meta_address).await.unwrap();
-    let meta_address = "127.0.0.1:5690".parse().unwrap();
-    hummock_meta_client
-        .register(meta_address, WorkerType::ComputeNode)
-        .await
-        .unwrap();
+    let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
+    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(mock_hummock_meta_service));
 
     let state_store = StateStoreImpl::new(
         &opts.store,
         config,
-        hummock_meta_client,
+        mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
-        hummock_stats.clone(),
     )
     .await
     .expect("Failed to get state_store");
 
-    dispatch_state_store!(state_store, store, { Operations::run(store, &opts).await });
+    dispatch_state_store!(state_store, store, {
+        Operations::run(store, mock_hummock_meta_client, &opts).await
+    });
 
     if opts.statistics {
         print_statistics(&state_store_stats);

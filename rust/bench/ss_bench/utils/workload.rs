@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use rand::distributions::Uniform;
@@ -52,6 +50,8 @@ impl Workload {
             }
         }
         if !batch.is_empty() {
+            batch.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+            batch.dedup_by(|(k1, _), (k2, _)| k1 == k2);
             batches.push(batch);
         }
 
@@ -164,10 +164,4 @@ impl Workload {
 
         (prefixes, keys)
     }
-}
-
-/// generate epoch for the whole crate
-pub(crate) fn get_epoch() -> u64 {
-    static EPOCH: AtomicU64 = AtomicU64::new(0);
-    EPOCH.fetch_add(1, Ordering::SeqCst)
 }
