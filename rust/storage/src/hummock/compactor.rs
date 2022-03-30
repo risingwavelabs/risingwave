@@ -255,6 +255,12 @@ impl Compactor {
                 .await?;
 
             if self.context.is_share_buffer_compact {
+                self.context.stats.addtable_upload_sst_counts.inc();
+            } else {
+                self.context.stats.compaction_upload_sst_counts.inc();
+            }
+
+            if self.context.is_share_buffer_compact {
                 self.context
                     .stats
                     .write_shared_buffer_sync_size
