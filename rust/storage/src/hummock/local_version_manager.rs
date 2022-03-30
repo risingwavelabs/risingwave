@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::cmp;
 use std::collections::btree_map::BTreeMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Weak};
@@ -249,10 +248,7 @@ impl LocalVersionManager {
                     retry_backoff = get_backoff_strategy();
                 }
                 Err(err) => {
-                    let retry_after = cmp::max(
-                        retry_backoff.next().unwrap_or(max_retry_interval),
-                        min_execute_interval,
-                    );
+                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                     tracing::warn!(
                         "Failed to pin version {}. Will retry after about {} milliseconds",
                         err,
@@ -322,10 +318,7 @@ impl LocalVersionManager {
                     retry_backoff = get_backoff_strategy();
                 }
                 Err(err) => {
-                    let retry_after = cmp::max(
-                        retry_backoff.next().unwrap_or(max_retry_interval),
-                        min_execute_interval,
-                    );
+                    let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                     tracing::warn!(
                         "Failed to unpin version {}. Will retry after about {} milliseconds",
                         err,
