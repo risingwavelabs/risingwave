@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::info;
+use log::{info, debug};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -284,7 +284,8 @@ where
     pub async fn flush(&self) -> Result<()> {
         let start = Instant::now();
 
-        info!("start barrier flush");
+        debug!("start barrier flush");
+
         self.barrier_manager_ref.wait_for_next_barrier().await?;
 
         let elapsed = Instant::now().duration_since(start);

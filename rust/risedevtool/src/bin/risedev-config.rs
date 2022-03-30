@@ -144,7 +144,7 @@ a dev cluster.
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[Self::ComputeNodeAndMetaNode, Self::Frontend]
+        &[Self::ComputeNodeAndMetaNode]
     }
 }
 

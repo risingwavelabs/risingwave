@@ -115,16 +115,16 @@ impl ExchangeServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
         let tsid = TaskOutputId::try_from(&pb_tsid)?;
-        debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
+        tracing::debug!(peer_addr = %peer_addr, from = ?tsid, "serve exchange RPC");
         let mut task_output = self.batch_mgr.take_output(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_output.take_data(&mut writer).await {
                 Ok(_) => {
-                    info!(
-                        "Exchanged {} chunks from output {:?}",
+                    tracing::debug!(
+                        from = ?tsid,
+                        "exchanged {} chunks",
                         writer.written_chunks(),
-                        tsid,
                     );
                     Ok(())
                 }

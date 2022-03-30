@@ -882,7 +882,7 @@ where
                 sstable_id_infos
             )?;
 
-            tracing::debug!(
+            tracing::info!(
                 "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
                 compact_task_id,
                 input_sst_ids.len(),

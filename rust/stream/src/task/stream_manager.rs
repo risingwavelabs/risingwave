@@ -203,7 +203,7 @@ impl StreamManager {
         for id in actors {
             core.drop_actor(*id);
         }
-        debug!("drop actors: {:?}", actors);
+        tracing::debug!(actors = ?actors, "drop actors");
         Ok(())
     }
 
