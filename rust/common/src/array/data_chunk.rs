@@ -184,7 +184,12 @@ impl DataChunk {
     }
 
     pub fn set_visibility(&mut self, visibility: Bitmap) {
+        let card = visibility.iter().map(|visible| visible as usize).sum();
+        for column in &self.columns {
+            assert_eq!(visibility.len(), column.array_ref().len())
+        }
         self.visibility = Some(visibility);
+        self.cardinality = card;
     }
 
     pub fn column_at(&self, idx: usize) -> &Column {

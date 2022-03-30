@@ -230,31 +230,48 @@ impl<K: HashKey> HashJoinExecutor<K> {
         }
 
         loop {
-            if let Some(mut ret_data_chunk) = probe_table.join()? {
-                if probe_table.has_non_equi_cond() {
-                    probe_table.process_non_equi_condition(&mut ret_data_chunk)?
-                }
+            if let Some(ret_data_chunk) = probe_table.join()? {
+                print!("data_chunk before process: {:?}", ret_data_chunk);
+                let data_chunk = if probe_table.has_non_equi_cond() {
+                    probe_table.process_non_equi_condition(ret_data_chunk)?
+                } else {
+                    Some(ret_data_chunk)
+                };
+                
+                // TODO(yuhao): Current we handle cut null columns in semi/anti join just 
+                // before returning chunks. We can furthur optimize this by cut columns earlier.
+                let output_data_chunk = data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
+                
+                print!("data_chunk after process: {:?}", output_data_chunk);
+                probe_table.reset_result_index();
 
                 self.state = HashJoinState::Probe(probe_table);
 
-                return Ok(Some(ret_data_chunk));
+                return Ok(output_data_chunk);
             } else {
                 match self.left_child.next().await? {
                     Some(data_chunk) => {
                         probe_table.set_probe_data(data_chunk)?;
                     }
                     None => {
-                        let mut ret_data_chunk = probe_table.consume_left()?;
-                        if probe_table.has_non_equi_cond() {
-                            probe_table.process_non_equi_condition(&mut ret_data_chunk)?
-                        }
+                        // Consume the rest when when probe side end.
+                        let ret_data_chunk = probe_table.consume_left()?;
+                        let data_chunk = if probe_table.has_non_equi_cond() {
+                            probe_table.process_non_equi_condition(ret_data_chunk)?
+                        } else {
+                            Some(ret_data_chunk)
+                        };
+                        
+                        let output_data_chunk = data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
+                        
+                        probe_table.reset_result_index();
 
                         if probe_table.join_type().need_join_remaining() {
                             self.state = HashJoinState::ProbeRemaining(probe_table);
                         } else {
                             self.state = HashJoinState::Done;
                         }
-                        return Ok(Some(ret_data_chunk));
+                        return Ok(output_data_chunk);
                     }
                 }
             }
@@ -265,13 +282,20 @@ impl<K: HashKey> HashJoinExecutor<K> {
         &mut self,
         mut probe_table: ProbeTable<K>,
     ) -> Result<Option<DataChunk>> {
-        if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+        let output_data_chunk = if let Some(ret_data_chunk) = probe_table.join_remaining()? {
+            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+
+            probe_table.reset_result_index();
             self.state = HashJoinState::ProbeRemaining(probe_table);
-            Ok(Some(ret_data_chunk))
+            output_data_chunk
         } else {
+            let ret_data_chunk = probe_table.consume_left()?;
+            let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
+        
             self.state = HashJoinState::Done;
-            probe_table.consume_left().map(|chunk| Some(chunk))
-        }
+            output_data_chunk
+        };
+        Ok(Some(output_data_chunk))
     }
 }
 
@@ -491,7 +515,7 @@ mod tests {
     /// insert into t2 values
     /// (8, 6.1::REAL), (2, null), (null, 8.9::REAL), (3, null), (null, 3.5::REAL),
     /// (6, null), (4, 7.5::REAL), (6, null), (null, 8::REAL), (7, null),
-    /// (null, 9.1::REAL), (9, null), (3, 5.7::REAL), (9, null), (null, 9.6::REAL),
+    /// (null, 9.1::REAL), (9, null), (3, 3.7::REAL), (9, null), (null, 9.6::REAL),
     /// (100, null), (null, 8.18::REAL), (200, null);
     /// ```
     impl TestFixture {
@@ -587,7 +611,7 @@ mod tests {
                 ));
 
                 let column2 = Column::new(Arc::new(
-                array! {F64Array, [Some(5.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
+                array! {F64Array, [Some(3.7f64), None, Some(9.6f64), None, Some(8.18f64), None]}.into(),
                 ));
 
                 let chunk =
@@ -675,7 +699,7 @@ mod tests {
                 right_key_types: vec![self.right_types[0].clone()],
                 right_col_len,
                 full_data_types,
-                batch_size: 2,
+                batch_size: 1000,
                 cond,
             };
 
@@ -728,16 +752,15 @@ mod tests {
             }
 
             while let Some(data_chunk) = join_executor.next().await.unwrap() {
+                let data_chunk = data_chunk.compact().unwrap();
                 data_chunk_merger.append(&data_chunk).unwrap();
             }
 
             let result_chunk = data_chunk_merger.finish().unwrap();
 
-            // Take t1.v2 and t2.v2
-            let (columns, vis) = result_chunk.into_parts();
-            let col_t1_v2 = columns[1].clone();
-            let col_t2_v2 = columns[3].clone();
-            let output_chunk = DataChunk::new(vec![col_t1_v2, col_t2_v2], vis);
+            // Take (t1.v2, t2.v2) in inner and left/right/full outer 
+            // or v2 decided by side of anti/semi.
+            let output_chunk = self.select_from_chunk(result_chunk);
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
@@ -760,7 +783,7 @@ mod tests {
         ));
 
         let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, Some(5.7f64), None,  Some(7.5f64), Some(5.7f64),  None]}
+            array! {F64Array, [None, Some(3.7f64), None,  Some(7.5f64), Some(3.7f64),  None]}
                 .into(),
         ));
 
@@ -785,7 +808,7 @@ mod tests {
         ));
 
         let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, None, None, Some(5.7f64), None, None, Some(7.5f64), Some(5.7f64),
+            array! {F64Array, [None, None, None, Some(3.7f64), None, None, Some(7.5f64), Some(3.7f64),
                 None, None, None, None]}.into(),
     ));
 
@@ -797,7 +820,7 @@ mod tests {
 
     /// Sql:
     /// ```sql
-    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1;
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
     /// ```
     #[tokio::test]
     async fn test_left_outer_join_with_non_equi_condition() {
@@ -805,12 +828,12 @@ mod tests {
 
         let column1 = Column::new(Arc::new(
             array! {F32Array, [Some(6.1f32), None, Some(8.4f32), Some(3.9f32), None,
-            Some(6.6f32), Some(0.7f32), None, Some(5.5f32)]}
+            Some(6.6f32), None, Some(0.7f32), None, Some(5.5f32)]}
             .into(),
         ));
 
         let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, None, None, Some(5.7f64), None, Some(7.5f64), None, None, None]}.into(),
+            array! {F64Array, [None, None, None, None, None, Some(7.5f64), None, None, None, None]}.into(),
     ));
 
         let expected_chunk =
@@ -839,7 +862,7 @@ mod tests {
 
         let column2 = Column::new(Arc::new(
             array! {F64Array, [
-            None, Some(5.7f64), None, Some(7.5f64), Some(5.7f64),
+            None, Some(3.7f64), None, Some(7.5f64), Some(3.7f64),
             None, Some(6.1f64), Some(8.9f64), Some(3.5f64), None,
             None, Some(8.0f64), None, Some(9.1f64), None,
             None, Some(9.6f64),None, Some(8.18f64), None]}
@@ -852,8 +875,37 @@ mod tests {
         test_fixture.do_test(expected_chunk, false).await;
     }
 
-    
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 left outer join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
+    /// ```
+    #[tokio::test]
+    async fn test_right_outer_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightOuter);
 
+        let column1 = Column::new(Arc::new(
+            array! {F32Array, [
+                Some(6.6), None, None, None, None, None, None,
+                None, None, None, None, None,
+                None, None, None, None, None, None
+            ]}
+            .into(),
+        ));
+
+        let column2 = Column::new(Arc::new(
+            array! {F64Array, [
+            Some(7.5f64), Some(6.1f64), None, Some(8.9f64), None, Some(3.5f64), None,
+            None, Some(8.0f64), None, Some(9.1f64), None, Some(3.7),
+            None, Some(9.6f64),None, Some(8.18f64), None]}
+            .into(),
+        ));
+
+        let expected_chunk =
+            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+    
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
     /// ```
@@ -875,8 +927,8 @@ mod tests {
 
         let column2 = Column::new(Arc::new(
             array! {F64Array, [
-                None, None, None, Some(5.7f64), None,
-                None, Some(7.5f64), Some(5.7f64), None, None,
+                None, None, None, Some(3.7f64), None,
+                None, Some(7.5f64), Some(3.7f64), None, None,
                 None, None, Some(6.1f64), Some(8.9f64), Some(3.5f64),
                 None, None, Some(8.0f64), None, Some(9.1f64),
                 None, None, Some(9.6f64), None, Some(8.18f64),
@@ -908,6 +960,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_left_anti_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftAnti);
+
+        let column1 = Column::new(Arc::new(
+            array! {F32Array, [
+                Some(6.1f32), None, Some(8.4f32), Some(3.9), None, None, Some(0.7f32), None, Some(5.5f32)
+            ]}
+            .into(),
+        ));
+
+        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
     async fn test_left_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
 
@@ -921,6 +989,21 @@ mod tests {
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
         test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    async fn test_left_semi_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
+
+        let column1 = Column::new(Arc::new(
+            array! {F32Array, [
+                Some(6.6f32)
+            ]}
+            .into(),
+        ));
+
+        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
     }
 
     #[tokio::test]
@@ -942,12 +1025,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_right_anti_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightAnti);
+
+        let column1 = Column::new(Arc::new(
+            array! {F64Array, [
+                Some(6.1f64), None, Some(8.9f64), None, Some(3.5f64), None, None,
+                Some(8.0f64), None, Some(9.1f64), None, Some(3.7f64), None,
+                Some(9.6f64), None, Some(8.18f64), None
+            ]}
+            .into(),
+        ));
+
+        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
+    }
+
+    #[tokio::test]
     async fn test_right_semi_join() {
         let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
 
         let column1 = Column::new(Arc::new(
             array! {F64Array, [
-                None, Some(5.7f64), None, Some(7.5f64)
+                None, Some(3.7f64), None, Some(7.5f64)
             ]}
             .into(),
         ));
@@ -955,5 +1056,21 @@ mod tests {
         let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
 
         test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    #[tokio::test]
+    async fn test_right_semi_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::RightSemi);
+
+        let column1 = Column::new(Arc::new(
+            array! {F64Array, [
+                Some(7.5f64)
+            ]}
+            .into(),
+        ));
+
+        let expected_chunk = DataChunk::try_from(vec![column1]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
     }
 }
