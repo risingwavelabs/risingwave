@@ -57,12 +57,12 @@ use risingwave_pb::hummock::LevelType;
 use value::*;
 
 use self::iterator::{
-    BoxedHummockIterator, ConcatIterator, DirectedUserIterator, HummockIterator, MergeIterator,
+    BoxedHummockIterator, DirectedUserIterator, HummockIterator, MergeIterator,
     ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
-use self::utils::{bloom_filter_sstables, range_overlap};
+use self::utils::range_overlap;
 use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
@@ -179,6 +179,34 @@ impl HummockStorage {
         })
     }
 
+    async fn get_from_table(
+        &self,
+        table: Arc<Sstable>,
+        internal_key: &[u8],
+        key: &[u8],
+    ) -> HummockResult<Option<Vec<u8>>> {
+        if table.surely_not_have_user_key(key) {
+            self.stats.bloom_filter_true_negative_counts.inc();
+            return Ok(None);
+        }
+        // Might have the key, take it as might positive.
+        self.stats.bloom_filter_might_positive_counts.inc();
+        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
+        iter.seek(internal_key).await?;
+        // Iterator has seeked passed the borders.
+        if !iter.is_valid() {
+            return Ok(None);
+        }
+
+        // Iterator gets us the key, we tell if it's the key we want
+        // or key next to it.
+        let value = match user_key(iter.key()) == key {
+            true => iter.value().into_put_value().map(|x| x.to_vec()),
+            false => None,
+        };
+        Ok(value)
+    }
+
     pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
         &self.hummock_meta_client
     }
@@ -218,66 +246,66 @@ impl StateStore for HummockStorage {
     /// failed due to other non-EOF errors.
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
-        let version = self.local_version_manager.get_version()?;
-        // check epoch validity
-        validate_epoch(version.safe_epoch(), epoch)?;
+            let version = self.local_version_manager.get_version()?;
+            // check epoch validity
+            validate_epoch(version.safe_epoch(), epoch)?;
 
-        // Query shared buffer. Return the value without iterating SSTs if found
-        if let Some(v) = self
-            .shared_buffer_manager
-            .get(key, (version.max_committed_epoch() + 1)..=epoch)
-        {
-            self.stats.get_shared_buffer_hit_counts.inc();
-            return Ok(v.into_put_value().map(|x| x.to_vec()));
-        }
-        let internal_key = key_with_epoch(key.to_vec(), epoch);
+            // Query shared buffer. Return the value without iterating SSTs if found
+            if let Some(v) = self
+                .shared_buffer_manager
+                .get(key, (version.max_committed_epoch() + 1)..=epoch)
+            {
+                self.stats.get_shared_buffer_hit_counts.inc();
+                return Ok(v.into_put_value().map(StorageValue::from));
+            }
+            let internal_key = key_with_epoch(key.to_vec(), epoch);
 
-        let mut table_counts = 0;
-        for level in &version.levels() {
-            let mut tables = self
-                .local_version_manager
-                .pick_few_tables(&level.table_ids)
-                .await?;
-            match level.level_type() {
-                LevelType::Overlapping => {
-                    tables.reverse();
-                    for table in tables {
-                        table_counts += 1;
-                        if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
-                            return Ok(Some(v));
+            let mut table_counts = 0;
+            for level in &version.levels() {
+                let mut tables = self
+                    .local_version_manager
+                    .pick_few_tables(&level.table_ids)
+                    .await?;
+                match level.level_type() {
+                    LevelType::Overlapping => {
+                        tables.reverse();
+                        for table in tables {
+                            table_counts += 1;
+                            if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
+                                return Ok(Some(StorageValue::from(v)));
+                            }
                         }
                     }
-                }
-                LevelType::Nonoverlapping => {
-                    let table_idx = tables
-                        .partition_point(|table| {
-                            let ord = VersionedComparator::compare_key(
-                                user_key(&table.meta.smallest_key),
-                                key,
-                            );
-                            ord == Ordering::Less || ord == Ordering::Equal
-                        })
-                        .saturating_sub(1); // considering the boundary of 0
-                    if table_idx < tables.len() {
-                        table_counts += 1;
-                        // Because we will keep multiple version of one in the same sst file, we do
-                        // not find it in the next adjacent file.
-                        if let Some(v) = self
-                            .get_from_table(tables[table_idx].clone(), &internal_key, key)
-                            .await?
-                        {
-                            return Ok(Some(v));
+                    LevelType::Nonoverlapping => {
+                        let table_idx = tables
+                            .partition_point(|table| {
+                                let ord = VersionedComparator::compare_key(
+                                    user_key(&table.meta.smallest_key),
+                                    key,
+                                );
+                                ord == Ordering::Less || ord == Ordering::Equal
+                            })
+                            .saturating_sub(1); // considering the boundary of 0
+                        if table_idx < tables.len() {
+                            table_counts += 1;
+                            // Because we will keep multiple version of one in the same sst file, we
+                            // do not find it in the next adjacent file.
+                            if let Some(v) = self
+                                .get_from_table(tables[table_idx].clone(), &internal_key, key)
+                                .await?
+                            {
+                                return Ok(Some(StorageValue::from(v)));
+                            }
                         }
                     }
                 }
             }
 
-
-        self.stats
-            .iter_merge_sstable_counts
-            .observe(table_counts as f64);
-        Ok(None)
-      }
+            self.stats
+                .iter_merge_sstable_counts
+                .observe(table_counts as f64);
+            Ok(None)
+        }
     }
 
     fn scan<R, B>(
@@ -385,35 +413,6 @@ impl StateStore for HummockStorage {
             Ok(())
         }
     }
-
-    async fn get_from_table(
-        &self,
-        table: Arc<Sstable>,
-        internal_key: &[u8],
-        key: &[u8],
-    ) -> HummockResult<Option<Vec<u8>>> {
-        if table.surely_not_have_user_key(key) {
-            self.stats.bloom_filter_true_negative_counts.inc();
-            return Ok(None);
-        }
-        // Might have the key, take it as might positive.
-        self.stats.bloom_filter_might_positive_counts.inc();
-        let mut iter = SSTableIterator::new(table, self.sstable_store.clone());
-        iter.seek(internal_key).await?;
-        // Iterator has seeked passed the borders.
-        if !iter.is_valid() {
-            return Ok(None);
-        }
-
-        // Iterator gets us the key, we tell if it's the key we want
-        // or key next to it.
-        let value = match user_key(iter.key()) == key {
-            true => iter.value().into_put_value().map(|x| x.to_vec()),
-            false => None,
-        };
-        Ok(value)
-    }
-
 
     /// Returns an iterator that scan from the begin key to the end key
     /// The result is based on a snapshot corresponding to the given `epoch`.

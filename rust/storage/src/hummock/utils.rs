@@ -19,29 +19,6 @@ use std::sync::Arc;
 use super::{HummockError, HummockResult, Sstable};
 use crate::monitor::StateStoreMetrics;
 
-pub fn bloom_filter_sstables(
-    tables: Vec<Arc<Sstable>>,
-    key: &[u8],
-    stats: Arc<StateStoreMetrics>,
-) -> HummockResult<Vec<Arc<Sstable>>> {
-    let bf_tables = tables
-        .into_iter()
-        .filter(|table| match table.surely_not_have_user_key(key) {
-            true => {
-                stats.bloom_filter_true_negative_counts.inc();
-                false
-            }
-            false => {
-                // Might have the key, take it as might positive.
-                stats.bloom_filter_might_positive_counts.inc();
-                true
-            }
-        })
-        .collect::<Vec<_>>();
-
-    Ok(bf_tables)
-}
-
 pub fn range_overlap<R, B>(
     search_key_range: &R,
     inclusive_start_key: &[u8],
