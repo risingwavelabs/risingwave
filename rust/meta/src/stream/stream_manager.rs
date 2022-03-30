@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::{info, debug};
+use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
