@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use tokio::sync::oneshot;
-use tokio::sync::oneshot::error::TryRecvError;
 use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
@@ -61,9 +60,9 @@ impl Actor {
         // Drive the streaming task with an infinite loop
         loop {
             // We also continue if the sender is dropped, which only appear in tests.
-            if let Ok(_) = self.stop_rx.try_recv() {
+            if self.stop_rx.try_recv().is_ok() {
                 break;
-            } 
+            }
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {
