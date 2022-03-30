@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use risingwave_common::types::DataType;
 
 use super::Expr;
@@ -55,6 +57,14 @@ impl PartialEq for Subquery {
         unreachable!("Subquery {:?} has not been unnested", self)
     }
 }
+
+impl Hash for Subquery {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        unreachable!("Subquery {:?} has not been hashed", self)
+    }
+}
+
+impl Eq for Subquery {}
 
 impl Expr for Subquery {
     fn return_type(&self) -> DataType {
