@@ -56,6 +56,7 @@ impl Distribution {
             },
         }
     }
+
     pub fn enforce_if_not_satisfies(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         if !plan.distribution().satisfies(self) {
             self.enforce(plan, required_order)
@@ -63,6 +64,7 @@ impl Distribution {
             plan
         }
     }
+
     fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
         match plan.convention() {
             Convention::Batch => {
@@ -112,6 +114,7 @@ impl Distribution {
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
     }
+
     /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
     /// valid.
     pub fn dist_column_indices(&self) -> &[usize] {
