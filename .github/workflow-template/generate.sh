@@ -16,17 +16,48 @@ HEADER="""
 # ========================================================================
 """
 
+sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-dev.gen.yml
+sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-release.gen.yml
+sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g' jobs/compute-node-build.yml > jobs/compute-node-build-dev.gen.yml
+sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g' jobs/compute-node-build.yml > jobs/compute-node-build-release.gen.yml
+
 # Generate workflow for main branch
+
+jobs_main=(
+   "jobs/frontend-check.yml"
+   "jobs/e2e-risedev-dev.gen.yml"
+   "jobs/e2e-risedev-release.gen.yml"
+   "jobs/e2e-source.yml"
+   "jobs/compute-node-build-dev.gen.yml"
+   "jobs/compute-node-build-release.gen.yml"
+   "jobs/compute-node-test.yml"
+   "jobs/misc-check.yml"
+)
+
 echo "$HEADER" > ../workflows/main.yml
 # shellcheck disable=SC2016
-yq ea '. as $item ireduce ({}; . * $item )' template.yml main-override.yml | yq eval '... comments=""' - >> ../workflows/main.yml
+yq ea '. as $item ireduce ({}; . * $item )' template.yml main-override.yml "${jobs_main[@]}" | yq eval '... comments=""' - >> ../workflows/main.yml
 echo "$HEADER" >> ../workflows/main.yml
 
 # Generate workflow for pull requests
+
+jobs_pr=(
+   "jobs/frontend-check.yml"
+   "jobs/e2e-risedev-dev.gen.yml"
+   "jobs/e2e-risedev-release.gen.yml"
+   "jobs/e2e-source.yml"
+   "jobs/compute-node-build-dev.gen.yml"
+   "jobs/compute-node-build-release.gen.yml"
+   "jobs/compute-node-test.yml"
+   "jobs/misc-check.yml"
+)
+
 echo "$HEADER" > ../workflows/pull-request.yml
 # shellcheck disable=SC2016
-yq ea '. as $item ireduce ({}; . * $item )' template.yml pr-override.yml | yq eval '... comments=""' - >> ../workflows/pull-request.yml
+yq ea '. as $item ireduce ({}; . * $item )' template.yml pr-override.yml "${jobs_pr[@]}" | yq eval '... comments=""' - >> ../workflows/pull-request.yml
 echo "$HEADER" >> ../workflows/pull-request.yml
+
+rm jobs/*.gen.yml
 
 if [ "$1" == "--check" ] ; then
  if ! git diff --exit-code; then
