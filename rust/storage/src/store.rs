@@ -170,20 +170,3 @@ pub trait StateStoreIter: Send {
 
     fn next(&mut self) -> Self::NextFuture<'_>;
 }
-
-pub async fn collect_from_iter<'a, I>(mut iter: I, limit: Option<usize>) -> Result<Vec<I::Item>>
-where
-    I: 'a + StateStoreIter,
-    I::Item: Send,
-{
-    let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-    for _ in 0..limit.unwrap_or(usize::MAX) {
-        match iter.next().await? {
-            Some(kv) => kvs.push(kv),
-            None => break,
-        }
-    }
-
-    Ok(kvs)
-}
