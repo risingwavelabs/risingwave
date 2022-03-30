@@ -235,9 +235,7 @@ where
     type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>> where Self: 'a;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
-            let timer = self.stats.iter_next_latency.start_timer();
             let pair = self.inner.next().await?;
-            timer.observe_duration();
 
             if let Some((key, value)) = pair.as_ref() {
                 self.stats
