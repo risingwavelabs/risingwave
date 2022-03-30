@@ -144,8 +144,25 @@ impl Binder {
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
             TableFactor::Table {
-                name, alias: None, ..
-            } => Ok(Relation::BaseTable(Box::new(self.bind_table(name)?))),
+                name,
+                alias: None,
+                args,
+            } => {
+                if args.is_empty() {
+                    Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
+                } else {
+                    let kind =
+                        WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
+                            ErrorCode::NotImplementedError(format!(
+                                "unknown window function kind: {}",
+                                name.0[0].value
+                            ))
+                        })?;
+                    Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(kind, args)?,
+                    )))
+                }
+            }
             TableFactor::Derived {
                 lateral,
                 subquery,

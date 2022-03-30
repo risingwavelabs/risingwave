@@ -68,7 +68,11 @@ impl Planner {
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
         match (args.next(), args.next(), args.next()) {
-            (Some(time_col_ref @ ExprImpl::InputRef(_)), Some(window_size @ ExprImpl::Literal(_)), None) => {
+            (
+                Some(time_col_ref @ ExprImpl::InputRef(_)),
+                Some(window_size @ ExprImpl::Literal(_)),
+                None,
+            ) => {
                 let cols = &input.table_desc.columns;
                 let mut exprs = Vec::with_capacity(cols.len() + 2);
                 let mut expr_aliases = Vec::with_capacity(cols.len() + 2);
@@ -103,7 +107,10 @@ impl Planner {
                 let project = LogicalProject::create(base, exprs, expr_aliases);
                 Ok(project)
             }
-            _ => Err(ErrorCode::BindError("Invalid arguments for TUMBLE window function".to_string()).into()),
+            _ => Err(ErrorCode::BindError(
+                "Invalid arguments for TUMBLE window function".to_string(),
+            )
+            .into()),
         }
     }
 }
