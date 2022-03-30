@@ -23,11 +23,11 @@ In root directory, simply run:
 ./risedev k # Kill cluster
 ```
 
-The default scene contains a MinIO, prometheus, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
+The default scene contains a MinIO, compute-node, meta-node and a frontend. RiseDev will automatically download and configure those services for you.
 
 RiseDev also provides several other modes:
-- ci-3node: 3 compute node + meta node + frontend (no MinIO)
-- ci-1node: 1 compute node + meta node + frontend (no MinIO)
+- ci-3node: 3 compute node + meta node + frontend + MinIO
+- ci-1node: 1 compute node + meta node + frontend + MinIO
 - dev-compute-node: 1 compute-node (user managed) + MinIO + prometheus + meta + frontend
 
 #### Debug compute node

@@ -19,14 +19,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
-    ToStream,
+    BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::expr::{
     as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.

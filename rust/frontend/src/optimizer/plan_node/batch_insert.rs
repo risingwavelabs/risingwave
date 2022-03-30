@@ -14,13 +14,12 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{InsertNode, TableRefId};
 
 use super::{LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchInsert` implements [`LogicalInsert`]
 #[derive(Debug, Clone)]
@@ -60,12 +59,6 @@ impl PlanTreeNodeUnary for BatchInsert {
 }
 
 impl_plan_tree_node_for_unary! { BatchInsert }
-
-impl WithSchema for BatchInsert {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> PlanRef {

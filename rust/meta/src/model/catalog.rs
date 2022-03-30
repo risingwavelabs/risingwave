@@ -122,15 +122,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_database() -> Result<()> {
-        let store = &MetaSrvEnv::for_test().await.meta_store_ref();
-        let databases = Database::list(&**store).await?;
+        let env = MetaSrvEnv::for_test().await;
+        let store = env.meta_store();
+        let databases = Database::list(store).await?;
         assert!(databases.is_empty());
-        assert!(
-            Database::select(&**store, &DatabaseRefId { database_id: 0 })
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(Database::select(store, &DatabaseRefId { database_id: 0 })
+            .await
+            .unwrap()
+            .is_none());
 
         future::join_all((0..100).map(|i| async move {
             Database {
@@ -138,7 +137,7 @@ mod tests {
                 database_name: format!("database_{}", i),
                 version: i as u64,
             }
-            .insert(&**store)
+            .insert(store)
             .await
         }))
         .await
@@ -146,7 +145,7 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         for i in 0..100 {
             let database = Database::select(
-                &**store,
+                store,
                 &DatabaseRefId {
                     database_id: i as i32,
                 },
@@ -168,20 +167,18 @@ mod tests {
             database_name: "database_0".to_string(),
             version: 101,
         }
-        .insert(&**store)
+        .insert(store)
         .await?;
 
-        let databases = Database::list(&**store).await?;
+        let databases = Database::list(store).await?;
         assert_eq!(databases.len(), 100);
 
         for i in 0..100 {
-            assert!(
-                Database::delete(&**store, &DatabaseRefId { database_id: i })
-                    .await
-                    .is_ok()
-            );
+            assert!(Database::delete(store, &DatabaseRefId { database_id: i })
+                .await
+                .is_ok());
         }
-        let databases = Database::list(&**store).await?;
+        let databases = Database::list(store).await?;
         assert!(databases.is_empty());
 
         Ok(())
@@ -189,15 +186,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_catalog_version_generator() -> Result<()> {
-        let store = &MetaSrvEnv::for_test().await.meta_store_ref();
-        let mut version = CatalogVersionGenerator::new(&**store).await.unwrap();
+        let env = MetaSrvEnv::for_test().await;
+        let store = env.meta_store();
+        let mut version = CatalogVersionGenerator::new(store).await.unwrap();
         assert_eq!(FIRST_VERSION_ID, version.version());
 
         assert_eq!(FIRST_VERSION_ID + 1, version.next());
         assert_eq!(FIRST_VERSION_ID + 1, version.version());
-        version.insert(&**store).await?;
+        version.insert(store).await?;
 
-        let version = CatalogVersionGenerator::new(&**store).await.unwrap();
+        let version = CatalogVersionGenerator::new(store).await.unwrap();
         assert_eq!(FIRST_VERSION_ID + 1, version.version());
 
         Ok(())

@@ -130,7 +130,7 @@ jobs:
       - name: e2e test rust frontend
         timeout-minutes: 1
         run: |
-          ~/cargo-make/makers ci-start ci-v2
+          ~/cargo-make/makers ci-start ci-default
           sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

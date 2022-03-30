@@ -14,13 +14,12 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchSimpleAgg {
@@ -64,12 +63,6 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
     }
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
-
-impl WithSchema for BatchSimpleAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> PlanRef {

@@ -24,7 +24,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
-use risingwave_pb::stream_service::InjectBarrierRequest;
+use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
 use tokio::sync::{oneshot, watch, RwLock};
 use uuid::Uuid;
@@ -32,11 +32,9 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::StoredClusterManagerRef;
-use crate::hummock::HummockManager;
-use crate::manager::{
-    CatalogManagerRef, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
-};
+use crate::cluster::ClusterManagerRef;
+use crate::hummock::HummockManagerRef;
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -158,53 +156,50 @@ impl ScheduledBarriers {
     }
 }
 
-/// [`BarrierManager`] sends barriers to all registered compute nodes and collect them, with
+/// [`GlobalBarrierManager`] sends barriers to all registered compute nodes and collect them, with
 /// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
 /// requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`BarrierManager`] provides a set of interfaces like a state machine, accepting [`Command`] that
-/// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
-/// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
-/// manager transactional using [`Command`].
-pub struct BarrierManager<S> {
+/// [`GlobalBarrierManager`] provides a set of interfaces like a state machine, accepting
+/// [`Command`] that carries info to build [`Mutation`]. To keep the consistency between barrier
+/// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
+/// done in barrier manager transactional using [`Command`].
+pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
 
     /// The queue of scheduled barriers.
     scheduled_barriers: ScheduledBarriers,
 
-    cluster_manager: StoredClusterManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
 
     catalog_manager: CatalogManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
-    epoch_generator: EpochGeneratorRef,
-
-    hummock_manager: Arc<HummockManager<S>>,
-
-    clients: StreamClientsRef,
+    hummock_manager: HummockManagerRef<S>,
 
     metrics: Arc<MetaMetrics>,
+
+    env: MetaSrvEnv<S>,
 }
 
 // TODO: Persist barrier manager states in meta store including previous epoch number, current epoch
 // number and barrier collection progress
-impl<S> BarrierManager<S>
+impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-    /// Create a new [`BarrierManager`].
+    /// Create a new [`GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: StoredClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        epoch_generator: EpochGeneratorRef,
-        hummock_manager: Arc<HummockManager<S>>,
+        hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let interval = Duration::from_millis(if std::env::var_os("CI").is_some() {
@@ -222,11 +217,10 @@ where
             cluster_manager,
             catalog_manager,
             fragment_manager,
-            epoch_generator,
-            clients: env.stream_clients_ref(),
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,
             metrics,
+            env,
         }
     }
 
@@ -246,10 +240,10 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
-            let new_epoch = self.epoch_generator.generate().into_inner();
+            let new_epoch = self.env.epoch_generator().generate().into_inner();
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.clients.clone(),
+                self.env.stream_clients_ref(),
                 &info,
                 prev_epoch,
                 new_epoch,
@@ -259,7 +253,8 @@ where
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             match self.run_inner(&command_ctx).await {
-                Ok(_) => {
+                Ok(_responses) => {
+                    // TODO: process the finished DDLs
                     prev_epoch = new_epoch;
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
                 }
@@ -275,14 +270,17 @@ where
     }
 
     /// Running a scheduled command.
-    async fn run_inner<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
+    async fn run_inner<'a>(
+        &self,
+        command_context: &CommandContext<'a, S>,
+    ) -> Result<Vec<InjectBarrierResponse>> {
         let timer = self.metrics.barrier_latency.start_timer();
 
         // Wait for all barriers collected
-        let collect_result = self.inject_barrier(command_context).await;
+        let result = self.inject_barrier(command_context).await;
         // Commit this epoch to Hummock
         if command_context.prev_epoch != INVALID_EPOCH {
-            match collect_result {
+            match result {
                 Ok(_) => {
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch)
@@ -295,14 +293,19 @@ where
                 }
             };
         }
-        collect_result?;
+        let responses = result?;
 
         timer.observe_duration();
-        command_context.post_collect().await // do some post stuffs
+        command_context.post_collect().await?; // do some post stuffs
+
+        Ok(responses)
     }
 
     /// Inject barrier to all computer nodes.
-    async fn inject_barrier<'a>(&self, command_context: &CommandContext<'a, S>) -> Result<()> {
+    async fn inject_barrier<'a>(
+        &self,
+        command_context: &CommandContext<'a, S>,
+    ) -> Result<Vec<InjectBarrierResponse>> {
         let mutation = command_context.to_mutation().await?;
         let info = command_context.info;
 
@@ -328,7 +331,7 @@ where
                 };
 
                 async move {
-                    let mut client = self.clients.get(node).await?;
+                    let mut client = self.env.stream_clients().get(node).await?;
 
                     let request = InjectBarrierRequest {
                         request_id,
@@ -342,16 +345,17 @@ where
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.
-                    client.inject_barrier(request).await.to_rw_result()?;
-
-                    Ok::<_, RwError>(())
+                    client
+                        .inject_barrier(request)
+                        .await
+                        .map(tonic::Response::<_>::into_inner)
+                        .to_rw_result()
                 }
                 .into()
             }
         });
 
-        try_join_all(collect_futures).await?;
-        Ok(())
+        try_join_all(collect_futures).await
     }
 
     /// Resolve actor information from cluster and fragment manager.
@@ -368,7 +372,7 @@ where
     }
 }
 
-impl<S> BarrierManager<S>
+impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
@@ -429,4 +433,4 @@ where
     }
 }
 
-pub type BarrierManagerRef<S> = Arc<BarrierManager<S>>;
+pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;
