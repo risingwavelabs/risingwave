@@ -2,11 +2,7 @@
 
 # Usage Example
 
-Before starting ss-bench, the meta service needs to be initialized. A simple way is using Risedev:
-
-```shell
-~/code/risingwave: ./risedev d
-```
+We use a mock meta-service for ss_becnh, and it may not be fully functional.
 
 ```shell
 ~/code/risingwave/rust: cargo run --bin ss-bench -- \

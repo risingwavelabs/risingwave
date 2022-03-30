@@ -125,6 +125,7 @@ async fn create_arrangement(
         column_ids,
         1,
         "ArrangeExecutor".to_string(),
+        vec![],
     ))
 }
 

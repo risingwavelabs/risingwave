@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -31,13 +31,13 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{NodeId, StoredClusterManagerRef};
+use crate::cluster::{ClusterManagerRef, NodeId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler};
 
-pub type StreamManagerRef<S> = Arc<StreamManager<S>>;
+pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
 /// [`Context`] carries one-time infos.
 #[derive(Default)]
@@ -50,17 +50,16 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
 
-/// Stream Manager
-
-pub struct StreamManager<S> {
+/// `GlobalStreamManager` manages all the streams in the system.
+pub struct GlobalStreamManager<S: MetaStore> {
     /// Manages definition and status of fragments and actors
-    fragment_manager_ref: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 
     /// Broadcasts and collect barriers
-    barrier_manager_ref: BarrierManagerRef<S>,
+    barrier_manager: BarrierManagerRef<S>,
 
     /// Maintains information of the cluster
-    cluster_manager_ref: StoredClusterManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
 
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
@@ -69,21 +68,21 @@ pub struct StreamManager<S> {
     clients: StreamClientsRef,
 }
 
-impl<S> StreamManager<S>
+impl<S> GlobalStreamManager<S>
 where
     S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
-        fragment_manager_ref: FragmentManagerRef<S>,
-        barrier_manager_ref: BarrierManagerRef<S>,
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        barrier_manager: BarrierManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
-            fragment_manager_ref,
-            barrier_manager_ref,
-            cluster_manager_ref: cluster_manager_ref.clone(),
-            scheduler: Scheduler::new(cluster_manager_ref),
+            fragment_manager,
+            barrier_manager,
+            scheduler: Scheduler::new(cluster_manager.clone()),
+            cluster_manager,
             clients: env.stream_clients_ref(),
         })
     }
@@ -99,7 +98,7 @@ where
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
         let nodes = self
-            .cluster_manager_ref
+            .cluster_manager
             .list_worker_node(
                 WorkerType::ComputeNode,
                 Some(risingwave_pb::common::worker_node::State::Running),
@@ -256,10 +255,10 @@ where
         }
 
         // Add table fragments to meta store with state: `State::Creating`.
-        self.fragment_manager_ref
+        self.fragment_manager
             .add_table_fragments(table_fragments.clone())
             .await?;
-        self.barrier_manager_ref
+        self.barrier_manager
             .run_command(Command::CreateMaterializedView {
                 table_fragments,
                 table_sink_map: ctx.table_sink_map,
@@ -273,19 +272,21 @@ where
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
     pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
-        self.barrier_manager_ref
+        self.barrier_manager
             .run_command(Command::DropMaterializedView(table_id.clone()))
             .await?;
 
         Ok(())
     }
 
-    /// Flush means waiting for the next barrier to finish.
+    /// Flush means waiting for the next barrier to collect.
     pub async fn flush(&self) -> Result<()> {
         let start = Instant::now();
 
-        info!("start barrier flush");
-        self.barrier_manager_ref.wait_for_next_barrier().await?;
+        debug!("start barrier flush");
+        self.barrier_manager
+            .wait_for_next_barrier_to_collect()
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         info!("barrier flushed in {:?}", elapsed);
@@ -320,10 +321,10 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::barrier::BarrierManager;
-    use crate::cluster::StoredClusterManager;
+    use crate::barrier::GlobalBarrierManager;
+    use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{CatalogManager, MetaSrvEnv, NotificationManager};
+    use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -399,10 +400,7 @@ mod tests {
             &self,
             _request: Request<InjectBarrierRequest>,
         ) -> std::result::Result<Response<InjectBarrierResponse>, Status> {
-            Ok(Response::new(InjectBarrierResponse {
-                request_id: "".to_string(),
-                status: None,
-            }))
+            Ok(Response::new(InjectBarrierResponse::default()))
         }
 
         async fn create_source(
@@ -428,7 +426,7 @@ mod tests {
     }
 
     struct MockServices {
-        stream_manager: StreamManager<MemStore>,
+        global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
         join_handle: JoinHandle<()>,
@@ -461,16 +459,8 @@ mod tests {
             sleep(Duration::from_secs(1));
 
             let env = MetaSrvEnv::for_test().await;
-            let notification_manager =
-                Arc::new(NotificationManager::new(env.epoch_generator_ref()));
-            let cluster_manager = Arc::new(
-                StoredClusterManager::new(
-                    env.clone(),
-                    notification_manager.clone(),
-                    Duration::from_secs(3600),
-                )
-                .await?,
-            );
+            let cluster_manager =
+                Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
             let host = HostAddress {
                 host: host.to_string(),
                 port: port as i32,
@@ -481,42 +471,34 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let catalog_manager = Arc::new(
-                CatalogManager::new(
-                    env.meta_store_ref(),
-                    env.id_gen_manager_ref(),
-                    notification_manager,
-                )
-                .await?,
-            );
+            let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let hummock_manager = Arc::new(
                 HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
                     .await?,
             );
-            let barrier_manager_ref = Arc::new(BarrierManager::new(
+            let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
                 catalog_manager,
                 fragment_manager.clone(),
-                env.epoch_generator_ref(),
                 hummock_manager,
                 meta_metrics.clone(),
             ));
 
-            let stream_manager = StreamManager::new(
+            let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
-                barrier_manager_ref.clone(),
+                barrier_manager.clone(),
                 cluster_manager.clone(),
             )
             .await?;
 
             // TODO: join barrier service back to local thread
-            tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
+            tokio::spawn(async move { barrier_manager.run().await.unwrap() });
 
             Ok(Self {
-                stream_manager,
+                global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
                 join_handle,
@@ -575,7 +557,7 @@ mod tests {
         let ctx = CreateMaterializedViewContext::default();
 
         services
-            .stream_manager
+            .global_stream_manager
             .create_materialized_view(table_fragments, ctx)
             .await?;
 

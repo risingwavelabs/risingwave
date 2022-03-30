@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
 use super::bind_context::{Clause, ColumnBinding};
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
+use crate::catalog::{is_row_id_column_name, ROWID_PREFIX};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
 #[derive(Debug)]
@@ -118,6 +119,14 @@ impl Binder {
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
+                    if is_row_id_column_name(&alias.value) {
+                        return Err(ErrorCode::InternalError(format!(
+                            "column name prefixed with {:?} are reserved word.",
+                            ROWID_PREFIX
+                        ))
+                        .into());
+                    }
+
                     let expr = self.bind_expr(expr)?;
                     select_list.push(expr);
                     aliases.push(Some(alias.value));
@@ -131,8 +140,9 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
+                SelectItem::ExprQualifiedWildcard(_, _) => todo!(),
                 SelectItem::Wildcard => {
-                    let (exprs, names) = Self::bind_columns(&self.context.columns[..])?;
+                    let (exprs, names) = Self::bind_visible_columns(&self.context.columns[..])?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -149,6 +159,25 @@ impl Binder {
                     InputRef::new(column.index, column.data_type.clone()).into(),
                     Some(column.column_name.clone()),
                 )
+            })
+            .unzip();
+        Ok(bound_columns)
+    }
+
+    pub fn bind_visible_columns(
+        columns: &[ColumnBinding],
+    ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
+        let bound_columns = columns
+            .iter()
+            .filter_map(|column| {
+                if !column.is_hidden {
+                    Some((
+                        InputRef::new(column.index, column.data_type.clone()).into(),
+                        Some(column.column_name.clone()),
+                    ))
+                } else {
+                    None
+                }
             })
             .unzip();
         Ok(bound_columns)

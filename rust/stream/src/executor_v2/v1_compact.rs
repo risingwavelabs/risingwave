@@ -21,6 +21,7 @@ pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::expr::BoxedExpression;
 
+use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use super::{Executor, ExecutorInfo, FilterExecutor};
@@ -46,7 +47,7 @@ impl fmt::Debug for StreamExecutorV1 {
 #[async_trait]
 impl ExecutorV1 for StreamExecutorV1 {
     async fn next(&mut self) -> Result<Message> {
-        self.stream.next().await.unwrap()
+        self.stream.next().await.unwrap().map_err(RwError::from)
     }
 
     fn schema(&self) -> &Schema {
@@ -88,10 +89,14 @@ impl Executor for ExecutorV1AsV2 {
 }
 
 impl ExecutorV1AsV2 {
-    #[try_stream(ok = Message, error = RwError)]
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         loop {
-            yield self.0.next().await?
+            yield self
+                .0
+                .next()
+                .await
+                .map_err(StreamExecutorError::executor_v1)?;
         }
     }
 }

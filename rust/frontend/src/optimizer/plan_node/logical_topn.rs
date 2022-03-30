@@ -16,9 +16,9 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
 use crate::optimizer::plan_node::LogicalProject;
-use crate::optimizer::property::{FieldOrder, Order, WithSchema};
+use crate::optimizer::property::{FieldOrder, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalTopN` sorts the input data and fetches up to `limit` rows from `offset`
@@ -70,7 +70,9 @@ impl PlanTreeNodeUnary for LogicalTopN {
                 input,
                 self.limit,
                 self.offset,
-                input_col_change.rewrite_order(self.order.clone()),
+                input_col_change
+                    .rewrite_required_order(&self.order)
+                    .unwrap(),
             ),
             input_col_change,
         )
@@ -101,7 +103,7 @@ impl ColPrunable for LogicalTopN {
                 .iter()
                 .map(|fo| FieldOrder {
                     index: mapping.map(fo.index),
-                    direct: fo.direct.clone(),
+                    direct: fo.direct,
                 })
                 .collect(),
         };

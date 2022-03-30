@@ -35,6 +35,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn key(&self) -> &[u8] {
         match self {
             Self::Forward(iter) => iter.key(),
@@ -42,6 +43,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn value(&self) -> &[u8] {
         match self {
             Self::Forward(iter) => iter.value(),
@@ -64,6 +66,7 @@ impl DirectedUserIterator<'_> {
         }
     }
 
+    #[inline(always)]
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Forward(iter) => iter.is_valid(),
@@ -89,7 +92,7 @@ pub struct UserIterator<'a> {
     /// Start and end bounds of user key.
     key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
 
-    /// Only read values if `ts <= self.read_epoch`.
+    /// Only reads values if `ts <= self.read_epoch`.
     read_epoch: Epoch,
 
     /// Ensures the SSTs needed by `iterator` won't be vacuumed.
@@ -125,7 +128,7 @@ impl<'a> UserIterator<'a> {
         }
     }
 
-    /// Get the iterator move to the next step.
+    /// Gets the iterator move to the next step.
     ///
     /// Returned result:
     /// - if `Ok(())` is returned, it means that the iterator successfully move to the next position
@@ -169,7 +172,7 @@ impl<'a> UserIterator<'a> {
         Ok(()) // not valid, EOF
     }
 
-    /// Return the key with the newest version. Thus no version in it, and only the `user_key` will
+    /// Returns the key with the newest version. Thus no version in it, and only the `user_key` will
     /// be returned.
     ///
     /// The returned key is de-duplicated and thus it will not output the same key, unless the
@@ -189,9 +192,9 @@ impl<'a> UserIterator<'a> {
         self.last_val.as_slice()
     }
 
-    /// Reset the iterating position to the beginning.
+    /// Resets the iterating position to the beginning.
     pub async fn rewind(&mut self) -> HummockResult<()> {
-        // handle range scan
+        // Handle range scan
         match &self.key_range.0 {
             Included(begin_key) => {
                 let full_key = &key_with_epoch(begin_key.clone(), self.read_epoch);
@@ -201,15 +204,15 @@ impl<'a> UserIterator<'a> {
             Unbounded => self.iterator.rewind().await?,
         };
 
-        // handle multi-version
+        // Handle multi-version
         self.last_key.clear();
-        // handle range scan when key > end_key
+        // Handles range scan when key > end_key
         self.next().await
     }
 
-    /// Reset the iterating position to the first position where the key >= provided key.
+    /// Resets the iterating position to the first position where the key >= provided key.
     pub async fn seek(&mut self, user_key: &[u8]) -> HummockResult<()> {
-        // handle range scan when key < begin_key
+        // Handle range scan when key < begin_key
         let user_key = match &self.key_range.0 {
             Included(begin_key) => {
                 if begin_key.as_slice() > user_key {
@@ -225,16 +228,16 @@ impl<'a> UserIterator<'a> {
         let full_key = &key_with_epoch(user_key, self.read_epoch);
         self.iterator.seek(full_key).await?;
 
-        // handle multi-version
+        // Handle multi-version
         self.last_key.clear();
-        // handle range scan when key > end_key
+        // Handle range scan when key > end_key
         let res = self.next().await;
         res
     }
 
-    /// Indicate whether the iterator can be used.
+    /// Indicates whether the iterator can be used.
     pub fn is_valid(&self) -> bool {
-        // handle range scan
+        // Handle range scan
         // key >= begin_key is guaranteed by seek/rewind function
         (!self.out_of_range) && self.iterator.is_valid()
     }

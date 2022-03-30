@@ -4,115 +4,69 @@
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave)
 
-## Download
-Run:
+## Quick Start
+
+### Installation
+
+You may start RisingWave with our pre-built binary, or build from source.
+
+**Use Pre-built Binary**
+
+```shell
+wget <future risingwave binary URL>
+./risingwave playground
+```
+
+**Build from Source**
+
 ```shell
 git clone https://github.com/singularity-data/risingwave.git
+./risedev dev  # start the cluster
+./risedev kill # stop the cluster
 ```
 
-## Environment
+Build from source requires several tools to be installed in the system. Refer to `CONTRIBUTING.md` for more information.
 
-* OS: macOS, Linux
-* Java 11
-* Rust
-* CMake
-* Protocol Buffers
-* OpenSSL
-* PostgreSQL (psql) (>= 14.1)
+### The First Query
 
-To install components in macOS, run:
+To connect to the RisingWave server, you will need to install Postgres client in advance.
 
 ```shell
-brew install java11
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install cmake
-brew install protobuf
-brew install openssl
+psql -h localhost -p 4566 -d dev
 ```
 
-Note that we only tested our code against Java 11. So please use the specific version!
+```sql
+/* create a table */
+create table t1(v1 int not null);
 
-## Development
+/* create a materialized view based on the previous table */
+create materialized view mv1 as select sum(v1) as sum_v1 from t1;
 
-You should have already seen multiple folders in our repo:
-- The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
-optimizer, and other components. We use Calcite to serve as our query optimizer.
-- The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
-engine, storage engine and meta service.
-- The `e2e_test` folder contains the latest end-to-end test cases.
+/* insert some data into the source table */
+insert into t1 values (1), (2), (3);
 
-### RiseDev
+/* ensure materialized view has been updated */
+flush;
 
-RiseDev is the tool for developing RisingWave. Using RiseDev requires tmux.
-
-```shell
-brew install tmux
+/* the materialized view should reflect the changes in source table */
+select * from mv1;
 ```
 
-Then, in the root directory, simply run:
+If everything works, you will see
 
-```shell
-./risedev d # shortcut for ./risedev dev
-psql -h localhost -p 4567 -d dev
+```
+ sum_v1
+--------
+      6
+(1 row)
 ```
 
-Everything will be set for you.
+in the Postgres shell.
 
-There are a lot of other running configurations, like `ci-1node`, `ci-3node`, `dev-compute-node`. You may find more in `./risedev --help`.
+## License
 
-To stop the playground,
-
-```shell
-./risedev k # shortcut for ./risedev kill
-```
-
-To view the logs,
-
-```shell
-./risedev l # shortcut for ./risedev logs
-```
-
-And you can configure components for RiseDev.
-
-```shell
-./risedev configure
-```
-
-For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
-
-```shell
-./risedev p
-```
-
-For more information, refer to `README.md` under `rust/risedevtool`.
-
-### Dashboard
-
-To preview the web page, install Node.js, and
-
-```shell
-cd rust/meta/src/dashboard && npx reload -b
-```
-
-### Dashboard v2
-
-The developement instructions for dashboard v2 is in [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+RisingWave is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
-
-## Toolchain
-
-Currently, we are using nightly toolchain `nightly-2022-03-09`. If anyone needs to upgrade
-the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
-
-## Documentation
-
-The Rust codebase is documented with docstring, and you could view the documentation by:
-
-```shell
-make rust_doc
-cd rust/target/doc
-open risingwave/index.html
-```
+Thanks for your interest in contributing to the project, please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.

@@ -32,8 +32,7 @@ use tokio::sync::{RwLock, RwLockReadGuard};
 use tokio::task::JoinHandle;
 
 use crate::manager::{
-    HashDispatchManager, HashDispatchManagerRef, IdCategory, IdGeneratorManagerRef, MetaSrvEnv,
-    NotificationManagerRef,
+    HashDispatchManager, HashDispatchManagerRef, IdCategory, LocalNotification, MetaSrvEnv,
 };
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
 use crate::storage::MetaStore;
@@ -41,11 +40,9 @@ use crate::storage::MetaStore;
 pub type NodeId = u32;
 pub type ParallelUnitId = u32;
 pub type NodeLocations = HashMap<NodeId, WorkerNode>;
-pub type StoredClusterManagerRef<S> = Arc<StoredClusterManager<S>>;
+pub type ClusterManagerRef<S> = Arc<ClusterManager<S>>;
 
 const DEFAULT_WORK_NODE_PARALLEL_DEGREE: usize = 4;
-
-/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 
 // TODO: substitute with `HostAddr`
 #[derive(Debug)]
@@ -65,36 +62,30 @@ impl Hash for WorkerKey {
     }
 }
 
-/// [`StoredClusterManager`] manager cluster/worker meta data in [`MetaStore`].
-pub struct StoredClusterManager<S> {
-    meta_store_ref: Arc<S>,
-    id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    dispatch_manager_ref: HashDispatchManagerRef<S>,
+/// [`ClusterManager`] manager cluster/worker meta data in [`MetaStore`].
+pub struct ClusterManager<S: MetaStore> {
+    env: MetaSrvEnv<S>,
+
     max_heartbeat_interval: Duration,
-    notification_manager_ref: NotificationManagerRef,
-    core: RwLock<StoredClusterManagerCore>,
+    dispatch_manager: HashDispatchManagerRef<S>,
+
+    core: RwLock<ClusterManagerCore>,
 }
 
-impl<S> StoredClusterManager<S>
+impl<S> ClusterManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        env: MetaSrvEnv<S>,
-        notification_manager_ref: NotificationManagerRef,
-        max_heartbeat_interval: Duration,
-    ) -> Result<Self> {
-        let meta_store_ref = env.meta_store_ref();
-        let core = StoredClusterManagerCore::new(meta_store_ref.clone()).await?;
+    pub async fn new(env: MetaSrvEnv<S>, max_heartbeat_interval: Duration) -> Result<Self> {
+        let meta_store = env.meta_store_ref();
+        let core = ClusterManagerCore::new(meta_store.clone()).await?;
         let compute_nodes = core.list_worker_node(WorkerType::ComputeNode, None);
-        let dispatch_manager_ref =
-            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store_ref.clone()).await?);
+        let dispatch_manager =
+            Arc::new(HashDispatchManager::new(&compute_nodes, meta_store).await?);
 
         Ok(Self {
-            meta_store_ref,
-            id_gen_manager_ref: env.id_gen_manager_ref(),
-            dispatch_manager_ref,
-            notification_manager_ref,
+            env,
+            dispatch_manager,
             max_heartbeat_interval,
             core: RwLock::new(core),
         })
@@ -102,7 +93,7 @@ where
 
     /// Used in `NotificationService::subscribe`.
     /// Need to pay attention to the order of acquiring locks to prevent deadlock problems.
-    pub async fn get_cluster_core_guard(&self) -> RwLockReadGuard<'_, StoredClusterManagerCore> {
+    pub async fn get_cluster_core_guard(&self) -> RwLockReadGuard<'_, ClusterManagerCore> {
         self.core.read().await
     }
 
@@ -117,7 +108,8 @@ where
             None => {
                 // Generate worker id.
                 let worker_id = self
-                    .id_gen_manager_ref
+                    .env
+                    .id_gen_manager()
                     .generate::<{ IdCategory::Worker }>()
                     .await?;
 
@@ -144,13 +136,13 @@ where
 
                 // Alter consistent hash mapping.
                 if r#type == WorkerType::ComputeNode {
-                    self.dispatch_manager_ref
+                    self.dispatch_manager
                         .add_worker_mapping(&worker.to_protobuf())
                         .await?;
                 }
 
                 // Persist worker node.
-                worker.insert(&*self.meta_store_ref).await?;
+                worker.insert(self.env.meta_store()).await?;
 
                 // Update core.
                 core.add_worker_node(worker);
@@ -168,7 +160,7 @@ where
                     return Ok(());
                 }
                 worker.worker_node.state = State::Starting as i32;
-                worker.insert(self.meta_store_ref.as_ref()).await?;
+                worker.insert(self.env.meta_store()).await?;
 
                 core.update_worker_node(worker);
                 Ok(())
@@ -187,13 +179,14 @@ where
                     return Ok(());
                 }
                 worker.worker_node.state = State::Running as i32;
-                worker.insert(self.meta_store_ref.as_ref()).await?;
+                worker.insert(self.env.meta_store()).await?;
 
                 core.update_worker_node(worker.clone());
 
                 // Notify frontends of new compute node.
                 if worker.worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.notification_manager_ref
+                    self.env
+                        .notification_manager()
                         .notify_frontend(Operation::Add, &Info::Node(worker.worker_node))
                         .await;
                 }
@@ -214,23 +207,30 @@ where
 
                 // Alter consistent hash mapping.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.dispatch_manager_ref
+                    self.dispatch_manager
                         .delete_worker_mapping(&worker_node)
                         .await?;
                 }
 
                 // Persist deletion.
-                Worker::delete(&*self.meta_store_ref, &host_address).await?;
+                Worker::delete(self.env.meta_store(), &host_address).await?;
 
                 // Update core.
                 core.delete_worker_node(worker);
 
                 // Notify frontends to delete compute node.
                 if worker_node.r#type == WorkerType::ComputeNode as i32 {
-                    self.notification_manager_ref
-                        .notify_frontend(Operation::Delete, &Info::Node(worker_node))
+                    self.env
+                        .notification_manager()
+                        .notify_frontend(Operation::Delete, &Info::Node(worker_node.clone()))
                         .await;
                 }
+
+                // Notify local subscribers
+                self.env
+                    .notification_manager()
+                    .notify_local_subscribers(LocalNotification::WorkerDeletion(worker_node))
+                    .await;
 
                 Ok(())
             }
@@ -258,7 +258,7 @@ where
     }
 
     pub async fn start_heartbeat_checker(
-        cluster_manager_ref: StoredClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         check_interval: Duration,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -278,7 +278,7 @@ where
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("Clock may have gone backwards")
                     .as_secs();
-                let mut workers_to_init_or_delete = cluster_manager_ref
+                let mut workers_to_init_or_delete = cluster_manager
                     .core
                     .read()
                     .await
@@ -294,18 +294,19 @@ where
                 for worker in
                     workers_to_init_or_delete.drain_filter(|w| w.expire_at() == INVALID_EXPIRE_AT)
                 {
-                    cluster_manager_ref.core.write().await.update_worker_ttl(
+                    cluster_manager.core.write().await.update_worker_ttl(
                         worker.key().expect("illegal key"),
-                        cluster_manager_ref.max_heartbeat_interval,
+                        cluster_manager.max_heartbeat_interval,
                     );
                 }
                 // 2. Delete expired workers.
                 for worker in workers_to_init_or_delete {
                     let key = worker.key().expect("illegal key");
-                    match cluster_manager_ref.delete_worker_node(key.clone()).await {
+                    match cluster_manager.delete_worker_node(key.clone()).await {
                         Ok(_) => {
-                            cluster_manager_ref
-                                .notification_manager_ref
+                            cluster_manager
+                                .env
+                                .notification_manager()
                                 .delete_sender(WorkerKey(key.clone()));
                             tracing::warn!(
                                 "Deleted expired worker {} {}:{}; expired at {}, now {}",
@@ -318,7 +319,7 @@ where
                         }
                         Err(err) => {
                             tracing::warn!(
-                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {}",
+                                "Failed to delete expired worker {} {}:{}; expired at {}, now {}. {:?}",
                                 worker.worker_id(),
                                 key.host,
                                 key.port,
@@ -364,7 +365,7 @@ where
     }
 
     pub async fn get_hash_mapping(&self) -> Vec<ParallelUnitId> {
-        self.dispatch_manager_ref.get_worker_mapping().await
+        self.dispatch_manager.get_worker_mapping().await
     }
 
     async fn generate_cn_parallel_units(
@@ -373,7 +374,8 @@ where
         node_id: u32,
     ) -> Result<Vec<ParallelUnit>> {
         let start_id = self
-            .id_gen_manager_ref
+            .env
+            .id_gen_manager()
             .generate_interval::<{ IdCategory::ParallelUnit }>(parallel_degree as i32)
             .await? as usize;
         let parallel_degree = DEFAULT_WORK_NODE_PARALLEL_DEGREE;
@@ -400,7 +402,7 @@ where
     }
 }
 
-pub struct StoredClusterManagerCore {
+pub struct ClusterManagerCore {
     /// Record for workers in the cluster.
     workers: HashMap<WorkerKey, Worker>,
     /// Record for parallel units of different types.
@@ -408,16 +410,12 @@ pub struct StoredClusterManagerCore {
     hash_parallel_units: Vec<ParallelUnit>,
 }
 
-impl StoredClusterManagerCore {
-    async fn new<S>(meta_store_ref: Arc<S>) -> Result<Self>
+impl ClusterManagerCore {
+    async fn new<S>(meta_store: Arc<S>) -> Result<Self>
     where
         S: MetaStore,
     {
-        let workers = try_match_expand!(
-            Worker::list(&*meta_store_ref).await,
-            Ok,
-            "Worker::list fail"
-        )?;
+        let workers = try_match_expand!(Worker::list(&*meta_store).await, Ok, "Worker::list fail")?;
         let mut worker_map = HashMap::new();
         let mut single_parallel_units = Vec::new();
         let mut hash_parallel_units = Vec::new();
@@ -547,7 +545,6 @@ mod tests {
 
     use super::*;
     use crate::hummock::test_utils::setup_compute_env;
-    use crate::manager::NotificationManager;
     use crate::storage::MemStore;
 
     #[tokio::test]
@@ -555,13 +552,9 @@ mod tests {
         let env = MetaSrvEnv::for_test().await;
 
         let cluster_manager = Arc::new(
-            StoredClusterManager::new(
-                env.clone(),
-                Arc::new(NotificationManager::new(env.epoch_generator_ref())),
-                Duration::new(0, 0),
-            )
-            .await
-            .unwrap(),
+            ClusterManager::new(env.clone(), Duration::new(0, 0))
+                .await
+                .unwrap(),
         );
 
         let mut worker_nodes = Vec::new();
@@ -595,10 +588,7 @@ mod tests {
         }
         assert_cluster_manager(&cluster_manager, 1, DEFAULT_WORK_NODE_PARALLEL_DEGREE - 1).await;
 
-        let mapping = cluster_manager
-            .dispatch_manager_ref
-            .get_worker_mapping()
-            .await;
+        let mapping = cluster_manager.dispatch_manager.get_worker_mapping().await;
         let unique_parallel_units = HashSet::<u32>::from_iter(mapping.into_iter());
         assert_eq!(
             unique_parallel_units.len(),
@@ -609,7 +599,7 @@ mod tests {
     }
 
     async fn assert_cluster_manager(
-        cluster_manager: &StoredClusterManager<MemStore>,
+        cluster_manager: &ClusterManager<MemStore>,
         single_parallel_count: usize,
         hash_parallel_count: usize,
     ) {
@@ -671,8 +661,7 @@ mod tests {
         );
 
         let (join_handle, shutdown_sender) =
-            StoredClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval)
-                .await;
+            ClusterManager::start_heartbeat_checker(cluster_manager.clone(), check_interval).await;
         tokio::time::sleep(ttl * 2 + check_interval).await;
 
         // One live node left.

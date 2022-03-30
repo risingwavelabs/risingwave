@@ -1,58 +1,207 @@
+# Develop RisingWave
+
+- [Develop RisingWave](#develop-risingwave)
+  - [Setting Up Development Environment](#setting-up-development-environment)
+  - [Code Structure](#code-structure)
+  - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
+    - [Adding More Components](#adding-more-components)
+    - [Start All-In-One Process](#start-all-in-one-process)
+  - [Testing and Lint](#testing-and-lint)
+    - [Lint](#lint)
+    - [Unit Tests](#unit-tests)
+    - [End-to-End Testing](#end-to-end-testing)
+    - [End-to-End Testing on CI](#end-to-end-testing-on-ci)
+  - [Developing Dashboard](#developing-dashboard)
+    - [Dashboard V1](#dashboard-v1)
+    - [Dashboard v2](#dashboard-v2)
+  - [Observability](#observability)
+    - [Monitoring](#monitoring)
+    - [Tracing](#tracing)
+    - [Dashboard](#dashboard)
+    - [Logging](#logging)
+  - [Misc Check](#misc-check)
+  - [Sending a PR](#sending-a-pr)
+    - [Pull Request Title](#pull-request-title)
+    - [Pull Request Description](#pull-request-description)
+  - [Update CI Workflow](#update-ci-workflow)
+  - [When adding new files...](#when-adding-new-files)
+  - [When adding new dependencies...](#when-adding-new-dependencies)
+
 Thanks for your interest in contributing to RisingWave! Contributions of many kinds are encouraged and most welcome.
 
 If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose).
 
-There are some tips for you.
+## Setting Up Development Environment
 
-## Testing
+To contribute to RisingWave, the first thing is to set up the development environment. You'll need:
 
-We support both unit tests and end-to-end tests.
+* OS: macOS, Linux
+* Rust toolchain
+* CMake
+* protobuf
+* OpenSSL
+* PostgreSQL (psql) (>= 14.1)
 
-We recommend to install required tools prior to running steps in the following sections:
+To install components in macOS, run:
 
 ```shell
-./risedev install-tools
+brew install postgresql cmake protobuf openssl tmux
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-### Unit Testing
-
-To run unit tests for Rust, run:
+To install components in Debian-based Linux systems, run:
 
 ```shell
-./risedev test
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
+sudo apt install postgresql-client
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-To run unit tests for Java, run the following commands under the root directory:
+Then you'll be able to compile and start RisingWave!
+
+## Code Structure
+
+- The `java` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
+- The `rust` folder contains all of the system components, where:
+  - `meta`: the meta service
+  - `batch`: the OLAP engine
+  - `stream`: the stream engine
+  - `storage`: the cloud-native storage engine
+  - `frontend`: SQL frontend
+  - `risedevtool`: the devtool for RisingWave
+- The `e2e_test` folder contains the latest end-to-end test cases.
+- The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
+- The `dashbaord` folder contains RisingWave dashboard v2.
+
+## Start and Monitor a Dev Cluster
+
+We use RiseDev to manage the full cycle of development. Using RiseDev requires `tmux` to be installed.
 
 ```shell
-make java_test
+# macOS
+brew install tmux
+
+# Debian
+sudo apt install tmux
+```
+
+RiseDev can help you compile and start a dev cluster. It is as simple as:
+
+```shell
+./risedev d                        # shortcut for ./risedev dev
+psql -h localhost -p 4566 -d dev
+```
+
+The default dev cluster only includes meta-node, compute-node and frontend-node. No data will be persisted, and everything will be in-memory. This should be very useful when developing and debugging.
+
+To stop the cluster,
+
+```shell
+./risedev k # shortcut for ./risedev kill
+```
+
+To view the logs,
+
+```shell
+./risedev l # shortcut for ./risedev logs
+```
+
+To clean data,
+
+```shell
+./risedev clean-data
+```
+
+### Adding More Components
+
+RiseDev supports automatic config of some components. We can add components like etcd, MinIO, Grafana, Prometheus and jaeger to the cluster, so as to persist data and monitor the cluster.
+
+To add those components into the cluster, you will need to configure RiseDev to download them at first. For example,
+
+```shell
+./risedev configure                               # start the interactive guide to enable components
+./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
+./risedev configure enable min-io                 # enable MinIO
+```
+
+After that, you can modify `risedev.yml` to compose the cluster. For example, we can modify the default section to:
+
+```yaml
+  default:
+    - use: minio
+    - use: meta-node
+      enable-dashboard-v2: false
+    - use: compute-node
+    - use: frontend
+    - use: prometheus
+    - use: grafana
+```
+
+Now we can run `./risedev d`. The new dev cluster will contain components from RisingWave, as well as MinIO to persist storage data, and Grafana to monitor the cluster. RiseDev will automatically configure the components to use the available storage service and monitor target.
+
+You may also add multiple compute nodes in the cluster. The `ci-3node` config is an example.
+
+### Start All-In-One Process
+
+Sometimes, developers might not need to start a full cluster to develop. `./risedev p` can help start an all-in-one process, where meta-node, compute-node and frontend-node are running in the same process. Logs are also printed to stdout instead of separate log files.
+
+```shell
+./risedev p # shortcut for ./risedev playground
+```
+
+For more information, refer to `README.md` under `rust/risedevtool`.
+
+## Testing and Lint
+
+The RisingWave project enforces several checks in CI. Everytime the code gets modified, several checks should be done.
+
+### Lint
+
+RisingWave requires all code to pass fmt, clippy, sort and hakari checks, which can be done in a single command:
+
+```shell
+./risedev install-tools # Install required tools for running unit tests
+./risedev c             # Run all checks, shortcut for ./risedev check
+```
+
+### Unit Tests
+
+RiseDev helps run unit tests fast with cargo-nextest. To run unit tests:
+
+```shell
+./risedev install-tools # Install required tools for running unit tests
+./risedev test          # Run unit tests
+```
+
+If you want to see the coverage report,
+
+```shell
+./risedev test-cov
 ```
 
 ### End-to-End Testing
 
-Currently, we use [sqllogictest-rs](https://github.com/singularity-data/sqllogictest-rs) to run our e2e tests.
+Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run our e2e tests.
 
-To install sqllogictest:
+sqllogictest installation is included when running `./risedev install-tools`. You may also install it with:
 
 ```shell
 cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin
 ```
 
-To run end-to-end tests with multiple compute-nodes, run the script:
+To run end-to-end test, you will need to start a full cluster first:
 
-```shell
-./risedev dev ci-3node
-sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
+```
+./risedev d
 ```
 
-To run end-to-end tests with state store, run the script:
+Then, use `sqllogictest` command to run some e2e tests:
 
 ```shell
-./risedev dev ci-1node
-sqllogictest -p 4567 -d dev './e2e_test/**/*.slt'
+sqllogictest -p 4567 -d dev './e2e_test/v2/**/*.slt'
 ```
 
-It will start processes in the background. After testing, you can run the following scriptto clean-up:
+After running e2e tests, you may kill the cluster and clean data.
 
 ```shell
 ./risedev k
@@ -62,21 +211,60 @@ It will start processes in the background. After testing, you can run the follow
 As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
 some unexpected decode error, try `./risedev clean-data` first.
 
-## Monitoring
+### End-to-End Testing on CI
+
+As we are in the process of deprecating the legacy Java frontend, CI runs e2e tests with the legacy Java frontend.
+We also have some special settings with environment variable to workaround some problems.
+
+Basically, CI is using the following two configuration to run the full e2e test suite:
+
+```shell
+./risedev dev ci-3node
+./risedev dev ci-1node
+```
+
+We may adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+## Developing Dashboard
+
+Currently, we have two versions of RisingWave dashboard. You may use RiseDev config to select which dashboard to use.
+
+Dashboard will be available at `http://127.0.0.1:5691/` on meta node.
+
+### Dashboard V1
+
+Dashboard V1 is a single HTML page. To preview and develop the web page, install Node.js, and
+
+```shell
+cd rust/meta/src/dashboard && npx reload -b
+```
+
+Dashboard V1 is bundled by default along with meta node. Without any configuration, you may use the dashboard when
+the cluster is started.
+
+### Dashboard v2
+
+The developement instructions for dashboard v2 is in [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+
+## Observability
+
+RiseDev supports several observability components in RisingWave cluster.
+
+### Monitoring
 
 Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics.
 
-## Tracing
+### Tracing
 
 Compute node supports streaming tracing. Tracing is not enabled by default, and you will need to
 use `./risedev configure` to enable tracing components. After that, simply uncomment `jaeger`
 service in `risedev.yml`.
 
-## Dashboard
+### Dashboard
 
 You may use RisingWave Dashboard to see actors in the system. It will be started along with meta node.
 
-## Logging
+### Logging
 
 The Java frontend uses `logback.xml` to configure its logging config.
 
@@ -85,30 +273,9 @@ The Rust components use `tokio-tracing` to handle both logging and tracing. The 
 * Third-party libraries: warn
 * Other libraries: debug
 
-If you need to adjust log levels, simply change the logging filters in `utils/logging`.
+If you need to adjust log levels, simply change the logging filters in `utils/logging/lib.rs`.
 
-## Code Formatting
-
-Before submitting your pull request (PR), you should format the code first.
-
-For Java code, please run:
-
-```shell
-cd java
-./gradlew spotlessApply
-```
-
-For Rust code, please run:
-
-```shell
-./risedev c # shortcut for ./risedev check
-```
-
-If a new dependency is added to `Cargo.toml`, you may also run:
-
-```shell
-cargo sort -w
-```
+## Misc Check
 
 For shell code, please run:
 
@@ -124,7 +291,9 @@ prototool format -d
 buf lint
 ```
 
-## Pull Request Title
+## Sending a PR
+
+### Pull Request Title
 
 As described in [here](https://github.com/commitizen/conventional-commit-types/blob/master/index.json), a valid PR title should begin with one of the following prefixes:
 
@@ -147,12 +316,12 @@ For example, a PR title could be:
 
 You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
 
-## Pull Request Description
+### Pull Request Description
 
 - If your PR is small (such as a typo fix), you can go brief.
 - If it is large and you have changed a lot, it's better to write more details.
 
-## GitHub Action
+## Update CI Workflow
 
 We use scripts to generate GitHub Action configurations based on templates in `.github/workflow-template`.
 

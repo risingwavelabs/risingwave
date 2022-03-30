@@ -20,10 +20,10 @@ mod resolve_id;
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_table, drop_table, gen_create_mv_plan, MvInfo};
+use risingwave_frontend::handler::{create_mv, create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::{QueryContext, QueryContextRef};
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
 use risingwave_frontend::test_utils::LocalFrontend;
 use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
@@ -148,7 +148,7 @@ impl TestCase {
             let statements = Parser::parse_sql(sql).unwrap();
 
             for stmt in statements {
-                let context = QueryContext::new(session.clone());
+                let context = OptimizerContext::new(session.clone());
                 match stmt.clone() {
                     Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
                         if result.is_some() {
@@ -163,6 +163,16 @@ impl TestCase {
                     Statement::CreateTable { name, columns, .. } => {
                         create_table::handle_create_table(context, name, columns).await?;
                     }
+                    Statement::CreateView {
+                        materialized: true,
+                        or_replace: false,
+                        name,
+                        query,
+                        ..
+                    } => {
+                        create_mv::handle_create_mv(context, name, query).await?;
+                    }
+
                     Statement::Drop(drop_statement) => {
                         let table_object_name = ObjectName(vec![drop_statement.name]);
                         drop_table::handle_drop_table(context, table_object_name).await?;
@@ -175,7 +185,11 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
-    fn apply_query(&self, stmt: &Statement, context: QueryContextRef) -> Result<TestCaseResult> {
+    fn apply_query(
+        &self,
+        stmt: &Statement,
+        context: OptimizerContextRef,
+    ) -> Result<TestCaseResult> {
         let session = context.inner().session_ctx.clone();
         let mut ret = TestCaseResult::default();
 
@@ -193,7 +207,7 @@ impl TestCase {
             }
         };
 
-        let mut planner = Planner::new(context);
+        let mut planner = Planner::new(context.clone());
 
         let logical_plan = match planner.plan(bound) {
             Ok(logical_plan) => {
@@ -237,8 +251,12 @@ impl TestCase {
                 return Err(anyhow!("expect a query"));
             };
 
-            let (stream_plan, table) =
-                gen_create_mv_plan(&session, &mut planner, q, MvInfo::with_name("test"))?;
+            let (stream_plan, table) = create_mv::gen_create_mv_plan(
+                &session,
+                context,
+                Box::new(q),
+                ObjectName(vec!["test".into()]),
+            )?;
 
             // Only generate stream_plan if it is specified in test case
             if self.stream_plan.is_some() {

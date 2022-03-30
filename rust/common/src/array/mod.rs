@@ -41,6 +41,7 @@ pub use chrono_array::{
     NaiveDateArray, NaiveDateArrayBuilder, NaiveDateTimeArray, NaiveDateTimeArrayBuilder,
     NaiveTimeArray, NaiveTimeArrayBuilder,
 };
+pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkRef};
 pub use data_chunk_iter::{Row, RowDeserializer, RowRef};
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};

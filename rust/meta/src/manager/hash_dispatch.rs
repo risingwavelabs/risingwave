@@ -39,8 +39,8 @@ impl<S> HashDispatchManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(compute_nodes: &[WorkerNode], meta_store_ref: Arc<S>) -> Result<Self> {
-        let mut core = HashDispatchManagerCore::new(meta_store_ref);
+    pub async fn new(compute_nodes: &[WorkerNode], meta_store: Arc<S>) -> Result<Self> {
+        let mut core = HashDispatchManagerCore::new(meta_store);
         if !compute_nodes.is_empty() {
             let parallel_units = compute_nodes
                 .iter()
@@ -102,8 +102,8 @@ struct HashDispatchManagerCore<S> {
     owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>>,
     /// Mapping from key count to parallel unit, aiming to maintain load balance.
     load_balancer: BTreeMap<usize, Vec<ParallelUnitId>>,
-    /// Meta store used for persistency.
-    meta_store_ref: Arc<S>,
+    /// Meta store used for persistence.
+    meta_store: Arc<S>,
 }
 
 // FIXME:
@@ -119,7 +119,7 @@ impl<S> HashDispatchManagerCore<S>
 where
     S: MetaStore,
 {
-    fn new(meta_store_ref: Arc<S>) -> Self {
+    fn new(meta_store: Arc<S>) -> Self {
         let key_mapping = ConsistentHashMapping::new();
         let owner_mapping: HashMap<ParallelUnitId, Vec<VirtualKey>> = HashMap::new();
         let load_balancer: BTreeMap<usize, Vec<ParallelUnitId>> = BTreeMap::new();
@@ -129,7 +129,7 @@ where
             key_mapping,
             owner_mapping,
             load_balancer,
-            meta_store_ref,
+            meta_store,
         }
     }
 
@@ -174,7 +174,7 @@ where
 
         self.key_mapping.set_mapping(key_mapping)?;
 
-        self.key_mapping.insert(&*self.meta_store_ref).await?;
+        self.key_mapping.insert(&*self.meta_store).await?;
 
         Ok(())
     }
@@ -247,7 +247,7 @@ where
         }
 
         // Persist mapping
-        self.key_mapping.insert(&*self.meta_store_ref).await?;
+        self.key_mapping.insert(&*self.meta_store).await?;
 
         Ok(())
     }
@@ -322,7 +322,7 @@ where
         }
 
         // Persist mapping
-        self.key_mapping.insert(&*self.meta_store_ref).await?;
+        self.key_mapping.insert(&*self.meta_store).await?;
 
         self.total_hash_parallels -= parallel_units.len();
 
@@ -342,7 +342,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatch_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::default());
+        let meta_store = Arc::new(MemStore::default());
         let mut current_id = 0u32;
         let worker_count = 10u32;
         let parallel_unit_per_node = 3u32;
@@ -373,7 +373,7 @@ mod tests {
             })
             .collect_vec();
 
-        let hash_dispatch_manager = HashDispatchManager::new(&[], meta_store_ref).await?;
+        let hash_dispatch_manager = HashDispatchManager::new(&[], meta_store).await?;
 
         for node in &worker_nodes {
             hash_dispatch_manager.add_worker_mapping(node).await?;
@@ -423,7 +423,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_hash_dispatch_manager_reboot() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::default());
+        let meta_store = Arc::new(MemStore::default());
         let mut current_id = 0u32;
         let init_worker_count = 3u32;
         let init_parallel_unit_per_node = 4u32;
@@ -455,7 +455,7 @@ mod tests {
             .collect_vec();
 
         let hash_dispatch_manager =
-            HashDispatchManager::new(&init_worker_nodes, meta_store_ref).await?;
+            HashDispatchManager::new(&init_worker_nodes, meta_store).await?;
         assert_core(&hash_dispatch_manager).await;
         assert_parallel_unit_count(
             &hash_dispatch_manager,

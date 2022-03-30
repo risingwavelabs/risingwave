@@ -48,10 +48,10 @@ pub struct CellBasedTable<S: StateStore> {
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
 
-    /// ColumnDesc contains strictly more info than `schema`.
+    /// `ColumnDesc` contains strictly more info than `schema`.
     column_descs: Vec<ColumnDesc>,
 
-    /// Mapping from column Id to column index
+    /// Mapping from column id to column index
     column_id_to_column_index: HashMap<ColumnId, usize>,
 
     pk_serializer: Option<OrderedRowSerializer>,
@@ -112,7 +112,7 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
-    /// Create an "adhoc" [`CellBasedTable`] with specified columns.
+    /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
     pub fn new_adhoc(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -214,7 +214,7 @@ fn generate_column_id_to_column_index_mapping(
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
-// (st1page): May be we will have a "ChunkIter" trait which returns a chunk each time, so the name
+// (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
     keyspace: Keyspace<S>,
@@ -226,7 +226,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     done: bool,
     /// Cached error messages after the iteration completes or fails
     err_msg: Option<String>,
-    /// A epoch representing the read snapshot
+    /// An epoch representing the read snapshot
     epoch: u64,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,

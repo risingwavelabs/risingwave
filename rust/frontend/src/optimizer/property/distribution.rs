@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use paste::paste;
 use risingwave_pb::plan::exchange_info::{
     BroadcastInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
 };
 use risingwave_pb::plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::optimizer::property::{Convention, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
-use crate::{for_batch_plan_nodes, for_logical_plan_nodes, for_stream_plan_nodes};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Distribution {
@@ -92,7 +90,7 @@ impl Distribution {
     // +-------+-------+
     // |hash_shard(a,b)|
     // +---------------+
-    fn satisfies(&self, other: &Distribution) -> bool {
+    pub fn satisfies(&self, other: &Distribution) -> bool {
         match self {
             Distribution::Any => matches!(other, Distribution::Any),
             Distribution::Single => matches!(other, Distribution::Any | Distribution::Single),
@@ -114,38 +112,16 @@ impl Distribution {
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
     }
-}
-
-pub trait WithDistribution {
-    /// the distribution property of the [`PlanNode`]'s output
-    fn distribution(&self) -> &Distribution;
-}
-
-macro_rules! impl_with_dist_base {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl WithDistribution for [<$convention $name>] {
-                fn distribution(&self) -> &Distribution {
-                    &self.base.dist
-                }
-            }
-        })*
+    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
+    /// valid.
+    pub fn dist_column_indices(&self) -> &[usize] {
+        match self {
+            Distribution::Single => Default::default(),
+            Distribution::HashShard(dists) => dists,
+            _ => unreachable!(),
+        }
     }
 }
-for_batch_plan_nodes! { impl_with_dist_base }
-for_stream_plan_nodes! { impl_with_dist_base }
-macro_rules! impl_with_dist_any {
-    ([], $( { $convention:ident, $name:ident }),*) => {
-        $(paste! {
-            impl WithDistribution for [<$convention $name>] {
-                fn distribution(&self) -> &Distribution {
-                   Distribution::any()
-                }
-            }
-        })*
-    }
-}
-for_logical_plan_nodes! { impl_with_dist_any }
 
 #[cfg(test)]
 mod tests {

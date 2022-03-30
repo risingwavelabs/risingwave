@@ -20,7 +20,7 @@ use crate::cluster::NodeId;
 use crate::model::ActorId;
 use crate::stream::ActorInfos;
 
-/// [`BarrierActorInfo`] resolves the actor info read from meta store for [`BarrierManager`].
+/// [`BarrierActorInfo`] resolves the actor info read from meta store for [`GlobalBarrierManager`].
 pub struct BarrierActorInfo {
     /// node_id => node
     pub node_map: HashMap<NodeId, WorkerNode>,

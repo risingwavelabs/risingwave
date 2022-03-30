@@ -12,23 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::{self};
-use std::iter;
+use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
-    ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
+    ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -90,7 +88,8 @@ impl LogicalJoin {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 left_len + right_len
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => left_len,
+            JoinType::RightSemi | JoinType::RightAnti => right_len,
         }
     }
 
@@ -102,15 +101,10 @@ impl LogicalJoin {
     ) -> ColIndexMapping {
         match join_type {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
-                ColIndexMapping::new(
-                    (0..left_len)
-                        .into_iter()
-                        .map(Some)
-                        .chain(iter::repeat(None).take(right_len))
-                        .collect_vec(),
-                )
+                ColIndexMapping::identity_or_none(left_len + right_len, left_len)
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::identity(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::empty(right_len),
         }
     }
 
@@ -124,7 +118,8 @@ impl LogicalJoin {
             JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {
                 ColIndexMapping::with_shift_offset(left_len + right_len, -(left_len as isize))
             }
-            _ => unimplemented!(),
+            JoinType::LeftSemi | JoinType::LeftAnti => ColIndexMapping::empty(left_len),
+            JoinType::RightSemi | JoinType::RightAnti => ColIndexMapping::identity(right_len),
         }
     }
 
@@ -175,7 +170,11 @@ impl LogicalJoin {
         )
     }
 
-    fn derive_schema(left_schema: &Schema, right_schema: &Schema, join_type: JoinType) -> Schema {
+    pub(super) fn derive_schema(
+        left_schema: &Schema,
+        right_schema: &Schema,
+        join_type: JoinType,
+    ) -> Schema {
         let left_len = left_schema.len();
         let right_len = right_schema.len();
         let out_column_num = Self::out_column_num(left_len, right_len, join_type);
@@ -192,7 +191,7 @@ impl LogicalJoin {
         Schema { fields }
     }
 
-    fn derive_pk(
+    pub(super) fn derive_pk(
         left_len: usize,
         right_len: usize,
         left_pk: &[usize],
@@ -203,8 +202,9 @@ impl LogicalJoin {
         let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
         left_pk
             .iter()
-            .map(|index| l2o.map(*index))
-            .chain(right_pk.iter().map(|index| r2o.map(*index)))
+            .map(|index| l2o.try_map(*index))
+            .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
+            .flatten()
             .collect()
     }
     /// Get a reference to the logical join's on.
@@ -274,26 +274,20 @@ impl ColPrunable for LogicalJoin {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        match self.join_type {
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightOuter | JoinType::FullOuter => {}
-            _ => unimplemented!(),
-        }
-
         let left_len = self.left.schema().fields.len();
 
-        let mut visitor = CollectInputRef {
-            input_bits: required_cols.clone(),
-        };
+        let mut visitor = CollectInputRef::new(required_cols.clone());
         self.on.visit_expr(&mut visitor);
+        let left_right_required_cols = visitor.collect();
 
         let mut on = self.on.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&left_right_required_cols);
         on = on.rewrite_expr(&mut mapping);
 
         let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
         let mut right_required_cols =
             FixedBitSet::with_capacity(self.right.schema().fields().len());
-        visitor.input_bits.ones().for_each(|i| {
+        left_right_required_cols.ones().for_each(|i| {
             if i < left_len {
                 left_required_cols.insert(i);
             } else {
@@ -308,7 +302,7 @@ impl ColPrunable for LogicalJoin {
             on,
         );
 
-        if required_cols == &visitor.input_bits {
+        if required_cols == &left_right_required_cols {
             join.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(join.schema().fields().len());
@@ -338,8 +332,11 @@ impl ToBatch for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -374,8 +371,11 @@ impl ToStream for LogicalJoin {
             // For inner joins, pull non-equal conditions to a filter operator on top of it
             let pull_filter = self.join_type == JoinType::Inner && predicate.has_non_eq();
             if pull_filter {
-                let eq_cond =
-                    EqJoinPredicate::new(Condition::true_cond(), predicate.eq_keys().to_vec());
+                let eq_cond = EqJoinPredicate::new(
+                    Condition::true_cond(),
+                    predicate.eq_keys().to_vec(),
+                    self.left.schema().len(),
+                );
                 let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
                 let hash_join = StreamHashJoin::new(logical_join, eq_cond).into();
                 let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
@@ -408,8 +408,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::optimizer::property::WithSchema;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     /// Pruning
     /// ```text
@@ -427,7 +426,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -513,7 +512,7 @@ mod tests {
     #[tokio::test]
     async fn test_prune_join_no_project() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: ty.clone(),
@@ -593,7 +592,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_join_to_batch() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
             .map(|i| Field {
                 data_type: DataType::Int32,

@@ -27,7 +27,7 @@ use super::state::ManagedMViewState;
 use crate::executor::{
     Barrier, Executor, ExecutorBuilder, Message, PkIndicesRef, Result, SimpleExecutor, StreamChunk,
 };
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -43,6 +43,10 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     /// Logical Operator Info
     op_info: String,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 pub struct MaterializeExecutorBuilder {}
@@ -52,7 +56,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MaterializeNode)?;
 
@@ -69,6 +73,13 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             .collect();
 
         let keyspace = Keyspace::table_root(store, &table_id);
+
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
         Ok(Box::new(MaterializeExecutor::new(
             params.input.remove(0),
             keyspace,
@@ -76,6 +87,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             column_ids,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -88,6 +100,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let arrange_columns = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -97,6 +110,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             arrange_columns,
             identity: format!("MaterializeExecutor {:X}", executor_id),
             op_info,
+            key_indices,
         }
     }
 
@@ -253,6 +267,7 @@ mod tests {
             column_ids,
             1,
             "MaterializeExecutor".to_string(),
+            vec![],
         ));
 
         materialize_executor.next().await.unwrap();

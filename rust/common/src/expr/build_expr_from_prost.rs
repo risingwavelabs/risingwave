@@ -44,7 +44,7 @@ pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_return_type_and_children(prost)?;
     ensure!(children.len() == 1);
     let child_expr = expr_build_from_prost(&children[0])?;
-    Ok(new_unary_expr(prost.get_expr_type()?, ret_type, child_expr))
+    new_unary_expr(prost.get_expr_type()?, ret_type, child_expr)
 }
 
 pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {

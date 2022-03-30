@@ -24,8 +24,8 @@ use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{PlanBase, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithSchema};
-use crate::session::QueryContextRef;
+use crate::optimizer::property::Distribution;
+use crate::session::OptimizerContextRef;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]
@@ -37,7 +37,11 @@ pub struct StreamSource {
 }
 
 impl StreamSource {
-    pub fn create(ctx: QueryContextRef, pk_idx: Vec<usize>, source_catalog: ProstSource) -> Self {
+    pub fn create(
+        ctx: OptimizerContextRef,
+        pk_idx: Vec<usize>,
+        source_catalog: ProstSource,
+    ) -> Self {
         let (source_type, prost_columns) = match &source_catalog.info {
             Some(Info::StreamSource(source)) => (SourceType::Source, source.columns.clone()),
             Some(Info::TableSource(source)) => (SourceType::Table, source.columns.clone()),
@@ -70,12 +74,6 @@ impl StreamSource {
             .iter()
             .map(|f| f.name.clone())
             .collect()
-    }
-}
-
-impl WithSchema for StreamSource {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
     }
 }
 

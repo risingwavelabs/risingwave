@@ -57,7 +57,7 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
-use crate::task::{ActorId, ExecutorParams, StreamManagerCore, ENABLE_BARRIER_AGGREGATION};
+use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
 mod aggregation;
@@ -180,7 +180,7 @@ impl Barrier {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
 
-    pub fn is_add_output(&self) -> bool {
+    pub fn is_add_output_mutation(&self) -> bool {
         self.mutation
             .as_ref()
             .map(|m| m.is_add_output())
@@ -467,7 +467,7 @@ pub trait ExecutorBuilder {
         executor_params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>>;
 }
 
@@ -492,7 +492,7 @@ macro_rules! build_executor {
 
 pub fn create_executor(
     executor_params: ExecutorParams,
-    stream: &mut StreamManagerCore,
+    stream: &mut LocalStreamManagerCore,
     node: &stream_plan::StreamNode,
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {

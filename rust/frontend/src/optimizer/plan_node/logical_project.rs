@@ -19,14 +19,14 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 
 use super::{
-    BatchProject, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamProject, ToBatch,
-    ToStream,
+    BatchProject, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, StreamProject,
+    ToBatch, ToStream,
 };
 use crate::expr::{
     as_alias_display, assert_input_ref, Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef,
 };
 use crate::optimizer::plan_node::CollectInputRef;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalProject` computes a set of expressions from its input relation.
@@ -41,10 +41,12 @@ pub struct LogicalProject {
 impl LogicalProject {
     pub fn new(input: PlanRef, exprs: Vec<ExprImpl>, expr_alias: Vec<Option<String>>) -> Self {
         let ctx = input.ctx();
-        let schema = Self::derive_schema(&exprs, &expr_alias);
+        let schema = Self::derive_schema(&exprs, &expr_alias, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
         for expr in &exprs {
-            assert_input_ref(expr, input.schema().fields().len());
+            assert_input_ref!(expr, input.schema().fields().len());
+            assert!(!expr.has_subquery());
+            assert!(!expr.has_agg_call());
         }
         let base = PlanBase::new_logical(ctx, schema, pk_indices);
         LogicalProject {
@@ -56,7 +58,7 @@ impl LogicalProject {
     }
 
     /// get the Mapping of columnIndex from input column index to out column index
-    pub fn o2i_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+    fn o2i_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
         let mut map = vec![None; exprs.len()];
         for (i, expr) in exprs.iter().enumerate() {
             map[i] = match expr {
@@ -69,8 +71,16 @@ impl LogicalProject {
 
     /// get the Mapping of columnIndex from input column index to output column index,if a input
     /// column corresponds more than one out columns, mapping to any one
-    pub fn i2o_col_mapping(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
-        Self::o2i_col_mapping(input_len, exprs).inverse()
+    fn i2o_col_mapping_inner(input_len: usize, exprs: &[ExprImpl]) -> ColIndexMapping {
+        Self::o2i_col_mapping_inner(input_len, exprs).inverse()
+    }
+
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        Self::o2i_col_mapping_inner(self.input.schema().len(), self.exprs())
+    }
+
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        Self::i2o_col_mapping_inner(self.input.schema().len(), self.exprs())
     }
 
     pub fn create(
@@ -116,13 +126,21 @@ impl LogicalProject {
         LogicalProject::new(input, exprs, alias).into()
     }
 
-    fn derive_schema(exprs: &[ExprImpl], expr_alias: &[Option<String>]) -> Schema {
+    fn derive_schema(
+        exprs: &[ExprImpl],
+        expr_alias: &[Option<String>],
+        input_schema: &Schema,
+    ) -> Schema {
+        let o2i = Self::o2i_col_mapping_inner(input_schema.len(), exprs);
         let fields = exprs
             .iter()
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
-                let name = alias.clone().unwrap_or(format!("expr#{}", id));
+                let name = alias.clone().unwrap_or(match o2i.try_map(id) {
+                    Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
+                    None => format!("expr#{}", id),
+                });
                 Field {
                     name,
                     data_type: expr.return_type(),
@@ -133,7 +151,7 @@ impl LogicalProject {
     }
 
     fn derive_pk(input_schema: &Schema, input_pk: &[usize], exprs: &[ExprImpl]) -> Vec<usize> {
-        let i2o = Self::i2o_col_mapping(input_schema.len(), exprs);
+        let i2o = Self::i2o_col_mapping_inner(input_schema.len(), exprs);
         input_pk
             .iter()
             .map(|pk_col| i2o.try_map(*pk_col))
@@ -198,7 +216,7 @@ impl PlanTreeNodeUnary for LogicalProject {
             .collect();
         let proj = Self::new(input, exprs, self.expr_alias().to_vec());
         // change the input columns index will not change the output column index
-        let out_col_change = ColIndexMapping::identical_map(self.schema().len());
+        let out_col_change = ColIndexMapping::identity(self.schema().len());
         (proj, out_col_change)
     }
 }
@@ -215,14 +233,12 @@ impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectInputRef {
-            input_bits: FixedBitSet::with_capacity(self.input.schema().fields().len()),
-        };
+        let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
         });
 
-        let child_required_cols = visitor.input_bits;
+        let child_required_cols = visitor.collect();
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
         let (exprs, expr_alias) = required_cols
@@ -253,21 +269,15 @@ impl ToBatch for LogicalProject {
 
 impl ToStream for LogicalProject {
     fn to_stream_with_dist_required(&self, required_dist: &Distribution) -> PlanRef {
-        let o2i = LogicalProject::o2i_col_mapping(self.input().schema().len(), self.exprs());
-        let input_dist = match required_dist {
-            Distribution::HashShard(dists) => {
-                let input_dists = dists
-                    .iter()
-                    .map(|hash_col| o2i.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match input_dists {
-                    Some(input_dists) => Distribution::HashShard(input_dists),
-                    None => Distribution::AnyShard,
-                }
-            }
-            dist => dist.clone(),
+        let input_required = match required_dist {
+            Distribution::HashShard(_) => self
+                .o2i_col_mapping()
+                .rewrite_required_distribution(required_dist)
+                .unwrap_or(Distribution::AnyShard),
+            Distribution::AnyShard => Distribution::AnyShard,
+            _ => Distribution::Any,
         };
-        let new_input = self.input().to_stream_with_dist_required(&input_dist);
+        let new_input = self.input().to_stream_with_dist_required(&input_required);
         let new_logical = self.clone_with_input(new_input);
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
@@ -280,7 +290,7 @@ impl ToStream for LogicalProject {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (proj, out_col_change) = self.rewrite_with_input(input.clone(), input_col_change);
         let input_pk = input.pk_indices();
-        let i2o = Self::i2o_col_mapping(input.schema().len(), proj.exprs());
+        let i2o = Self::i2o_col_mapping_inner(input.schema().len(), proj.exprs());
         let col_need_to_add = input_pk.iter().cloned().filter(|i| i2o.try_map(*i) == None);
         let input_schema = input.schema();
         let (exprs, expr_alias) = proj
@@ -311,7 +321,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -326,7 +336,7 @@ mod tests {
     /// ```
     async fn test_prune_project() {
         let ty = DataType::Int32;
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field {
                 data_type: ty.clone(),

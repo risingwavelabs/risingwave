@@ -61,7 +61,7 @@ pub struct MetaMetrics {
     /// num of SSTs written into next level during history compactions to next level
     pub level_compact_write_sstn: IntCounterVec,
     /// num of compactions from each level to next level
-    pub level_compact_frequence: IntCounterVec,
+    pub level_compact_frequency: IntCounterVec,
 }
 
 impl MetaMetrics {
@@ -162,8 +162,8 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let level_compact_frequence = register_int_counter_vec_with_registry!(
-            "storage_level_compact_frequence",
+        let level_compact_frequency = register_int_counter_vec_with_registry!(
+            "storage_level_compact_frequency",
             "num of compactions from each level to next level",
             &["level_index"],
             registry
@@ -184,7 +184,7 @@ impl MetaMetrics {
             level_compact_read_sstn_curr,
             level_compact_read_sstn_next,
             level_compact_write_sstn,
-            level_compact_frequence,
+            level_compact_frequency,
         }
     }
 

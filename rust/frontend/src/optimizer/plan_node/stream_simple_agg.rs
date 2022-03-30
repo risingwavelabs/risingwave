@@ -14,12 +14,12 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
 pub struct StreamSimpleAgg {
@@ -31,14 +31,16 @@ impl StreamSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.pk_indices.to_vec();
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+
         // Simple agg executor might change the append-only behavior of the stream.
-        let base = PlanBase::new_stream(
-            ctx,
-            logical.schema().clone(),
-            pk_indices,
-            Distribution::any().clone(),
-            false,
-        );
+        let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -65,12 +67,6 @@ impl PlanTreeNodeUnary for StreamSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { StreamSimpleAgg }
 
-impl WithSchema for StreamSimpleAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToStreamProst for StreamSimpleAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
@@ -82,6 +78,13 @@ impl ToStreamProst for StreamSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            distribution_keys: self
+                .base
+                .dist
+                .dist_column_indices()
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
         })
     }
 }

@@ -1,36 +1,7 @@
 risedev:
-  ci-v2:
-    - use: minio
-    - use: etcd
-    - use: meta-node
-    - use: compute-node
-    - use: frontend-v2
-
-  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend and 1 MinIO.
-  ci-3node:
-    - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
-    - use: meta-node
-    - use: compute-node
-      port: 5687
-      exporter-port: 1222
-    - use: compute-node
-      port: 5688
-      exporter-port: 1223
-    - use: compute-node
-      port: 5689
-      exporter-port: 1224
-    - use: frontend
-
-  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend and 1 MinIO.
-  ci-1node:
-    - use: minio
-    # - use: etcd
-    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
-    - use: meta-node
-    - use: compute-node
-    - use: frontend
+  #########################################
+  ### Configurations used by developers ###
+  #########################################
 
   # The default configuration will start 1 compute node, 1 meta node and 1 frontend.
   default:
@@ -56,36 +27,79 @@ risedev:
     # If you want to enable tracing, uncomment the following line.
     # - use: jaeger
 
-    # If you want to use the new frontend, uncomment the following line.
-    # - use: frontend-v2
+    # If you want to use the legacy frontend, uncomment the following line.
+    # - use: frontend-legacy
+
+  legacy:
+    - use: meta-node
+    - use: compute-node
+    - use: frontend-legacy
 
   # `dev-compute-node` have the same settings as default except the the compute node will be started by user.
   dev-compute-node:
-    - use: minio
     - use: meta-node
     - use: compute-node
-      # If user-managed is true, developers should start the compute-node, and RiseDev will wait for its start.
       user-managed: true
-    - use: prometheus
-    - use: frontend
+    - use: frontend-legacy
 
-  # `dev-frontend` have the same settings as default except the the frontend node will be started by user.
+  # `dev-frontend` have the same settings as default except the the frontend-legacy node will be started by user.
   dev-frontend:
-    - use: minio
     - use: meta-node
     - use: compute-node
-    - use: frontend
-      # If user-managed is true, developers should start the frontend, and RiseDev will wait for its start.
+    - use: frontend-legacy
       user-managed: true
 
   # `dev-meta-node` have the same settings as default except the the meta node will be started by user.
   dev-meta-node:
-    - use: minio
     - use: meta-node
-      # If user-managed is true, developers should start the frontend, and RiseDev will wait for its start.
       user-managed: true
     - use: compute-node
+    - use: frontend-legacy
+
+  dev-frontend-v2:
+    - use: minio
+    - use: meta-node
+    - use: compute-node
     - use: frontend
+      user-managed: true
+
+  #################################
+  ### Configurations used on CI ###
+  #################################
+
+  ci-default:
+    - use: minio
+    # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: meta-node
+    - use: compute-node
+    - use: frontend
+
+  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend-legacy and 1 MinIO.
+  ci-3node:
+    - use: minio
+    # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: meta-node
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+    - use: frontend-legacy
+
+  # The CI-1node configuration will start 1 compute node, 1 meta node, 1 frontend-legacy and 1 MinIO.
+  ci-1node:
+    - use: minio
+    # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: meta-node
+    - use: compute-node
+    - use: frontend-legacy
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -226,23 +240,23 @@ template:
     # Minio instances used by this Prometheus instance
     provide-minio: "minio*"
 
-  frontend:
-    # Listen address of frontend
+  frontend-legacy:
+    # Listen address of frontend-legacy
     address: "127.0.0.1"
 
-    # Listen port of frontend
+    # Listen port of frontend-legacy
     port: 4567
 
     # Id of this instance
-    id: frontend
+    id: frontend-legacy
 
-    # Meta-nodes used by this frontend instance
+    # Meta-nodes used by this frontend-legacy instance
     provide-meta-node: "meta-node*"
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
-  frontend-v2:
+  frontend:
     # Listen address of frontend
     address: "127.0.0.1"
 
@@ -250,7 +264,7 @@ template:
     port: 4566
 
     # Id of this instance
-    id: frontend-v2
+    id: frontend
 
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"

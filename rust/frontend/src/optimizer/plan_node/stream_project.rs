@@ -14,13 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::{Distribution, WithSchema};
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -41,20 +39,9 @@ impl StreamProject {
         let ctx = logical.base.ctx.clone();
         let input = logical.input();
         let pk_indices = logical.base.pk_indices.to_vec();
-        let i2o = LogicalProject::i2o_col_mapping(logical.input().schema().len(), logical.exprs());
-        let distribution = match input.distribution() {
-            Distribution::HashShard(dists) => {
-                let new_dists = dists
-                    .iter()
-                    .map(|hash_col| i2o.try_map(*hash_col))
-                    .collect::<Option<Vec<_>>>();
-                match new_dists {
-                    Some(new_dists) => Distribution::HashShard(new_dists),
-                    None => Distribution::AnyShard,
-                }
-            }
-            dist => dist.clone(),
-        };
+        let distribution = logical
+            .i2o_col_mapping()
+            .rewrite_provided_distribution(input.distribution());
         // Project executor won't change the append-only behavior of the stream, so it depends on
         // input's `append_only`.
         let base = PlanBase::new_stream(
@@ -77,11 +64,6 @@ impl PlanTreeNodeUnary for StreamProject {
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
-impl WithSchema for StreamProject {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToStreamProst for StreamProject {
     fn to_stream_prost_body(&self) -> ProstStreamNode {

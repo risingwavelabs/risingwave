@@ -52,7 +52,7 @@ impl BlockIterator {
         }
     }
 
-    /// Replace block inside iterator and reset the iterator
+    /// Replaces block inside iterator and reset the iterator
     pub fn set_block(&mut self, block: Arc<Block>) {
         self.idx = 0;
         self.perv_overlap = 0;
@@ -61,7 +61,7 @@ impl BlockIterator {
         self.block = block;
     }
 
-    /// Update the internal state of the iterator to use the value and key of a given index.
+    /// Updates the internal state of the iterator to use the value and key of a given index.
     ///
     /// If the index is not inside the entries, the function will not fetch the value, and will
     /// return false.
@@ -111,12 +111,12 @@ impl BlockIterator {
         lo
     }
 
-    /// Seek to the first entry that is equal or greater than key.
+    /// Seeks to the first entry that is equal or greater than key.
     pub fn seek(&mut self, key: &[u8]) {
         self.seek_from(key, SeekPos::Origin);
     }
 
-    /// Seek to the first entry that is equal or greater than key.
+    /// Seeks to the first entry that is equal or greater than key.
     pub fn seek_from(&mut self, key: &[u8], whence: SeekPos) {
         let start_index = match whence {
             SeekPos::Origin => 0,
@@ -131,12 +131,12 @@ impl BlockIterator {
         self.set_idx(found_entry_idx as isize);
     }
 
-    /// Seek to the first entry that is equal or less than key.
+    /// Seeks to the first entry that is equal or less than key.
     pub fn seek_le(&mut self, key: &[u8]) {
         self.seek_le_from(key, SeekPos::Origin);
     }
 
-    /// Seek to the first entry that is equal or less than key.
+    /// Seeks to the first entry that is equal or less than key.
     pub fn seek_le_from(&mut self, key: &[u8], whence: SeekPos) {
         let end_index = match whence {
             SeekPos::Origin => self.block.len(),
@@ -162,7 +162,7 @@ impl BlockIterator {
         self.set_idx(self.block.len() as isize - 1);
     }
 
-    /// Return the key and value of the previous operation
+    /// Returns the key and value of the previous operation
     pub fn data(&self) -> Option<(&[u8], &[u8])> {
         if self.is_valid() {
             Some((&self.key[..], &self.val[..]))
@@ -181,22 +181,22 @@ impl BlockIterator {
         &self.val[..]
     }
 
-    /// Check whether the iterator is at the last position
+    /// Checks whether the iterator is at the last position
     pub fn is_last(&self) -> bool {
         self.idx >= 0 && self.idx == (self.block.len() - 1) as isize
     }
-    /// Check whether the iterator is at a valid position
+    /// Checks whether the iterator is at a valid position
     pub fn is_valid(&self) -> bool {
         self.idx >= 0 && self.idx < self.block.len() as isize
     }
 
-    /// Move to the next position
+    /// Moves to the next position
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> bool {
         self.set_idx(self.idx + 1)
     }
 
-    /// Move to the previous position
+    /// Moves to the previous position
     pub fn prev(&mut self) -> bool {
         self.set_idx(self.idx - 1)
     }

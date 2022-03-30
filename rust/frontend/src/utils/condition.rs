@@ -15,12 +15,12 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, Literal,
+    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
-use crate::optimizer::plan_node::CollectInputRef;
 
 #[derive(Debug, Clone)]
 pub struct Condition {
@@ -98,6 +98,22 @@ impl Condition {
         }
     }
 
+    /// Convert condition to an expression. If always true, return `None`.
+    pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
+        let mut iter = self.conjunctions.iter();
+        if let Some(e) = iter.next() {
+            let mut ret = e.clone();
+            for expr in iter {
+                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
+                    .unwrap()
+                    .into();
+            }
+            Some(ret)
+        } else {
+            None
+        }
+    }
+
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
@@ -115,23 +131,63 @@ impl Condition {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
-        let (mut left, mut right, mut others) = (vec![], vec![], vec![]);
-        self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, left_col_num + right_col_num);
+        self.group_by::<_, 3>(|expr| {
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
             if input_bits.is_subset(&left_bit_map) {
-                left.push(expr)
+                0
             } else if input_bits.is_subset(&right_bit_map) {
-                right.push(expr)
+                1
             } else {
+                2
+            }
+        })
+        .into_iter()
+        .next_tuple()
+        .unwrap()
+    }
+
+    #[must_use]
+    /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
+    /// columns from other conditions.
+    ///
+    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    ///
+    /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
+    pub fn split_eq_keys(
+        self,
+        left_col_num: usize,
+        right_col_num: usize,
+    ) -> (Vec<(InputRef, InputRef)>, Self) {
+        let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
+        let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
+
+        let (mut eq_keys, mut others) = (vec![], vec![]);
+        self.conjunctions.into_iter().for_each(|expr| {
+            let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
+            if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                 others.push(expr)
+            } else {
+                let mut is_eq_cond = false;
+                if let ExprImpl::FunctionCall(function_call) = expr.clone()
+                    && function_call.get_expr_type() == ExprType::Equal
+                    && let (_, ExprImpl::InputRef(x), ExprImpl::InputRef(y)) =
+                            function_call.decompose_as_binary()
+                    {
+                        is_eq_cond = true;
+                        if x.index() < y.index() {
+                            eq_keys.push((*x, *y));
+                        } else {
+                            eq_keys.push((*y, *x));
+                        }
+                    }
+                if !is_eq_cond {
+                    others.push(expr)
+                }
             }
         });
 
         (
-            Condition { conjunctions: left },
-            Condition {
-                conjunctions: right,
-            },
+            eq_keys,
             Condition {
                 conjunctions: others,
             },
@@ -142,24 +198,43 @@ impl Condition {
     /// Split the condition expressions into 2 groups: those referencing `columns` and others which
     /// are disjoint with columns.
     pub fn split_disjoint(self, columns: &FixedBitSet) -> (Self, Self) {
-        let (mut referencing, mut disjoint) = (vec![], vec![]);
-        self.conjunctions.into_iter().for_each(|expr| {
-            let input_bits = CollectInputRef::collect(&expr, columns.len());
+        self.group_by::<_, 2>(|expr| {
+            let input_bits = expr.collect_input_refs(columns.len());
             if input_bits.is_disjoint(columns) {
-                disjoint.push(expr)
+                1
             } else {
-                referencing.push(expr)
+                0
             }
-        });
+        })
+        .into_iter()
+        .next_tuple()
+        .unwrap()
+    }
 
-        (
-            Condition {
-                conjunctions: referencing,
-            },
-            Condition {
-                conjunctions: disjoint,
-            },
-        )
+    #[must_use]
+    /// Split the condition expressions into `N` groups.
+    /// An expression `expr` is in the `i`-th group if `f(expr)==i`.
+    ///
+    /// # Panics
+    /// Panics if `f(expr)>=N`.
+    pub fn group_by<F, const N: usize>(self, f: F) -> [Self; N]
+    where
+        F: Fn(&ExprImpl) -> usize,
+    {
+        const EMPTY: Vec<ExprImpl> = vec![];
+        let mut groups = [EMPTY; N];
+        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
+            // i-th group
+            let i = f(expr);
+            assert!(i < N);
+            i
+        }) {
+            groups[key].extend(group);
+        }
+
+        groups.map(|group| Condition {
+            conjunctions: group,
+        })
     }
 
     #[must_use]
