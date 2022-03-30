@@ -13,14 +13,18 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
+use std::cmp;
 use std::collections::btree_map::BTreeMap;
 use std::ops::DerefMut;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
+use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio_retry::strategy::jitter;
 
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
@@ -217,19 +221,45 @@ impl LocalVersionManager {
         local_version_manager: Weak<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) {
-        let mut min_interval = tokio::time::interval(Duration::from_millis(100));
+        let max_retry_interval = Duration::from_secs(10);
+        let min_execute_interval = Duration::from_millis(100);
+        let get_backoff_strategy = || {
+            tokio_retry::strategy::ExponentialBackoff::from_millis(10)
+                .max_delay(max_retry_interval)
+                .map(jitter)
+        };
+        let mut retry_backoff = get_backoff_strategy();
+        let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
         loop {
-            min_interval.tick().await;
-            if let Some(local_version_manager) = local_version_manager.upgrade() {
-                let last_pinned = match local_version_manager.current_version.read().as_ref() {
-                    None => INVALID_VERSION_ID,
-                    Some(v) => v.version.id,
-                };
-                if let Ok(version) = hummock_meta_client.pin_version(last_pinned).await {
-                    local_version_manager.try_set_version(version);
+            min_execute_interval_tick.tick().await;
+            let local_version_manager = match local_version_manager.upgrade() {
+                None => {
+                    tracing::info!("Shutdown hummock pin worker");
+                    return;
                 }
-            } else {
-                return;
+                Some(local_version_manager) => local_version_manager,
+            };
+            let last_pinned = match local_version_manager.current_version.read().as_ref() {
+                None => INVALID_VERSION_ID,
+                Some(v) => v.version.id,
+            };
+            match hummock_meta_client.pin_version(last_pinned).await {
+                Ok(version) => {
+                    local_version_manager.try_set_version(version);
+                    retry_backoff = get_backoff_strategy();
+                }
+                Err(err) => {
+                    let retry_after = cmp::max(
+                        retry_backoff.next().unwrap_or(max_retry_interval),
+                        min_execute_interval,
+                    );
+                    tracing::warn!(
+                        "Failed to pin version {}. Will retry after about {} milliseconds",
+                        err,
+                        retry_after.as_millis()
+                    );
+                    tokio::time::sleep(retry_after).await;
+                }
             }
         }
     }
@@ -240,23 +270,68 @@ impl LocalVersionManager {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         shared_buffer_manager: Arc<SharedBufferManager>,
     ) {
+        let min_execute_interval = Duration::from_millis(1000);
+        let max_retry_interval = Duration::from_secs(10);
+        let get_backoff_strategy = || {
+            tokio_retry::strategy::ExponentialBackoff::from_millis(10)
+                .max_delay(max_retry_interval)
+                .map(jitter)
+        };
+        let mut retry_backoff = get_backoff_strategy();
+        let mut min_execute_interval_tick = tokio::time::interval(min_execute_interval);
+        let mut versions_to_unpin = vec![];
+        // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
-            match rx.recv().await {
-                None => {
-                    return;
-                }
-                Some(version) => {
-                    // TODO: #93 retry instead of unwrap
-                    hummock_meta_client
-                        .unpin_version(&[version.id])
-                        .await
-                        .unwrap();
-                    if let Some(local_version_manager) = local_version_manager.upgrade() {
-                        local_version_manager.unref_committed_epoch(
-                            version.max_committed_epoch,
-                            shared_buffer_manager.borrow(),
-                        )
+            min_execute_interval_tick.tick().await;
+            // 1. Collect new versions to unpin.
+            'collect: loop {
+                match rx.try_recv() {
+                    Ok(version) => {
+                        versions_to_unpin.push(version);
                     }
+                    Err(err) => {
+                        match err {
+                            TryRecvError::Empty => {}
+                            TryRecvError::Disconnected => {
+                                tracing::info!("Shutdown hummock unpin worker");
+                                return;
+                            }
+                        }
+                        break 'collect;
+                    }
+                }
+            }
+            if versions_to_unpin.is_empty() {
+                continue;
+            }
+            // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
+            match hummock_meta_client
+                .unpin_version(&versions_to_unpin.iter().map(|v| v.id).collect_vec())
+                .await
+            {
+                Ok(_) => {
+                    if let Some(local_version_manager) = local_version_manager.upgrade() {
+                        for version in &versions_to_unpin {
+                            local_version_manager.unref_committed_epoch(
+                                version.max_committed_epoch,
+                                shared_buffer_manager.borrow(),
+                            )
+                        }
+                    }
+                    versions_to_unpin.clear();
+                    retry_backoff = get_backoff_strategy();
+                }
+                Err(err) => {
+                    let retry_after = cmp::max(
+                        retry_backoff.next().unwrap_or(max_retry_interval),
+                        min_execute_interval,
+                    );
+                    tracing::warn!(
+                        "Failed to unpin version {}. Will retry after about {} milliseconds",
+                        err,
+                        retry_after.as_millis()
+                    );
+                    tokio::time::sleep(retry_after).await;
                 }
             }
         }
