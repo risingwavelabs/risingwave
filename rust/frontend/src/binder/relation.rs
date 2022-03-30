@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
@@ -21,11 +22,12 @@ use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
+    Expr as ExprAst, Function, Ident, JoinConstraint, JoinOperator, ObjectName, Query, TableFactor,
+    TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
-use super::{BoundQuery, UNNAMED_SUBQUERY};
+use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
@@ -37,6 +39,7 @@ pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    WindowTableFunction(Box<BoundWindowTableFunction>),
 }
 
 #[derive(Debug)]
@@ -133,11 +136,13 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, .. } => {
-                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
-            }
+            TableFactor::Table {
+                name, alias: None, ..
+            } => Ok(Relation::BaseTable(Box::new(self.bind_table(name)?))),
             TableFactor::Derived {
-                lateral, subquery, ..
+                lateral,
+                subquery,
+                alias: None,
             } => {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
@@ -145,6 +150,32 @@ impl Binder {
                     Ok(Relation::Subquery(Box::new(
                         self.bind_subquery_relation(*subquery)?,
                     )))
+                }
+            }
+            TableFactor::TableFunction {
+                expr:
+                    ExprAst::Function(Function {
+                        name,
+                        args,
+                        over: None,
+                        distinct: false,
+                    }),
+                alias: None,
+            } => {
+                let mut name = name.0.into_iter();
+                match (name.next(), name.next()) {
+                    (Some(Ident { value: fn_name, .. }), None) => {
+                        let fn_name = fn_name.to_lowercase();
+                        let Ok(kind) = WindowTableFunctionKind::from_str(&fn_name) else {
+                            // TODO: handle normal table function here.
+                            return Err(ErrorCode::NotImplementedError(format!("unknown table function {:?}", fn_name)).into());
+                        };
+                        self.bind_window_table_function(kind, args)
+                            .map(|t| Relation::WindowTableFunction(Box::new(t)))
+                    }
+                    _ => Err(
+                        ErrorCode::NotImplementedError(format!("unknown table function")).into(),
+                    ),
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(

@@ -94,7 +94,10 @@ impl Binder {
         Ok(())
     }
 
-    fn bind_function_expr_arg(&mut self, arg_expr: FunctionArgExpr) -> Result<Vec<ExprImpl>> {
+    pub(in crate::binder) fn bind_function_expr_arg(
+        &mut self,
+        arg_expr: FunctionArgExpr,
+    ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
@@ -102,7 +105,10 @@ impl Binder {
         }
     }
 
-    fn bind_function_arg(&mut self, arg: FunctionArg) -> Result<Vec<ExprImpl>> {
+    pub(in crate::binder) fn bind_function_arg(
+        &mut self,
+        arg: FunctionArg,
+    ) -> Result<Vec<ExprImpl>> {
         match arg {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
             FunctionArg::Named { .. } => todo!(),
