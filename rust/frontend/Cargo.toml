@@ -32,6 +32,7 @@ risingwave_source = { path = "../source" }
 risingwave_sqlparser = { path = "../sqlparser" }
 serde_json = "1"
 smallvec = { version = "1.6.1", features = ["serde"] }
+tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = [
     "rt",
@@ -44,7 +45,6 @@ tokio = { version = "1", features = [
 ] }
 tonic = "0.6"
 tracing = { version = "0.1" }
-tempfile = "3"
 uuid = "0.8"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
