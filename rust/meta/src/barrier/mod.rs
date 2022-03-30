@@ -381,6 +381,8 @@ where
         let (collect_tx, collect_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
 
+        let is_create_mview = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
@@ -391,9 +393,12 @@ where
         )
         .await?;
 
-        // Schedule a checkpoint immediately.
-        self.do_schedule(Command::checkpoint(), Notifier::default())
-            .await?;
+        // TODO: review this workaround
+        if is_create_mview {
+            // Insert a flush immediately.
+            // For speed up the creation of MVs with a small amount of data.
+            self.wait_for_next_barrier_to_collect().await?;
+        }
 
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
         finish_rx.await.unwrap(); // Wait for this command to be finished.
