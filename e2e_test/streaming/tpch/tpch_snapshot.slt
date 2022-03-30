@@ -9,13 +9,7 @@ include ../../tpch/insert_partsupp.slt.part
 include ../../tpch/insert_region.slt.part
 include ../../tpch/insert_supplier.slt.part
 
-statement ok
-flush;
-
 include ./create_views.slt.part
-
-statement ok
-flush;
 
 include ./q1.slt.part
 include ./q2.slt.part

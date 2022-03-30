@@ -2,9 +2,6 @@ include ../../tpch/create_tables.slt.part
 
 include ./create_views.slt.part
 
-statement ok
-flush;
-
 include ../../tpch/insert_customer.slt.part
 include ../../tpch/insert_lineitem.slt.part
 include ../../tpch/insert_nation.slt.part
