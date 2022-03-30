@@ -17,6 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::{HummockStateStoreIter, HummockStorage, StateStore};
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
@@ -31,15 +32,15 @@ async fn test_basic() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = Arc::new(default_config_for_test());
-
+    let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+        MockHummockMetaService::new(),
+    )));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
         local_version_manager,
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
+        meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
@@ -165,6 +166,20 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
+    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    meta_client.commit_epoch(epoch1).await.unwrap();
+    hummock_storage.wait_epoch(epoch1).await.unwrap();
+    let value = hummock_storage
+        .get(&Bytes::from("bb"), epoch2)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value.to_bytes(), Bytes::from("222"));
+    let value = hummock_storage
+        .get(&Bytes::from("dd"), epoch2)
+        .await
+        .unwrap();
+    assert!(value.is_none());
 }
 
 async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
