@@ -15,7 +15,6 @@
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Future;
 use risingwave_common::error::Result;
@@ -228,24 +227,23 @@ pub struct MonitoredStateStoreIter<I> {
     stats: Arc<StateStoreMetrics>,
 }
 
-#[async_trait]
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
 where
     I: StateStoreIter<Item = (Bytes, StorageValue)>,
 {
-    type Item = I::Item;
+    type Item = (Bytes, StorageValue);
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>> where Self: 'a;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            let pair = self.inner.next().await?;
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let timer = self.stats.iter_next_latency.start_timer();
-        let pair = self.inner.next().await?;
-        timer.observe_duration();
+            if let Some((key, value)) = pair.as_ref() {
+                self.stats
+                    .iter_next_size
+                    .observe((key.len() + value.len()) as _);
+            }
 
-        if let Some((key, value)) = pair.as_ref() {
-            self.stats
-                .iter_next_size
-                .observe((key.len() + value.len()) as _);
+            Ok(pair)
         }
-
-        Ok(pair)
     }
 }

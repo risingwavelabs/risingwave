@@ -138,7 +138,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
 
@@ -171,7 +171,7 @@ jobs:
       - name: e2e test rust frontend
         timeout-minutes: 1
         run: |
-          ~/cargo-make/makers ci-start ci-v2
+          ~/cargo-make/makers ci-start ci-default
           sqllogictest -p 4566 -d dev './e2e_test/v2/*.slt'
 
       - name: Kill cluster

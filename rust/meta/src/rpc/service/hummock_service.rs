@@ -78,7 +78,7 @@ where
         let req = request.into_inner();
         let result = self
             .hummock_manager
-            .unpin_version(req.context_id, req.pinned_version_id)
+            .unpin_version(req.context_id, req.pinned_version_ids)
             .await;
         match result {
             Ok(_) => Ok(Response::new(UnpinVersionResponse { status: None })),
@@ -114,10 +114,7 @@ where
                 status: None,
             })),
             Some(compact_task) => {
-                let result = self
-                    .hummock_manager
-                    .report_compact_task(compact_task, req.task_result)
-                    .await;
+                let result = self.hummock_manager.report_compact_task(compact_task).await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
                         status: None,
@@ -151,14 +148,12 @@ where
         request: Request<UnpinSnapshotRequest>,
     ) -> Result<Response<UnpinSnapshotResponse>, Status> {
         let req = request.into_inner();
-        if let Some(snapshot) = req.snapshot {
-            if let Err(e) = self
-                .hummock_manager
-                .unpin_snapshot(req.context_id, snapshot)
-                .await
-            {
-                return Err(e.to_grpc_status());
-            }
+        if let Err(e) = self
+            .hummock_manager
+            .unpin_snapshot(req.context_id, req.snapshots)
+            .await
+        {
+            return Err(e.to_grpc_status());
         }
         Ok(Response::new(UnpinSnapshotResponse { status: None }))
     }

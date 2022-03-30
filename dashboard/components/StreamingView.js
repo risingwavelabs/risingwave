@@ -400,7 +400,7 @@ export default function StreamingView(props) {
             <Autocomplete
               isOptionEqualToValue={(option, value) => { return option.tableId === value.tableId }}
               disablePortal
-              options={mvList.map(mv => { return { label: mv[1].tableName, tableId: mv[0] } }) || []}
+              options={mvList.map(mv => { return { label: mv.name, tableId: mv.id } }) || []}
               onChange={onSelectMvChange}
               renderInput={(param) => <TextField {...param} label="Materialized View" />}
             />

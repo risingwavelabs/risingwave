@@ -20,7 +20,7 @@ pub(crate) mod common;
 #[clap(author, version, about, long_about = None)]
 #[clap(propagate_version = true)]
 #[clap(infer_subcommands = true)]
-struct Cli {
+pub struct CliOpts {
     #[clap(subcommand)]
     command: Commands,
 }
@@ -41,10 +41,8 @@ enum HummockCommands {
     ListKv,
 }
 
-pub async fn start() {
-    let cli = Cli::parse();
-
-    match &cli.command {
+pub async fn start(opts: CliOpts) {
+    match &opts.command {
         Commands::Hummock(HummockCommands::ListVersion) => {
             cmd_impl::hummock::list_version().await.unwrap()
         }
