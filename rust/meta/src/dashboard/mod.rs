@@ -47,8 +47,9 @@ pub type Service<S> = Arc<DashboardService<S>>;
 
 mod handlers {
     use axum::Json;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::{ActorLocation, Table};
+    use risingwave_pb::meta::ActorLocation;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
@@ -103,8 +104,7 @@ mod handlers {
             .await
             .map_err(err)?
             .iter()
-            .filter(|t| t.is_materialized_view())
-            .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
+            .map(|mv| (mv.id as TableId, mv.clone()))
             .collect::<Vec<_>>();
         Ok(Json(materialized_views))
     }
