@@ -109,7 +109,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
@@ -199,7 +199,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
@@ -632,7 +632,7 @@ jobs:
           wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.2/sqllogictest-linux-amd64.tar.gz
+          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
