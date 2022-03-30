@@ -123,7 +123,7 @@ impl ObserverManager {
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Some(Info::TableV2(table)) => match resp.operation() {
-                Operation::Add => catalog_guard.create_table(&table),
+                Operation::Add => catalog_guard.create_table(table),
                 Operation::Delete => {
                     catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
                 }
@@ -158,9 +158,10 @@ impl ObserverManager {
     /// update frontend's data. `start` use `mut self` as parameter.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
         let first_resp = self.rx.next().await?.ok_or_else(|| {
-            ErrorCode::InternalError(format!(
+            ErrorCode::InternalError(
                 "ObserverManager start failed, Stream of notification terminated at the start."
-            ))
+                    .to_string(),
+            )
         })?;
         self.handle_first_notification(first_resp)?;
         let handle = tokio::spawn(async move {
