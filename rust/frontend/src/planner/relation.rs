@@ -42,8 +42,7 @@ impl Planner {
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {
         let left = self.plan_relation(join.left)?;
         let right = self.plan_relation(join.right)?;
-        // TODO: Support more join types.
-        let join_type = risingwave_pb::plan::JoinType::Inner;
+        let join_type = join.join_type;
         let on_clause = join.cond;
         Ok(LogicalJoin::create(left, right, join_type, on_clause))
     }

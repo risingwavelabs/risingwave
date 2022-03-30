@@ -15,12 +15,11 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{ColumnOrder, OrderByNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithOrder, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
@@ -55,12 +54,6 @@ impl PlanTreeNodeUnary for BatchSort {
     }
 }
 impl_plan_tree_node_for_unary! {BatchSort}
-
-impl WithSchema for BatchSort {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
 
 impl ToDistributedBatch for BatchSort {
     fn to_distributed(&self) -> PlanRef {

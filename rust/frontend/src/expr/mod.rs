@@ -36,6 +36,8 @@ mod expr_visitor;
 pub use expr_visitor::*;
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
+use paste::paste;
+
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
@@ -83,43 +85,60 @@ impl ExprImpl {
         visitor.visit_expr(self);
         visitor.collect()
     }
-
-    pub fn has_agg_call(&self) -> bool {
-        struct HasAggCall {
-            has_agg_call: bool,
-        }
-
-        impl ExprVisitor for HasAggCall {
-            fn visit_agg_call(&mut self, _agg_call: &AggCall) {
-                self.has_agg_call = true;
-            }
-        }
-
-        let mut visitor = HasAggCall {
-            has_agg_call: false,
-        };
-        visitor.visit_expr(self);
-        visitor.has_agg_call
-    }
-
-    pub fn has_subquery(&self) -> bool {
-        struct HasSubquery {
-            has_subquery: bool,
-        }
-
-        impl ExprVisitor for HasSubquery {
-            fn visit_subquery(&mut self, _subquery: &Subquery) {
-                self.has_subquery = true;
-            }
-        }
-
-        let mut visitor = HasSubquery {
-            has_subquery: false,
-        };
-        visitor.visit_expr(self);
-        visitor.has_subquery
-    }
 }
+
+/// Implement downcast functions, e.g., `as_subquery(self) -> Option<Subquery>`
+macro_rules! impl_as_variant {
+    ( $($variant:ident),* ) => {
+        paste! {
+            impl ExprImpl {
+                $(
+                    pub fn [<as_ $variant:snake>](self) -> Option<$variant> {
+                        if let ExprImpl::$variant(expr) = self {
+                            Some(*expr)
+                        } else {
+                            None
+                        }
+                    }
+                )*
+            }
+        }
+    };
+}
+
+impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+
+/// Implement helper functions which recursively checks whether an variant is included in the
+/// expression. e.g., `has_subquery(&self) -> bool`
+macro_rules! impl_has_variant {
+    ( $($variant:ident),* ) => {
+        paste! {
+            impl ExprImpl {
+                $(
+                    pub fn [<has_ $variant:snake>](&self) -> bool {
+                        struct Has {
+                            has: bool,
+                        }
+
+                        impl ExprVisitor for Has {
+                            fn [<visit_ $variant:snake>](&mut self, _: &$variant) {
+                                self.has = true;
+                            }
+                        }
+
+                        let mut visitor = Has {
+                            has: false,
+                        };
+                        visitor.visit_expr(self);
+                        visitor.has
+                    }
+                )*
+            }
+        }
+    };
+}
+
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
 
 impl Expr for ExprImpl {
     fn return_type(&self) -> DataType {

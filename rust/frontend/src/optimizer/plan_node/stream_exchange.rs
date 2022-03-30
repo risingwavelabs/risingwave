@@ -14,12 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
 use super::{PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::optimizer::property::{Distribution, WithDistribution, WithSchema};
+use crate::optimizer::property::Distribution;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
@@ -60,12 +59,6 @@ impl PlanTreeNodeUnary for StreamExchange {
     }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
-
-impl WithSchema for StreamExchange {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
 
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {

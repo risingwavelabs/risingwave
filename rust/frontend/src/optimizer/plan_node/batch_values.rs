@@ -14,14 +14,13 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::values_node::ExprTuple;
 use risingwave_pb::plan::ValuesNode;
 
 use super::{LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst, ToDistributedBatch};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchValues {
@@ -55,12 +54,6 @@ impl fmt::Display for BatchValues {
         f.debug_struct("BatchValues")
             .field("rows", &self.logical.rows())
             .finish()
-    }
-}
-
-impl WithSchema for BatchValues {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
     }
 }
 

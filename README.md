@@ -13,8 +13,7 @@ git clone https://github.com/singularity-data/risingwave.git
 ## Environment
 
 * OS: macOS, Linux
-* Java 11
-* Rust
+* Rust toolchain
 * CMake
 * Protocol Buffers
 * OpenSSL
@@ -23,7 +22,7 @@ git clone https://github.com/singularity-data/risingwave.git
 To install components in macOS, run:
 
 ```shell
-brew install java11 postgresql cmake protobuf openssl tmux
+brew install postgresql cmake protobuf openssl tmux
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -31,7 +30,6 @@ To install components in Debian-based linux systems, run:
 ```shell
 sudo apt update
 sudo apt upgrade
-sudo apt install openjdk-11-jdk
 sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
 sudo apt install postgresql-client
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -42,7 +40,7 @@ Note that we only tested our code against Java 11. So please use the specific ve
 ## Development
 
 You should have already seen multiple folders in our repo:
-- The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
+- The `java` folder contains the system's legacy frontend code. The frontend includes parser, binder, planner,
 optimizer, and other components. We use Calcite to serve as our query optimizer.
 - The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
 engine, storage engine and meta service.
@@ -92,7 +90,7 @@ And you can configure components for RiseDev.
 For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
 
 ```shell
-./risedev p
+./risedev p # shortcut for ./risedev playground
 ```
 
 For more information, refer to `README.md` under `rust/risedevtool`.
@@ -123,7 +121,7 @@ the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
 The Rust codebase is documented with docstring, and you could view the documentation by:
 
 ```shell
-make rust_doc
+./risedev docs
 cd rust/target/doc
 open risingwave/index.html
 ```

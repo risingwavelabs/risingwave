@@ -64,7 +64,7 @@ type SchemaId = u32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
 pub struct MetaClient {
-    worker_id_ref: Option<u32>,
+    worker_id: Option<u32>,
     pub inner: GrpcMetaClient,
 }
 
@@ -73,16 +73,16 @@ impl MetaClient {
     pub async fn new(meta_addr: &str) -> Result<Self> {
         Ok(Self {
             inner: GrpcMetaClient::new(meta_addr).await?,
-            worker_id_ref: None,
+            worker_id: None,
         })
     }
 
     pub fn set_worker_id(&mut self, worker_id: u32) {
-        self.worker_id_ref = Some(worker_id);
+        self.worker_id = Some(worker_id);
     }
 
     pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.expect("worker node id is not set.")
+        self.worker_id.expect("worker node id is not set.")
     }
 
     /// Subscribe to notification from meta.

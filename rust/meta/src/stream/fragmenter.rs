@@ -42,7 +42,7 @@ pub struct StreamFragmenter<S> {
     stream_graph: StreamGraphBuilder<S>,
 
     /// id generator, used to generate actor id.
-    id_gen_manager_ref: IdGeneratorManagerRef<S>,
+    id_gen_manager: IdGeneratorManagerRef<S>,
     /// hash mapping, used for hash dispatcher
     hash_mapping: Vec<ParallelUnitId>,
 }
@@ -52,14 +52,14 @@ where
     S: MetaStore,
 {
     pub fn new(
-        id_gen_manager_ref: IdGeneratorManagerRef<S>,
-        fragment_manager_ref: FragmentManagerRef<S>,
+        id_gen_manager: IdGeneratorManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
         hash_mapping: Vec<ParallelUnitId>,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(None),
-            stream_graph: StreamGraphBuilder::new(fragment_manager_ref),
-            id_gen_manager_ref,
+            stream_graph: StreamGraphBuilder::new(fragment_manager),
+            id_gen_manager,
             hash_mapping,
         }
     }
@@ -171,7 +171,7 @@ where
     /// Create a new stream fragment with given node with generating a fragment id.
     async fn new_stream_fragment(&self, node: StreamNode) -> Result<StreamFragment> {
         let fragment_id = self
-            .id_gen_manager_ref
+            .id_gen_manager
             .generate::<{ IdCategory::Fragment }>()
             .await? as _;
         let fragment = StreamFragment::new(fragment_id, Arc::new(node));
@@ -182,7 +182,7 @@ where
     /// Generate actor id from id generator.
     async fn gen_actor_ids(&self, parallel_degree: u32) -> Result<Range<ActorId>> {
         let start_actor_id = self
-            .id_gen_manager_ref
+            .id_gen_manager
             .generate_interval::<{ IdCategory::Actor }>(parallel_degree as i32)
             .await? as _;
 

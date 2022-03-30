@@ -29,7 +29,7 @@ use super::managed_state::join::*;
 use super::{Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::common::StreamChunkBuilder;
 use crate::executor::ExecutorBuilder;
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
@@ -125,7 +125,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
         stream.create_hash_join_node(params, node, store)

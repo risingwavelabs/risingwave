@@ -31,7 +31,7 @@ use super::{
     StreamingAggStateImpl,
 };
 use crate::executor::ExecutorBuilder;
-use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 #[derive(Debug)]
 pub struct LocalSimpleAggExecutor {
     /// Schema of the executor.
@@ -73,7 +73,7 @@ impl ExecutorBuilder for LocalSimpleAggExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::LocalSimpleAggNode)?;
         let agg_calls: Vec<AggCall> = node
@@ -183,7 +183,9 @@ impl AggExecutor for LocalSimpleAggExecutor {
             .iter_mut()
             .zip_eq(builders.iter_mut())
             .try_for_each(|(state, builder)| -> Result<_> {
-                builder.append_datum(&state.get_output()?)?;
+                let data = state.get_output()?;
+                trace!("append_datum: {:?}", data);
+                builder.append_datum(&data)?;
                 state.reset();
                 Ok(())
             })?;

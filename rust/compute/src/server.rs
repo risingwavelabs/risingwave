@@ -34,7 +34,7 @@ use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::{StreamEnvironment, StreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tower::make::Shared;
@@ -54,6 +54,14 @@ fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     ComputeNodeConfig::init(config_path).unwrap()
 }
 
+fn get_compile_mode() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
+}
+
 /// Bootstraps the compute-node.
 pub async fn compute_node_serve(
     listen_addr: SocketAddr,
@@ -62,7 +70,11 @@ pub async fn compute_node_serve(
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     // Load the configuration.
     let config = load_config(&opts);
-    info!("Starting compute node with config {:?}", config);
+    info!(
+        "Starting compute node with config {:?} in {} mode",
+        config,
+        get_compile_mode()
+    );
     let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
@@ -102,17 +114,17 @@ pub async fn compute_node_serve(
     // A hummock compactor is deployed along with compute node for now.
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
         sub_tasks.push(Compactor::start_compactor(
-            hummock.inner().storage.options().clone(),
-            hummock.inner().storage.local_version_manager().clone(),
-            hummock.inner().storage.hummock_meta_client().clone(),
-            hummock.inner().storage.sstable_store(),
+            hummock.inner().options().clone(),
+            hummock.inner().local_version_manager().clone(),
+            hummock.inner().hummock_meta_client().clone(),
+            hummock.inner().sstable_store(),
             state_store_metrics,
         ));
     }
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(
+    let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),

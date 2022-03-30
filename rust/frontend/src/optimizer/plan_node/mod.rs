@@ -33,12 +33,14 @@ use std::rc::Rc;
 
 use downcast_rs::{impl_downcast, Downcast};
 use dyn_clone::{self, DynClone};
+use fixedbitset::FixedBitSet;
 use paste::paste;
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::plan::PlanNode as BatchPlanProst;
 use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
-use super::property::{WithConvention, WithDistribution, WithOrder, WithSchema};
+use super::property::{Distribution, Order};
 
 /// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
 /// `dyn PlanNode`
@@ -50,12 +52,6 @@ pub trait PlanNode:
     + Debug
     + Display
     + Downcast
-    + WithConvention
-    + WithOrder
-    + WithDistribution
-    + WithSchema
-    + WithContext
-    + WithId
     + ColPrunable
     + ToBatch
     + ToStream
@@ -64,8 +60,17 @@ pub trait PlanNode:
 {
     fn node_type(&self) -> PlanNodeType;
     fn plan_base(&self) -> &PlanBase;
-    fn append_only(&self) -> bool {
-        self.plan_base().append_only
+    fn convention(&self) -> Convention;
+
+    // TODO: find a better place declear this func
+    fn must_contain_columns(&self, required_cols: &FixedBitSet) {
+        // Having equal length also implies:
+        // required_cols.is_subset(&FixedBitSet::from_iter(0..self.schema().fields().len()))
+        assert_eq!(
+            required_cols.len(),
+            self.plan_base().schema.fields().len(),
+            "required cols capacity != columns available",
+        );
     }
 }
 
@@ -74,6 +79,13 @@ pub type PlanRef = Rc<dyn PlanNode>;
 
 #[derive(Clone, Debug, Copy)]
 pub struct PlanNodeId(pub i32);
+
+#[derive(Debug, PartialEq)]
+pub enum Convention {
+    Logical,
+    Batch,
+    Stream,
+}
 
 impl dyn PlanNode {
     /// Write explain the whole plan tree.
@@ -93,8 +105,26 @@ impl dyn PlanNode {
         Ok(output)
     }
 
+    pub fn id(&self) -> PlanNodeId {
+        self.plan_base().id
+    }
+    pub fn ctx(&self) -> OptimizerContextRef {
+        self.plan_base().ctx.clone()
+    }
+    pub fn schema(&self) -> &Schema {
+        &self.plan_base().schema
+    }
     pub fn pk_indices(&self) -> &[usize] {
         &self.plan_base().pk_indices
+    }
+    pub fn order(&self) -> &Order {
+        &self.plan_base().order
+    }
+    pub fn distribution(&self) -> &Distribution {
+        &self.plan_base().dist
+    }
+    pub fn append_only(&self) -> bool {
+        self.plan_base().append_only
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
@@ -238,7 +268,7 @@ pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
 
-use crate::optimizer::property::{WithContext, WithId};
+use crate::session::OptimizerContextRef;
 
 /// [`for_all_plan_nodes`] includes all plan nodes. If you added a new plan node
 /// inside the project, be sure to add here and in its conventions like [`for_logical_plan_nodes`]
@@ -373,6 +403,9 @@ macro_rules! enum_plan_node_type {
                 }
                 fn plan_base(&self) -> &PlanBase {
                     &self.base
+                }
+                fn convention(&self) -> Convention {
+                    Convention::$convention
                 }
             })*
         }

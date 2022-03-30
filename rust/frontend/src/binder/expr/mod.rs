@@ -77,6 +77,21 @@ impl Binder {
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
+            Expr::TypedString { data_type, value } => Ok(ExprImpl::FunctionCall(Box::new(
+                FunctionCall::new_with_return_type(
+                    ExprType::Cast,
+                    vec![ExprImpl::Literal(Box::new(self.bind_string(value)?))],
+                    bind_data_type(&data_type)?,
+                ),
+            ))),
+            Expr::Between {
+                expr,
+                negated,
+                low,
+                high,
+            } => Ok(ExprImpl::FunctionCall(Box::new(
+                self.bind_between(*expr, negated, *low, *high)?,
+            ))),
             _ => Err(
                 ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
             ),
@@ -144,6 +159,63 @@ impl Binder {
             inputs,
             DataType::Varchar,
         ))
+    }
+
+    /// Bind `expr (not) between low and high`
+    pub(super) fn bind_between(
+        &mut self,
+        expr: Expr,
+        negated: bool,
+        low: Expr,
+        high: Expr,
+    ) -> Result<FunctionCall> {
+        let expr = self.bind_expr(expr)?;
+        let low = self.bind_expr(low)?;
+        let high = self.bind_expr(high)?;
+
+        let func_call = if negated {
+            // negated = true: expr < low or expr > high
+            FunctionCall::new_with_return_type(
+                ExprType::Or,
+                vec![
+                    FunctionCall::new_with_return_type(
+                        ExprType::LessThan,
+                        vec![expr.clone(), low],
+                        DataType::Boolean,
+                    )
+                    .into(),
+                    FunctionCall::new_with_return_type(
+                        ExprType::GreaterThan,
+                        vec![expr, high],
+                        DataType::Boolean,
+                    )
+                    .into(),
+                ],
+                DataType::Boolean,
+            )
+        } else {
+            // negated = false: expr >= low and expr <= high
+            FunctionCall::new_with_return_type(
+                ExprType::And,
+                vec![
+                    FunctionCall::new_with_return_type(
+                        ExprType::GreaterThanOrEqual,
+                        vec![expr.clone(), low],
+                        DataType::Boolean,
+                    )
+                    .into(),
+                    FunctionCall::new_with_return_type(
+                        ExprType::LessThanOrEqual,
+                        vec![expr, high],
+                        DataType::Boolean,
+                    )
+                    .into(),
+                ],
+                DataType::Boolean,
+            )
+        };
+
+        Ok(func_call)
     }
 
     pub(super) fn bind_case(

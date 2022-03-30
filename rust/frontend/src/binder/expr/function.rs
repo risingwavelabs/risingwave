@@ -101,6 +101,7 @@ impl Binder {
         match arg_expr {
             FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr(expr)?]),
             FunctionArgExpr::QualifiedWildcard(_) => todo!(),
+            FunctionArgExpr::ExprQualifiedWildcard(_, _) => todo!(),
             FunctionArgExpr::Wildcard => Ok(vec![]),
         }
     }

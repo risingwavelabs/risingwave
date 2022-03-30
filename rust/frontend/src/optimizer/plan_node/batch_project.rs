@@ -14,7 +14,6 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::expr::ExprNode;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::ProjectNode;
@@ -23,7 +22,7 @@ use super::{
     LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
 };
 use crate::expr::Expr;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows
@@ -66,12 +65,6 @@ impl PlanTreeNodeUnary for BatchProject {
 }
 
 impl_plan_tree_node_for_unary! { BatchProject }
-
-impl WithSchema for BatchProject {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToDistributedBatch for BatchProject {
     fn to_distributed(&self) -> PlanRef {

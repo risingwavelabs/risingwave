@@ -26,21 +26,18 @@ pub struct SourceManager<S>
 where
     S: MetaStore,
 {
-    meta_store_ref: Arc<S>,
-    barrier_manager_ref: BarrierManagerRef<S>,
+    meta_store: Arc<S>,
+    barrier_manager: BarrierManagerRef<S>,
 }
 
 impl<S> SourceManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        meta_store_ref: Arc<S>,
-        barrier_manager_ref: BarrierManagerRef<S>,
-    ) -> Result<Self> {
+    pub async fn new(meta_store: Arc<S>, barrier_manager: BarrierManagerRef<S>) -> Result<Self> {
         Ok(Self {
-            meta_store_ref,
-            barrier_manager_ref,
+            meta_store,
+            barrier_manager,
         })
     }
 

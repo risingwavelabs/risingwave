@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use futures::future::try_join_all;
-use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
@@ -32,8 +31,8 @@ use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
-/// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
-/// barriers to send, and may do different stuffs after the barrier is collected.
+/// [`Command`] is the action of [`GlobalBarrierManager`]. For different commands, we'll build
+/// different barriers to send, and may do different stuffs after the barrier is collected.
 #[derive(Debug, Clone)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.
@@ -167,8 +166,7 @@ where
 
                     async move {
                         let mut client = self.clients.get(node).await?;
-
-                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
+                        tracing::debug!(request_id = %request_id, actors = ?actors, "drop actors");
                         let request = DropActorsRequest {
                             request_id,
                             table_ref_id: Some(table_ref_id.to_owned()),
