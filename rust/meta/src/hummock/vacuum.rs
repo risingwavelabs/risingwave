@@ -293,7 +293,7 @@ mod tests {
             0
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await
             .unwrap();
 
