@@ -1,7 +1,7 @@
 - sql: |
     select * from t;
   create_source:
-    row_format: proto
+    row_format: protobuf
     file: |
       syntax = "proto3";
       package test;

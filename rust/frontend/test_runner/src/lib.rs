@@ -179,9 +179,14 @@ impl TestCase {
         session: Arc<SessionImpl>,
         do_check_result: bool,
     ) -> Result<Option<TestCaseResult>> {
-        let sql = "CREATE SOURCE t WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://".to_string();
         match self.create_source.clone() {
             Some(source) => {
+                let sql = format!(
+                    r#"CREATE SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+                    source.row_format
+                );
                 if let Some(content) = source.file {
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
