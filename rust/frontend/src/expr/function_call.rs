@@ -14,7 +14,7 @@
 
 use risingwave_common::types::DataType;
 
-use super::{infer_type, Expr, ExprImpl};
+use super::{infer_type, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
 
 #[derive(Clone, PartialEq)]
@@ -85,6 +85,23 @@ impl std::fmt::Debug for FunctionCall {
 
 impl FunctionCall {
     pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
+        // Rewrite NULL's type.
+        let data_type = if let Some(expr) = inputs.iter().find(|expr| !expr.is_null()) {
+            expr.return_type()
+        } else {
+            DataType::Boolean
+        };
+        let inputs: Vec<ExprImpl> = inputs
+            .into_iter()
+            .map(|expr| {
+                if expr.is_null() {
+                    ExprImpl::Literal(Box::new(Literal::new(None, data_type.clone())))
+                } else {
+                    expr
+                }
+            })
+            .collect();
+
         let return_type = infer_type(
             func_type,
             inputs.iter().map(|expr| expr.return_type()).collect(),
