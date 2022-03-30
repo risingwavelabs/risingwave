@@ -229,8 +229,11 @@ impl LocalStreamManager {
     }
 
     /// Gracefully stop actors on this worker.
-    pub async fn stop_actor(&self, actors: &[ActorId]) -> Result<()> {
-        todo!();
+    pub async fn stop_actor(&self, _actors: &[ActorId]) -> Result<()> {
+        let mut core = self.core.lock();
+        // stop all actors.
+        core.stop_all_actors()?;
+        Ok(())
     }
 
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
@@ -910,6 +913,7 @@ impl LocalStreamManagerCore {
 
     /// Gracefully stop an actor by sending a stop signal to it.
     fn stop_actor(&mut self, actor_id: ActorId) -> Result<()> {
+        debug!("stoppped actor {}", actor_id);
         let handle = self.handles.remove(&actor_id).unwrap();
         self.context.retain(|&(up_id, _)| up_id != actor_id);
         self.actor_infos.remove(&actor_id);
@@ -918,6 +922,18 @@ impl LocalStreamManagerCore {
         handle.stop_tx.send(()).ok();
 
         handle.handle.abort();
+        Ok(())
+    }
+
+    fn stop_all_actors(&mut self) -> Result<()> {
+        // copy out actor ids
+        let actor_ids: Vec<_> = self.handles.keys().cloned().collect();
+        for actor_id in actor_ids {
+            self.stop_actor(actor_id)?;
+        }
+        self.actor_infos.clear();
+        debug!("actors: {:?}" , self.actors.len());
+        debug!("actor_infos: {:?}", self.actor_infos.len());
         Ok(())
     }
 }

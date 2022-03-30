@@ -233,6 +233,12 @@ impl Executor for MergeExecutor {
         loop {
             // Convert channel receivers to futures here to do `select_all`
             let mut futures = vec![];
+            if self.active.is_empty() {
+                // FIXME: currently we can only loop forever
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
+                }
+            }
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());
             }
@@ -243,10 +249,13 @@ impl Executor for MergeExecutor {
                 self.active.push(fut.into_inner().unwrap());
             }
 
-            let message = message.expect(
-                "upstream channel closed unexpectedly, please check error in upstream executors",
-            );
+            // If message is None, some upstream channel must be closed, but we shouldn't panic here.
+            // We should continue until meta shutdown all actors on ourself.
+            if message.is_none() {
+                continue;
+            }
 
+            let message = message.unwrap();        
             match message {
                 Message::Chunk(chunk) => {
                     self.active.push(from);
@@ -280,7 +289,6 @@ impl Executor for MergeExecutor {
                 let barrier = self.next_barrier.take().unwrap();
                 return Ok(Message::Barrier(barrier));
             }
-            assert!(!self.active.is_empty())
         }
     }
 

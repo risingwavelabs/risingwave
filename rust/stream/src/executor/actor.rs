@@ -17,6 +17,7 @@ use std::sync::Arc;
 use risingwave_common::error::Result;
 use tracing_futures::Instrument;
 use tokio::sync::oneshot;
+use tokio::sync::oneshot::error::TryRecvError;
 
 use super::{Mutation, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
@@ -59,7 +60,8 @@ impl Actor {
         );
         // Drive the streaming task with an infinite loop
         loop {
-            if let _ = self.stop_rx.try_recv() {
+            if let Err(TryRecvError::Empty) = self.stop_rx.try_recv() {
+            } else {
                 break;
             }
             let message = self.consumer.next().instrument(span.clone()).await;

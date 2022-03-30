@@ -21,7 +21,7 @@ use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, ShutdownRequest,
-    UpdateActorsRequest,
+    UpdateActorsRequest, StopActorsRequest,
 };
 use uuid::Uuid;
 
@@ -199,22 +199,45 @@ where
 
     /// Kill all compute nodes and wait for them to be online again.
     async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<()> {
+        // for worker_node in info.node_map.values() {
+        //     loop {
+        //         tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
+        //         match self.env.stream_clients().get(worker_node).await {
+        //             Ok(client) => {
+        //                 if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
+        //                     self.cluster_manager
+        //                         .deactivate_worker_node(worker_node.host.clone().unwrap())
+        //                         .await?;
+        //                     break;
+        //                 }
+        //             }
+        //             Err(err) => {
+        //                 debug!("failed to get client: {}", err);
+        //                 continue;
+        //             }
+        //         }
+        //     }
+        // }
+
         for worker_node in info.node_map.values() {
-            loop {
-                tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
-                match self.env.stream_clients().get(worker_node).await {
-                    Ok(client) => {
-                        if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
+            // gracefully shutdown actors on available compute nodes, and remove malfunctioning nodes.
+            match self.env.stream_clients().get(worker_node).await {
+                Ok(client) => {
+                    match client.to_owned().stop_actors(StopActorsRequest{ request_id: String::new(), actor_ids: vec![],}).await {
+                        Ok(_) => {
+                            
+                        }
+                        Err(err) => {
+                            // this node has down, remove it from cluster manager.
+                            debug!("failed to stop actors on {:?}: {}", worker_node, err);
                             self.cluster_manager
-                                .deactivate_worker_node(worker_node.host.clone().unwrap())
-                                .await?;
-                            break;
+                            .deactivate_worker_node(worker_node.host.clone().unwrap())
+                            .await?;
                         }
                     }
-                    Err(err) => {
-                        debug!("failed to get client: {}", err);
-                        continue;
-                    }
+                }
+                Err(err) => {
+                    debug!("failed to get client: {}", err);
                 }
             }
         }
@@ -228,6 +251,7 @@ where
                 .iter()
                 .map(|worker_node| worker_node.id)
                 .collect::<HashSet<_>>();
+            debug!("all compute nodes: {:?}", all_nodes);
             if info
                 .node_map
                 .keys()
