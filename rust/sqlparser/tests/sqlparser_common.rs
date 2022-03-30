@@ -1892,7 +1892,7 @@ fn parse_literal_time() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TypedString {
-            data_type: DataType::Time,
+            data_type: DataType::Time(false),
             value: "01:23:34".into()
         },
         expr_from_projection(only(&select.projection)),

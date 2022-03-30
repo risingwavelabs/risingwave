@@ -292,7 +292,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Char(_) => DataType::Char,
         AstDataType::Varchar(_) => DataType::Varchar,
         AstDataType::Date => DataType::Date,
-        AstDataType::Time => DataType::Time,
+        AstDataType::Time(false) => DataType::Time,
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestampz,
         AstDataType::Interval => DataType::Interval,

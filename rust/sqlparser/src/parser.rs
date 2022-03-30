@@ -1952,11 +1952,11 @@ impl Parser {
                     Ok(DataType::Timestamp(with_time_zone))
                 }
                 Keyword::TIME => {
-                    // TBD: we throw away "with/without timezone" information
-                    if self.parse_keyword(Keyword::WITH) || self.parse_keyword(Keyword::WITHOUT) {
+                    let with_time_zone = self.parse_keyword(Keyword::WITH);
+                    if with_time_zone || self.parse_keyword(Keyword::WITHOUT) {
                         self.expect_keywords(&[Keyword::TIME, Keyword::ZONE])?;
                     }
-                    Ok(DataType::Time)
+                    Ok(DataType::Time(with_time_zone))
                 }
                 // Interval types can be followed by a complicated interval
                 // qualifier that we don't currently support. See
