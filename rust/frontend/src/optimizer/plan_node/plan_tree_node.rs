@@ -15,7 +15,7 @@
 use smallvec::SmallVec;
 
 use super::PlanRef;
-use crate::optimizer::property::{Distribution, Order};
+
 use crate::utils::ColIndexMapping;
 
 /// The trait [`PlanNode`](super::PlanNode) really need about tree structure and used by optimizer
