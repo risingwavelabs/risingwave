@@ -110,7 +110,7 @@ impl LocalBarrierManager {
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
-        debug!("register sender: {}", actor_id);
+        tracing::trace!(actor_id = actor_id, "register sender");
         self.senders.insert(actor_id, sender);
     }
 

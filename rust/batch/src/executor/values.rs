@@ -53,7 +53,7 @@ impl ValuesExecutor {
 #[async_trait::async_trait]
 impl Executor for ValuesExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("Values executor init");
+        trace!("Values executor init");
         Ok(())
     }
 

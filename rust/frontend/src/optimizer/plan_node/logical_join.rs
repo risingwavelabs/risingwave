@@ -19,14 +19,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
-    ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
+    ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -408,7 +408,6 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::optimizer::property::WithSchema;
     use crate::session::OptimizerContext;
 
     /// Pruning

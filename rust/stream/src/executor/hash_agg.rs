@@ -39,7 +39,7 @@ use super::{
     Executor, ExecutorState, Message, PkIndicesRef, StatefulExecutor,
 };
 use crate::executor::{agg_input_arrays, pk_input_arrays, ExecutorBuilder, PkIndices};
-use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -124,7 +124,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashAggNode)?;
         let key_indices = node

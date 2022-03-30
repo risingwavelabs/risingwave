@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
-use risingwave_storage::hummock::HummockStateStore;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::{HummockMetrics, MonitoredStateStore, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 
@@ -50,7 +50,7 @@ impl HummockServiceOpts {
         })
     }
 
-    pub async fn create_hummock_store(&self) -> Result<MonitoredStateStore<HummockStateStore>> {
+    pub async fn create_hummock_store(&self) -> Result<MonitoredStateStore<HummockStorage>> {
         let meta_client = self.meta_opts.create_meta_client().await?;
 
         // FIXME: allow specify custom config

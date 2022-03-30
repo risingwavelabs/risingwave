@@ -18,11 +18,13 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerService;
 use risingwave_pb::meta::*;
 use tonic::{Request, Response, Status};
 
-use crate::cluster::StoredClusterManagerRef;
-use crate::manager::{EpochGeneratorRef, IdGeneratorManagerRef, MetaSrvEnv};
+use crate::cluster::ClusterManagerRef;
+use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, SourceManagerRef, StreamFragmenter, StreamManagerRef};
+use crate::stream::{
+    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
+};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -31,14 +33,11 @@ pub struct StreamServiceImpl<S>
 where
     S: MetaStore,
 {
-    sm: StreamManagerRef<S>,
+    global_stream_manager: GlobalStreamManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
+    cluster_manager: ClusterManagerRef<S>,
 
-    id_gen_manager_ref: IdGeneratorManagerRef<S>,
-    fragment_manager_ref: FragmentManagerRef<S>,
-    cluster_manager: StoredClusterManagerRef<S>,
-
-    #[allow(dead_code)]
-    epoch_generator: EpochGeneratorRef,
+    env: MetaSrvEnv<S>,
 }
 
 impl<S> StreamServiceImpl<S>
@@ -46,18 +45,17 @@ where
     S: MetaStore,
 {
     pub fn new(
-        sm: StreamManagerRef<S>,
-        fragment_manager_ref: FragmentManagerRef<S>,
-        cluster_manager: StoredClusterManagerRef<S>,
-        _source_manager_ref: SourceManagerRef<S>,
+        global_stream_manager: GlobalStreamManagerRef<S>,
+        fragment_manager: FragmentManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
+        _source_manager: SourceManagerRef<S>,
         env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
-            sm,
-            fragment_manager_ref,
-            id_gen_manager_ref: env.id_gen_manager_ref(),
+            global_stream_manager,
+            fragment_manager,
             cluster_manager,
-            epoch_generator: env.epoch_generator_ref(),
+            env,
         }
     }
 }
@@ -85,8 +83,8 @@ where
         let mut ctx = CreateMaterializedViewContext::default();
 
         let mut fragmenter = StreamFragmenter::new(
-            self.id_gen_manager_ref.clone(),
-            self.fragment_manager_ref.clone(),
+            self.env.id_gen_manager_ref(),
+            self.fragment_manager.clone(),
             hash_mapping,
         );
         let graph = fragmenter
@@ -95,7 +93,11 @@ where
             .map_err(|e| e.to_grpc_status())?;
 
         let table_fragments = TableFragments::new(TableId::from(&req.table_ref_id), graph);
-        match self.sm.create_materialized_view(table_fragments, ctx).await {
+        match self
+            .global_stream_manager
+            .create_materialized_view(table_fragments, ctx)
+            .await
+        {
             Ok(()) => Ok(Response::new(CreateMaterializedViewResponse {
                 status: None,
             })),
@@ -111,7 +113,7 @@ where
         let req = request.into_inner();
 
         match self
-            .sm
+            .global_stream_manager
             .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
             .await
         {
@@ -124,7 +126,10 @@ where
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         let _req = request.into_inner();
 
-        self.sm.flush().await.map_err(|e| e.to_grpc_status())?;
+        self.global_stream_manager
+            .flush()
+            .await
+            .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(FlushResponse { status: None }))
     }
 }

@@ -20,17 +20,17 @@ use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamEnvironment, StreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mgr: Arc<StreamManager>,
+    mgr: Arc<LocalStreamManager>,
     env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: StreamEnvironment) -> Self {
+    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }
@@ -166,7 +166,7 @@ impl StreamService for StreamServiceImpl {
                     .create_table_source_v2(&id, columns)
                     .map_err(tonic_err)?;
 
-                info!("create table source, id: {}", id);
+                tracing::debug!(id = %id, "create table source");
             }
         };
 
@@ -186,7 +186,7 @@ impl StreamService for StreamServiceImpl {
             .drop_source(&id)
             .map_err(tonic_err)?;
 
-        info!("drop source, id: {}", id);
+        tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }

@@ -30,7 +30,7 @@ use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Order, WithSchema};
+use crate::optimizer::property::Order;
 
 /// Materializes a stream.
 #[derive(Debug, Clone)]
@@ -210,12 +210,6 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 }
 
 impl_plan_tree_node_for_unary! { StreamMaterialize }
-
-impl WithSchema for StreamMaterialize {
-    fn schema(&self) -> &Schema {
-        &self.base.schema
-    }
-}
 
 impl ToStreamProst for StreamMaterialize {
     fn to_stream_prost_body(&self) -> ProstStreamNode {

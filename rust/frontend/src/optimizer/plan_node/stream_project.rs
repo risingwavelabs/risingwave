@@ -14,13 +14,11 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
-use crate::optimizer::property::WithSchema;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
@@ -66,11 +64,6 @@ impl PlanTreeNodeUnary for StreamProject {
     }
 }
 impl_plan_tree_node_for_unary! {StreamProject}
-impl WithSchema for StreamProject {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToStreamProst for StreamProject {
     fn to_stream_prost_body(&self) -> ProstStreamNode {

@@ -38,7 +38,7 @@ fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
     }
 }
 
-/// This test creates stream plan protos and feed them into `StreamManager`.
+/// This test creates stream plan protos and feed them into `LocalStreamManager`.
 /// There are 5 actors in total, where:
 /// * 1 = mock source
 /// * 3 = pipe with RR dispatcher
@@ -53,7 +53,7 @@ fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
 /// ```
 #[tokio::test]
 async fn test_stream_proto() {
-    let stream_manager = StreamManager::for_test();
+    let stream_manager = LocalStreamManager::for_test();
     let info = [1, 3, 7, 11, 13, 233]
         .iter()
         .cloned()
