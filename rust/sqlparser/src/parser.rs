@@ -1945,11 +1945,11 @@ impl Parser {
                 Keyword::UUID => Ok(DataType::Uuid),
                 Keyword::DATE => Ok(DataType::Date),
                 Keyword::TIMESTAMP => {
-                    // TBD: we throw away "with/without timezone" information
-                    if self.parse_keyword(Keyword::WITH) || self.parse_keyword(Keyword::WITHOUT) {
+                    let with_time_zone = self.parse_keyword(Keyword::WITH);
+                    if with_time_zone || self.parse_keyword(Keyword::WITHOUT) {
                         self.expect_keywords(&[Keyword::TIME, Keyword::ZONE])?;
                     }
-                    Ok(DataType::Timestamp)
+                    Ok(DataType::Timestamp(with_time_zone))
                 }
                 Keyword::TIME => {
                     // TBD: we throw away "with/without timezone" information

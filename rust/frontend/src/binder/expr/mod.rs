@@ -293,7 +293,8 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Varchar(_) => DataType::Varchar,
         AstDataType::Date => DataType::Date,
         AstDataType::Time => DataType::Time,
-        AstDataType::Timestamp => DataType::Timestamp,
+        AstDataType::Timestamp(false) => DataType::Timestamp,
+        AstDataType::Timestamp(true) => DataType::Timestampz,
         AstDataType::Interval => DataType::Interval,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
