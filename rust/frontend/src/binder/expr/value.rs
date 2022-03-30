@@ -23,9 +23,7 @@ impl Binder {
     pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
-            Value::SingleQuotedString(s) => {
-                Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
-            }
+            Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
             // FIXME: For now we just use a dummy type (Boolean) for null. We should
             // bind the actual type according to the table schema if it's an
@@ -41,6 +39,10 @@ impl Binder {
             } => self.bind_interval(value, leading_field),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
+    }
+
+    pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
+        Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {

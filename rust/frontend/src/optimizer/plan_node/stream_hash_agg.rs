@@ -15,13 +15,12 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::InputRefDisplay;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 
 #[derive(Debug, Clone)]
 pub struct StreamHashAgg {
@@ -88,12 +87,6 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
-
-impl WithSchema for StreamHashAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToStreamProst for StreamHashAgg {
     fn to_stream_prost_body(&self) -> ProstStreamNode {

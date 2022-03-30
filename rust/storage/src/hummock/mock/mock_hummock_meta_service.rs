@@ -31,6 +31,8 @@ use crate::hummock::{
 /// Mock of the `HummockService` in meta crate. Not all RPCs are mocked.
 /// When you add new RPC mocks, you may also need to modify existing RPC mocks to ensure
 /// correctness.
+/// Note: `MockHummockMetaService` will be removed after reimplementing `MockHummockMetaClient` by
+/// wrapping `HummockManager`.
 pub struct MockHummockMetaService {
     inner: Mutex<MockHummockMetaServiceInner>,
 }
@@ -100,10 +102,12 @@ impl MockHummockMetaService {
 
     pub fn unpin_version(&self, request: UnpinVersionRequest) -> UnpinVersionResponse {
         let mut guard = self.inner.lock();
-        guard
-            .version_ref_counts
-            .entry(request.pinned_version_id)
-            .and_modify(|c| *c -= 1);
+        for pinned_version_id in request.pinned_version_ids {
+            guard
+                .version_ref_counts
+                .entry(pinned_version_id)
+                .and_modify(|c| *c -= 1);
+        }
         UnpinVersionResponse { status: None }
     }
 
@@ -122,11 +126,12 @@ impl MockHummockMetaService {
 
     pub fn unpin_snapshot(&self, request: UnpinSnapshotRequest) -> UnpinSnapshotResponse {
         let mut guard = self.inner.lock();
-        let epoch = request.snapshot.unwrap().epoch;
-        guard
-            .snapshot_ref_counts
-            .entry(epoch)
-            .and_modify(|c| *c -= 1);
+        for epoch in request.snapshots.iter().map(|s| s.epoch) {
+            guard
+                .snapshot_ref_counts
+                .entry(epoch)
+                .and_modify(|c| *c -= 1);
+        }
         UnpinSnapshotResponse { status: None }
     }
 

@@ -1,0 +1,18 @@
+- sql: |
+    /* bind typed literal */
+    select int '1';
+  logical_plan: |
+    LogicalProject { exprs: ["1":Varchar::Int32], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind typed literal */
+    SELECT bool 't'
+  logical_plan: |
+    LogicalProject { exprs: ["t":Varchar::Boolean], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    /* bind between */
+    SELECT 1 between 2 and 3
+  logical_plan: |
+    LogicalProject { exprs: [((1:Int32 >= 2:Int32) AND (1:Int32 <= 3:Int32))], expr_alias: [ ] }
+      LogicalValues { rows: [[]], schema: Schema { fields: [] } }

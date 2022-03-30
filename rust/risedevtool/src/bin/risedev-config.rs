@@ -18,19 +18,50 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{anyhow, Context, Result};
+use clap::{ArgEnum, Parser, Subcommand};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::IntoEnumIterator;
 use itertools::Itertools;
 
-#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq)]
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+#[clap(propagate_version = true)]
+#[clap(infer_subcommands = true)]
+pub struct RiseDevConfigOpts {
+    #[clap(subcommand)]
+    command: Option<Commands>,
+    #[clap(short, long)]
+    file: String,
+}
+
+#[derive(Subcommand)]
+#[clap(infer_subcommands = true)]
+enum Commands {
+    /// Enable one component
+    Enable {
+        /// Component to enable
+        #[clap(arg_enum)]
+        component: Components,
+    },
+    /// Disable one component
+    Disable {
+        /// Component to disable
+        #[clap(arg_enum)]
+        component: Components,
+    },
+    /// Use default configuration
+    Default,
+}
+
+#[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq, ArgEnum)]
 pub enum Components {
     MinIO,
     PrometheusAndGrafana,
     Etcd,
     Tracing,
-    ComputeNodeAndMetaNode,
-    Frontend,
+    RustComponents,
+    LegacyFrontend,
     Dashboard,
     Release,
     AllInOne,
@@ -43,8 +74,8 @@ impl Components {
             Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
-            Self::ComputeNodeAndMetaNode => "[Build] Rust components",
-            Self::Frontend => "[Build] Java frontend",
+            Self::RustComponents => "[Build] Rust components",
+            Self::LegacyFrontend => "[Build] Legacy Java frontend",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
             Self::Release => "[Build] Enable release mode",
@@ -69,13 +100,13 @@ Required if you want to view metrics."
 Required if you want to persistent meta-node data.
                 "
             }
-            Self::ComputeNodeAndMetaNode => {
+            Self::RustComponents => {
                 "
 Required if you want to build compute-node and meta-node.
 Otherwise you will need to manually download and copy it
 to RiseDev directory."
             }
-            Self::Frontend => {
+            Self::LegacyFrontend => {
                 "
 Required if you want to build frontend. Otherwise you will
 need to manually download and copy it to RiseDev directory."
@@ -117,8 +148,8 @@ a dev cluster.
             "ENABLE_MINIO" => Some(Self::MinIO),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
-            "ENABLE_BUILD_RUST" => Some(Self::ComputeNodeAndMetaNode),
-            "ENABLE_BUILD_FRONTEND" => Some(Self::Frontend),
+            "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
+            "ENABLE_BUILD_FRONTEND" => Some(Self::LegacyFrontend),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
             "ENABLE_ALL_IN_ONE" => Some(Self::AllInOne),
@@ -132,8 +163,8 @@ a dev cluster.
             Self::MinIO => "ENABLE_MINIO",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
-            Self::ComputeNodeAndMetaNode => "ENABLE_BUILD_RUST",
-            Self::Frontend => "ENABLE_BUILD_FRONTEND",
+            Self::RustComponents => "ENABLE_BUILD_RUST",
+            Self::LegacyFrontend => "ENABLE_BUILD_FRONTEND",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",
             Self::Tracing => "ENABLE_COMPUTE_TRACING",
             Self::Release => "ENABLE_RELEASE_PROFILE",
@@ -144,7 +175,7 @@ a dev cluster.
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[Self::ComputeNodeAndMetaNode, Self::Frontend]
+        &[Self::RustComponents]
     }
 }
 
@@ -209,9 +240,8 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
 }
 
 fn main() -> Result<()> {
-    let file_path = std::env::args()
-        .nth(1)
-        .ok_or_else(|| anyhow!("expect argv[1] to be component env file path"))?;
+    let opts = RiseDevConfigOpts::parse();
+    let file_path = opts.file;
 
     let chosen = {
         if let Ok(file) = OpenOptions::new().read(true).open(&file_path) {
@@ -248,11 +278,20 @@ fn main() -> Result<()> {
         }
     };
 
-    let chosen = if let Some(true) = std::env::args().nth(2).map(|x| x == "--default") {
-        println!("Using default config");
-        Components::default_enabled().to_vec()
-    } else {
-        configure(&chosen)?
+    let chosen = match &opts.command {
+        Some(Commands::Default) => {
+            println!("Using default config");
+            Components::default_enabled().to_vec()
+        }
+        Some(Commands::Enable { component }) => {
+            let mut chosen = chosen;
+            chosen.push(*component);
+            chosen
+        }
+        Some(Commands::Disable { component }) => {
+            chosen.into_iter().filter(|x| x != component).collect()
+        }
+        None => configure(&chosen)?,
     };
 
     for component in Components::into_enum_iter() {

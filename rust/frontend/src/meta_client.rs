@@ -44,7 +44,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .inner
             .unpin_snapshot(UnpinSnapshotRequest {
                 context_id: 0,
-                snapshot: Some(HummockSnapshot { epoch }),
+                snapshots: vec![HummockSnapshot { epoch }],
             })
             .await
             .to_rw_result()?;

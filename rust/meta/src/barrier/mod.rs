@@ -32,53 +32,18 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
-use crate::cluster::StoredClusterManagerRef;
-use crate::hummock::HummockManager;
-use crate::manager::{
-    CatalogManagerRef, EpochGeneratorRef, MetaSrvEnv, StreamClientsRef, INVALID_EPOCH,
-};
+use self::notifier::{Notifier, UnfinishedNotifiers};
+use crate::cluster::ClusterManagerRef;
+use crate::hummock::HummockManagerRef;
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
 mod command;
 mod info;
+mod notifier;
 mod recovery;
-
-#[derive(Debug, Default)]
-struct Notifier {
-    /// Get notified when scheduled barrier is about to send or failed.
-    to_send: Option<oneshot::Sender<Result<()>>>,
-
-    /// Get notified when scheduled barrier is collected(finished) or failed.
-    collected: Option<oneshot::Sender<Result<()>>>,
-}
-
-impl Notifier {
-    /// Notify when we are about to send a barrier.
-    fn notify_to_send(&mut self) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(Ok(())).ok();
-        }
-    }
-
-    /// Notify when we have collected a barrier from all actors.
-    fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
-            tx.send(Ok(())).ok();
-        }
-    }
-
-    /// Notify when we failed to send a barrier or collected a barrier.
-    fn notify_failed(&mut self, err: RwError) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(Err(err.clone())).ok();
-        }
-        if let Some(tx) = self.collected.take() {
-            tx.send(Err(err)).ok();
-        }
-    }
-}
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
@@ -148,9 +113,9 @@ impl ScheduledBarriers {
     /// Clear all buffered scheduled barriers, and notify their subscribers with failed as aborted.
     async fn abort(&self) {
         let mut buffer = self.buffer.write().await;
-        while let Some((_, mut notifiers)) = buffer.pop_front() {
-            notifiers.iter_mut().for_each(|notify| {
-                notify.notify_failed(RwError::from(ErrorCode::InternalError(
+        while let Some((_, notifiers)) = buffer.pop_front() {
+            notifiers.into_iter().for_each(|notify| {
+                notify.notify_collection_failed(RwError::from(ErrorCode::InternalError(
                     "Scheduled barrier abort.".to_string(),
                 )))
             })
@@ -158,71 +123,83 @@ impl ScheduledBarriers {
     }
 }
 
-/// [`BarrierManager`] sends barriers to all registered compute nodes and collect them, with
+/// [`GlobalBarrierManager`] sends barriers to all registered compute nodes and collect them, with
 /// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
 /// requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`BarrierManager`] provides a set of interfaces like a state machine, accepting [`Command`] that
-/// carries info to build [`Mutation`]. To keep the consistency between barrier manager and meta
-/// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
-/// manager transactional using [`Command`].
-pub struct BarrierManager<S> {
-    cluster_manager: StoredClusterManagerRef<S>,
+/// [`GlobalBarrierManager`] provides a set of interfaces like a state machine, accepting
+/// [`Command`] that carries info to build [`Mutation`]. To keep the consistency between barrier
+/// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
+/// done in barrier manager transactional using [`Command`].
+pub struct GlobalBarrierManager<S: MetaStore> {
+    /// The maximal interval for sending a barrier.
+    interval: Duration,
+
+    /// The queue of scheduled barriers.
+    scheduled_barriers: ScheduledBarriers,
+
+    cluster_manager: ClusterManagerRef<S>,
 
     catalog_manager: CatalogManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
-    epoch_generator: EpochGeneratorRef,
-
-    hummock_manager: Arc<HummockManager<S>>,
-
-    clients: StreamClientsRef,
-
-    scheduled_barriers: ScheduledBarriers,
+    hummock_manager: HummockManagerRef<S>,
 
     metrics: Arc<MetaMetrics>,
+
+    env: MetaSrvEnv<S>,
 }
 
 // TODO: Persist barrier manager states in meta store including previous epoch number, current epoch
 // number and barrier collection progress
-impl<S> BarrierManager<S>
+impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
-    const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-    /// Create a new [`BarrierManager`].
+    /// Create a new [`GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
-        cluster_manager: StoredClusterManagerRef<S>,
+        cluster_manager: ClusterManagerRef<S>,
         catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
-        epoch_generator: EpochGeneratorRef,
-        hummock_manager: Arc<HummockManager<S>>,
+        hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
+        // TODO: make this configurable
+        let interval = Duration::from_millis(if let Ok(x) = std::env::var("RW_CI") && x == "true" {
+            // Use a shorter interval to discovery more bugs on CI.
+            500
+        } else if cfg!(debug_assertions) {
+            // Use a longer interval to better debug with tracing.
+            5000
+        } else {
+            100
+        });
+
         Self {
+            interval,
             cluster_manager,
             catalog_manager,
             fragment_manager,
-            epoch_generator,
-            clients: env.stream_clients_ref(),
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,
             metrics,
+            env,
         }
     }
 
     /// Start an infinite loop to take scheduled barriers and send them.
     pub async fn run(&self) -> Result<()> {
-        let mut min_interval = tokio::time::interval(Self::INTERVAL);
+        let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut prev_epoch = INVALID_EPOCH;
+        let mut unfinished = UnfinishedNotifiers::default();
+
         loop {
             tokio::select! {
                 // Wait for the minimal interval,
@@ -233,10 +210,10 @@ where
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
-            let new_epoch = self.epoch_generator.generate().into_inner();
+            let new_epoch = self.env.epoch_generator().generate().into_inner();
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.clients.clone(),
+                self.env.stream_clients_ref(),
                 &info,
                 prev_epoch,
                 new_epoch,
@@ -246,15 +223,23 @@ where
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             match self.run_inner(&command_ctx).await {
-                Ok(_responses) => {
-                    // TODO: process the finished DDLs
-                    prev_epoch = new_epoch;
+                Ok(responses) => {
+                    // Notify about collected first.
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                    // Then try to finish the barrier for Create MVs.
+                    let actors_to_finish = command_ctx.actors_to_finish();
+                    unfinished.add(new_epoch, actors_to_finish, notifiers);
+                    for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
+                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    }
+
+                    prev_epoch = new_epoch;
                 }
                 Err(e) => {
                     notifiers
-                        .iter_mut()
-                        .for_each(|notify| notify.notify_failed(e.clone()));
+                        .into_iter()
+                        .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     // If failed, enter recovery mode.
                     prev_epoch = self.recovery(prev_epoch, &command).await.into_inner();
                 }
@@ -324,7 +309,7 @@ where
                 };
 
                 async move {
-                    let mut client = self.clients.get(node).await?;
+                    let mut client = self.env.stream_clients().get(node).await?;
 
                     let request = InjectBarrierRequest {
                         request_id,
@@ -334,7 +319,7 @@ where
                     };
                     tracing::trace!(
                         target: "events::meta::barrier::inject_barrier",
-                        "inject barrier request: {:#?}", request
+                        "inject barrier request: {:?}", request
                     );
 
                     // This RPC returns only if this worker node has collected this barrier.
@@ -365,7 +350,7 @@ where
     }
 }
 
-impl<S> BarrierManager<S>
+impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
@@ -394,26 +379,45 @@ where
             },
         )
         .await?;
-        rx.await.unwrap()
+        rx.await.unwrap();
+
+        Ok(())
     }
 
     /// Run a command and return when it's completely finished.
     pub async fn run_command(&self, command: Command) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
+        let (collect_tx, collect_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+
+        let is_create_mview = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
-                collected: Some(tx),
+                collected: Some(collect_tx),
+                finished: Some(finish_tx),
                 ..Default::default()
             },
         )
         .await?;
-        rx.await.unwrap()
+
+        collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
+
+        // TODO: review this workaround
+        if is_create_mview {
+            // Insert a flush immediately.
+            // For speed up the creation of MVs with a small amount of data.
+            self.wait_for_next_barrier_to_collect().await?;
+        }
+
+        finish_rx.await.unwrap(); // Wait for this command to be finished.
+
+        Ok(())
     }
 
-    /// Wait for the next barrier to finish. Note that the barrier flowing in our stream graph is
+    /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier(&self) -> Result<()> {
+    pub async fn wait_for_next_barrier_to_collect(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
             collected: Some(tx),
@@ -426,4 +430,4 @@ where
     }
 }
 
-pub type BarrierManagerRef<S> = Arc<BarrierManager<S>>;
+pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;

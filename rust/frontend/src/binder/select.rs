@@ -140,6 +140,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
+                SelectItem::ExprQualifiedWildcard(_, _) => todo!(),
                 SelectItem::Wildcard => {
                     let (exprs, names) = Self::bind_visible_columns(&self.context.columns[..])?;
                     select_list.extend(exprs);

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_pb::hummock::{
     AddTablesRequest, CommitEpochRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot,
     HummockVersion, PinSnapshotRequest, PinVersionRequest, SstableInfo,
@@ -26,6 +27,7 @@ use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::mock::MockHummockMetaService;
 use crate::hummock::{HummockEpoch, HummockResult, HummockSSTableId, HummockVersionId};
 
+/// Note: `MockHummockMetaClient` will be reimplemented by wrapping `HummockManager`.
 pub struct MockHummockMetaClient {
     mock_hummock_meta_service: Arc<MockHummockMetaService>,
 }
@@ -50,11 +52,11 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(response.pinned_version.unwrap())
     }
 
-    async fn unpin_version(&self, pinned_version_id: HummockVersionId) -> HummockResult<()> {
+    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_version(UnpinVersionRequest {
                 context_id: 0,
-                pinned_version_id,
+                pinned_version_ids: pinned_version_ids.to_owned(),
             });
         Ok(())
     }
@@ -72,13 +74,16 @@ impl HummockMetaClient for MockHummockMetaClient {
         Ok(epoch)
     }
 
-    async fn unpin_snapshot(&self, pinned_epoch: HummockEpoch) -> HummockResult<()> {
+    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> HummockResult<()> {
         self.mock_hummock_meta_service
             .unpin_snapshot(UnpinSnapshotRequest {
                 context_id: 0,
-                snapshot: Some(HummockSnapshot {
-                    epoch: pinned_epoch,
-                }),
+                snapshots: pinned_epochs
+                    .iter()
+                    .map(|epoch| HummockSnapshot {
+                        epoch: epoch.to_owned(),
+                    })
+                    .collect_vec(),
             });
         Ok(())
     }

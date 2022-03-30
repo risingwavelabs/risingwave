@@ -34,13 +34,11 @@ use tokio::task::JoinHandle;
 use super::intercept::MetricsMiddlewareLayer;
 use super::service::notification_service::NotificationServiceImpl;
 use super::DdlServiceImpl;
-use crate::barrier::BarrierManager;
-use crate::cluster::StoredClusterManager;
+use crate::barrier::GlobalBarrierManager;
+use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{
-    CatalogManager, MemEpochGenerator, MetaSrvEnv, NotificationManager, StoredCatalogManager,
-};
+use crate::manager::{CatalogManager, MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -49,7 +47,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, SourceManager, StreamManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -76,24 +74,24 @@ pub async fn rpc_serve(
             )
             .await
             .map_err(|e| RwError::from(InternalError(format!("failed to connect etcd {}", e))))?;
-            let meta_store_ref = Arc::new(EtcdMetaStore::new(client));
+            let meta_store = Arc::new(EtcdMetaStore::new(client));
             rpc_serve_with_store(
                 addr,
                 prometheus_addr,
                 dashboard_addr,
-                meta_store_ref,
+                meta_store,
                 max_heartbeat_interval,
                 ui_path,
             )
             .await
         }
         MetaStoreBackend::Mem => {
-            let meta_store_ref = Arc::new(MemStore::default());
+            let meta_store = Arc::new(MemStore::default());
             rpc_serve_with_store(
                 addr,
                 prometheus_addr,
                 dashboard_addr,
-                meta_store_ref,
+                meta_store,
                 max_heartbeat_interval,
                 ui_path,
             )
@@ -106,27 +104,22 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     addr: SocketAddr,
     prometheus_addr: Option<SocketAddr>,
     dashboard_addr: Option<SocketAddr>,
-    meta_store_ref: Arc<S>,
+    meta_store: Arc<S>,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
-    let epoch_generator_ref = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::<S>::new(meta_store_ref.clone(), epoch_generator_ref.clone()).await;
+    let epoch_generator = Arc::new(MemEpochGenerator::new());
+    let env = MetaSrvEnv::<S>::new(meta_store.clone(), epoch_generator.clone()).await;
 
-    let fragment_manager = Arc::new(FragmentManager::new(meta_store_ref.clone()).await.unwrap());
+    let fragment_manager = Arc::new(FragmentManager::new(meta_store.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let compactor_manager = Arc::new(hummock::CompactorManager::new());
 
-    let notification_manager = Arc::new(NotificationManager::new(epoch_generator_ref.clone()));
     let cluster_manager = Arc::new(
-        StoredClusterManager::new(
-            env.clone(),
-            notification_manager.clone(),
-            max_heartbeat_interval,
-        )
-        .await
-        .unwrap(),
+        ClusterManager::new(env.clone(), max_heartbeat_interval)
+            .await
+            .unwrap(),
     );
     let hummock_manager = Arc::new(
         hummock::HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
@@ -139,101 +132,89 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             dashboard_addr,
             cluster_manager: cluster_manager.clone(),
             fragment_manager: fragment_manager.clone(),
-            meta_store_ref: env.meta_store_ref(),
+            meta_store: env.meta_store_ref(),
             has_test_data: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(ui_path));
     }
 
-    let catalog_manager_ref = Arc::new(
-        StoredCatalogManager::new(meta_store_ref.clone(), notification_manager.clone())
+    let catalog_manager = Arc::new(
+        StoredCatalogManager::new(meta_store.clone(), env.notification_manager_ref())
             .await
             .unwrap(),
     );
-    let catalog_manager_v2_ref = Arc::new(
-        CatalogManager::new(
-            meta_store_ref.clone(),
-            env.id_gen_manager_ref(),
-            notification_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
+    let catalog_manager_v2 = Arc::new(CatalogManager::new(env.clone()).await.unwrap());
 
-    let barrier_manager_ref = Arc::new(BarrierManager::new(
+    let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
-        catalog_manager_v2_ref.clone(),
+        catalog_manager_v2.clone(),
         fragment_manager.clone(),
-        epoch_generator_ref.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
     {
-        let barrier_manager_ref = barrier_manager_ref.clone();
+        let barrier_manager = barrier_manager.clone();
         // TODO: join barrier service back to local thread
-        tokio::spawn(async move { barrier_manager_ref.run().await.unwrap() });
+        tokio::spawn(async move { barrier_manager.run().await.unwrap() });
     }
 
-    let stream_manager_ref = Arc::new(
-        StreamManager::new(
+    let stream_manager = Arc::new(
+        GlobalStreamManager::new(
             env.clone(),
             fragment_manager.clone(),
-            barrier_manager_ref.clone(),
+            barrier_manager.clone(),
             cluster_manager.clone(),
         )
         .await
         .unwrap(),
     );
 
-    let vacuum_trigger_ref = Arc::new(hummock::VacuumTrigger::new(
+    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
     ));
 
-    let source_manager_ref = Arc::new(
-        SourceManager::new(meta_store_ref, barrier_manager_ref.clone())
+    let source_manager = Arc::new(
+        SourceManager::new(meta_store, barrier_manager.clone())
             .await
             .unwrap(),
     );
 
     {
-        let source_manager_ref = source_manager_ref.clone();
+        let source_manager = source_manager.clone();
         tokio::spawn(async move {
-            source_manager_ref.run().await.unwrap();
+            source_manager.run().await.unwrap();
         });
     }
 
-    let epoch_srv = EpochServiceImpl::new(epoch_generator_ref.clone());
+    let epoch_srv = EpochServiceImpl::new(epoch_generator.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());
-    let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager_ref);
+    let catalog_srv = CatalogServiceImpl::<S>::new(env.clone(), catalog_manager);
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
-        catalog_manager_v2_ref.clone(),
-        stream_manager_ref.clone(),
+        catalog_manager_v2.clone(),
+        stream_manager.clone(),
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
-        stream_manager_ref,
+        stream_manager,
         fragment_manager.clone(),
         cluster_manager.clone(),
-        source_manager_ref,
-        env,
+        source_manager,
+        env.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
         compactor_manager.clone(),
-        vacuum_trigger_ref.clone(),
+        vacuum_trigger.clone(),
     );
-    let notification_srv = NotificationServiceImpl::new(
-        notification_manager.clone(),
-        catalog_manager_v2_ref,
-        cluster_manager.clone(),
-        epoch_generator_ref.clone(),
-    );
+    let notification_manager = env.notification_manager_ref();
+    let notification_srv =
+        NotificationServiceImpl::new(env, catalog_manager_v2, cluster_manager.clone());
 
     if let Some(prometheus_addr) = prometheus_addr {
         meta_metrics.boot_metrics_service(prometheus_addr);
@@ -244,16 +225,15 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock::start_hummock_workers(
             hummock_manager,
             compactor_manager,
-            vacuum_trigger_ref,
-            notification_manager.clone(),
+            vacuum_trigger,
+            notification_manager,
         )
         .await,
     );
     #[cfg(not(test))]
     {
         sub_tasks.push(
-            StoredClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1))
-                .await,
+            ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
     }
 

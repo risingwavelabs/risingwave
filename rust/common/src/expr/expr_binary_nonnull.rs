@@ -180,7 +180,9 @@ macro_rules! gen_binary_expr_cmp {
                     { float64, decimal, float64, $general_f },
                     { timestamp, timestamp, timestamp, $general_f },
                     { date, date, date, $general_f },
-                    { boolean, boolean, boolean, $general_f }
+                    { boolean, boolean, boolean, $general_f },
+                    { timestamp, date, timestamp, $general_f },
+                    { date, timestamp, timestamp, $general_f }
                 }
             }
         }

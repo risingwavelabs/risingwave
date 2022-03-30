@@ -16,7 +16,6 @@ use paste::paste;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;
-use crate::optimizer::property::Convention;
 
 /// Define `PlanVisitor` trait.
 macro_rules! def_visitor {

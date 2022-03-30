@@ -19,7 +19,6 @@ use futures::channel::mpsc::{Receiver, Sender};
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use tokio::sync::oneshot;
 
 use crate::executor::Message;
 
@@ -109,27 +108,14 @@ impl SharedContext {
     pub fn register_finish_create_mview_notifier(
         &self,
         actor_id: ActorId,
-    ) -> FinishCreateMviewNotifierTx {
-        let (tx, rx) = oneshot::channel();
+    ) -> FinishCreateMviewNotifier {
         debug!("register finish create mview notifier: {}", actor_id);
 
         let barrier_manager = self.barrier_manager.clone();
-        tokio::spawn(async move {
-            match rx.await {
-                Ok(ddl_epoch) => {
-                    // Report to the local barrier manager.
-                    barrier_manager
-                        .lock()
-                        .finish_create_mview(ddl_epoch, actor_id);
-                }
-                Err(_) => info!(
-                    "finish create mview notifier for actor {} dropped, are we recovering?",
-                    actor_id
-                ),
-            }
-        });
-
-        tx
+        FinishCreateMviewNotifier {
+            barrier_manager,
+            actor_id,
+        }
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {

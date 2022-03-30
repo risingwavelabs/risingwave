@@ -26,9 +26,9 @@ use risingwave_storage::hummock::{
     SSTableBuilderOptions,
 };
 
-use crate::cluster::StoredClusterManager;
-use crate::hummock::HummockManager;
-use crate::manager::{MetaSrvEnv, NotificationManager};
+use crate::cluster::{ClusterManager, ClusterManagerRef};
+use crate::hummock::{HummockManager, HummockManagerRef};
+use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::{MemStore, MetaStore};
 
@@ -55,7 +55,11 @@ where
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables]}
 
     // Simulate a compaction and increase version by 1.
-    let mut compact_task = hummock_manager.get_compact_task().await.unwrap().unwrap();
+    let mut compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     let (test_tables_2, _) = generate_test_tables(
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
@@ -157,19 +161,15 @@ pub async fn setup_compute_env(
     port: i32,
 ) -> (
     MetaSrvEnv<MemStore>,
-    Arc<HummockManager<MemStore>>,
-    Arc<StoredClusterManager<MemStore>>,
+    HummockManagerRef<MemStore>,
+    ClusterManagerRef<MemStore>,
     WorkerNode,
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_manager = Arc::new(
-        StoredClusterManager::new(
-            env.clone(),
-            Arc::new(NotificationManager::new(env.epoch_generator_ref())),
-            Duration::from_secs(1),
-        )
-        .await
-        .unwrap(),
+        ClusterManager::new(env.clone(), Duration::from_secs(1))
+            .await
+            .unwrap(),
     );
     let hummock_manager = Arc::new(
         HummockManager::new(

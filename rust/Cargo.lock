@@ -3428,6 +3428,7 @@ version = "0.1.3"
 dependencies = [
  "anyhow",
  "bytes",
+ "clap 3.1.6",
  "console",
  "dialoguer",
  "enum-iterator",
@@ -3816,6 +3817,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-retry",
  "tokio-stream",
  "tonic",
  "tower",
