@@ -114,6 +114,19 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
+    async fn stop_actors(&self, request: Request<StopActorsRequest>) -> std::result::Result<Response<StopActorsResponse>, Status> {
+        let req = request.into_inner();
+        let actors = req.actor_ids;
+        self.mgr
+            .stop_actor(&actors).await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(StopActorsResponse {
+            request_id: req.request_id,
+            status: None,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
     async fn inject_barrier(
         &self,
         request: Request<InjectBarrierRequest>,

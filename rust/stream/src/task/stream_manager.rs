@@ -46,7 +46,14 @@ lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
 
-pub type ActorHandle = JoinHandle<()>;
+// pub type ActorHandle = JoinHandle<()>;
+
+/// ActorHandle contains the join handle of actor's future, and a sender used to gracefully stop the
+/// actor.
+pub struct ActorHandle {
+    pub handle: JoinHandle<()>,
+    pub stop_tx: oneshot::Sender<()>,
+}
 
 pub struct StreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -217,6 +224,11 @@ impl StreamManager {
         Ok(())
     }
 
+    /// Gracefully stop actors on this worker.
+    pub async fn stop_actor(&self, actors: &[ActorId]) -> Result<()> {
+        todo!();
+    }
+
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock();
         core.context.take_receiver(&ids)
@@ -235,7 +247,7 @@ impl StreamManager {
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await?;
+            handle.handle.await?;
         }
         Ok(())
     }
@@ -244,7 +256,7 @@ impl StreamManager {
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await.unwrap();
+            handle.handle.await.unwrap();
         }
         Ok(())
     }
@@ -708,12 +720,17 @@ impl StreamManagerCore {
 
             trace!("build actor: {:#?}", &dispatcher);
 
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
+            let (stop_tx, stop_rx) = oneshot::channel();
+
+            let actor = Actor::new(dispatcher, actor_id, self.context.clone(), stop_rx);
             self.handles.insert(
                 actor_id,
-                tokio::spawn(async move {
-                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
-                }),
+                ActorHandle {
+                    handle: tokio::spawn(async move {
+                        actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                    }),
+                    stop_tx,
+                },
             );
         }
 
@@ -764,7 +781,7 @@ impl StreamManagerCore {
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.abort();
+        handle.handle.abort();
     }
 
     fn build_channel_for_chain_node(
@@ -882,6 +899,19 @@ impl StreamManagerCore {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Gracefully stop an actor by sending a stop signal to it.
+    fn stop_actor(&mut self, actor_id: ActorId) -> Result<()> {
+        let handle = self.handles.remove(&actor_id).unwrap();
+        self.context.retain(|&(up_id, _)| up_id != actor_id);
+        self.actor_infos.remove(&actor_id);
+        self.actors.remove(&actor_id);
+
+        handle.stop_tx.send(()).ok();
+
+        handle.handle.abort();
         Ok(())
     }
 }

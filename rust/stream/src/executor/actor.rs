@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use tracing_futures::Instrument;
+use tokio::sync::oneshot;
 
 use super::{Mutation, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
@@ -27,6 +28,8 @@ pub struct Actor {
     id: ActorId,
 
     context: Arc<SharedContext>,
+
+    stop_rx: oneshot::Receiver<()>,
 }
 
 impl Actor {
@@ -34,11 +37,13 @@ impl Actor {
         consumer: Box<dyn StreamConsumer>,
         id: ActorId,
         context: Arc<SharedContext>,
+        stop_rx: oneshot::Receiver<()>, 
     ) -> Self {
         Self {
             consumer,
             id,
             context,
+            stop_rx,
         }
     }
 
@@ -54,6 +59,9 @@ impl Actor {
         );
         // Drive the streaming task with an infinite loop
         loop {
+            if let _ = self.stop_rx.try_recv() {
+                break;
+            }
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {

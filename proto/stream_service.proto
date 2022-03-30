@@ -54,6 +54,16 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
+message StopActorsRequest {
+  string request_id = 1;
+  repeated uint32 actor_ids = 3;
+}
+
+message StopActorsResponse {
+  string request_id = 1;
+  common.Status status = 2;
+}
+
 message InjectBarrierRequest {
   string request_id = 1;
   data.Barrier barrier = 2;
@@ -103,6 +113,7 @@ service StreamService {
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
+  rpc StopActors(StopActorsRequest) returns (StopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
