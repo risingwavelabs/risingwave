@@ -76,10 +76,7 @@ pub struct Compactor {
 impl Compactor {
     /// Create a new compactor.
     pub fn new(context: Arc<CompactorContext>, compact_task: CompactTask) -> Self {
-        Self {
-            compact_task,
-            context,
-        }
+        Self { context, compact_task }
     }
 
     /// For compaction from shared buffer to level 0, this is the only function gets called.
@@ -153,7 +150,7 @@ impl Compactor {
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
-    async fn compact_done(&mut self, output_ssts: &Vec<(usize, Vec<Sstable>)>, task_ok: bool) {
+    async fn compact_done(&mut self, output_ssts: &[(usize, Vec<Sstable>)], task_ok: bool) {
         self.compact_task.task_status = task_ok;
         self.compact_task
             .sorted_output_ssts
