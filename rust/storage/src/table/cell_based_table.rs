@@ -151,7 +151,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
         for (key, value) in state_store_range_scan_res {
             if key.len() > 4 {
-                // The last four bytes of the key represent its column_id
+                // The last four bytes of the key in scan result represent its column_id
                 let column_id_bytes = &key[key.len() - 4..];
                 let column_id = deserialize_column_id(column_id_bytes)?;
                 let column_index = self
