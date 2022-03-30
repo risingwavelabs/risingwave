@@ -17,7 +17,6 @@ use fixedbitset::FixedBitSet;
 use super::super::plan_node::*;
 use super::{BoxedRule, Rule};
 use crate::expr::InputRef;
-use crate::optimizer::property::WithSchema;
 use crate::utils::Substitute;
 
 /// Pushes a [`LogicalFilter`] past a [`LogicalAgg`].

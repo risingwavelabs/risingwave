@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod compact_task_assignment;
 mod current_version_id;
 mod pinned_snapshot;
 mod pinned_version;

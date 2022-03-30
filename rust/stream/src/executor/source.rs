@@ -38,7 +38,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRef};
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
     /// The reader for stream source
@@ -89,7 +89,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::SourceNode)?;
         let (sender, barrier_receiver) = unbounded_channel();

@@ -36,7 +36,7 @@ pub trait ToStream {
     ///
     /// Now it is used to:
     /// 1. ensure every plan node's output having pk column
-    /// 2. (todo) add `row_count`() in every Agg
+    /// 2. add `row_count`() in every Agg
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping);
     /// `to_stream` is equivalent to `to_stream_with_dist_required(Distribution::any())`
     fn to_stream(&self) -> PlanRef;

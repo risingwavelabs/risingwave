@@ -28,8 +28,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{LogicalProject, StreamMaterialize};
-use self::property::Convention;
+use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::expr::InputRef;
 

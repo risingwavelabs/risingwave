@@ -30,7 +30,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::aggregation::*;
 use super::{Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::executor::{pk_input_array_refs, ExecutorBuilder};
-use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -102,7 +102,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::GlobalSimpleAggNode)?;
         let agg_calls: Vec<AggCall> = node

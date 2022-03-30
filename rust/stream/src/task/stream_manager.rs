@@ -55,7 +55,7 @@ pub struct ActorHandle {
     pub stop_tx: oneshot::Sender<()>,
 }
 
-pub struct StreamManagerCore {
+pub struct LocalStreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
@@ -86,9 +86,9 @@ pub struct StreamManagerCore {
     compute_client_pool: ComputeClientPool,
 }
 
-/// `StreamManager` manages all stream executors in this project.
-pub struct StreamManager {
-    core: Mutex<StreamManagerCore>,
+/// `LocalStreamManager` manages all stream executors in this project.
+pub struct LocalStreamManager {
+    core: Mutex<LocalStreamManagerCore>,
 }
 
 pub struct ExecutorParams {
@@ -128,8 +128,8 @@ impl Debug for ExecutorParams {
     }
 }
 
-impl StreamManager {
-    fn with_core(core: StreamManagerCore) -> Self {
+impl LocalStreamManager {
+    fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
             core: Mutex::new(core),
         }
@@ -140,12 +140,16 @@ impl StreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
+        Self::with_core(LocalStreamManagerCore::new(
+            addr,
+            state_store,
+            streaming_metrics,
+        ))
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::with_core(StreamManagerCore::for_test())
+        Self::with_core(LocalStreamManagerCore::for_test())
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
@@ -243,7 +247,7 @@ impl StreamManager {
         core.update_actors(actors, hanging_channels)
     }
 
-    /// This function was called while [`StreamManager`] exited.
+    /// This function was called while [`LocalStreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
@@ -261,7 +265,8 @@ impl StreamManager {
         Ok(())
     }
 
-    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn update_actor_info(
         &self,
         req: stream_service::BroadcastActorInfoTableRequest,
@@ -270,7 +275,8 @@ impl StreamManager {
         core.update_actor_info(req)
     }
 
-    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)
@@ -325,7 +331,7 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
         .count();
 }
 
-impl StreamManagerCore {
+impl LocalStreamManagerCore {
     fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,

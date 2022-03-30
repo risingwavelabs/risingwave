@@ -18,7 +18,7 @@ use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServic
 use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
-use crate::hummock::{CompactorManager, HummockManager, VacuumTrigger};
+use crate::hummock::{CompactorManager, HummockManagerRef, VacuumTrigger};
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
 
@@ -26,7 +26,7 @@ pub struct HummockServiceImpl<S>
 where
     S: MetaStore,
 {
-    hummock_manager: Arc<HummockManager<S>>,
+    hummock_manager: HummockManagerRef<S>,
     compactor_manager: Arc<CompactorManager>,
     vacuum_trigger: Arc<VacuumTrigger<S>>,
 }
@@ -36,7 +36,7 @@ where
     S: MetaStore,
 {
     pub fn new(
-        hummock_manager: Arc<HummockManager<S>>,
+        hummock_manager: HummockManagerRef<S>,
         compactor_manager: Arc<CompactorManager>,
         vacuum_trigger: Arc<VacuumTrigger<S>>,
     ) -> Self {
@@ -205,9 +205,11 @@ where
 
     async fn subscribe_compact_tasks(
         &self,
-        _request: Request<SubscribeCompactTasksRequest>,
+        request: Request<SubscribeCompactTasksRequest>,
     ) -> Result<Response<Self::SubscribeCompactTasksStream>, Status> {
-        let rx = self.compactor_manager.add_compactor().await;
+        let rx = self
+            .compactor_manager
+            .add_compactor(request.into_inner().context_id);
         Ok(Response::new(RwReceiverStream::new(rx)))
     }
 

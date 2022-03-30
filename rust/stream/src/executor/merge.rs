@@ -28,7 +28,7 @@ use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef, Result};
 use crate::executor::{ExecutorBuilder, Mutation, PkIndices};
-use crate::task::{ExecutorParams, StreamManagerCore, UpDownActorIds};
+use crate::task::{ExecutorParams, LocalStreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
 pub struct RemoteInput {
@@ -108,7 +108,7 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
         stream.create_merge_node(params, node)

@@ -33,9 +33,10 @@ use crate::storage::MetaStore;
 /// [`StoredCatalogManager`] manages meta operations including retrieving catalog info, creating
 /// a table and dropping a table. Besides, it contains a cache for meta info in the `core`.
 pub struct StoredCatalogManager<S> {
+    meta_store: Arc<S>,
+    notification_manager: NotificationManagerRef,
+
     core: Mutex<CatalogManagerCore>,
-    meta_store_ref: Arc<S>,
-    nm: NotificationManagerRef,
 }
 
 pub type StoredCatalogManagerRef<S> = Arc<StoredCatalogManager<S>>;
@@ -44,17 +45,20 @@ impl<S> StoredCatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>, nm: NotificationManagerRef) -> Result<Self> {
-        let databases = Database::list(&*meta_store_ref).await?;
-        let schemas = Schema::list(&*meta_store_ref).await?;
-        let tables = Table::list(&*meta_store_ref).await?;
-        let version = CatalogVersionGenerator::new(&*meta_store_ref).await?;
+    pub async fn new(
+        meta_store: Arc<S>,
+        notification_manager: NotificationManagerRef,
+    ) -> Result<Self> {
+        let databases = Database::list(&*meta_store).await?;
+        let schemas = Schema::list(&*meta_store).await?;
+        let tables = Table::list(&*meta_store).await?;
+        let version = CatalogVersionGenerator::new(&*meta_store).await?;
 
         let core = Mutex::new(CatalogManagerCore::new(databases, schemas, tables, version));
         Ok(Self {
+            meta_store,
+            notification_manager,
             core,
-            meta_store_ref,
-            nm,
         })
     }
 
@@ -67,14 +71,14 @@ where
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&database.database_ref_id);
         if !core.has_database(&database_id) {
-            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            let version = core.new_version_id(&*self.meta_store).await?;
             database.version = version;
 
-            database.insert(&*self.meta_store_ref).await?;
+            database.insert(&*self.meta_store).await?;
             core.add_database(database.clone());
 
             // Notify frontends to create database.
-            self.nm
+            self.notification_manager
                 .notify_frontend(Operation::Add, &Info::Database(database))
                 .await;
 
@@ -90,13 +94,13 @@ where
         let mut core = self.core.lock().await;
         let database_id = DatabaseId::from(&Some(database_ref_id.clone()));
         if core.has_database(&database_id) {
-            Database::delete(&*self.meta_store_ref, database_ref_id).await?;
-            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            Database::delete(&*self.meta_store, database_ref_id).await?;
+            let version = core.new_version_id(&*self.meta_store).await?;
             let mut database = core.delete_database(&database_id).unwrap();
             database.version = version;
 
             // Notify frontends to delete database.
-            self.nm
+            self.notification_manager
                 .notify_frontend(Operation::Delete, &Info::Database(database))
                 .await;
 
@@ -115,14 +119,14 @@ where
             .values()
             .any(|s| s.schema_name == schema.schema_name);
         if !exist {
-            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            let version = core.new_version_id(&*self.meta_store).await?;
             schema.version = version;
 
-            schema.insert(&*self.meta_store_ref).await?;
+            schema.insert(&*self.meta_store).await?;
             core.add_schema(schema.clone());
 
             // Notify frontends to create schema.
-            self.nm
+            self.notification_manager
                 .notify_frontend(Operation::Add, &Info::Schema(schema))
                 .await;
 
@@ -138,14 +142,14 @@ where
         let mut core = self.core.lock().await;
         let schema_id = SchemaId::from(&Some(schema_ref_id.clone()));
         if core.has_schema(&schema_id) {
-            Schema::delete(&*self.meta_store_ref, schema_ref_id).await?;
-            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            Schema::delete(&*self.meta_store, schema_ref_id).await?;
+            let version = core.new_version_id(&*self.meta_store).await?;
 
             let mut schema = core.delete_schema(&schema_id).unwrap();
             schema.version = version;
 
             // Notify frontends to delete schema.
-            self.nm
+            self.notification_manager
                 .notify_frontend(Operation::Delete, &Info::Schema(schema))
                 .await;
 
@@ -164,10 +168,10 @@ where
             .values()
             .any(|t| t.table_name == table.table_name);
         if !exist {
-            let version = core.new_version_id(&*self.meta_store_ref).await?;
+            let version = core.new_version_id(&*self.meta_store).await?;
             table.version = version;
 
-            table.insert(&*self.meta_store_ref).await?;
+            table.insert(&*self.meta_store).await?;
             core.add_table(table.clone());
 
             if let TableInfo::MaterializedView(mview_info) = table.get_info().unwrap() {
@@ -178,7 +182,7 @@ where
             }
 
             // Notify frontends to create table.
-            self.nm
+            self.notification_manager
                 .notify_frontend(Operation::Add, &Info::Table(table))
                 .await;
 
@@ -205,8 +209,8 @@ where
                 )
                 .into()),
                 None => {
-                    Table::delete(&*self.meta_store_ref, table_ref_id).await?;
-                    let version = core.new_version_id(&*self.meta_store_ref).await?;
+                    Table::delete(&*self.meta_store, table_ref_id).await?;
+                    let version = core.new_version_id(&*self.meta_store).await?;
 
                     let mut table = core.delete_table(&table_id).unwrap();
                     let dependent_tables: Vec<TableId> = if let TableInfo::MaterializedView(
@@ -228,7 +232,7 @@ where
                     table.version = version;
 
                     // Notify frontends to delete table.
-                    self.nm
+                    self.notification_manager
                         .notify_frontend(Operation::Delete, &Info::Table(table))
                         .await;
 

@@ -14,14 +14,12 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToStreamProst};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::WithSchema;
 use crate::utils::Condition;
 
 /// `StreamFilter` implements [`super::LogicalFilter`]
@@ -70,12 +68,6 @@ impl PlanTreeNodeUnary for StreamFilter {
 }
 
 impl_plan_tree_node_for_unary! { StreamFilter }
-
-impl WithSchema for StreamFilter {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToStreamProst for StreamFilter {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
