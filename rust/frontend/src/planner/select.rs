@@ -159,8 +159,7 @@ impl Planner {
                 Condition {
                     conjunctions: others,
                 },
-            )
-            .into())
+            ))
         }
     }
 

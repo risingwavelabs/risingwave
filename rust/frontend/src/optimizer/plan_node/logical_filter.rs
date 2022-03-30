@@ -15,7 +15,6 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use super::{
     ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,

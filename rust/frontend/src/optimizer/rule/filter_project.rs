@@ -32,7 +32,7 @@ impl Rule for FilterProjectRule {
 
         let input = project.input();
         let pushed_filter = LogicalFilter::create(input, predicate);
-        Some(project.clone_with_input(pushed_filter.into()).into())
+        Some(project.clone_with_input(pushed_filter).into())
     }
 }
 
