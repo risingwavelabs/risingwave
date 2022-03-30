@@ -202,7 +202,8 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        let interval = Duration::from_millis(if std::env::var_os("CI").is_some() {
+        // TODO: make this configurable
+        let interval = Duration::from_millis(if let Ok(x) = std::env::var("RW_CI") && x == "true" {
             // Use a shorter interval to discovery more bugs on CI.
             500
         } else if cfg!(debug_assertions) {
