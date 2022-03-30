@@ -115,8 +115,7 @@
         LogicalProject { exprs: [$0, $1], expr_alias: [ ,  ] }
           LogicalFilter { predicate: ($2 < 1:Int32) }
             LogicalScan { table: t1, columns: [v1, v2, v3] }
-        LogicalFilter { predicate:  }
-          LogicalScan { table: t2, columns: [v1, v2] }
+        LogicalScan { table: t2, columns: [v1, v2] }
 - sql: |
     /* mixed */
     create table t (v1 bigint, v2 double precision, v3 int);
