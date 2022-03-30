@@ -67,7 +67,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     // unpin nonexistent target will not return error
     for _ in 0..3 {
         hummock_manager
-            .unpin_version(context_id, version_id)
+            .unpin_version(context_id, vec![version_id])
             .await
             .unwrap();
         assert_eq!(
@@ -95,7 +95,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
     // unpin nonexistent target will not return error
     for _ in 0..3 {
         hummock_manager
-            .unpin_snapshot(context_id, HummockSnapshot { epoch })
+            .unpin_snapshot(context_id, vec![HummockSnapshot { epoch }])
             .await
             .unwrap();
         assert_eq!(
@@ -296,7 +296,7 @@ async fn test_hummock_transaction() -> Result<()> {
         assert!(get_sorted_committed_sstable_ids(&pinned_version).is_empty());
 
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
 
         // Commit epoch1
@@ -313,7 +313,7 @@ async fn test_hummock_transaction() -> Result<()> {
         );
 
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
     }
 
@@ -345,7 +345,7 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
 
         // Commit epoch2
@@ -362,7 +362,7 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
     }
 
@@ -411,7 +411,7 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
 
         // Abort epoch3
@@ -437,7 +437,7 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
 
         // Commit epoch4
@@ -454,7 +454,7 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_committed_sstable_ids(&pinned_version)
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await?;
     }
     Ok(())

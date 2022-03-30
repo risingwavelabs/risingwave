@@ -345,7 +345,7 @@ where
     pub async fn unpin_version(
         &self,
         context_id: HummockContextId,
-        pinned_version_id: HummockVersionId,
+        pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_versions =
@@ -356,7 +356,9 @@ where
             }
             Some(context_pinned_version) => context_pinned_version,
         };
-        context_pinned_version.unpin_version(pinned_version_id);
+        for pinned_version_id in pinned_version_ids.as_ref() {
+            context_pinned_version.unpin_version(*pinned_version_id);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
 
         #[cfg(test)]
@@ -658,7 +660,7 @@ where
     pub async fn unpin_snapshot(
         &self,
         context_id: HummockContextId,
-        hummock_snapshot: HummockSnapshot,
+        hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_snapshots =
@@ -670,7 +672,9 @@ where
             }
             Some(context_pinned_snapshot) => context_pinned_snapshot,
         };
-        context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        for hummock_snapshot in hummock_snapshots.as_ref() {
+            context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
 
         #[cfg(test)]

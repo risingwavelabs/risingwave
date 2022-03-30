@@ -116,7 +116,7 @@ message PinVersionResponse {
 
 message UnpinVersionRequest {
   uint32 context_id = 1;
-  uint64 pinned_version_id = 2;
+  repeated uint64 pinned_version_ids = 2;
 }
 
 message UnpinVersionResponse {
@@ -135,7 +135,7 @@ message PinSnapshotResponse {
 
 message UnpinSnapshotRequest {
   uint32 context_id = 1;
-  HummockSnapshot snapshot = 2;
+  repeated HummockSnapshot snapshots = 2;
 }
 
 message UnpinSnapshotResponse {
