@@ -34,7 +34,7 @@ use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::{StreamEnvironment, StreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tower::make::Shared;
@@ -124,7 +124,7 @@ pub async fn compute_node_serve(
 
     // Initialize the managers.
     let batch_mgr = Arc::new(BatchManager::new());
-    let stream_mgr = Arc::new(StreamManager::new(
+    let stream_mgr = Arc::new(LocalStreamManager::new(
         client_addr.clone(),
         state_store.clone(),
         streaming_metrics.clone(),

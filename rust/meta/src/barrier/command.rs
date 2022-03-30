@@ -31,8 +31,8 @@ use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
 
-/// [`Command`] is the action of [`BarrierManager`]. For different commands, we'll build different
-/// barriers to send, and may do different stuffs after the barrier is collected.
+/// [`Command`] is the action of [`GlobalBarrierManager`]. For different commands, we'll build
+/// different barriers to send, and may do different stuffs after the barrier is collected.
 #[derive(Debug, Clone)]
 pub enum Command {
     /// `Plain` command generates a barrier with the mutation it carries.

@@ -28,8 +28,8 @@ use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, MutexGuard};
 
-use super::{IdCategory, IdGeneratorManagerRef};
-use crate::manager::NotificationManagerRef;
+use super::IdCategory;
+use crate::manager::MetaSrvEnv;
 use crate::model::{MetadataModel, Transactional};
 use crate::storage::{MetaStore, Transaction};
 
@@ -41,10 +41,9 @@ pub type RelationId = u32;
 
 pub type Catalog = (Vec<Database>, Vec<Schema>, Vec<Table>, Vec<Source>);
 
-pub struct CatalogManager<S> {
+pub struct CatalogManager<S: MetaStore> {
+    env: MetaSrvEnv<S>,
     core: Mutex<CatalogManagerCore<S>>,
-    meta_store_ref: Arc<S>,
-    nm: NotificationManagerRef,
 }
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
@@ -53,33 +52,30 @@ impl<S> CatalogManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(
-        meta_store_ref: Arc<S>,
-        id_gen_manager: IdGeneratorManagerRef<S>,
-        nm: NotificationManagerRef,
-    ) -> Result<Self> {
+    pub async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
         let catalog_manager = Self {
-            core: Mutex::new(CatalogManagerCore::new(meta_store_ref.clone()).await?),
-            meta_store_ref,
-            nm,
+            core: Mutex::new(CatalogManagerCore::new(env.clone()).await?),
+            env,
         };
-        catalog_manager.init(id_gen_manager).await?;
+        catalog_manager.init().await?;
         Ok(catalog_manager)
     }
 
     // Create default database and schema.
-    async fn init(&self, id_gen_manager: IdGeneratorManagerRef<S>) -> Result<()> {
+    async fn init(&self) -> Result<()> {
         let mut database = Database {
             name: DEFAULT_DATABASE_NAME.to_string(),
             ..Default::default()
         };
         if !self.core.lock().await.has_database(&database) {
-            database.id = id_gen_manager
+            database.id = self
+                .env
+                .id_gen_manager()
                 .generate::<{ IdCategory::Database }>()
                 .await? as u32;
             self.create_database(&database).await?;
         }
-        let databases = Database::list(&*self.meta_store_ref)
+        let databases = Database::list(self.env.meta_store())
             .await?
             .into_iter()
             .filter(|db| db.name == DEFAULT_DATABASE_NAME)
@@ -92,7 +88,11 @@ where
             ..Default::default()
         };
         if !self.core.lock().await.has_schema(&schema) {
-            schema.id = id_gen_manager.generate::<{ IdCategory::Schema }>().await? as u32;
+            schema.id = self
+                .env
+                .id_gen_manager()
+                .generate::<{ IdCategory::Schema }>()
+                .await? as u32;
             self.create_schema(&schema).await?;
         }
         Ok(())
@@ -111,17 +111,18 @@ where
 
     pub async fn list_sources(&self) -> Result<Vec<Source>> {
         let core = self.core.lock().await;
-        Source::list(&*core.meta_store_ref).await
+        Source::list(core.env.meta_store()).await
     }
 
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
-            database.insert(&*self.meta_store_ref).await?;
+            database.insert(self.env.meta_store()).await?;
             core.add_database(database);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::DatabaseV2(database.to_owned()))
                 .await
                 .into_inner();
@@ -136,13 +137,14 @@ where
 
     pub async fn drop_database(&self, database_id: DatabaseId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let database = Database::select(&*self.meta_store_ref, &database_id).await?;
+        let database = Database::select(self.env.meta_store(), &database_id).await?;
         if let Some(database) = database {
-            Database::delete(&*self.meta_store_ref, &database_id).await?;
+            Database::delete(self.env.meta_store(), &database_id).await?;
             core.drop_database(&database);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::DatabaseV2(database))
                 .await
                 .into_inner();
@@ -158,11 +160,12 @@ where
     pub async fn create_schema(&self, schema: &Schema) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_schema(schema) {
-            schema.insert(&*self.meta_store_ref).await?;
+            schema.insert(self.env.meta_store()).await?;
             core.add_schema(schema);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::SchemaV2(schema.to_owned()))
                 .await
                 .into_inner();
@@ -177,13 +180,14 @@ where
 
     pub async fn drop_schema(&self, schema_id: SchemaId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let schema = Schema::select(&*self.meta_store_ref, &schema_id).await?;
+        let schema = Schema::select(self.env.meta_store(), &schema_id).await?;
         if let Some(schema) = schema {
-            Schema::delete(&*self.meta_store_ref, &schema_id).await?;
+            Schema::delete(self.env.meta_store(), &schema_id).await?;
             core.drop_schema(&schema);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Delete, &Info::SchemaV2(schema))
                 .await
                 .into_inner();
@@ -217,11 +221,12 @@ where
         let key = (table.database_id, table.schema_id, table.name.clone());
         if !core.has_table(table) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            table.insert(&*self.meta_store_ref).await?;
+            table.insert(self.env.meta_store()).await?;
             core.add_table(table);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
@@ -253,14 +258,15 @@ where
     pub async fn create_table(&self, table: &Table) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_table(table) {
-            table.insert(&*self.meta_store_ref).await?;
+            table.insert(self.env.meta_store()).await?;
             core.add_table(table);
             for &dependent_relation_id in &table.dependent_relations {
                 core.increase_ref_count(dependent_relation_id);
             }
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(table.to_owned()))
                 .await
                 .into_inner();
@@ -275,7 +281,7 @@ where
 
     pub async fn drop_table(&self, table_id: TableId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let table = Table::select(&*self.meta_store_ref, &table_id).await?;
+        let table = Table::select(self.env.meta_store(), &table_id).await?;
         if let Some(table) = table {
             match core.get_ref_count(table_id) {
                 Some(ref_count) => Err(CatalogError(
@@ -288,14 +294,15 @@ where
                 )
                 .into()),
                 None => {
-                    Table::delete(&*self.meta_store_ref, &table_id).await?;
+                    Table::delete(self.env.meta_store(), &table_id).await?;
                     core.drop_table(&table);
                     for &dependent_relation_id in &table.dependent_relations {
                         core.decrease_ref_count(dependent_relation_id);
                     }
 
                     let version = self
-                        .nm
+                        .env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::TableV2(table))
                         .await
                         .into_inner();
@@ -328,11 +335,12 @@ where
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && core.has_in_progress_creation(&key) {
             core.unmark_creating(&key);
-            source.insert(&*self.meta_store_ref).await?;
+            source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -361,11 +369,12 @@ where
     pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_source(source) {
-            source.insert(&*self.meta_store_ref).await?;
+            source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -380,7 +389,7 @@ where
 
     pub async fn drop_source(&self, source_id: SourceId) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let source = Source::select(&*self.meta_store_ref, &source_id).await?;
+        let source = Source::select(self.env.meta_store(), &source_id).await?;
         if let Some(source) = source {
             match core.get_ref_count(source_id) {
                 Some(ref_count) => Err(CatalogError(
@@ -393,11 +402,12 @@ where
                 )
                 .into()),
                 None => {
-                    Source::delete(&*self.meta_store_ref, &source_id).await?;
+                    Source::delete(self.env.meta_store(), &source_id).await?;
                     core.drop_source(&source);
 
                     let version = self
-                        .nm
+                        .env
+                        .notification_manager()
                         .notify_frontend(Operation::Delete, &Info::Source(source))
                         .await
                         .into_inner();
@@ -455,16 +465,18 @@ where
             let mut transaction = Transaction::default();
             source.upsert_in_transaction(&mut transaction)?;
             mview.upsert_in_transaction(&mut transaction)?;
-            core.meta_store_ref.txn(transaction).await?;
+            core.env.meta_store().txn(transaction).await?;
             core.add_source(source);
             core.add_table(mview);
 
-            self.nm
+            self.env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::TableV2(mview.to_owned()))
                 .await;
             // Currently frontend uses source's version
             let version = self
-                .nm
+                .env
+                .notification_manager()
                 .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
                 .await
                 .into_inner();
@@ -505,8 +517,8 @@ where
         mview_id: TableId,
     ) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
-        let mview = Table::select(&*self.meta_store_ref, &mview_id).await?;
-        let source = Source::select(&*self.meta_store_ref, &source_id).await?;
+        let mview = Table::select(self.env.meta_store(), &mview_id).await?;
+        let source = Source::select(self.env.meta_store(), &source_id).await?;
         match (mview, source) {
             (Some(mview), Some(source)) => {
                 // decrease associated source's ref count first to avoid deadlock
@@ -551,18 +563,20 @@ where
                 let mut transaction = Transaction::default();
                 mview.delete_in_transaction(&mut transaction)?;
                 source.delete_in_transaction(&mut transaction)?;
-                core.meta_store_ref.txn(transaction).await?;
+                core.env.meta_store().txn(transaction).await?;
                 core.drop_table(&mview);
                 core.drop_source(&source);
                 for &dependent_relation_id in &mview.dependent_relations {
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
-                self.nm
+                self.env
+                    .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::TableV2(mview))
                     .await;
                 let version = self
-                    .nm
+                    .env
+                    .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::Source(source))
                     .await
                     .into_inner();
@@ -584,8 +598,8 @@ type RelationKey = (DatabaseId, SchemaId, String);
 
 /// [`CatalogManagerCore`] caches meta catalog information and maintains dependent relationship
 /// between tables.
-pub struct CatalogManagerCore<S> {
-    meta_store_ref: Arc<S>,
+pub struct CatalogManagerCore<S: MetaStore> {
+    env: MetaSrvEnv<S>,
     /// Cached database key information.
     databases: HashSet<DatabaseKey>,
     /// Cached schema key information.
@@ -605,11 +619,11 @@ impl<S> CatalogManagerCore<S>
 where
     S: MetaStore,
 {
-    async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
-        let databases = Database::list(&*meta_store_ref).await?;
-        let schemas = Schema::list(&*meta_store_ref).await?;
-        let sources = Source::list(&*meta_store_ref).await?;
-        let tables = Table::list(&*meta_store_ref).await?;
+    async fn new(env: MetaSrvEnv<S>) -> Result<Self> {
+        let databases = Database::list(env.meta_store()).await?;
+        let schemas = Schema::list(env.meta_store()).await?;
+        let sources = Source::list(env.meta_store()).await?;
+        let tables = Table::list(env.meta_store()).await?;
 
         let mut relation_ref_count = HashMap::new();
 
@@ -634,7 +648,7 @@ where
         let in_progress_creation_tracker = HashSet::new();
 
         Ok(Self {
-            meta_store_ref,
+            env,
             databases,
             schemas,
             sources,
@@ -646,10 +660,10 @@ where
 
     pub async fn get_catalog(&self) -> Result<Catalog> {
         Ok((
-            Database::list(&*self.meta_store_ref).await?,
-            Schema::list(&*self.meta_store_ref).await?,
-            Table::list(&*self.meta_store_ref).await?,
-            Source::list(&*self.meta_store_ref).await?,
+            Database::list(self.env.meta_store()).await?,
+            Schema::list(self.env.meta_store()).await?,
+            Table::list(self.env.meta_store()).await?,
+            Source::list(self.env.meta_store()).await?,
         ))
     }
 
