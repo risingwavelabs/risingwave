@@ -179,7 +179,7 @@ where
 
                     async move {
                         let mut client = self.clients.get(node).await?;
-                        tracing::debug!(request_id = %request_id, actors = ?actors, "drop actors");
+                        tracing::debug!(request_id = %request_id, node = node_id, actors = ?actors, "drop actors");
                         let request = DropActorsRequest {
                             request_id,
                             table_ref_id: Some(table_ref_id.to_owned()),

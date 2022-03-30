@@ -133,6 +133,12 @@ impl ScheduledBarriers {
 /// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
 /// done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
+    /// The maximal interval for sending a barrier.
+    interval: Duration,
+
+    /// The queue of scheduled barriers.
+    scheduled_barriers: ScheduledBarriers,
+
     cluster_manager: ClusterManagerRef<S>,
 
     catalog_manager: CatalogManagerRef<S>,
@@ -140,8 +146,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     fragment_manager: FragmentManagerRef<S>,
 
     hummock_manager: HummockManagerRef<S>,
-
-    scheduled_barriers: ScheduledBarriers,
 
     metrics: Arc<MetaMetrics>,
 
@@ -154,8 +158,6 @@ impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
-    const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
     /// Create a new [`GlobalBarrierManager`].
@@ -167,7 +169,19 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
+        // TODO: make this configurable
+        let interval = Duration::from_millis(if let Ok(x) = std::env::var("RW_CI") && x == "true" {
+            // Use a shorter interval to discovery more bugs on CI.
+            500
+        } else if cfg!(debug_assertions) {
+            // Use a longer interval to better debug with tracing.
+            5000
+        } else {
+            100
+        });
+
         Self {
+            interval,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -180,7 +194,7 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     pub async fn run(&self) -> Result<()> {
-        let mut min_interval = tokio::time::interval(Self::INTERVAL);
+        let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut prev_epoch = INVALID_EPOCH;
