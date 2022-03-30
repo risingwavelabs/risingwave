@@ -109,17 +109,13 @@ impl Compactor {
 
     /// Handle a compaction task and report its status to hummock manager.
     /// Always return `Ok` and let hummock manager handle errors.
-    pub async fn compact(
-        context: Arc<CompactorContext>,
-        compact_task: CompactTask,
-    ) -> HummockResult<()> {
+    pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
             Compactor::compact_task_to_string(compact_task.clone())
         );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
-        // and number of output target sstables.
         let parallelism = compact_task.splits.len();
         let mut compact_success = true;
         let mut output_ssts = Vec::with_capacity(parallelism);
@@ -153,20 +149,11 @@ impl Compactor {
         }
 
         // After a compaction is done, mutate the compaction task.
-        compactor
-            .compact_done(&output_ssts, compact_success)
-            .await
-            .unwrap();
-
-        Ok(())
+        compactor.compact_done(&output_ssts, compact_success).await;
     }
 
     /// Fill in the compact task and let hummock manager know the compaction output ssts.
-    async fn compact_done(
-        &mut self,
-        output_ssts: &Vec<(usize, Vec<Sstable>)>,
-        task_ok: bool,
-    ) -> HummockResult<()> {
+    async fn compact_done(&mut self, output_ssts: &Vec<(usize, Vec<Sstable>)>, task_ok: bool) {
         self.compact_task.task_status = task_ok;
         self.compact_task
             .sorted_output_ssts
@@ -210,8 +197,6 @@ impl Compactor {
                 e
             );
         }
-
-        Ok(())
     }
 
     /// Compact the given key range and merge iterator.
@@ -417,9 +402,7 @@ impl Compactor {
                             vacuum_task,
                         })) => {
                             if let Some(compact_task) = compact_task {
-                                Compactor::compact(compactor_context.clone(), compact_task)
-                                    .await
-                                    .unwrap();
+                                Compactor::compact(compactor_context.clone(), compact_task).await;
                             }
 
                             Compactor::try_vacuum(

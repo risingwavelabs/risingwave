@@ -783,10 +783,9 @@ where
             return Ok(false);
         }
         compact_task_assignment.remove(&compact_task.task_id);
-        let delete_table_ids = match compact_status.report_compact_task(
-            output_table_compact_entries,
-            compact_task.clone(),
-        ) {
+        let delete_table_ids = match compact_status
+            .report_compact_task(output_table_compact_entries, compact_task.clone())
+        {
             None => {
                 panic!("Inconsistent compact status");
             }

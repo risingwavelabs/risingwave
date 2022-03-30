@@ -149,7 +149,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager
+    let mut compact_task = hummock_manager
         .get_compact_task(context_id)
         .await
         .unwrap()
@@ -194,13 +194,15 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager
+    let mut compact_task = hummock_manager
         .get_compact_task(context_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
+    compact_task.task_status = true;
+
     assert!(hummock_manager
         .report_compact_task(compact_task.clone())
         .await
@@ -907,7 +909,11 @@ async fn test_print_compact_task() -> Result<()> {
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
     // Get a compaction task.
-    let compact_task = hummock_manager.get_compact_task(context_id).await.unwrap().unwrap();
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(
         compact_task
             .get_input_ssts()
