@@ -46,10 +46,8 @@ echo "$HEADER" >> ../workflows/main.yml
 jobs_pr=(
    "jobs/frontend-check.yml"
    "jobs/e2e-risedev-dev.gen.yml"
-   "jobs/e2e-risedev-release.gen.yml"
    "jobs/e2e-source.yml"
    "jobs/compute-node-build-dev.gen.yml"
-   "jobs/compute-node-build-release.gen.yml"
    "jobs/compute-node-test.yml"
    "jobs/misc-check.yml"
 )
