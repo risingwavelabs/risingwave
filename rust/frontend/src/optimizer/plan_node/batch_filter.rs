@@ -43,15 +43,6 @@ impl BatchFilter {
         BatchFilter { base, logical }
     }
 
-    /// check if the predicate is always true
-    pub fn filter_if_need(input: PlanRef, predicate: Condition) -> PlanRef {
-        if predicate.always_true() {
-            input
-        } else {
-            BatchFilter::new(LogicalFilter::new(input, predicate)).into()
-        }
-    }
-
     pub fn predicate(&self) -> &Condition {
         self.logical.predicate()
     }
