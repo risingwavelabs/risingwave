@@ -181,48 +181,52 @@ impl Binder {
 
     pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let source_catalog =
-            self.catalog
-                .get_source_by_name(&self.db_name, &schema_name, &table_name)?;
 
-        let (columns, table_desc, table_id) = match source_catalog.get_info()? {
-            // Since stream source doesn't have table catalog, use the stream source info.
-            // Field descs have same hidden value with column catalog.
-            Info::StreamSource(info) => {
-                let catalogs: Vec<ColumnCatalog> =
-                    info.columns.iter().map(|c| c.clone().into()).collect_vec();
-                let mut columns = vec![];
-                for catalog in catalogs {
-                    columns.append(
-                        &mut catalog
-                            .column_desc
-                            .get_column_descs()
-                            .iter()
-                            .map(|c| ColumnCatalog {
-                                column_desc: c.clone(),
-                                is_hidden: catalog.is_hidden,
-                            })
-                            .collect_vec(),
-                    );
-                }
-                let table_desc = TableDesc {
-                    table_id: TableId::new(source_catalog.id),
-                    pk: vec![],
-                    columns: columns.iter().map(|c| c.column_desc.clone()).collect_vec(),
-                };
-                (columns, table_desc, TableId::new(source_catalog.id))
-            }
-            Info::TableSource(_) => {
-                let table_catalog =
-                    self.catalog
-                        .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
-                (
+        let (columns, table_desc, table_id) =
+            match self
+                .catalog
+                .get_option_table_by_name(&self.db_name, &schema_name, &table_name)?
+            {
+                Some(table_catalog) => (
                     table_catalog.columns.to_vec(),
                     table_catalog.table_desc(),
                     table_catalog.id(),
-                )
-            }
-        };
+                ),
+                // Since stream source doesn't have table catalog, use the stream source info.
+                // Field descs have same hidden value with column catalog.
+                None => {
+                    let source_catalog = self.catalog.get_source_by_name(
+                        &self.db_name,
+                        &schema_name,
+                        &table_name,
+                    )?;
+                    let catalogs: Vec<ColumnCatalog> = source_catalog
+                        .get_column_catalogs()
+                        .iter()
+                        .map(|c| c.clone().into())
+                        .collect_vec();
+                    let mut columns = vec![];
+                    for catalog in catalogs {
+                        columns.append(
+                            &mut catalog
+                                .column_desc
+                                .get_column_descs()
+                                .iter()
+                                .map(|c| ColumnCatalog {
+                                    column_desc: c.clone(),
+                                    is_hidden: catalog.is_hidden,
+                                })
+                                .collect_vec(),
+                        );
+                    }
+                    let table_desc = TableDesc {
+                        table_id: TableId::new(source_catalog.id),
+                        pk: vec![],
+                        columns: columns.iter().map(|c| c.column_desc.clone()).collect_vec(),
+                    };
+                    (columns, table_desc, TableId::new(source_catalog.id))
+                }
+            };
 
         self.bind_context(
             columns.iter().map(|c| {

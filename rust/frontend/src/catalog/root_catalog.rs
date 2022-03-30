@@ -139,6 +139,17 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("table", table_name.to_string()).into())
     }
 
+    pub fn get_option_table_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> Result<Option<&TableCatalog>> {
+        Ok(self
+            .get_schema_by_name(db_name, schema_name)?
+            .get_table_by_name(table_name))
+    }
+
     pub fn get_source_by_name(
         &self,
         db_name: &str,

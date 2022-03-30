@@ -2,10 +2,11 @@
 
 use std::net::{AddrParseError, SocketAddr};
 
+use crate::catalog::source::Info;
 use crate::common::HostAddress;
 use crate::data::data_type::TypeName;
 use crate::data::DataType;
-use crate::plan::ColumnDesc;
+use crate::plan::{ColumnCatalog, ColumnDesc};
 
 impl crate::common::HostAddress {
     /// Convert `HostAddress` to `SocketAddr`.
@@ -68,17 +69,26 @@ impl crate::catalog::Source {
         )
     }
 
-    /// Return column_descs from source info
+    /// Return column_descs from source info filter our hidden column
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let catalogs = match self.get_info().unwrap() {
-            crate::catalog::source::Info::StreamSource(info) => &info.columns,
-            crate::catalog::source::Info::TableSource(info) => &info.columns,
+            Info::StreamSource(info) => &info.columns,
+            Info::TableSource(info) => &info.columns,
         };
         catalogs
             .iter()
             .filter(|c| !c.is_hidden)
             .map(|c| c.column_desc.as_ref().cloned().unwrap())
             .collect()
+    }
+
+    /// Return column_catalogs from source info
+    pub fn get_column_catalogs(&self) -> Vec<ColumnCatalog> {
+        let catalogs = match self.get_info().unwrap() {
+            Info::StreamSource(info) => &info.columns,
+            Info::TableSource(info) => &info.columns,
+        };
+        catalogs.iter().map(|c| c.clone()).collect()
     }
 }
 
