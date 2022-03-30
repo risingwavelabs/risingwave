@@ -143,28 +143,16 @@ impl<S: StateStore> CellBasedTable<S> {
             .state_store()
             .scan(start_key..end_key, None, epoch)
             .await?;
-
-        // row does not exist
-        if state_store_range_scan_res.is_empty() {
-            return Ok(None);
-        }
-
+        let mut cell_based_row_deserializer =
+            CellBasedRowDeserializer::new(self.column_descs.clone());
         for (key, value) in state_store_range_scan_res {
-            if key.len() > 4 {
-                // The last four bytes of the key in scan result represent its column_id
-                let column_id_bytes = &key[key.len() - 4..];
-                let column_id = deserialize_column_id(column_id_bytes)?;
-                let column_index = self
-                    .column_id_to_column_index
-                    .get(&column_id)
-                    .expect("column id not found");
-                let mut de = value_encoding::Deserializer::new(value.to_bytes());
-                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
-                row[*column_index] = cell;
-            } else {
-                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "state store key length incorrect ".to_string(),
-                )));
+            cell_based_row_deserializer.deserialize(&key, value.as_bytes())?;
+        }
+        let pk_and_row = cell_based_row_deserializer.take();
+        match pk_and_row {
+            Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+            None => {
+                return Ok(None);
             }
         }
 
