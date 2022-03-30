@@ -2796,9 +2796,9 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
- "log",
  "tokio",
  "tokio-postgres",
+ "tracing",
  "workspace-hack",
 ]
 
