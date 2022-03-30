@@ -60,10 +60,10 @@ impl Actor {
         );
         // Drive the streaming task with an infinite loop
         loop {
-            if let Err(TryRecvError::Empty) = self.stop_rx.try_recv() {
-            } else {
+            // We also continue if the sender is dropped, which only appear in tests.
+            if let Ok(_) = self.stop_rx.try_recv() {
                 break;
-            }
+            } 
             let message = self.consumer.next().instrument(span.clone()).await;
             match message {
                 Ok(Some(barrier)) => {

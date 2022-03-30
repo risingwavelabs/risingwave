@@ -21,6 +21,7 @@ use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::expr::*;
 use risingwave_common::types::*;
+use tokio::sync::oneshot;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
@@ -90,7 +91,8 @@ async fn test_merger_sum_aggr() {
         let consumer =
             SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
         let context = SharedContext::for_test().into();
-        let actor = Actor::new(Box::new(consumer), 0, context);
+        let stop_rx = oneshot::channel().1;
+        let actor = Actor::new(Box::new(consumer), 0, context, stop_rx);
         (actor, rx)
     };
 
@@ -126,7 +128,8 @@ async fn test_merger_sum_aggr() {
         ctx,
     );
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(dispatcher), 0, context);
+    let stop_rx = oneshot::channel().1;
+    let actor = Actor::new(Box::new(dispatcher), 0, context, stop_rx);
     handles.push(tokio::spawn(actor.run()));
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
@@ -167,7 +170,8 @@ async fn test_merger_sum_aggr() {
     let items = Arc::new(Mutex::new(vec![]));
     let consumer = MockConsumer::new(Box::new(projection), items.clone());
     let context = SharedContext::for_test().into();
-    let actor = Actor::new(Box::new(consumer), 0, context);
+    let stop_rx = oneshot::channel().1;
+    let actor = Actor::new(Box::new(consumer), 0, context, stop_rx);
     handles.push(tokio::spawn(actor.run()));
 
     let mut epoch = 1;
