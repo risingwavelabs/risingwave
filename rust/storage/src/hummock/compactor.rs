@@ -148,6 +148,9 @@ impl Compactor {
             }
         }
 
+        // Sort by split/key range index.
+        output_ssts.sort_by_key(|(split_index, _)| *split_index);
+
         // After a compaction is done, mutate the compaction task.
         compactor.compact_done(&output_ssts, compact_success).await;
     }
@@ -507,7 +510,10 @@ impl Compactor {
             "Compaction watermark: {:?} \n",
             compact_task.watermark
         ));
-        s.push_str(&format!("Compaction splits: {:?} \n", compact_task.splits));
+        s.push_str(&format!(
+            "Compaction # splits: {:?} \n",
+            compact_task.splits.len()
+        ));
         s.push_str(&format!(
             "Compaction task status: {:?} \n",
             compact_task.task_status
