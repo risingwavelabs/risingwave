@@ -16,13 +16,14 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::SubscribeResponse;
 use risingwave_rpc_client::{MetaClient, NotificationStream};
 use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
-use tokio::time;
 
 use crate::catalog::root_catalog::Catalog;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
@@ -54,9 +55,114 @@ impl ObserverManager {
         }
     }
 
+    pub fn handle_first_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+        let mut catalog_guard = self.catalog.write();
+        match resp.info {
+            Some(Info::FeSnapshot(snapshot)) => {
+                for db in snapshot.database {
+                    catalog_guard.create_database(db)
+                }
+                for schema in snapshot.schema {
+                    catalog_guard.create_schema(schema)
+                }
+                for table in snapshot.table {
+                    catalog_guard.create_table(&table)
+                }
+                for source in snapshot.source {
+                    catalog_guard.create_source(source)
+                }
+                for node in snapshot.nodes {
+                    self.worker_node_manager.add_worker_node(node)
+                }
+            }
+            _ => {
+                return Err(ErrorCode::InternalError(format!(
+                    "the first notify should be snapshot, but get {:?}",
+                    resp
+                ))
+                .into())
+            }
+        }
+        catalog_guard.set_version(resp.version);
+        self.catalog_updated_tx.send(resp.version).unwrap();
+        Ok(())
+    }
+
+    pub fn handle_notification(&mut self, resp: SubscribeResponse) {
+        let mut catalog_guard = self.catalog.write();
+        match &resp.info {
+            Some(Info::Database(_)) => {
+                panic!(
+                    "received a deprecated catalog notification from meta {:?}",
+                    resp
+                );
+            }
+            Some(Info::Schema(_)) => {
+                panic!(
+                    "received a deprecated catalog notification from meta {:?}",
+                    resp
+                );
+            }
+            Some(Info::Table(_)) => {
+                panic!(
+                    "received a deprecated catalog notification from meta {:?}",
+                    resp
+                );
+            }
+            Some(Info::Node(node)) => {
+                self.update_worker_node_manager(resp.operation(), node.clone());
+            }
+            Some(Info::DatabaseV2(database)) => match resp.operation() {
+                Operation::Add => catalog_guard.create_database(database.clone()),
+                Operation::Delete => catalog_guard.drop_database(database.id),
+                _ => panic!("receive an unsupported notify {:?}", resp.clone()),
+            },
+            Some(Info::SchemaV2(schema)) => match resp.operation() {
+                Operation::Add => catalog_guard.create_schema(schema.clone()),
+                Operation::Delete => catalog_guard.drop_schema(schema.database_id, schema.id),
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Some(Info::TableV2(table)) => match resp.operation() {
+                Operation::Add => catalog_guard.create_table(&table),
+                Operation::Delete => {
+                    catalog_guard.drop_table(table.database_id, table.schema_id, table.id.into())
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Some(Info::Source(source)) => match resp.operation() {
+                Operation::Add => catalog_guard.create_source(source.clone()),
+                Operation::Delete => {
+                    catalog_guard.drop_source(source.database_id, source.schema_id, source.id)
+                }
+                _ => panic!("receive an unsupported notify {:?}", resp),
+            },
+            Some(Info::FeSnapshot(_)) => {
+                panic!(
+                    "receiving an FeSnapshot in the middle is unsupported now {:?}",
+                    resp
+                )
+            }
+            None => panic!("receive an unsupported notify {:?}", resp),
+        }
+        assert!(
+            resp.version > catalog_guard.version(),
+            "resp version={:?}, current version={:?}",
+            resp.version,
+            catalog_guard.version()
+        );
+        catalog_guard.set_version(resp.version);
+        self.catalog_updated_tx.send(resp.version).unwrap();
+    }
+
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
     /// update frontend's data. `start` use `mut self` as parameter.
-    pub async fn start(mut self) -> JoinHandle<()> {
+    pub async fn start(mut self) -> Result<JoinHandle<()>> {
+        let first_resp = self.rx.next().await?.ok_or_else(|| {
+            ErrorCode::InternalError(format!(
+                "ObserverManager start failed, Stream of notification terminated at the start."
+            ))
+        })?;
+        self.handle_first_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
@@ -64,95 +170,11 @@ impl ObserverManager {
                         tracing::error!("Stream of notification terminated.");
                         break;
                     }
-                    let resp = resp.unwrap();
-                    let resp_clone = resp.clone();
-                    let operation = resp.operation();
-                    let mut catalog_guard = self.catalog.write();
-                    match resp.info {
-                        Some(Info::Database(_)) => {
-                            panic!(
-                                "received a deprecated catalog notification from meta {:?}",
-                                resp_clone
-                            );
-                        }
-                        Some(Info::Schema(_)) => {
-                            panic!(
-                                "received a deprecated catalog notification from meta {:?}",
-                                resp_clone
-                            );
-                        }
-                        Some(Info::Table(_)) => {
-                            panic!(
-                                "received a deprecated catalog notification from meta {:?}",
-                                resp_clone
-                            );
-                        }
-                        Some(Info::Node(node)) => {
-                            self.update_worker_node_manager(operation, node);
-                        }
-                        Some(Info::DatabaseV2(database)) => match operation {
-                            Operation::Add => catalog_guard.create_database(database),
-                            Operation::Delete => catalog_guard.drop_database(database.id),
-                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
-                        },
-                        Some(Info::SchemaV2(schema)) => match operation {
-                            Operation::Add => catalog_guard.create_schema(schema),
-                            Operation::Delete => {
-                                catalog_guard.drop_schema(schema.database_id, schema.id)
-                            }
-                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
-                        },
-                        Some(Info::TableV2(table)) => match operation {
-                            Operation::Add => catalog_guard.create_table(&table),
-                            Operation::Delete => catalog_guard.drop_table(
-                                table.database_id,
-                                table.schema_id,
-                                table.id.into(),
-                            ),
-                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
-                        },
-                        Some(Info::Source(source)) => match operation {
-                            Operation::Add => catalog_guard.create_source(source),
-                            Operation::Delete => catalog_guard.drop_source(
-                                source.database_id,
-                                source.schema_id,
-                                source.id,
-                            ),
-                            _ => panic!("receive an unsupported notify {:?}", resp_clone),
-                        },
-                        Some(Info::FeSnapshot(snapshot)) => {
-                            for db in snapshot.database {
-                                catalog_guard.create_database(db)
-                            }
-                            for schema in snapshot.schema {
-                                catalog_guard.create_schema(schema)
-                            }
-                            for table in snapshot.table {
-                                catalog_guard.create_table(&table)
-                            }
-                            for source in snapshot.source {
-                                catalog_guard.create_source(source)
-                            }
-                            for node in snapshot.nodes {
-                                self.worker_node_manager.add_worker_node(node)
-                            }
-                        }
-                        None => panic!("receive an unsupported notify {:?}", resp),
-                    }
-                    assert!(
-                        resp.version > catalog_guard.version(),
-                        "resp version={:?}, current version={:?}",
-                        resp.version,
-                        catalog_guard.version()
-                    );
-                    catalog_guard.set_version(resp.version);
-                    self.catalog_updated_tx.send(resp.version).unwrap();
+                    self.handle_notification(resp.unwrap());
                 }
             }
         });
-        // FIXME: to wait the local catalog init
-        time::sleep(time::Duration::from_millis(50)).await;
-        handle
+        Ok(handle)
     }
 
     /// `update_worker_node_manager` is called in `start` method.
