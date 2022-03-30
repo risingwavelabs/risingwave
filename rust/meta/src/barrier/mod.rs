@@ -32,6 +32,7 @@ use uuid::Uuid;
 pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
+use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
@@ -41,42 +42,8 @@ use crate::stream::FragmentManagerRef;
 
 mod command;
 mod info;
+mod notifier;
 mod recovery;
-
-#[derive(Debug, Default)]
-struct Notifier {
-    /// Get notified when scheduled barrier is about to send or failed.
-    to_send: Option<oneshot::Sender<Result<()>>>,
-
-    /// Get notified when scheduled barrier is collected(finished) or failed.
-    collected: Option<oneshot::Sender<Result<()>>>,
-}
-
-impl Notifier {
-    /// Notify when we are about to send a barrier.
-    fn notify_to_send(&mut self) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(Ok(())).ok();
-        }
-    }
-
-    /// Notify when we have collected a barrier from all actors.
-    fn notify_collected(&mut self) {
-        if let Some(tx) = self.collected.take() {
-            tx.send(Ok(())).ok();
-        }
-    }
-
-    /// Notify when we failed to send a barrier or collected a barrier.
-    fn notify_failed(&mut self, err: RwError) {
-        if let Some(tx) = self.to_send.take() {
-            tx.send(Err(err.clone())).ok();
-        }
-        if let Some(tx) = self.collected.take() {
-            tx.send(Err(err)).ok();
-        }
-    }
-}
 
 type Scheduled = (Command, SmallVec<[Notifier; 1]>);
 
@@ -146,9 +113,9 @@ impl ScheduledBarriers {
     /// Clear all buffered scheduled barriers, and notify their subscribers with failed as aborted.
     async fn abort(&self) {
         let mut buffer = self.buffer.write().await;
-        while let Some((_, mut notifiers)) = buffer.pop_front() {
-            notifiers.iter_mut().for_each(|notify| {
-                notify.notify_failed(RwError::from(ErrorCode::InternalError(
+        while let Some((_, notifiers)) = buffer.pop_front() {
+            notifiers.into_iter().for_each(|notify| {
+                notify.notify_collection_failed(RwError::from(ErrorCode::InternalError(
                     "Scheduled barrier abort.".to_string(),
                 )))
             })
@@ -231,6 +198,8 @@ where
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut prev_epoch = INVALID_EPOCH;
+        let mut unfinished = UnfinishedNotifiers::default();
+
         loop {
             tokio::select! {
                 // Wait for the minimal interval,
@@ -254,15 +223,23 @@ where
             let mut notifiers = notifiers;
             notifiers.iter_mut().for_each(Notifier::notify_to_send);
             match self.run_inner(&command_ctx).await {
-                Ok(_responses) => {
-                    // TODO: process the finished DDLs
-                    prev_epoch = new_epoch;
+                Ok(responses) => {
+                    // Notify about collected first.
                     notifiers.iter_mut().for_each(Notifier::notify_collected);
+
+                    // Then try to finish the barrier for Create MVs.
+                    let actors_to_finish = command_ctx.actors_to_finish();
+                    unfinished.add(new_epoch, actors_to_finish, notifiers);
+                    for finished in responses.into_iter().flat_map(|r| r.finished_create_mviews) {
+                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    }
+
+                    prev_epoch = new_epoch;
                 }
                 Err(e) => {
                     notifiers
-                        .iter_mut()
-                        .for_each(|notify| notify.notify_failed(e.clone()));
+                        .into_iter()
+                        .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     // If failed, enter recovery mode.
                     prev_epoch = self.recovery(prev_epoch, &command).await.into_inner();
                 }
@@ -402,26 +379,45 @@ where
             },
         )
         .await?;
-        rx.await.unwrap()
+        rx.await.unwrap();
+
+        Ok(())
     }
 
     /// Run a command and return when it's completely finished.
     pub async fn run_command(&self, command: Command) -> Result<()> {
-        let (tx, rx) = oneshot::channel();
+        let (collect_tx, collect_rx) = oneshot::channel();
+        let (finish_tx, finish_rx) = oneshot::channel();
+
+        let is_create_mview = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
-                collected: Some(tx),
+                collected: Some(collect_tx),
+                finished: Some(finish_tx),
                 ..Default::default()
             },
         )
         .await?;
-        rx.await.unwrap()
+
+        collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
+
+        // TODO: review this workaround
+        if is_create_mview {
+            // Insert a flush immediately.
+            // For speed up the creation of MVs with a small amount of data.
+            self.wait_for_next_barrier_to_collect().await?;
+        }
+
+        finish_rx.await.unwrap(); // Wait for this command to be finished.
+
+        Ok(())
     }
 
-    /// Wait for the next barrier to finish. Note that the barrier flowing in our stream graph is
+    /// Wait for the next barrier to collect. Note that the barrier flowing in our stream graph is
     /// ignored, if exists.
-    pub async fn wait_for_next_barrier(&self) -> Result<()> {
+    pub async fn wait_for_next_barrier_to_collect(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
         let notifier = Notifier {
             collected: Some(tx),

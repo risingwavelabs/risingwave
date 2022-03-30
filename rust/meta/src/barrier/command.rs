@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use futures::future::try_join_all;
 use risingwave_common::catalog::TableId;
@@ -149,6 +149,19 @@ where
         };
 
         Ok(mutation)
+    }
+
+    /// For `CreateMaterializedView`, returns the actors of the `Chain` nodes. For other commands,
+    /// returns an empty set.
+    pub fn actors_to_finish(&self) -> HashSet<ActorId> {
+        match &self.command {
+            Command::CreateMaterializedView { dispatches, .. } => dispatches
+                .iter()
+                .flat_map(|(_, down_actor_infos)| down_actor_infos.iter().map(|info| info.actor_id))
+                .collect(),
+
+            _ => Default::default(),
+        }
     }
 
     /// Do some stuffs after barriers are collected, for the given command.
