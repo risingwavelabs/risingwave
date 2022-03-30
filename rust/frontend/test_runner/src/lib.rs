@@ -154,19 +154,8 @@ impl TestCase {
 
         let placeholder_empty_vec = vec![];
 
-        match extract_content(self.clone()) {
-            Some(content) => {
-                let file = create_proto_file(content.as_str());
-                let sql = format!(
-                    r#"CREATE SOURCE t
-    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
-    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
-                    file.path().to_str().unwrap()
-                );
-                self.run_sql(&sql, session.clone(), do_check_result).await?;
-            }
-            None => {}
-        }
+        self.pre_create_source(session.clone(), do_check_result)
+            .await?;
 
         for sql in self
             .before_statements
@@ -181,6 +170,33 @@ impl TestCase {
             result = self.run_sql(sql, session.clone(), do_check_result).await?;
         }
         Ok(result.unwrap_or_default())
+    }
+
+    async fn pre_create_source(
+        &self,
+        session: Arc<SessionImpl>,
+        do_check_result: bool,
+    ) -> Result<Option<TestCaseResult>> {
+        let sql = "CREATE SOURCE t WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://".to_string();
+        match self.create_source.clone() {
+            Some(source) => {
+                if let Some(content) = source.file {
+                    let temp_file = create_proto_file(content.as_str());
+                    self.run_sql(
+                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        session.clone(),
+                        do_check_result,
+                    )
+                    .await
+                } else if let Some(file) = source.file_location {
+                    self.run_sql(&(sql + &file + "'"), session.clone(), do_check_result)
+                        .await
+                } else {
+                    panic!("{:?} create source need to conclude content", self.id);
+                }
+            }
+            None => Ok(None),
+        }
     }
 
     async fn run_sql(
@@ -431,30 +447,3 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
         panic!("{} test cases failed", failed_num);
     }
 }
-
-pub fn extract_content(c: TestCase) -> Option<String> {
-    match c.create_source {
-        Some(source) => {
-            if let Some(content) = source.file {
-                Some(content)
-            } else {
-                panic!("{:?} create source need to conclude content", c.id);
-            }
-        }
-        None => None,
-    }
-}
-
-// pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
-//     let temp_file = Builder::new()
-//         .prefix("temp")
-//         .suffix(".proto")
-//         .rand_bytes(5)
-//         .tempfile()
-//         .unwrap();
-//
-//     let mut file = temp_file.as_file();
-//     file.write_all(proto_data.as_ref())
-//         .expect("writing binary to test file");
-//     temp_file
-// }
