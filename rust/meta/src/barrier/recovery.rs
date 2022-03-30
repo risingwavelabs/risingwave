@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, ShutdownRequest,
-    UpdateActorsRequest, StopActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, StopActorsRequest,
+    UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -50,11 +50,18 @@ where
 
             let info = self.resolve_actor_info(None).await;
 
-            // kill all compute nodes and wait for online, and create all sources.
-            if self.kill_and_wait_compute_nodes(&info).await.is_err()
-                || self.create_sources(&info).await.is_err()
-            {
-                continue;
+            // kill all compute nodes and wait for online, and create sources on failed nodes.
+            match self.kill_and_wait_compute_nodes(&info).await {
+                Ok(failed_node_ids) => {
+                    if let Err(e) = self.create_sources(&info, failed_node_ids).await {
+                        debug!("create_sources failed: {:?}", e);
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    debug!("kill_and_wait_compute_nodes failed: {:?}", e);
+                    continue;
+                }
             }
 
             // update and build all actors.
@@ -102,11 +109,19 @@ where
     }
 
     /// Create all sources in compute nodes.
-    async fn create_sources(&self, info: &BarrierActorInfo) -> Result<()> {
+    async fn create_sources(
+        &self,
+        info: &BarrierActorInfo,
+        failed_node_ids: HashSet<u32>,
+    ) -> Result<()> {
         // Attention, using catalog v2 here, it's not compatible with Java frontend.
         let sources = self.catalog_manager.list_sources().await?;
 
-        for worker_node in info.node_map.values() {
+        for worker_node in info
+            .node_map
+            .values()
+            .filter(|n| failed_node_ids.contains(&n.id))
+        {
             let client = &self.env.stream_clients().get(worker_node).await?;
             let futures = sources.iter().map(|source| {
                 let request = CreateSourceRequest {
@@ -198,41 +213,27 @@ where
     }
 
     /// Kill all compute nodes and wait for them to be online again.
-    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<()> {
-        // for worker_node in info.node_map.values() {
-        //     loop {
-        //         tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
-        //         match self.env.stream_clients().get(worker_node).await {
-        //             Ok(client) => {
-        //                 if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
-        //                     self.cluster_manager
-        //                         .deactivate_worker_node(worker_node.host.clone().unwrap())
-        //                         .await?;
-        //                     break;
-        //                 }
-        //             }
-        //             Err(err) => {
-        //                 debug!("failed to get client: {}", err);
-        //                 continue;
-        //             }
-        //         }
-        //     }
-        // }
-
+    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<HashSet<u32>> {
+        let mut failed_worker_id = HashSet::<u32>::new();
         for worker_node in info.node_map.values() {
-            // gracefully shutdown actors on available compute nodes, and remove malfunctioning nodes.
+            // gracefully shutdown actors on running compute nodes
             match self.env.stream_clients().get(worker_node).await {
                 Ok(client) => {
-                    match client.to_owned().stop_actors(StopActorsRequest{ request_id: String::new(), actor_ids: vec![],}).await {
-                        Ok(_) => {
-                            
-                        }
+                    match client
+                        .to_owned()
+                        .stop_actors(StopActorsRequest {
+                            request_id: String::new(),
+                        })
+                        .await
+                    {
+                        Ok(_) => {}
                         Err(err) => {
                             // this node has down, remove it from cluster manager.
                             debug!("failed to stop actors on {:?}: {}", worker_node, err);
                             self.cluster_manager
-                            .deactivate_worker_node(worker_node.host.clone().unwrap())
-                            .await?;
+                                .deactivate_worker_node(worker_node.host.clone().unwrap())
+                                .await?;
+                            failed_worker_id.insert(worker_node.id);
                         }
                     }
                 }
@@ -241,7 +242,7 @@ where
                 }
             }
         }
-        debug!("all compute nodes have been stopped, wait for online!");
+        debug!("currently stopped compute nodes: {:?}", failed_worker_id);
         loop {
             tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
             let all_nodes = self
@@ -251,7 +252,6 @@ where
                 .iter()
                 .map(|worker_node| worker_node.id)
                 .collect::<HashSet<_>>();
-            debug!("all compute nodes: {:?}", all_nodes);
             if info
                 .node_map
                 .keys()
@@ -261,7 +261,7 @@ where
             }
         }
 
-        debug!("all compute nodes have been killed and restart.");
-        Ok(())
+        debug!("all compute nodes have been restarted.");
+        Ok(failed_worker_id)
     }
 }

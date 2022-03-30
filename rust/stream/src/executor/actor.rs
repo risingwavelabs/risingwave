@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
-use tracing_futures::Instrument;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
+use tracing_futures::Instrument;
 
 use super::{Mutation, StreamConsumer};
 use crate::task::{ActorId, SharedContext};
@@ -38,7 +38,7 @@ impl Actor {
         consumer: Box<dyn StreamConsumer>,
         id: ActorId,
         context: Arc<SharedContext>,
-        stop_rx: oneshot::Receiver<()>, 
+        stop_rx: oneshot::Receiver<()>,
     ) -> Self {
         Self {
             consumer,

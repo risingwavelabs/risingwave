@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
+use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -45,11 +46,8 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
-
-// pub type ActorHandle = JoinHandle<()>;
-
-/// ActorHandle contains the join handle of actor's future, and a sender used to gracefully stop the
-/// actor.
+/// `ActorHandle` contains the join handle of actor's future, and a sender used to gracefully stop
+/// the actor.
 pub struct ActorHandle {
     pub handle: JoinHandle<()>,
     pub stop_tx: oneshot::Sender<()>,
@@ -228,11 +226,17 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Gracefully stop actors on this worker.
-    pub async fn stop_actor(&self, _actors: &[ActorId]) -> Result<()> {
-        let mut core = self.core.lock();
-        // stop all actors.
-        core.stop_all_actors()?;
+    /// Gracefully stop all actors on this worker.
+    pub async fn stop_all_actors(&self) -> Result<()> {
+        let futures = {
+            let mut core = self.core.lock();
+            let futures = core.stop_all_actors()?;
+            // Reset barrier manager to a clean state.
+            core.context.reset_barrier_manager();
+            futures
+        };
+        join_all(futures).await;
+
         Ok(())
     }
 
@@ -911,29 +915,22 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 
-    /// Gracefully stop an actor by sending a stop signal to it.
-    fn stop_actor(&mut self, actor_id: ActorId) -> Result<()> {
-        debug!("stoppped actor {}", actor_id);
-        let handle = self.handles.remove(&actor_id).unwrap();
-        self.context.retain(|&(up_id, _)| up_id != actor_id);
-        self.actor_infos.remove(&actor_id);
-        self.actors.remove(&actor_id);
+    fn stop_all_actors(&mut self) -> Result<Vec<JoinHandle<()>>> {
+        // let actor_ids = .collect_vec();
+        let futures = self
+            .handles
+            .drain()
+            .map(|(actor_id, handle)| {
+                self.context.retain(|&(up_id, _)| up_id != actor_id);
+                self.actors.remove(&actor_id);
+                handle.stop_tx.send(()).ok();
+                handle.handle
+            })
+            .collect_vec();
 
-        handle.stop_tx.send(()).ok();
-
-        handle.handle.abort();
-        Ok(())
-    }
-
-    fn stop_all_actors(&mut self) -> Result<()> {
-        // copy out actor ids
-        let actor_ids: Vec<_> = self.handles.keys().cloned().collect();
-        for actor_id in actor_ids {
-            self.stop_actor(actor_id)?;
-        }
+        // meta will rebuild this soon
         self.actor_infos.clear();
-        debug!("actors: {:?}" , self.actors.len());
-        debug!("actor_infos: {:?}", self.actor_infos.len());
-        Ok(())
+
+        Ok(futures)
     }
 }
