@@ -234,10 +234,9 @@ impl Executor for MergeExecutor {
             // Convert channel receivers to futures here to do `select_all`
             let mut futures = vec![];
             if self.active.is_empty() {
-                // FIXME: currently we can only loop forever
-                loop {
-                    tokio::time::sleep(tokio::time::Duration::from_secs(u64::MAX)).await;
-                }
+                let future = futures::future::pending();
+                let () = future.await;
+                unreachable!("no active channels");
             }
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());
