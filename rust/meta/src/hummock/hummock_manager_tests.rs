@@ -276,9 +276,9 @@ async fn test_hummock_transaction() -> Result<()> {
     let mut committed_tables = vec![];
 
     // Add and commit tables in epoch1.
-    // BEFORE:  umcommitted_epochs = [], committed_epochs = []
-    // RUNNING: umcommitted_epochs = [epoch1], committed_epochs = []
-    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1]
+    // BEFORE:  uncommitted_epochs = [], committed_epochs = []
+    // RUNNING: uncommitted_epochs = [epoch1], committed_epochs = []
+    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1]
     let epoch1: u64 = 1;
     {
         // Add tables in epoch1
@@ -322,9 +322,9 @@ async fn test_hummock_transaction() -> Result<()> {
     }
 
     // Add and commit tables in epoch2.
-    // BEFORE:  umcommitted_epochs = [], committed_epochs = [epoch1]
-    // RUNNING: umcommitted_epochs = [epoch2], committed_epochs = [epoch1]
-    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1, epoch2]
+    // BEFORE:  uncommitted_epochs = [], committed_epochs = [epoch1]
+    // RUNNING: uncommitted_epochs = [epoch2], committed_epochs = [epoch1]
+    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1, epoch2]
     let epoch2 = epoch1 + 1;
     {
         // Add tables in epoch2
@@ -371,9 +371,9 @@ async fn test_hummock_transaction() -> Result<()> {
     }
 
     // Add tables in epoch3 and epoch4. Abort epoch3, commit epoch4.
-    // BEFORE:  umcommitted_epochs = [], committed_epochs = [epoch1, epoch2]
-    // RUNNING: umcommitted_epochs = [epoch3, epoch4], committed_epochs = [epoch1, epoch2]
-    // AFTER:   umcommitted_epochs = [], committed_epochs = [epoch1, epoch2, epoch4]
+    // BEFORE:  uncommitted_epochs = [], committed_epochs = [epoch1, epoch2]
+    // RUNNING: uncommitted_epochs = [epoch3, epoch4], committed_epochs = [epoch1, epoch2]
+    // AFTER:   uncommitted_epochs = [], committed_epochs = [epoch1, epoch2, epoch4]
     let epoch3 = epoch2 + 1;
     let epoch4 = epoch3 + 1;
     {
@@ -414,12 +414,24 @@ async fn test_hummock_transaction() -> Result<()> {
             get_sorted_sstable_ids(&committed_tables),
             get_sorted_committed_sstable_ids(&pinned_version)
         );
-        hummock_manager
-            .unpin_version(context_id, vec![pinned_version.id])
-            .await?;
 
         // Abort epoch3
         hummock_manager.abort_epoch(epoch3).await.unwrap();
+
+        // Uncommitted SSTs should be marked for deletion
+        println!("{}", pinned_version.id);
+        let mut sstables_to_delete = hummock_manager
+            .get_ssts_to_delete(pinned_version.id)
+            .await
+            .unwrap();
+        sstables_to_delete.sort();
+        assert_eq!(
+            get_sorted_sstable_ids(&tables_in_epoch3),
+            sstables_to_delete
+        );
+        hummock_manager
+            .unpin_version(context_id, vec![pinned_version.id])
+            .await?;
 
         // Get tables after aborting epoch3. tables_in_epoch1 and tables_in_epoch2 should be
         // returned
