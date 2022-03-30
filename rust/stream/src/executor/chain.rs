@@ -23,15 +23,15 @@ use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef};
 use crate::executor::ExecutorBuilder;
-use crate::task::{DdlFinishNotifierTx, ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, FinishCreateMviewNotifier, LocalStreamManagerCore};
 
 #[derive(Debug)]
 enum ChainState {
     Init {
-        notifier: DdlFinishNotifierTx,
+        notifier: FinishCreateMviewNotifier,
     },
     ReadingSnapshot {
-        notifier: DdlFinishNotifierTx,
+        notifier: FinishCreateMviewNotifier,
         create_epoch: u64,
     },
     ReadingMview,
@@ -48,6 +48,7 @@ pub struct ChainExecutor {
     state: ChainState,
     schema: Schema,
     column_idxs: Vec<usize>,
+
     /// Logical Operator Info
     op_info: String,
 }
@@ -59,7 +60,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        stream: &mut StreamManagerCore,
+        stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ChainNode)?;
         let snapshot = params.input.remove(1);
@@ -73,8 +74,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
         // For notifying about creation finish.
         let notifier = stream
             .context
-            .lock_barrier_manager()
-            .register_ddl_finish_notifier(params.actor_id);
+            .register_finish_create_mview_notifier(params.actor_id);
 
         // The batch query executor scans on a mapped adhoc mview table, thus we should directly use
         // its schema.
@@ -94,7 +94,7 @@ impl ChainExecutor {
     pub fn new(
         snapshot: Box<dyn Executor>,
         mview: Box<dyn Executor>,
-        notifier: DdlFinishNotifierTx,
+        notifier: FinishCreateMviewNotifier,
         schema: Schema,
         column_idxs: Vec<usize>,
         op_info: String,
@@ -146,9 +146,7 @@ impl ChainExecutor {
                         notifier,
                         create_epoch,
                     } => {
-                        notifier
-                            .send(create_epoch)
-                            .expect("failed to notify finished");
+                        notifier.notify(create_epoch);
                         return self.read_mview().await;
                     }
                     _ => unreachable!(),
@@ -227,6 +225,7 @@ impl Executor for ChainExecutor {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
 
     use async_trait::async_trait;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
@@ -234,11 +233,11 @@ mod test {
     use risingwave_common::column_nonnull;
     use risingwave_common::error::{ErrorCode, Result, RwError};
     use risingwave_common::types::DataType;
-    use tokio::sync::oneshot;
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
+    use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
 
     #[derive(Debug)]
     struct MockSnapshot(MockSource);
@@ -333,12 +332,16 @@ mod test {
             ],
         ));
 
-        let (finish_tx, mut finish_rx) = oneshot::channel();
+        let barrier_manager = LocalBarrierManager::for_test();
+        let notifier = FinishCreateMviewNotifier {
+            barrier_manager: Arc::new(parking_lot::Mutex::new(barrier_manager)),
+            actor_id: 0,
+        };
 
         let mut chain = ChainExecutor::new(
             first,
             second,
-            finish_tx,
+            notifier,
             schema,
             vec![0],
             "ChainExecutor".to_string(),
@@ -349,11 +352,6 @@ mod test {
             count += 1;
             let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
             assert_eq!(target, count);
-
-            // Already consumed the snapshot.
-            if target == 3 {
-                finish_rx.try_recv().expect("should report finished");
-            }
         }
     }
 }

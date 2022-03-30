@@ -9,6 +9,9 @@ include ../../tpch/insert_partsupp.slt.part
 include ../../tpch/insert_region.slt.part
 include ../../tpch/insert_supplier.slt.part
 
+statement ok
+flush;
+
 include ./create_views.slt.part
 
 statement ok

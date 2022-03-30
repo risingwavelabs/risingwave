@@ -379,7 +379,10 @@ impl Compactor {
                     .subscribe_compact_tasks()
                     .await
                 {
-                    Ok(stream) => stream,
+                    Ok(stream) => {
+                        tracing::debug!("Succeeded subscribe_compact_tasks.");
+                        stream
+                    }
                     Err(e) => {
                         tracing::warn!("Failed to subscribe_compact_tasks. {}", RwError::from(e));
                         continue 'start_stream;

@@ -58,8 +58,8 @@ impl CurrentHummockVersionId {
         }
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CurrentHummockVersionId>> {
-        CurrentHummockVersionId::select(meta_store_ref, &HUMMOCK_VERSION_ID_KEY.to_string()).await
+    pub async fn get<S: MetaStore>(meta_store: &S) -> Result<Option<CurrentHummockVersionId>> {
+        CurrentHummockVersionId::select(meta_store, &HUMMOCK_VERSION_ID_KEY.to_string()).await
     }
 
     /// Increase version id, return previous one

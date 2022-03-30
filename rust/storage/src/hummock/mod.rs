@@ -16,6 +16,7 @@
 
 use std::cmp::Ordering;
 use std::fmt;
+use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -41,7 +42,6 @@ mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
 mod sstable_store;
-mod state_store;
 #[cfg(test)]
 mod state_store_tests;
 #[cfg(test)]
@@ -57,12 +57,12 @@ use risingwave_pb::hummock::LevelType;
 use value::*;
 
 use self::iterator::{
-    BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator, UserIterator,
+    BoxedHummockIterator, ConcatIterator, DirectedUserIterator, HummockIterator, MergeIterator,
+    ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
-pub use self::state_store::*;
-use self::utils::range_overlap;
+use self::utils::{bloom_filter_sstables, range_overlap};
 use super::monitor::StateStoreMetrics;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
@@ -70,6 +70,9 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
 use crate::hummock::version_cmp::VersionedComparator;
+use crate::storage_value::StorageValue;
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 pub type HummockTTL = u64;
 pub type HummockSSTableId = u64;
@@ -154,13 +157,67 @@ impl HummockStorage {
         Ok(instance)
     }
 
+    #[cfg(not(feature = "blockv2"))]
+    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
+        SSTableBuilder::new(SSTableBuilderOptions {
+            table_capacity: options.sstable_size,
+            block_size: options.block_size,
+            bloom_false_positive: options.bloom_false_positive,
+            checksum_algo: options.checksum_algo,
+        })
+    }
+
+    #[cfg(feature = "blockv2")]
+    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
+        SSTableBuilder::new(SSTableBuilderOptions {
+            capacity: options.sstable_size as usize,
+            block_capacity: options.block_size as usize,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: options.bloom_false_positive,
+            // TODO: Make this configurable.
+            compression_algorithm: CompressionAlgorithm::None,
+        })
+    }
+
+    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
+        &self.hummock_meta_client
+    }
+
+    pub fn options(&self) -> &Arc<StorageConfig> {
+        &self.options
+    }
+
+    pub fn sstable_store(&self) -> SstableStoreRef {
+        self.sstable_store.clone()
+    }
+
+    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
+        &self.local_version_manager
+    }
+
+    pub fn shared_buffer_manager(&self) -> &SharedBufferManager {
+        &self.shared_buffer_manager
+    }
+}
+
+impl fmt::Debug for HummockStorage {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        todo!()
+    }
+}
+
+impl StateStore for HummockStorage {
+    type Iter<'a> = HummockStateStoreIter<'a>;
+    define_state_store_associated_type!();
+
     /// Gets the value of a specified `key`.
     /// The result is based on a snapshot corresponding to the given `epoch`.
     ///
     /// If `Ok(Some())` is returned, the key is found. If `Ok(None)` is returned,
     /// the key is not found. If `Err()` is returned, the searching for the key
     /// failed due to other non-EOF errors.
-    pub async fn get(&self, key: &[u8], epoch: u64) -> HummockResult<Option<Vec<u8>>> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+        async move {
         let version = self.local_version_manager.get_version()?;
         // check epoch validity
         validate_epoch(version.safe_epoch(), epoch)?;
@@ -214,132 +271,63 @@ impl HummockStorage {
                     }
                 }
             }
-        }
+
 
         self.stats
             .iter_merge_sstable_counts
             .observe(table_counts as f64);
         Ok(None)
+      }
     }
 
-    /// Returns an iterator that scan from the begin key to the end key
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    pub async fn range_scan<R, B>(
+    fn scan<R, B>(
         &self,
         key_range: R,
+        limit: Option<usize>,
         epoch: u64,
-    ) -> HummockResult<UserIterator<'_>>
+    ) -> Self::ScanFuture<'_, R, B>
     where
-        R: RangeBounds<B>,
-        B: AsRef<[u8]>,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
-        let version = self.local_version_manager.get_version()?;
-        // Check epoch validity
-        validate_epoch(version.safe_epoch(), epoch)?;
+        async move {
+            let mut iter = self.iter(key_range, epoch).await?;
+            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
 
-        // Filter out tables that overlap with given `key_range`
-        let tables = self.local_version_manager.tables(&version.levels()).await?;
-        let tables_count = tables.len();
-        let overlapped_sstable_iters = tables
-            .into_iter()
-            .filter(|t| {
-                let table_start = user_key(t.meta.smallest_key.as_slice());
-                let table_end = user_key(t.meta.largest_key.as_slice());
-                range_overlap(&key_range, table_start, table_end, false)
-            })
-            .map(|t| {
-                Box::new(SSTableIterator::new(t, self.sstable_store.clone()))
-                    as BoxedHummockIterator
-            });
+            for _ in 0..limit.unwrap_or(usize::MAX) {
+                match iter.next().await? {
+                    Some(kv) => kvs.push(kv),
+                    None => break,
+                }
+            }
 
-        let mi = if version.max_committed_epoch() < epoch {
-            // Take shared buffers into consideration if the read epoch is above the max committed
-            // epoch
-            let overlapped_shared_buffer_iters = self
-                .shared_buffer_manager
-                .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
-                .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator);
-            MergeIterator::new(
-                overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                self.stats.clone(),
-            )
-        } else {
-            self.stats
-                .iter_merge_sstable_counts
-                .observe(tables_count as f64);
-            MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
-        };
-
-        // TODO: avoid this clone
-        Ok(UserIterator::new(
-            mi,
-            (
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-            ),
-            epoch,
-            Some(version),
-        ))
+            Ok(kvs)
+        }
     }
 
-    /// Returns a reversed iterator that scans from the end key to the begin key
-    /// The result is based on a snapshot corresponding to the given `epoch`.
-    pub async fn reverse_range_scan<R, B>(
+    fn reverse_scan<R, B>(
         &self,
         key_range: R,
+        limit: Option<usize>,
         epoch: u64,
-    ) -> HummockResult<ReverseUserIterator<'_>>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
-        R: RangeBounds<B>,
-        B: AsRef<[u8]>,
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
     {
-        let version = self.local_version_manager.get_version()?;
-        // Check epoch validity
-        validate_epoch(version.safe_epoch(), epoch)?;
+        async move {
+            let mut iter = self.reverse_iter(key_range, epoch).await?;
+            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
 
-        // Filter out tables that overlap with given `key_range`
-        let overlapped_sstable_iters = self
-            .local_version_manager
-            .tables(&version.levels())
-            .await?
-            .into_iter()
-            .filter(|t| {
-                let table_start = user_key(t.meta.smallest_key.as_slice());
-                let table_end = user_key(t.meta.largest_key.as_slice());
-                range_overlap(&key_range, table_start, table_end, true)
-            })
-            .map(|t| {
-                Box::new(ReverseSSTableIterator::new(t, self.sstable_store.clone()))
-                    as BoxedHummockIterator
-            });
+            for _ in 0..limit.unwrap_or(usize::MAX) {
+                match iter.next().await? {
+                    Some(kv) => kvs.push(kv),
+                    None => break,
+                }
+            }
 
-        let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
-            // Take shared buffers into consideration if the read epoch is above the max committed
-            // epoch
-            let overlapped_shared_buffer_iters = self
-                .shared_buffer_manager
-                .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
-                .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator);
-            ReverseMergeIterator::new(
-                overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
-                self.stats.clone(),
-            )
-        } else {
-            ReverseMergeIterator::new(overlapped_sstable_iters, self.stats.clone())
-        };
-
-        // TODO: avoid this clone
-        Ok(ReverseUserIterator::new_with_epoch(
-            reverse_merge_iterator,
-            (
-                key_range.end_bound().map(|b| b.as_ref().to_owned()),
-                key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            ),
-            epoch,
-            Some(version),
-        ))
+            Ok(kvs)
+        }
     }
 
     /// Writes a batch to storage. The batch should be:
@@ -351,72 +339,51 @@ impl HummockStorage {
     ///   changes to be committed before reading and writing new keys to the engine. That is because
     ///   that the table with lower epoch might be committed after a table with higher epoch has
     ///   been committed. If such case happens, the outcome is non-predictable.
-    pub async fn write_batch(
+    fn ingest_batch(
         &self,
-        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
         epoch: u64,
-    ) -> HummockResult<()> {
-        let batch = kv_pairs
-            .map(|(key, value)| {
-                (
-                    Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
-                    value,
-                )
-            })
-            .collect_vec();
-        self.shared_buffer_manager.write_batch(batch, epoch)?;
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            let batch = kv_pairs
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                        value.into(),
+                    )
+                })
+                .collect_vec();
+            self.shared_buffer_manager.write_batch(batch, epoch)?;
 
-        if !self.options.async_checkpoint_enabled {
-            return self.shared_buffer_manager.sync(Some(epoch)).await;
+            if !self.options.async_checkpoint_enabled {
+                self.shared_buffer_manager.sync(Some(epoch)).await?;
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     /// Replicates a batch to shared buffer, without uploading to the storage backend.
-    pub async fn replicate_batch(
+    fn replicate_batch(
         &self,
-        kv_pairs: impl Iterator<Item = (Bytes, HummockValue<Bytes>)>,
+        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
         epoch: u64,
-    ) -> HummockResult<()> {
-        let batch = kv_pairs
-            .map(|i| {
-                (
-                    Bytes::from(FullKey::from_user_key(i.0.to_vec(), epoch).into_inner()),
-                    i.1,
-                )
-            })
-            .collect_vec();
-        self.shared_buffer_manager
-            .replicate_remote_batch(batch, epoch)?;
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move {
+            let batch = kv_pairs
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        Bytes::from(FullKey::from_user_key(key.to_vec(), epoch).into_inner()),
+                        value.into(),
+                    )
+                })
+                .collect_vec();
+            self.shared_buffer_manager
+                .replicate_remote_batch(batch, epoch)?;
 
-        // self.sync(epoch).await?;
-        Ok(())
-    }
-
-    pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
-        self.shared_buffer_manager.sync(epoch).await
-    }
-
-    #[cfg(not(feature = "blockv2"))]
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            table_capacity: options.sstable_size,
-            block_size: options.block_size,
-            bloom_false_positive: options.bloom_false_positive,
-            checksum_algo: options.checksum_algo,
-        })
-    }
-
-    #[cfg(feature = "blockv2")]
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            capacity: options.sstable_size as usize,
-            block_capacity: options.block_size as usize,
-            restart_interval: DEFAULT_RESTART_INTERVAL,
-            bloom_false_positive: options.bloom_false_positive,
-            // TODO: Make this configurable.
-            compression_algorithm: CompressionAlgorithm::None,
-        })
+            Ok(())
+        }
     }
 
     async fn get_from_table(
@@ -447,33 +414,172 @@ impl HummockStorage {
         Ok(value)
     }
 
-    pub fn hummock_meta_client(&self) -> &Arc<dyn HummockMetaClient> {
-        &self.hummock_meta_client
+
+    /// Returns an iterator that scan from the begin key to the end key
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            let version = self.local_version_manager.get_version()?;
+            // Check epoch validity
+            validate_epoch(version.safe_epoch(), epoch)?;
+
+            // Filter out tables that overlap with given `key_range`
+            let tables = self.local_version_manager.tables(&version.levels()).await?;
+            let tables_count = tables.len();
+            let overlapped_sstable_iters = tables
+                .into_iter()
+                .filter(|t| {
+                    let table_start = user_key(t.meta.smallest_key.as_slice());
+                    let table_end = user_key(t.meta.largest_key.as_slice());
+                    range_overlap(&key_range, table_start, table_end, false)
+                })
+                .map(|t| {
+                    Box::new(SSTableIterator::new(t, self.sstable_store.clone()))
+                        as BoxedHummockIterator
+                })
+                .collect_vec();
+
+            let mi = if version.max_committed_epoch() < epoch {
+                // Take shared buffers into consideration if the read epoch is above the max
+                // committed epoch
+                let overlapped_shared_buffer_iters = self
+                    .shared_buffer_manager
+                    .iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
+                    .into_iter()
+                    .map(|i| Box::new(i) as BoxedHummockIterator);
+                MergeIterator::new(
+                    overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
+                    self.stats.clone(),
+                )
+            } else {
+                self.stats
+                    .iter_merge_sstable_counts
+                    .observe(tables_count as f64);
+                MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
+            };
+
+            // TODO: avoid this clone
+            let mut user_iter = DirectedUserIterator::Forward(UserIterator::new(
+                mi,
+                (
+                    key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                    key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                ),
+                epoch,
+                Some(version),
+            ));
+
+            user_iter.rewind().await?;
+            Ok(HummockStateStoreIter::new(user_iter))
+        }
     }
 
-    pub fn options(&self) -> &Arc<StorageConfig> {
-        &self.options
+    /// Returns a reversed iterator that scans from the end key to the begin key
+    /// The result is based on a snapshot corresponding to the given `epoch`.
+    fn reverse_iter<R, B>(&self, key_range: R, epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            let version = self.local_version_manager.get_version()?;
+            // Check epoch validity
+            validate_epoch(version.safe_epoch(), epoch)?;
+
+            // Filter out tables that overlap with given `key_range`
+            let overlapped_sstable_iters = self
+                .local_version_manager
+                .tables(&version.levels())
+                .await?
+                .into_iter()
+                .filter(|t| {
+                    let table_start = user_key(t.meta.smallest_key.as_slice());
+                    let table_end = user_key(t.meta.largest_key.as_slice());
+                    range_overlap(&key_range, table_start, table_end, true)
+                })
+                .map(|t| {
+                    Box::new(ReverseSSTableIterator::new(t, self.sstable_store.clone()))
+                        as BoxedHummockIterator
+                })
+                .collect_vec();
+
+            let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
+                // Take shared buffers into consideration if the read epoch is above the max
+                // committed epoch
+                let overlapped_shared_buffer_iters = self
+                    .shared_buffer_manager
+                    .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
+                    .into_iter()
+                    .map(|i| Box::new(i) as BoxedHummockIterator);
+                ReverseMergeIterator::new(
+                    overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
+                    self.stats.clone(),
+                )
+            } else {
+                ReverseMergeIterator::new(overlapped_sstable_iters, self.stats.clone())
+            };
+
+            // TODO: avoid this clone
+            let mut reverse_user_iter =
+                DirectedUserIterator::Backward(ReverseUserIterator::new_with_epoch(
+                    reverse_merge_iterator,
+                    (
+                        key_range.end_bound().map(|b| b.as_ref().to_owned()),
+                        key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                    ),
+                    epoch,
+                    Some(version),
+                ));
+
+            reverse_user_iter.rewind().await?;
+            Ok(HummockStateStoreIter::new(reverse_user_iter))
+        }
     }
 
-    pub fn sstable_store(&self) -> SstableStoreRef {
-        self.sstable_store.clone()
+    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
     }
 
-    pub fn local_version_manager(&self) -> &Arc<LocalVersionManager> {
-        &self.local_version_manager
-    }
-
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> Result<()> {
-        Ok(self.local_version_manager.wait_epoch(epoch).await?)
-    }
-
-    pub fn shared_buffer_manager(&self) -> &SharedBufferManager {
-        &self.shared_buffer_manager
+    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move {
+            self.shared_buffer_manager.sync(epoch).await?;
+            Ok(())
+        }
     }
 }
 
-impl fmt::Debug for HummockStorage {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
+pub struct HummockStateStoreIter<'a> {
+    inner: DirectedUserIterator<'a>,
+}
+
+impl<'a> HummockStateStoreIter<'a> {
+    fn new(inner: DirectedUserIterator<'a>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
+    // TODO: directly return `&[u8]` to user instead of `Bytes`.
+    type Item = (Bytes, StorageValue);
+    type NextFuture<'b> = impl Future<Output = Result<Option<Self::Item>>> where Self:'b;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            let iter = &mut self.inner;
+
+            if iter.is_valid() {
+                let kv = (
+                    Bytes::copy_from_slice(iter.key()),
+                    StorageValue::from(Bytes::copy_from_slice(iter.value())),
+                );
+                iter.next().await?;
+                Ok(Some(kv))
+            } else {
+                Ok(None)
+            }
+        }
     }
 }

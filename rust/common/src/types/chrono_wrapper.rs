@@ -161,3 +161,11 @@ impl NaiveDateTimeWrapper {
             .map_err(|e| RwError::from(InternalError(e.to_string())))
     }
 }
+
+impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
+    type Error = RwError;
+
+    fn try_from(date: NaiveDateWrapper) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
+    }
+}

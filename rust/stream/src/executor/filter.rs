@@ -22,7 +22,7 @@ use risingwave_storage::StateStore;
 use super::Executor;
 use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Executor as ExecutorV2, FilterExecutor as FilterExecutorV2};
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 pub struct FilterExecutorBuilder {}
 
@@ -31,7 +31,7 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::FilterNode)?;
         let search_condition = build_from_prost(node.get_search_condition()?)?;

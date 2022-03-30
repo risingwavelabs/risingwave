@@ -17,11 +17,13 @@ use std::iter::once;
 
 use tokio::sync::oneshot;
 
+use super::{CollectResult, FinishedCreateMview};
 use crate::executor::Barrier;
 use crate::task::ActorId;
 
+/// The state machine of local barrier manager.
 #[derive(Debug)]
-pub(super) enum ManagedBarrierState {
+enum ManagedBarrierStateInner {
     /// Currently no barrier on the flight.
     Pending {
         /// Last epoch of barriers.
@@ -46,15 +48,37 @@ pub(super) enum ManagedBarrierState {
         remaining_actors: HashSet<ActorId>,
 
         /// Notify that the collection is finished.
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: oneshot::Sender<CollectResult>,
     },
 }
 
+#[derive(Debug)]
+pub(super) struct ManagedBarrierState {
+    inner: ManagedBarrierStateInner,
+
+    pub finished_create_mviews: Vec<FinishedCreateMview>,
+}
+
 impl ManagedBarrierState {
+    /// Create a barrier manager state. This will be called only once.
+    pub(super) fn new() -> Self {
+        Self {
+            inner: ManagedBarrierStateInner::Pending {
+                // TODO: specify last epoch
+                last_epoch: None,
+            },
+            finished_create_mviews: Default::default(),
+        }
+    }
+
+    fn inner_mut(&mut self) -> &mut ManagedBarrierStateInner {
+        &mut self.inner
+    }
+
     /// Notify if we have collected barriers from all actor ids. The state must be `Issued`.
     fn may_notify(&mut self) {
-        let (epoch, to_notify) = match self {
-            ManagedBarrierState::Issued {
+        let (epoch, to_notify) = match self.inner_mut() {
+            ManagedBarrierStateInner::Issued {
                 epoch,
                 remaining_actors,
                 ..
@@ -65,18 +89,22 @@ impl ManagedBarrierState {
 
         if to_notify {
             let state = std::mem::replace(
-                self,
-                ManagedBarrierState::Pending {
+                self.inner_mut(),
+                ManagedBarrierStateInner::Pending {
                     last_epoch: Some(epoch),
                 },
             );
+            let finished_create_mviews = std::mem::take(&mut self.finished_create_mviews);
 
             match state {
-                ManagedBarrierState::Issued {
+                ManagedBarrierStateInner::Issued {
                     collect_notifier, ..
                 } => {
                     // Notify about barrier finishing.
-                    if collect_notifier.send(()).is_err() {
+                    let result = CollectResult {
+                        finished_create_mviews,
+                    };
+                    if collect_notifier.send(result).is_err() {
                         warn!("failed to notify barrier collection with epoch {}", epoch)
                     }
                 }
@@ -96,19 +124,19 @@ impl ManagedBarrierState {
             self
         );
 
-        match self {
-            ManagedBarrierState::Pending { last_epoch } => {
+        match self.inner_mut() {
+            ManagedBarrierStateInner::Pending { last_epoch } => {
                 if let Some(last_epoch) = *last_epoch {
                     assert_eq!(barrier.epoch.prev, last_epoch)
                 }
 
-                *self = Self::Stashed {
+                *self.inner_mut() = ManagedBarrierStateInner::Stashed {
                     epoch: barrier.epoch.curr,
                     collected_actors: once(actor_id).collect(),
                 }
             }
 
-            ManagedBarrierState::Stashed {
+            ManagedBarrierStateInner::Stashed {
                 epoch,
                 collected_actors,
             } => {
@@ -118,7 +146,7 @@ impl ManagedBarrierState {
                 assert!(new);
             }
 
-            ManagedBarrierState::Issued {
+            ManagedBarrierStateInner::Issued {
                 epoch,
                 remaining_actors,
                 ..
@@ -138,13 +166,13 @@ impl ManagedBarrierState {
         &mut self,
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-        collect_notifier: oneshot::Sender<()>,
+        collect_notifier: oneshot::Sender<CollectResult>,
     ) {
-        match self {
-            ManagedBarrierState::Pending { .. } => {
+        match self.inner_mut() {
+            ManagedBarrierStateInner::Pending { .. } => {
                 let remaining_actors = actor_ids_to_collect.into_iter().collect();
 
-                *self = Self::Issued {
+                *self.inner_mut() = ManagedBarrierStateInner::Issued {
                     epoch: barrier.epoch.curr,
                     remaining_actors,
                     collect_notifier,
@@ -152,7 +180,7 @@ impl ManagedBarrierState {
                 self.may_notify();
             }
 
-            ManagedBarrierState::Stashed {
+            ManagedBarrierStateInner::Stashed {
                 epoch,
                 collected_actors,
             } => {
@@ -163,7 +191,7 @@ impl ManagedBarrierState {
                     .filter(|a| !collected_actors.contains(a))
                     .collect();
 
-                *self = Self::Issued {
+                *self.inner_mut() = ManagedBarrierStateInner::Issued {
                     epoch: barrier.epoch.curr,
                     remaining_actors,
                     collect_notifier,
@@ -171,7 +199,9 @@ impl ManagedBarrierState {
                 self.may_notify();
             }
 
-            ManagedBarrierState::Issued { .. } => panic!("barrier state has already been `Issued`"),
+            ManagedBarrierStateInner::Issued { .. } => {
+                panic!("barrier state has already been `Issued`")
+            }
         }
     }
 }

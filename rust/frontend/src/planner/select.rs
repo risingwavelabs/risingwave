@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
@@ -26,6 +27,7 @@ use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalValues, PlanAggCall, PlanRef,
 };
 use crate::planner::Planner;
+use crate::utils::Condition;
 impl Planner {
     pub(super) fn plan_select(
         &mut self,
@@ -44,15 +46,9 @@ impl Planner {
             Some(t) => self.plan_relation(t)?,
         };
         // Plan the WHERE clause.
-        root = match where_clause {
-            None => root,
-            Some(mut predicate) => {
-                if predicate.has_subquery() {
-                    (root, predicate) = self.substitute_subqueries(root, predicate)?;
-                }
-                LogicalFilter::create(root, predicate)?
-            }
-        };
+        if let Some(where_clause) = where_clause {
+            root = self.plan_where(root, where_clause)?;
+        }
         // Plan the SELECT clause.
         // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());
@@ -60,7 +56,7 @@ impl Planner {
             LogicalAgg::create(select_items, aliases, group_by, root)
         } else {
             if select_items.iter().any(|e| e.has_subquery()) {
-                (root, select_items) = self.substitute_subqueries_vec(root, select_items)?;
+                (root, select_items) = self.substitute_subqueries(root, select_items)?;
             }
             Ok(LogicalProject::create(root, select_items, aliases))
         }
@@ -92,15 +88,80 @@ impl Planner {
         ))
     }
 
-    /// A wrapper around [`substitute_subqueries_vec`]
-    fn substitute_subqueries(
-        &mut self,
-        mut root: PlanRef,
-        expr: ExprImpl,
-    ) -> Result<(PlanRef, ExprImpl)> {
-        let mut exprs = vec![expr];
-        (root, exprs) = self.substitute_subqueries_vec(root, exprs)?;
-        Ok((root, exprs.into_iter().next().unwrap()))
+    /// For `... AND (NOT) subquery AND ...`, we can plan it as `LeftSemi/LeftAnti`
+    /// [`LogicalApply`] (correlated) or [`LogicalJoin`].
+    ///
+    /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
+    /// [`LogicalJoin`] using [`substitute_subqueries`].
+    fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
+        if !where_clause.has_subquery() {
+            return LogicalFilter::create(input, where_clause);
+        }
+
+        let (subquery_conjunctions, not_subquery_conjunctions, others) =
+            Condition::with_expr(where_clause)
+                .group_by::<_, 3>(|expr| match expr {
+                    ExprImpl::Subquery(_) => 0,
+                    ExprImpl::FunctionCall(func_call)
+                        if func_call.get_expr_type() == ExprType::Not
+                            && matches!(func_call.inputs()[0], ExprImpl::Subquery(_)) =>
+                    {
+                        1
+                    }
+                    _ => 2,
+                })
+                .into_iter()
+                .next_tuple()
+                .unwrap();
+
+        for expr in subquery_conjunctions {
+            let subquery = expr.as_subquery().unwrap();
+            let is_correlated = subquery.is_correlated();
+
+            let join_type = match subquery.kind {
+                SubqueryKind::Existential => JoinType::LeftSemi,
+                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                    return Err(
+                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    )
+                }
+            };
+            let right = self.plan_query(subquery.query)?.as_subplan();
+
+            input = Self::create_apply_or_join(is_correlated, input, right, join_type);
+        }
+
+        for expr in not_subquery_conjunctions {
+            let not = expr.as_function_call().unwrap();
+            let (_, subquery) = not.decompose_as_unary();
+            let subquery = subquery.as_subquery().unwrap();
+            let is_correlated = subquery.is_correlated();
+
+            let join_type = match subquery.kind {
+                SubqueryKind::Existential => JoinType::LeftAnti,
+                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                    return Err(
+                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    )
+                }
+            };
+            let right = self.plan_query(subquery.query)?.as_subplan();
+
+            input = Self::create_apply_or_join(is_correlated, input, right, join_type);
+        }
+
+        if others.always_true() {
+            Ok(input)
+        } else {
+            let (input, others) = self.substitute_subqueries(input, others.conjunctions)?;
+            Ok(LogicalFilter::new(
+                input,
+                Condition {
+                    conjunctions: others,
+                },
+            )
+            .into())
+        }
     }
 
     /// Substitues all [`Subquery`] in `exprs`.
@@ -111,7 +172,7 @@ impl Planner {
     ///
     /// The [`InputRef`]s' indexes start from `root.schema().len()`,
     /// which means they are additional columns beyond the original `root`.
-    fn substitute_subqueries_vec(
+    fn substitute_subqueries(
         &mut self,
         mut root: PlanRef,
         mut exprs: Vec<ExprImpl>,
@@ -155,17 +216,21 @@ impl Planner {
                 }
             }
 
-            if is_correlated {
-                root = LogicalApply::create(root, right, JoinType::LeftOuter);
-            } else {
-                root = LogicalJoin::create(
-                    root,
-                    right,
-                    JoinType::LeftOuter,
-                    ExprImpl::literal_bool(true),
-                );
-            }
+            root = Self::create_apply_or_join(is_correlated, root, right, JoinType::LeftOuter);
         }
         Ok((root, exprs))
+    }
+
+    fn create_apply_or_join(
+        is_correlated: bool,
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+    ) -> PlanRef {
+        if is_correlated {
+            LogicalApply::create(left, right, join_type)
+        } else {
+            LogicalJoin::create(left, right, join_type, ExprImpl::literal_bool(true))
+        }
     }
 }

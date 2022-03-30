@@ -18,9 +18,8 @@ use std::{fmt, vec};
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, PlanBase, PlanNode, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::WithSchema;
 use crate::session::OptimizerContextRef;
 
 /// `LogicalValues` builds rows according to a list of expressions

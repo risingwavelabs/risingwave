@@ -19,14 +19,14 @@ use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::JoinType;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary, StreamHashJoin, ToBatch,
-    ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, StreamHashJoin,
+    ToBatch, ToStream,
 };
 use crate::expr::ExprImpl;
 use crate::optimizer::plan_node::{
     BatchFilter, BatchHashJoin, CollectInputRef, EqJoinPredicate, LogicalFilter, StreamFilter,
 };
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -202,8 +202,9 @@ impl LogicalJoin {
         let r2o = Self::r2o_col_mapping_inner(left_len, right_len, join_type);
         left_pk
             .iter()
-            .map(|index| l2o.map(*index))
-            .chain(right_pk.iter().map(|index| r2o.map(*index)))
+            .map(|index| l2o.try_map(*index))
+            .chain(right_pk.iter().map(|index| r2o.try_map(*index)))
+            .flatten()
             .collect()
     }
     /// Get a reference to the logical join's on.
@@ -407,7 +408,6 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
-    use crate::optimizer::property::WithSchema;
     use crate::session::OptimizerContext;
 
     /// Pruning
