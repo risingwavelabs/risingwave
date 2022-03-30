@@ -163,7 +163,7 @@ impl<S: StateStore> CellBasedTable<S> {
                 row[*column_index] = cell;
             } else {
                 return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                    "state store key length incoreet ".to_string(),
+                    "state store key length incorrect ".to_string(),
                 )));
             }
         }
