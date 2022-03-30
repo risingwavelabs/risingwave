@@ -88,15 +88,13 @@ impl ManagedBarrierState {
 
     /// Collect a `barrier` from the actor with `actor_id`.
     pub(super) fn collect(&mut self, actor_id: ActorId, barrier: &Barrier) {
-        // Enable this tracing for debugging.
-        //
-        // tracing::trace!(
-        //     target: "events::stream::barrier::collect_barrier",
-        //     "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
-        //     barrier.epoch.curr,
-        //     actor_id,
-        //     self
-        // );
+        tracing::trace!(
+            target: "events::stream::barrier::collect_barrier",
+            "collect_barrier: epoch = {}, actor_id = {}, state = {:#?}",
+            barrier.epoch.curr,
+            actor_id,
+            self
+        );
 
         match self {
             ManagedBarrierState::Pending { last_epoch } => {
