@@ -244,7 +244,7 @@ where
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }
-        tracing::debug!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
     }
 }

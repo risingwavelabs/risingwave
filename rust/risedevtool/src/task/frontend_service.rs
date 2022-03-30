@@ -16,7 +16,7 @@ use std::env;
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
 use super::{ExecuteContext, Task};
 use crate::{FrontendConfig, FrontendGen};
@@ -39,9 +39,15 @@ impl FrontendService {
             &FrontendGen.gen_server_properties(&self.config),
         )?;
 
+        let frontend_java_path = Path::new(&prefix_bin).join("risingwave-fe-runnable.jar");
+
+        if !frontend_java_path.exists() {
+            return Err(anyhow!("risingwave-fe-runnable.jar binary not found in {:?}\nDid you enable build java frontend feature in `./risedev configure`?", frontend_java_path));
+        }
+
         let mut cmd = Command::new("java");
         cmd.arg("-cp")
-            .arg(Path::new(&prefix_bin).join("risingwave-fe-runnable.jar"))
+            .arg(frontend_java_path)
             // Enable JRE remote debugging functionality
             .arg("-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=127.0.0.1:5005")
             .arg(format!(

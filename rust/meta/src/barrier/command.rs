@@ -15,7 +15,6 @@
 use std::collections::HashMap;
 
 use futures::future::try_join_all;
-use log::debug;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
@@ -167,8 +166,7 @@ where
 
                     async move {
                         let mut client = self.clients.get(node).await?;
-
-                        debug!("[{}]drop actors: {:?}", request_id, actors.clone());
+                        tracing::debug!(request_id = %request_id, actors = ?actors, "drop actors");
                         let request = DropActorsRequest {
                             request_id,
                             table_ref_id: Some(table_ref_id.to_owned()),
