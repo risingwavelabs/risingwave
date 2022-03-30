@@ -51,6 +51,10 @@
     BatchProject { exprs: [Normalized(1.0):Decimal, Neg(Normalized(2.0):Decimal)], expr_alias: [ ,  ] }
       BatchValues { rows: [[]] }
 - sql: |
+    values(round(42.4382, 2));
+  batch_plan: |
+    BatchValues { rows: [[RoundDigit(Normalized(42.4382):Decimal, 2:Int32)]] }
+- sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
   batch_plan: |

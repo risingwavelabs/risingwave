@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use super::{infer_type, Expr, ExprImpl};
@@ -84,6 +86,30 @@ impl std::fmt::Debug for FunctionCall {
 }
 
 impl FunctionCall {
+    /// Returns error if the function call is not valid.
+    pub fn try_new(
+        function_name: &str,
+        func_type: ExprType,
+        inputs: Vec<ExprImpl>,
+    ) -> Result<Self> {
+        infer_type(
+            func_type,
+            inputs.iter().map(|expr| expr.return_type()).collect(),
+        )
+        .ok_or_else(|| {
+            let args = inputs
+                .iter()
+                .map(|i| format!("{:?}", i.return_type()))
+                .join(",");
+            ErrorCode::NotImplementedError(format!(
+                "function: {}({}) doesn't exist",
+                function_name, args
+            ))
+            .into()
+        })
+        .map(|return_type| Self::new_with_return_type(func_type, inputs, return_type))
+    }
+
     pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
         let return_type = infer_type(
             func_type,

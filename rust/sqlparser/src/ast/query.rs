@@ -324,7 +324,7 @@ pub enum TableFactor {
         subquery: Box<Query>,
         alias: Option<TableAlias>,
     },
-    /// `TABLE(<expr>)[ AS <alias> ]`
+    /// `<expr>[ AS <alias> ]`
     TableFunction {
         expr: Expr,
         alias: Option<TableAlias>,
