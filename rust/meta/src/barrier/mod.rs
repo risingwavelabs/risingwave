@@ -155,7 +155,7 @@ where
     S: MetaStore,
 {
     const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 500 } else { 100 });
+        Duration::from_millis(if cfg!(debug_assertions) { 5000 } else { 100 });
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
     /// Create a new [`GlobalBarrierManager`].
