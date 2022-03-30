@@ -1,0 +1,28 @@
+- sql: |
+    select * from t;
+  create_source:
+    row_format: proto
+    file: |
+      syntax = "proto3";
+      package test;
+      message TestRecord {
+        int32 id = 1;
+        Country country = 3;
+        int64 zipcode = 4;
+        float rate = 5;
+      }
+      message Country {
+        string address = 1;
+        City city = 2;
+        string zipcode = 3;
+      }
+      message City {
+        string address = 1;
+        string zipcode = 2;
+      }
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchScan { table: t, columns: [id, country, country.address, country.city, country.city.address, country.city.zipcode, country.zipcode, zipcode, rate] }
+  stream_plan: |
+    StreamMaterialize { columns: [id, country, country.address, country.city, country.city.address, country.city.zipcode, country.zipcode, zipcode, rate], pk_columns: [] }
+      StreamTableScan { table: t, columns: [id, country, country.address, country.city, country.city.address, country.city.zipcode, country.zipcode, zipcode, rate], pk_indices: [] }

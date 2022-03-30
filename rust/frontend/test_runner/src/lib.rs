@@ -17,14 +17,16 @@
 
 mod resolve_id;
 
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_mv, create_table, drop_table};
+use risingwave_frontend::handler::{create_mv, create_source, create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
-use risingwave_frontend::test_utils::LocalFrontend;
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -73,6 +75,19 @@ pub struct TestCase {
 
     /// Error of optimizer
     pub optimizer_error: Option<String>,
+
+    /// Since the create source sql just support file location to create.
+    /// Support using file content or file location to create source.
+    pub create_source: Option<CreateSource>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CreateSource {
+    row_format: String,
+    file_location: Option<String>,
+    file: Option<String>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -124,6 +139,7 @@ impl TestCaseResult {
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
             binder_error: self.binder_error,
+            create_source: original_test_case.create_source.clone(),
         }
     }
 }
@@ -138,6 +154,20 @@ impl TestCase {
 
         let placeholder_empty_vec = vec![];
 
+        match extract_content(self.clone()) {
+            Some(content) => {
+                let file = create_proto_file(content.as_str());
+                let sql = format!(
+                    r#"CREATE SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+                    file.path().to_str().unwrap()
+                );
+                self.run_sql(&sql, session.clone(), do_check_result).await?;
+            }
+            None => {}
+        }
+
         for sql in self
             .before_statements
             .as_ref()
@@ -145,44 +175,59 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(&self.sql))
         {
-            let statements = Parser::parse_sql(sql).unwrap();
+            if result.is_some() {
+                panic!("two queries in one test case");
+            }
+            result = self.run_sql(sql, session.clone(), do_check_result).await?;
+        }
+        Ok(result.unwrap_or_default())
+    }
 
-            for stmt in statements {
-                let context = OptimizerContext::new(session.clone());
-                match stmt.clone() {
-                    Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
-                        if result.is_some() {
-                            panic!("two queries in one test case");
-                        }
-                        let ret = self.apply_query(&stmt, context.into())?;
-                        if do_check_result {
-                            check_result(self, &ret)?;
-                        }
-                        result = Some(ret);
+    async fn run_sql(
+        &self,
+        sql: &str,
+        session: Arc<SessionImpl>,
+        do_check_result: bool,
+    ) -> Result<Option<TestCaseResult>> {
+        let statements = Parser::parse_sql(sql).unwrap();
+        let mut result = None;
+        for stmt in statements {
+            let context = OptimizerContext::new(session.clone());
+            match stmt.clone() {
+                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+                    if result.is_some() {
+                        panic!("two queries in one test case");
                     }
-                    Statement::CreateTable { name, columns, .. } => {
-                        create_table::handle_create_table(context, name, columns).await?;
+                    let ret = self.apply_query(&stmt, context.into())?;
+                    if do_check_result {
+                        check_result(self, &ret)?;
                     }
-                    Statement::CreateView {
-                        materialized: true,
-                        or_replace: false,
-                        name,
-                        query,
-                        ..
-                    } => {
-                        create_mv::handle_create_mv(context, name, query).await?;
-                    }
-
-                    Statement::Drop(drop_statement) => {
-                        let table_object_name = ObjectName(vec![drop_statement.name]);
-                        drop_table::handle_drop_table(context, table_object_name).await?;
-                    }
-                    _ => return Err(anyhow!("Unsupported statement type")),
+                    result = Some(ret);
                 }
+                Statement::CreateTable { name, columns, .. } => {
+                    create_table::handle_create_table(context, name, columns).await?;
+                }
+                Statement::CreateSource(source) => {
+                    create_source::handle_create_source(context, source).await?;
+                }
+                Statement::CreateView {
+                    materialized: true,
+                    or_replace: false,
+                    name,
+                    query,
+                    ..
+                } => {
+                    create_mv::handle_create_mv(context, name, query).await?;
+                }
+
+                Statement::Drop(drop_statement) => {
+                    let table_object_name = ObjectName(vec![drop_statement.name]);
+                    drop_table::handle_drop_table(context, table_object_name).await?;
+                }
+                _ => return Err(anyhow!("Unsupported statement type")),
             }
         }
-
-        Ok(result.unwrap_or_default())
+        Ok(result)
     }
 
     fn apply_query(
@@ -386,3 +431,30 @@ pub async fn run_test_file(file_name: &str, file_content: &str) {
         panic!("{} test cases failed", failed_num);
     }
 }
+
+pub fn extract_content(c: TestCase) -> Option<String> {
+    match c.create_source {
+        Some(source) => {
+            if let Some(content) = source.file {
+                Some(content)
+            } else {
+                panic!("{:?} create source need to conclude content", c.id);
+            }
+        }
+        None => None,
+    }
+}
+
+// pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
+//     let temp_file = Builder::new()
+//         .prefix("temp")
+//         .suffix(".proto")
+//         .rand_bytes(5)
+//         .tempfile()
+//         .unwrap();
+//
+//     let mut file = temp_file.as_file();
+//     file.write_all(proto_data.as_ref())
+//         .expect("writing binary to test file");
+//     temp_file
+// }

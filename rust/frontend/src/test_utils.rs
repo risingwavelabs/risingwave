@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::error::Error;
+use std::io::Write;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -29,6 +30,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
+use tempfile::{Builder, NamedTempFile};
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
@@ -232,4 +234,20 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
         Ok(())
     }
+}
+
+/// Returns the file.
+/// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
+pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
+    let temp_file = Builder::new()
+        .prefix("temp")
+        .suffix(".proto")
+        .rand_bytes(5)
+        .tempfile()
+        .unwrap();
+
+    let mut file = temp_file.as_file();
+    file.write_all(proto_data.as_ref())
+        .expect("writing binary to test file");
+    temp_file
 }

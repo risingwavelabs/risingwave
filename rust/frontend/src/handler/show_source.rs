@@ -82,12 +82,29 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
 
-    use crate::handler::create_source::tests::create_proto_file;
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend};
 
+    static PROTO_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
     #[tokio::test]
     async fn test_show_source_handler() {
-        let proto_file = create_proto_file();
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
