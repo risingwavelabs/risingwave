@@ -168,6 +168,12 @@ impl ScheduledBarriers {
 /// store, some actions like "drop materialized view" or "create mv on mv" must be done in barrier
 /// manager transactional using [`Command`].
 pub struct BarrierManager<S> {
+    /// The maximal interval for sending a barrier.
+    interval: Duration,
+
+    /// The queue of scheduled barriers.
+    scheduled_barriers: ScheduledBarriers,
+
     cluster_manager: StoredClusterManagerRef<S>,
 
     catalog_manager: CatalogManagerRef<S>,
@@ -180,8 +186,6 @@ pub struct BarrierManager<S> {
 
     clients: StreamClientsRef,
 
-    scheduled_barriers: ScheduledBarriers,
-
     metrics: Arc<MetaMetrics>,
 }
 
@@ -191,8 +195,6 @@ impl<S> BarrierManager<S>
 where
     S: MetaStore,
 {
-    const INTERVAL: Duration =
-        Duration::from_millis(if cfg!(debug_assertions) { 500 } else { 100 });
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
     /// Create a new [`BarrierManager`].
@@ -205,7 +207,18 @@ where
         hummock_manager: Arc<HummockManager<S>>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
+        let interval = Duration::from_millis(if std::env::var_os("CI").is_some() {
+            // Use a shorter interval to discovery more bugs on CI.
+            500
+        } else if cfg!(debug_assertions) {
+            // Use a longer interval to better debug with tracing.
+            5000
+        } else {
+            100
+        });
+
         Self {
+            interval,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -219,7 +232,7 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     pub async fn run(&self) -> Result<()> {
-        let mut min_interval = tokio::time::interval(Self::INTERVAL);
+        let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         let mut prev_epoch = INVALID_EPOCH;
