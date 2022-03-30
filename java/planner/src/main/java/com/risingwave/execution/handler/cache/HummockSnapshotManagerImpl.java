@@ -77,7 +77,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
               this.unpinWorker.submit(
                   () -> {
                     var snapshot = HummockSnapshot.newBuilder().setEpoch(keyEpoch).build();
-                    var request = UnpinSnapshotRequest.newBuilder().setSnapshot(snapshot).build();
+                    var request = UnpinSnapshotRequest.newBuilder().addSnapshots(snapshot).build();
                     this.metaClient.unpinSnapshot(request);
                   });
               return null;

@@ -345,7 +345,7 @@ where
     pub async fn unpin_version(
         &self,
         context_id: HummockContextId,
-        pinned_version_id: HummockVersionId,
+        pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_versions =
@@ -356,7 +356,9 @@ where
             }
             Some(context_pinned_version) => context_pinned_version,
         };
-        context_pinned_version.unpin_version(pinned_version_id);
+        for pinned_version_id in pinned_version_ids.as_ref() {
+            context_pinned_version.unpin_version(*pinned_version_id);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
 
         #[cfg(test)]
@@ -658,7 +660,7 @@ where
     pub async fn unpin_snapshot(
         &self,
         context_id: HummockContextId,
-        hummock_snapshot: HummockSnapshot,
+        hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_snapshots =
@@ -670,7 +672,9 @@ where
             }
             Some(context_pinned_snapshot) => context_pinned_snapshot,
         };
-        context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        for hummock_snapshot in hummock_snapshots.as_ref() {
+            context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
 
         #[cfg(test)]
@@ -748,11 +752,7 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
-    pub async fn report_compact_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> Result<bool> {
+    pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -785,17 +785,15 @@ where
             return Ok(false);
         }
         compact_task_assignment.remove(&compact_task.task_id);
-        let delete_table_ids = match compact_status.report_compact_task(
-            output_table_compact_entries,
-            compact_task,
-            task_result,
-        ) {
+        let delete_table_ids = match compact_status
+            .report_compact_task(output_table_compact_entries, compact_task.clone())
+        {
             None => {
                 panic!("Inconsistent compact status");
             }
             Some(delete_table_ids) => delete_table_ids,
         };
-        if task_result {
+        if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
             let (
@@ -880,7 +878,7 @@ where
                 sstable_id_infos
             )?;
 
-            tracing::debug!(
+            tracing::info!(
                 "Finish hummock compaction task id {}, compact {} SSTs {:?} to {} SSTs {:?}",
                 compact_task_id,
                 input_sst_ids.len(),

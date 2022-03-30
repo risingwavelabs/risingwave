@@ -586,9 +586,9 @@
       .then(response => response.json())
       .then(data => data.forEach(
         (data) => {
-          if (showAssociateMv || !data[1].isAssociated) {
-            currentMvs.add(data[0])
-            $("#mvSelect").append(mvSelectOption(data[0], data[1].tableName))
+          if (showAssociateMv || !data.hasOwnProperty('associatedSourceId')) {
+            currentMvs.add(data.id)
+            $("#mvSelect").append(mvSelectOption(data.id, data.name))
           }
         }))
   }

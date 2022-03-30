@@ -53,13 +53,10 @@ impl Rule for FilterAggRule {
         let pushed_predicate = pushed_predicate.rewrite_expr(&mut subst);
 
         let input = agg.input();
-        let pushed_filter = LogicalFilter::new(input, pushed_predicate);
-        let new_agg = agg.clone_with_input(pushed_filter.into()).into();
-        if agg_call_pred.always_true() {
-            Some(new_agg)
-        } else {
-            Some(LogicalFilter::new(new_agg, agg_call_pred).into())
-        }
+        let pushed_filter = LogicalFilter::create(input, pushed_predicate);
+        let new_agg = agg.clone_with_input(pushed_filter).into();
+
+        Some(LogicalFilter::create(new_agg, agg_call_pred))
     }
 }
 

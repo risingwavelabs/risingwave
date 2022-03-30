@@ -28,9 +28,6 @@ create materialized view mv4 as select * from t1 order by t1.v2 DESC, t1.v3 ASC 
 statement ok
 create materialized view mv5 as select * from t1 order by t1.v2 DESC, t1.v3 ASC offset 1;
 
-statement ok
-flush;
-
 query IIIIII
 select v1, v2, v3, v10, v20, v30 from mv1;
 ----

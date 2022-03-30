@@ -17,7 +17,6 @@ use std::io;
 use std::result::Result;
 use std::sync::Arc;
 
-use log::{error, info};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::pg_protocol::PgProtocol;
@@ -39,17 +38,17 @@ pub trait Session: Send + Sync {
     ) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
 }
 
-/// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
+/// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
 pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one
-    info!("Starting server at {}", addr);
+    tracing::info!("Server Listening at {}", addr);
     loop {
         let session_mgr = session_mgr.clone();
         let conn_ret = listener.accept().await;
         match conn_ret {
             Ok((stream, peer_addr)) => {
-                info!("New connection: {}", peer_addr);
+                tracing::info!("New connection: {}", peer_addr);
                 tokio::spawn(async move {
                     // connection succeeded
                     pg_serve_conn(stream, session_mgr).await;
@@ -57,7 +56,7 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::R
             }
 
             Err(e) => {
-                error!("Connection failure: {}", e);
+                tracing::error!("Connection failure: {}", e);
             }
         }
     }
@@ -70,12 +69,12 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
         match terminate {
             Ok(is_ter) => {
                 if is_ter {
-                    println!("Connection closed by terminate cmd!");
+                    tracing::info!("Connection closed by terminate cmd!");
                     break;
                 }
             }
-            Err(_) => {
-                println!("Connection closed by error!");
+            Err(e) => {
+                tracing::error!("Connection closed by error {:?}!", e);
                 break;
             }
         }
