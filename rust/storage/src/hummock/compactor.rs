@@ -76,7 +76,10 @@ pub struct Compactor {
 impl Compactor {
     /// Create a new compactor.
     pub fn new(context: Arc<CompactorContext>, compact_task: CompactTask) -> Self {
-        Self { context, compact_task }
+        Self {
+            context,
+            compact_task,
+        }
     }
 
     /// For compaction from shared buffer to level 0, this is the only function gets called.
