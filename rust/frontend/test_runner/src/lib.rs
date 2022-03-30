@@ -76,7 +76,6 @@ pub struct TestCase {
     /// Error of optimizer
     pub optimizer_error: Option<String>,
 
-    /// Since the create source sql just support file location to create.
     /// Support using file content or file location to create source.
     pub create_source: Option<CreateSource>,
 }
@@ -154,7 +153,8 @@ impl TestCase {
 
         let placeholder_empty_vec = vec![];
 
-        self.pre_create_source(session.clone(), do_check_result)
+        // Since temp file will be deleted when it goes out of scope, so create source advance.
+        self.create_source_advance(session.clone(), do_check_result)
             .await?;
 
         for sql in self
@@ -172,7 +172,9 @@ impl TestCase {
         Ok(result.unwrap_or_default())
     }
 
-    async fn pre_create_source(
+    // If testcase have create source info, run sql to create source.
+    // Support create source by file content or file location.
+    async fn create_source_advance(
         &self,
         session: Arc<SessionImpl>,
         do_check_result: bool,
@@ -192,7 +194,10 @@ impl TestCase {
                     self.run_sql(&(sql + &file + "'"), session.clone(), do_check_result)
                         .await
                 } else {
-                    panic!("{:?} create source need to conclude content", self.id);
+                    panic!(
+                        "{:?} create source need to conclude content or location",
+                        self.id
+                    );
                 }
             }
             None => Ok(None),

@@ -178,9 +178,9 @@ impl Binder {
             self.catalog
                 .get_source_by_name(&self.db_name, &schema_name, &table_name)?;
 
-        let (columns, table_desc, table_id) = match source_catalog.get_info().unwrap() {
-            // Since stream source doesn't have table catalog, use the info to form columns and
-            // table_desc Field descs have same hidden value with column catalog.
+        let (columns, table_desc, table_id) = match source_catalog.get_info()? {
+            // Since stream source doesn't have table catalog, use the stream source info.
+            // Field descs have same hidden value with column catalog.
             Info::StreamSource(info) => {
                 let catalogs: Vec<ColumnCatalog> =
                     info.columns.iter().map(|c| c.clone().into()).collect_vec();
