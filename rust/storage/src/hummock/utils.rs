@@ -14,10 +14,8 @@
 
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
-use std::sync::Arc;
 
-use super::{HummockError, HummockResult, Sstable};
-use crate::monitor::StateStoreMetrics;
+use super::{HummockError, HummockResult};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
