@@ -110,7 +110,7 @@ impl LocalBarrierManager {
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
-        debug!("register sender: {}", actor_id);
+        tracing::trace!(actor_id = actor_id, "register sender");
         self.senders.insert(actor_id, sender);
     }
 
@@ -162,8 +162,8 @@ impl LocalBarrierManager {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+            trace!("remove actors {:?} from senders", actors);
             for actor in actors {
-                trace!("remove actor {} from senders", actor);
                 self.senders.remove(actor);
             }
         }

@@ -179,7 +179,7 @@ impl StreamService for StreamServiceImpl {
                     .create_table_source_v2(&id, columns)
                     .map_err(tonic_err)?;
 
-                info!("create table source, id: {}", id);
+                tracing::debug!(id = %id, "create table source");
             }
         };
 
@@ -199,7 +199,7 @@ impl StreamService for StreamServiceImpl {
             .drop_source(&id)
             .map_err(tonic_err)?;
 
-        info!("drop source, id: {}", id);
+        tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }

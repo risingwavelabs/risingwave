@@ -75,7 +75,7 @@ impl Actor {
                     // then stop this actor if asked
                     if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                         if actors.contains(&self.id) {
-                            debug!("actor exit: {}", self.id);
+                            tracing::trace!(actor_id = self.id, "actor exit");
                             break;
                         }
                     }

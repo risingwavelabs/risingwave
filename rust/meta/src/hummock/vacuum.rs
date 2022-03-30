@@ -244,7 +244,7 @@ where
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }
-        tracing::debug!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
     }
 }
@@ -293,7 +293,7 @@ mod tests {
             0
         );
         hummock_manager
-            .unpin_version(context_id, pinned_version.id)
+            .unpin_version(context_id, vec![pinned_version.id])
             .await
             .unwrap();
 

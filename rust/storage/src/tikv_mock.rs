@@ -15,7 +15,6 @@
 use std::future::Future;
 use std::ops::RangeBounds;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
@@ -116,11 +115,11 @@ impl TikvStateStoreIter {
     }
 }
 
-#[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        unimplemented!()
-    }
-
     type Item = (Bytes, StorageValue);
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { unimplemented!() }
+    }
 }
