@@ -31,7 +31,7 @@ pub(crate) mod write_batch;
 pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
-    pub meta_service: Arc<MockHummockMetaClient>,
+    pub meta_client: Arc<MockHummockMetaClient>,
 
     // TODO(Sun Ting): exploit specified (no need to support encryption) rng to speed up
     rng: StdRng,
@@ -58,7 +58,7 @@ impl Operations {
             keys: vec![],
             prefixes: vec![],
             rng: StdRng::seed_from_u64(opts.seed),
-            meta_service,
+            meta_client: meta_service,
         };
 
         for operation in opts.benchmarks.split(',') {
