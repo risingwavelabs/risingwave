@@ -52,6 +52,15 @@ impl LogicalFilter {
         }
     }
 
+    /// check if the predicate is always true
+    pub fn filter_if_need(input: PlanRef, predicate: Condition) -> PlanRef {
+        if predicate.always_true() {
+            input
+        } else {
+            LogicalFilter::new(input, predicate).into()
+        }
+    }
+
     /// the function will check if the predicate is bool expression
     pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
         let predicate = Condition::with_expr(predicate);
