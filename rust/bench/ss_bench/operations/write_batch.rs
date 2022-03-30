@@ -13,17 +13,20 @@
 // limitations under the License.
 
 use std::mem::size_of_val;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
+use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
+use crate::utils::workload::Workload;
 use crate::Opts;
 
 impl Operations {
@@ -36,6 +39,7 @@ impl Operations {
         self.track_keys(keys.clone());
 
         let batches = Workload::make_batches(opts, keys, values);
+        println!("batch size: {}", batches.len());
 
         let perf = self.run_batches(store, opts, batches).await;
 
@@ -96,27 +100,49 @@ impl Operations {
             grouped_batches[i % opts.concurrency_num as usize].push(batch);
         }
 
+        let task_count = Arc::new(AtomicUsize::new(grouped_batches.len()));
+        let epoch = Arc::new(AtomicU64::new(1));
+        let origin_task_count = grouped_batches.len();
         let mut args = grouped_batches
             .into_iter()
-            .map(|batches| (batches, store.clone()))
+            .map(|batches| {
+                (
+                    batches,
+                    store.clone(),
+                    self.meta_service.clone(),
+                    task_count.clone(),
+                    epoch.clone(),
+                )
+            })
             .collect_vec();
 
         let futures = args
             .drain(..)
-            .map(|(batches, store)| async move {
-                let mut latencies: Vec<u128> = vec![];
-                for batch in batches {
-                    let start = Instant::now();
-                    let batch = batch
-                        .into_iter()
-                        .map(|(k, v)| (k, v.map(StorageValue::from)))
-                        .collect_vec();
-                    store.ingest_batch(batch, get_epoch()).await.unwrap();
-                    let time_nano = start.elapsed().as_nanos();
-                    latencies.push(time_nano);
-                }
-                latencies
-            })
+            .map(
+                |(batches, store, meta_service, task_count, global_epoch)| async move {
+                    let mut latencies: Vec<u128> = vec![];
+                    for batch in batches {
+                        let start = Instant::now();
+                        let batch = batch
+                            .into_iter()
+                            .map(|(k, v)| (k, v.map(StorageValue::from)))
+                            .collect_vec();
+                        let epoch = global_epoch.load(Ordering::Acquire);
+                        store.ingest_batch(batch, epoch).await.unwrap();
+                        if task_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+                            store.sync(Some(epoch)).await.unwrap();
+                            meta_service.commit_epoch(epoch).await.unwrap();
+                            global_epoch.fetch_add(1, Ordering::SeqCst);
+                            task_count.store(origin_task_count, Ordering::Release);
+                            print!("sync once: {}", epoch);
+                        }
+                        store.wait_epoch(epoch).await.unwrap();
+                        let time_nano = start.elapsed().as_nanos();
+                        latencies.push(time_nano);
+                    }
+                    latencies
+                },
+            )
             .collect_vec();
 
         let total_start = Instant::now();

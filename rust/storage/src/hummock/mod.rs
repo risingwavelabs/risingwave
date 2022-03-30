@@ -35,8 +35,7 @@ mod iterator;
 pub mod key;
 pub mod key_range;
 pub mod local_version_manager;
-#[cfg(test)]
-pub(crate) mod mock;
+pub mod mock;
 mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;

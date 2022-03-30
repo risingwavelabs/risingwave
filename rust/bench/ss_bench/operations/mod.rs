@@ -13,10 +13,12 @@
 // limitations under the License.
 
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
+use risingwave_storage::hummock::mock::MockHummockMetaClient;
 use risingwave_storage::StateStore;
 
 use crate::utils::display_stats::*;
@@ -29,6 +31,7 @@ pub(crate) mod write_batch;
 pub(crate) struct Operations {
     pub(crate) keys: Vec<Bytes>,
     pub(crate) prefixes: Vec<Bytes>,
+    pub meta_service: Arc<MockHummockMetaClient>,
 
     // TODO(Sun Ting): exploit specified (no need to support encryption) rng to speed up
     rng: StdRng,
@@ -44,13 +47,18 @@ pub(crate) struct PerfMetrics {
 
 impl Operations {
     /// Run operations in the `--benchmarks` option
-    pub(crate) async fn run(store: impl StateStore, opts: &Opts) {
+    pub(crate) async fn run(
+        store: impl StateStore,
+        meta_service: Arc<MockHummockMetaClient>,
+        opts: &Opts,
+    ) {
         let mut stat_display = DisplayStats::default();
 
         let mut runner = Operations {
             keys: vec![],
             prefixes: vec![],
             rng: StdRng::seed_from_u64(opts.seed),
+            meta_service,
         };
 
         for operation in opts.benchmarks.split(',') {
