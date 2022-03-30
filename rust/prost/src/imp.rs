@@ -69,7 +69,7 @@ impl crate::catalog::Source {
         )
     }
 
-    /// Return column_descs from source info filter our hidden column
+    /// Return column_descs from source info filter out hidden column
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let catalogs = match self.get_info().unwrap() {
             Info::StreamSource(info) => &info.columns,
