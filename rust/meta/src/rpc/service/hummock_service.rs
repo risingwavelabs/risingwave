@@ -114,10 +114,7 @@ where
                 status: None,
             })),
             Some(compact_task) => {
-                let result = self
-                    .hummock_manager
-                    .report_compact_task(compact_task, req.task_result)
-                    .await;
+                let result = self.hummock_manager.report_compact_task(compact_task).await;
                 match result {
                     Ok(_) => Ok(Response::new(ReportCompactionTasksResponse {
                         status: None,

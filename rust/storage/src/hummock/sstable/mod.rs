@@ -52,6 +52,7 @@ pub use utils::CompressionAlgorithm;
 
 use super::{HummockError, HummockResult};
 
+#[derive(Clone)]
 /// [`SSTable`] is a handle for accessing SST in [`TableManager`].
 pub struct Sstable {
     pub id: u64,
