@@ -55,18 +55,18 @@ jobs:
           name: risingwave-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<profile>]/risingwave
+            rust/target/$[<target>]/risingwave
 
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<profile>]/risingwave_regress_test
+            rust/target/$[<target>]/risingwave_regress_test
 
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<profile>]/risedev-playground
+            rust/target/$[<target>]/risedev-playground

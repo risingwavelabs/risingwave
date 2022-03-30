@@ -38,7 +38,6 @@ jobs:
   stop-runner-c:
     name: ec2-stop-c
     needs:
-      - start-runner-c
       - compute-node-build-release
       - end-to-end-risedev-release
     runs-on: ubuntu-latest

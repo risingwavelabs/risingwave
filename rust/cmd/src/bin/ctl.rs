@@ -14,7 +14,6 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use clap::StructOpt;
 use tikv_jemallocator::Jemalloc;
 
 #[global_allocator]
@@ -24,6 +23,8 @@ static GLOBAL: Jemalloc = Jemalloc;
 #[cfg(not(feature = "all-in-one"))]
 #[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
+    use clap::StructOpt;
+
     let opts = risingwave_ctl::CliOpts::parse();
 
     risingwave_logging::oneshot_common();

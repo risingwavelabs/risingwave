@@ -16,6 +16,8 @@ env:
   RW_CI: true
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
+  RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
+  RUSTFLAGS: -D warnings
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -66,7 +68,6 @@ jobs:
   stop-runner-a:
     name: ec2-stop-a
     needs:
-      - start-runner-a
       - compute-node-build-dev
       - end-to-end-risedev-dev
     runs-on: ubuntu-latest
@@ -89,7 +90,6 @@ jobs:
   stop-runner-b:
     name: ec2-stop-b
     needs:
-      - start-runner-b
       - compute-node-test
     runs-on: ubuntu-latest
     if: ${{ always() }}
@@ -134,7 +134,6 @@ jobs:
   stop-runner-c:
     name: ec2-stop-c
     needs:
-      - start-runner-c
       - compute-node-build-release
       - end-to-end-risedev-release
     runs-on: ubuntu-latest
@@ -253,6 +252,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
+          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
@@ -357,6 +357,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
+          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
@@ -445,6 +446,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
+          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
@@ -572,19 +574,19 @@ jobs:
           name: risingwave-dev
           if-no-files-found: error
           path: |
-            rust/target/dev/risingwave
+            rust/target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-dev
           if-no-files-found: error
           path: |
-            rust/target/dev/risingwave_regress_test
+            rust/target/debug/risingwave_regress_test
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-dev
           if-no-files-found: error
           path: |
-            rust/target/dev/risedev-playground
+            rust/target/debug/risedev-playground
   compute-node-build-release:
     needs: start-runner-c
     runs-on: ${{ needs.start-runner-c.outputs.label }}

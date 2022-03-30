@@ -73,6 +73,7 @@ jobs:
         run: |
           curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
           unzip ~/cargo-make.zip -d ~
+          mv "~/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
 
       - name: Prepare RiseDev playground
         run: |

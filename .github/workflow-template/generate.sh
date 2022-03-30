@@ -16,10 +16,12 @@ HEADER="""
 # ========================================================================
 """
 
-sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-dev.gen.yml
-sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-release.gen.yml
-sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g' jobs/compute-node-build.yml > jobs/compute-node-build-dev.gen.yml
-sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g' jobs/compute-node-build.yml > jobs/compute-node-build-release.gen.yml
+# Repalce $[<profile>] -> dev/release; $[<runner>] -> a/c; $[<target>] -> debug/release
+
+sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g;s/\$\[<target>\]/debug/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-dev.gen.yml
+sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g;s/\$\[<target>\]/release/g' jobs/e2e-risedev.yml > jobs/e2e-risedev-release.gen.yml
+sed 's/\$\[<profile>\]/dev/g;s/\$\[<runner>\]/a/g;s/\$\[<target>\]/debug/g' jobs/compute-node-build.yml > jobs/compute-node-build-dev.gen.yml
+sed 's/\$\[<profile>\]/release/g;s/\$\[<runner>\]/c/g;s/\$\[<target>\]/release/g' jobs/compute-node-build.yml > jobs/compute-node-build-release.gen.yml
 
 # Generate workflow for main branch
 
