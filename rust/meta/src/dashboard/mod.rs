@@ -97,15 +97,10 @@ mod handlers {
 
     pub async fn list_materialized_views<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<(TableId, Table)>>> {
+    ) -> Result<Json<Vec<Table>>> {
         use crate::model::MetadataModel;
 
-        let materialized_views = Table::list(&*srv.meta_store)
-            .await
-            .map_err(err)?
-            .iter()
-            .map(|mv| (mv.id as TableId, mv.clone()))
-            .collect::<Vec<_>>();
+        let materialized_views = Table::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(materialized_views))
     }
 
