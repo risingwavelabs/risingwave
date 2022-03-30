@@ -145,13 +145,11 @@ mod tests {
         let mut result = vec![];
         let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
         for (key_bytes, value_bytes) in bytes {
-            if let Some(value_bytes) = value_bytes {
-                let pk_and_row = deserializer
-                    .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes))
-                    .unwrap();
-                if let Some(pk_and_row) = pk_and_row {
-                    result.push(pk_and_row.1);
-                }
+            let pk_and_row = deserializer
+                .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
+                .unwrap();
+            if let Some(pk_and_row) = pk_and_row {
+                result.push(pk_and_row.1);
             }
         }
         let pk_and_row = deserializer.take();

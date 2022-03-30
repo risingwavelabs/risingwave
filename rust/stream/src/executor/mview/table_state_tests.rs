@@ -553,7 +553,7 @@ async fn test_cell_based_write() {
         Some(222_i32.into()),
     ]);
     table
-        .delete_row(&delete_pk1, delete_value1, epoch)
+        .delete_row(&delete_pk1, &delete_value1, epoch)
         .await
         .unwrap();
     let get_delete_row2_res1 = table

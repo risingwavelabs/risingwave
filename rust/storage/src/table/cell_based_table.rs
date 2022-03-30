@@ -133,17 +133,15 @@ impl<S: StateStore> CellBasedTable<S> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let column_ids = generate_column_id(&self.column_descs);
         let mut row = vec![None; column_ids.len()];
-        let start_key = &serialize_pk(pk, pk_serializer)?;
+        let start_key = self
+            .keyspace
+            .prefixed_key(&serialize_pk(pk, pk_serializer)?);
+        let end_key = next_key(&start_key);
 
         let state_store_range_scan_res = self
             .keyspace
             .state_store()
-            .scan(
-                self.keyspace.prefixed_key(start_key)
-                    ..next_key(&self.keyspace.prefixed_key(start_key)),
-                None,
-                epoch,
-            )
+            .scan(start_key..end_key, None, epoch)
             .await?;
 
         // row does not exist
@@ -153,11 +151,9 @@ impl<S: StateStore> CellBasedTable<S> {
 
         for (key, value) in state_store_range_scan_res {
             if key.len() > 4 {
+                // The last four bytes of the key represent its column_id
                 let column_id_bytes = &key[key.len() - 4..];
                 let column_id = deserialize_column_id(column_id_bytes)?;
-                if column_id == NULL_ROW_SPECIAL_CELL_ID {
-                    break;
-                }
                 let column_index = self
                     .column_id_to_column_index
                     .get(&column_id)
@@ -175,14 +171,16 @@ impl<S: StateStore> CellBasedTable<S> {
         Ok(Some(Row::new(row)))
     }
 
-    pub async fn delete_row(&mut self, pk: &Row, old_value: Row, epoch: u64) -> Result<()> {
+    pub async fn delete_row(&mut self, pk: &Row, old_value: &Row, epoch: u64) -> Result<()> {
+        // TODO(wcy-fdu): TODO: support only serialize key mode. We only need keys in this case to
+        // delete.
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
         let column_ids = generate_column_id(&self.column_descs);
         let bytes = self.cell_based_row_serializer.serialize(
             &arrange_key_buf,
-            Some(old_value),
+            Some(old_value.clone()),
             &column_ids,
         )?;
         for (key, value) in bytes {

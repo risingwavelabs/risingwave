@@ -141,14 +141,6 @@ pub fn serialize_pk_and_row(
     }
     let mut result = vec![];
     let mut all_null = true;
-    if row.is_none() {
-        let key = [
-            pk_buf,
-            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
-        result.push((key, None));
-    }
     for (index, column_id) in column_ids.iter().enumerate() {
         let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
         match row {
