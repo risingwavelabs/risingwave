@@ -77,7 +77,7 @@ pub enum ErrorCode {
     MetaError(String),
 
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
-    /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
+    /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
     #[error("End of the stream")]
     Eof,
 
