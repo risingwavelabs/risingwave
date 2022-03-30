@@ -84,22 +84,21 @@ impl Rule for FilterJoinRule {
         let right_predicate = right_from_filter.and_then(|c1| right_from_on.map(|c2| c1.and(c2)));
 
         let new_left: PlanRef = if let Some(predicate) = left_predicate {
-            LogicalFilter::new(join.left(), predicate).into()
+            LogicalFilter::filter_if_need(join.left(), predicate)
         } else {
             join.left()
         };
         let new_right: PlanRef = if let Some(predicate) = right_predicate {
-            LogicalFilter::new(join.right(), predicate).into()
+            LogicalFilter::filter_if_need(join.right(), predicate)
         } else {
             join.right()
         };
         let new_join = LogicalJoin::new(new_left, new_right, join_type, new_on);
 
-        if new_filter_predicate.always_true() {
-            Some(new_join.into())
-        } else {
-            Some(LogicalFilter::new(new_join.into(), new_filter_predicate).into())
-        }
+        Some(LogicalFilter::filter_if_need(
+            new_join.into(),
+            new_filter_predicate,
+        ))
     }
 }
 

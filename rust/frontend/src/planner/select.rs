@@ -154,7 +154,7 @@ impl Planner {
             Ok(input)
         } else {
             let (input, others) = self.substitute_subqueries(input, others.conjunctions)?;
-            Ok(LogicalFilter::new(
+            Ok(LogicalFilter::filter_if_need(
                 input,
                 Condition {
                     conjunctions: others,

@@ -37,7 +37,7 @@ pub struct LogicalFilter {
 }
 
 impl LogicalFilter {
-    pub fn new(input: PlanRef, predicate: Condition) -> Self {
+    fn new(input: PlanRef, predicate: Condition) -> Self {
         let ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
