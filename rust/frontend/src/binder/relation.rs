@@ -256,6 +256,7 @@ impl Binder {
             .enumerate()
             .zip_longest(column_aliases)
             .try_for_each(|pair| {
+                // Column aliases can be less than columns, but not more.
                 let (index, (name, data_type, is_hidden)) = match pair {
                     itertools::EitherOrBoth::Both((index, (_name, data_type, is_hidden)), alias) => (
                         index, (alias.value, data_type, is_hidden)

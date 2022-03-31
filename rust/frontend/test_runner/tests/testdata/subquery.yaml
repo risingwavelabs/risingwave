@@ -69,6 +69,7 @@
           LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
         LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
+    /* alias less columns than available */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a) join t on a=v1;
   logical_plan: |
@@ -78,6 +79,7 @@
           LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
         LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
+    /* alias more columns than available */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt(a, b, c) join t on a=v1;
   binder_error: 'Bind error: table "tt" has less columns available but more aliases specified'

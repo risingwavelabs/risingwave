@@ -23,6 +23,7 @@
         StreamExchange { dist: HashShard([0]) }
           StreamTableScan { table: t3, columns: [v5, v6, _row_id#0], pk_indices: [2] }
 - sql: |
+    /* self join */
     create table t (v1 int, v2 int);
     select t1.v1 as t1v1, t2.v1 as t2v1 from t t1 join t t2 on t1.v1 = t2.v1;
   logical_plan: |
