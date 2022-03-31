@@ -24,7 +24,7 @@ use crate::executor::ExecutorBuilder;
 use crate::executor_v2::{Executor as ExecutorV2, FilterExecutor as FilterExecutorV2};
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-pub struct FilterExecutorBuilder {}
+pub struct FilterExecutorBuilder;
 
 impl ExecutorBuilder for FilterExecutorBuilder {
     fn new_boxed_executor(
