@@ -121,7 +121,7 @@ To add those components into the cluster, you will need to configure RiseDev to 
 ```shell
 ./risedev configure                               # start the interactive guide to enable components
 ./risedev configure enable prometheus-and-grafana # enable Prometheus and Grafana
-./risedev configure enable min-io                 # enable MinIO
+./risedev configure enable minio                  # enable MinIO
 ```
 
 After that, you can modify `risedev.yml` to compose the cluster. For example, we can modify the default section to:
