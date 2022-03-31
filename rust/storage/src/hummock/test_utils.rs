@@ -21,7 +21,6 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::SstableMeta;
 
-#[cfg(feature = "blockv2")]
 use super::{CompressionAlgorithm, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::key::key_with_epoch;
@@ -63,17 +62,6 @@ pub async fn mock_hummock_storage() -> HummockStorage {
 /// Number of keys in table generated in `generate_table`.
 pub const TEST_KEYS_COUNT: usize = 10000;
 
-#[cfg(not(feature = "blockv2"))]
-pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
-    SSTableBuilderOptions {
-        bloom_false_positive: 0.1,
-        block_size: 4096,                // 4KB
-        table_capacity: 256 * (1 << 20), // 256MB
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-    }
-}
-
-#[cfg(feature = "blockv2")]
 pub fn default_builder_opt_for_test() -> SSTableBuilderOptions {
     SSTableBuilderOptions {
         capacity: 256 * (1 << 20), // 256MB

@@ -93,14 +93,6 @@ pub fn generate_test_tables(
     table_ids: Vec<u64>,
 ) -> (Vec<SstableInfo>, Vec<(SstableMeta, Bytes)>) {
     // Tables to add
-    #[cfg(not(feature = "blockv2"))]
-    let opt = SSTableBuilderOptions {
-        bloom_false_positive: 0.1,
-        block_size: 4096,
-        table_capacity: 0,
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-    };
-    #[cfg(feature = "blockv2")]
     let opt = SSTableBuilderOptions {
         capacity: 64 * 1024 * 1024,
         block_capacity: 4096,

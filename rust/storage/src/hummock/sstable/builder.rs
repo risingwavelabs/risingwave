@@ -12,261 +12,180 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Hummock SST builder.
-//!
-//! The SST format is exactly the same as `AgateDB` (`BadgerDB`), and is very similar to `RocksDB`.
-
-// Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
-
-use bytes::{Buf, BufMut, Bytes, BytesMut};
-use prost::Message;
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
+use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_pb::hummock::{BlockMeta, SstableMeta};
 
 use super::bloom::Bloom;
-use super::utils::bytes_diff;
+use super::utils::CompressionAlgorithm;
+use super::{
+    BlockBuilder, BlockBuilderOptions, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
+    DEFAULT_RESTART_INTERVAL,
+};
 use crate::hummock::key::user_key;
-use crate::hummock::sstable::utils::checksum;
-use crate::hummock::HummockValue;
+use crate::hummock::value::HummockValue;
 
-/// Entry header stores the difference between current key and block base key. `overlap` is the
-/// common prefix of key and base key, and diff is the length of different part.
-#[derive(Default)]
-pub struct Header {
-    /// Overlap with base key.
-    pub overlap: u16,
+pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
+pub const DEFAULT_BLOOM_FALSE_POSITIVE: f64 = 0.1;
 
-    /// Length of the diff.
-    pub diff: u16,
+#[derive(Clone, Debug)]
+pub struct SSTableBuilderOptions {
+    /// Approximate sstable capacity.
+    pub capacity: usize,
+    /// Approximate block capacity.
+    pub block_capacity: usize,
+    /// Restart point interval.
+    pub restart_interval: usize,
+    /// False prsitive probability of bloom filter.
+    pub bloom_false_positive: f64,
+    /// Compression algorithm.
+    pub compression_algorithm: CompressionAlgorithm,
 }
 
-pub const HEADER_SIZE: usize = std::mem::size_of::<Header>();
-
-impl Header {
-    /// Encode encodes the header.
-    pub fn encode(&self, bytes: &mut impl BufMut) {
-        bytes.put_u32_le((self.overlap as u32) << 16 | self.diff as u32);
-    }
-
-    /// Decode decodes the header.
-    pub fn decode(bytes: &mut impl Buf) -> Self {
-        let h = bytes.get_u32_le();
+impl Default for SSTableBuilderOptions {
+    fn default() -> Self {
         Self {
-            overlap: (h >> 16) as u16,
-            diff: h as u16,
+            capacity: DEFAULT_SSTABLE_SIZE,
+            block_capacity: DEFAULT_BLOCK_SIZE,
+            restart_interval: DEFAULT_RESTART_INTERVAL,
+            bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
+            compression_algorithm: CompressionAlgorithm::None,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SSTableBuilderOptions {
-    /// Target capacity of the table
-    pub table_capacity: u32,
-
-    /// Size of each block in bytes in SST
-    pub block_size: u32,
-
-    /// False positive probability of Bloom filter
-    pub bloom_false_positive: f64,
-
-    /// Checksum algorithm
-    pub checksum_algo: ChecksumAlg,
-}
-
-/// Builder is used in building a table.
-/// Builder builds an SST that consists of two parts:
-/// - Table data is simply a sequence of blocks.
-/// - Metadata is the prost-encoded `SstableMeta` data and essential information to determine the
-/// checksum.
 pub struct SSTableBuilder {
+    /// Options.
     options: SSTableBuilderOptions,
-
-    meta: SstableMeta,
-
-    /// Buffer blocks data
-    data_buf: BytesMut,
-
-    /// Used for prefix-encode
-    base_key: Bytes,
-    base_offset: u32,
-
-    /// Entry offsets in a block
-    entry_offsets: Vec<u32>,
-
-    /// Used for building the Bloom filter
-    key_hashes: Vec<u32>,
+    /// Write buffer.
+    buf: BytesMut,
+    /// Current block builder.
+    block_builder: Option<BlockBuilder>,
+    /// Block metadata vec.
+    block_metas: Vec<BlockMeta>,
+    /// Hashes of user keys.
+    user_key_hashes: Vec<u32>,
+    /// Last added full key.
+    last_full_key: Bytes,
+    key_count: usize,
 }
 
 impl SSTableBuilder {
-    /// Create new builder from options
     pub fn new(options: SSTableBuilderOptions) -> Self {
         Self {
-            data_buf: BytesMut::with_capacity(options.table_capacity as usize),
-            meta: SstableMeta::default(),
-            base_key: Bytes::new(),
-            base_offset: 0,
-            key_hashes: Vec::with_capacity(1024),
-            entry_offsets: vec![],
-            options,
+            options: options.clone(),
+            buf: BytesMut::with_capacity(options.capacity),
+            block_builder: None,
+            block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
+            user_key_hashes: Vec::with_capacity(options.capacity / DEFAULT_ENTRY_SIZE + 1),
+            last_full_key: Bytes::default(),
+            key_count: 0,
         }
     }
 
-    /// Checks if the builder is empty
-    pub fn is_empty(&self) -> bool {
-        self.data_buf.is_empty()
-    }
-
-    /// Calculates the difference of two keys
-    fn key_diff<'a>(&self, key: &'a [u8]) -> &'a [u8] {
-        bytes_diff(&self.base_key, key)
-    }
-
-    /// Appends encoded block bytes to the buffer
-    fn finish_block(&mut self) {
-        // Try to set the smallest key of table
-        if self.meta.smallest_key.is_empty() {
-            self.meta.smallest_key = self.base_key.to_vec();
+    /// Add kv pair to sstable.
+    pub fn add(&mut self, full_key: &[u8], value: HummockValue<&[u8]>) {
+        // Rotate block builder if the previous one has been built.
+        if self.block_builder.is_none() {
+            self.last_full_key.clear();
+            self.block_builder = Some(BlockBuilder::new(BlockBuilderOptions {
+                capacity: self.options.capacity,
+                restart_interval: self.options.restart_interval,
+                compression_algorithm: self.options.compression_algorithm,
+            }));
+            self.block_metas.push(BlockMeta {
+                offset: self.buf.len() as u32,
+                len: 0,
+                smallest_key: vec![],
+            })
         }
 
-        // ---------- encode block ----------
-        // Different behavior: BadgerDB will just return.
-        assert!(!self.entry_offsets.is_empty());
+        let block_builder = self.block_builder.as_mut().unwrap();
 
-        // Encode offsets list and its length
-        for offset in &self.entry_offsets {
-            self.data_buf.put_u32_le(*offset);
+        // TODO: refine me
+        let mut raw_value = BytesMut::default();
+        value.encode(&mut raw_value);
+        let raw_value = raw_value.freeze();
+
+        block_builder.add(full_key, &raw_value);
+
+        let user_key = user_key(full_key);
+        self.user_key_hashes.push(farmhash::fingerprint32(user_key));
+
+        if self.last_full_key.is_empty() {
+            self.block_metas.last_mut().unwrap().smallest_key = full_key.to_vec();
         }
-        self.data_buf.put_u32(self.entry_offsets.len() as u32);
+        self.last_full_key = Bytes::copy_from_slice(full_key);
 
-        // Encode checksum and its length
-        let checksum = checksum(
-            self.options.checksum_algo,
-            &self.data_buf[self.base_offset as usize..],
-        );
-        let mut cs_bytes = BytesMut::new();
-        checksum.encode(&mut cs_bytes).unwrap();
-        let ck_len = cs_bytes.len() as u32;
-        self.data_buf.put(cs_bytes);
-        self.data_buf.put_u32(ck_len);
-
-        // ---------- add block offset to meta ----------
-        let block_meta = BlockMeta {
-            smallest_key: self.base_key.to_vec(),
-            offset: self.base_offset,
-            len: self.data_buf.len() as u32 - self.base_offset,
-        };
-        self.meta.block_metas.push(block_meta);
+        if block_builder.approximate_len() >= self.options.block_capacity {
+            self.build_block();
+        }
+        self.key_count += 1;
     }
 
-    fn should_finish_block(&self, key: &[u8], value: HummockValue<&[u8]>) -> bool {
-        // If there is no entry till now, we will return false.
-        if self.entry_offsets.is_empty() {
-            return false;
-        }
-
-        // We should include current entry also in size, that's why +1 to len(b.entryOffsets).
-        let entries_offsets_size = (self.entry_offsets.len() + 1) * 4 +
-        4 + // size of list
-        8 + // sum64 in checksum proto
-        4; // checksum length
-
-        let estimated_size = self.data_buf.len()
-            - self.base_offset as usize + 6 // header size for entry
-            + key.len()
-            + value.encoded_len()
-            + entries_offsets_size;
-
-        // Integer overflow check for table size.
-        let _ = u32::try_from(self.data_buf.len() + estimated_size).unwrap();
-
-        estimated_size > self.options.block_size as usize
-    }
-
-    /// Table data format:
+    /// Finish building sst.
+    ///
+    /// Unlike most LSM-Tree implementations, sstable meta and data are encoded separately.
+    /// Both meta and data has its own object (file).
+    ///
+    /// # Format
+    ///
+    /// data:
+    ///
     /// ```plain
-    /// | Block | Block | Block | Block | Block |
+    /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    /// Add adds a key-value pair to the block.
-    /// Note: the passed key-value pairs should be ordered,
-    /// though we do not check that yet.
-    pub fn add(&mut self, key: &[u8], value: HummockValue<&[u8]>) {
-        if self.should_finish_block(key, value) {
-            self.finish_block();
-            self.base_key.clear();
-            assert!(self.data_buf.len() < u32::MAX as usize);
-            self.base_offset = self.data_buf.len() as u32;
-            self.entry_offsets.clear();
+    pub fn finish(mut self) -> (Bytes, SstableMeta) {
+        let smallest_key = self.block_metas[0].smallest_key.clone();
+        let largest_key = self.last_full_key.to_vec();
+        self.build_block();
+        self.buf.put_u32_le(self.block_metas.len() as u32);
+
+        let meta = SstableMeta {
+            block_metas: self.block_metas,
+            bloom_filter: if self.options.bloom_false_positive > 0.0 {
+                let bits_per_key = Bloom::bloom_bits_per_key(
+                    self.user_key_hashes.len(),
+                    self.options.bloom_false_positive,
+                );
+                Bloom::build_from_key_hashes(&self.user_key_hashes, bits_per_key).to_vec()
+            } else {
+                vec![]
+            },
+            estimated_size: self.buf.len() as u32,
+            key_count: self.key_count as u32,
+            smallest_key,
+            largest_key,
+        };
+
+        (self.buf.freeze(), meta)
+    }
+
+    pub fn approximate_len(&self) -> usize {
+        self.buf.len() + 4
+    }
+
+    fn build_block(&mut self) {
+        // Skip empty block.
+        if self.block_builder.is_none() {
+            return;
         }
+        let mut block_meta = self.block_metas.last_mut().unwrap();
+        let block = self.block_builder.take().unwrap().build();
+        self.buf.put_slice(&block);
+        block_meta.len = self.buf.len() as u32 - block_meta.offset;
+    }
 
-        // Set the largest key
-        self.meta.largest_key.clear();
-        self.meta.largest_key.extend_from_slice(key);
+    pub fn len(&self) -> usize {
+        self.user_key_hashes.len()
+    }
 
-        // Remove epoch before calculate hash
-        let user_key = user_key(key);
-        self.key_hashes.push(farmhash::fingerprint32(user_key));
-
-        // diff_key stores the difference of key with baseKey.
-        let diff_key = if self.base_key.is_empty() {
-            self.base_key = key.to_vec().into();
-            key
-        } else {
-            self.key_diff(key)
-        };
-        assert!(key.len() - diff_key.len() <= u16::MAX as usize);
-        assert!(diff_key.len() <= u16::MAX as usize);
-
-        // Get header
-        let header = Header {
-            overlap: (key.len() - diff_key.len()) as u16,
-            diff: diff_key.len() as u16,
-        };
-        assert!(self.data_buf.len() <= u32::MAX as usize);
-
-        // Store current entry's offset
-        self.entry_offsets
-            .push(self.data_buf.len() as u32 - self.base_offset);
-
-        // Entry layout: header, diffKey, value.
-        header.encode(&mut self.data_buf);
-        self.data_buf.put_slice(diff_key);
-        value.encode(&mut self.data_buf);
-
-        // Update estimated size
-        let block_size = value.encoded_len() + diff_key.len() + 4;
-        self.meta.estimated_size += block_size as u32;
+    pub fn is_empty(&self) -> bool {
+        self.user_key_hashes.is_empty()
     }
 
     /// Returns true if we roughly reached capacity
     pub fn reach_capacity(&self) -> bool {
-        let block_size = self.data_buf.len() as u32 + // actual length of current buffer
-            self.entry_offsets.len() as u32 * 4 + // all entry offsets size
-            4 + // count of all entry offsets
-            8 + // checksum bytes
-            4; // checksum length
-
-        let estimated_size = block_size +
-            4 + // index length
-            5 * self.meta.block_metas.len() as u32; // TODO: why 5?
-        estimated_size as u32 > self.options.table_capacity
-    }
-
-    /// Finalizes the table to be blocks and metadata
-    pub fn finish(mut self) -> (Bytes, SstableMeta) {
-        // Append blocks. This will never start a new block.
-        self.finish_block();
-
-        // TODO: move boundaries and build index if we need to encrypt or compress
-
-        // Initialize bloom filter
-        if self.options.bloom_false_positive > 0.0 {
-            let bits_per_key =
-                Bloom::bloom_bits_per_key(self.key_hashes.len(), self.options.bloom_false_positive);
-            let bloom = Bloom::build_from_key_hashes(&self.key_hashes, bits_per_key);
-            self.meta.bloom_filter = bloom.to_vec();
-        }
-
-        (self.data_buf.freeze(), self.meta)
+        self.approximate_len() >= self.options.capacity
     }
 }
 
@@ -283,10 +202,11 @@ pub(super) mod tests {
     #[should_panic]
     fn test_empty() {
         let opt = SSTableBuilderOptions {
+            capacity: 0,
+            block_capacity: 4096,
+            restart_interval: 16,
             bloom_false_positive: 0.1,
-            block_size: 4096,
-            table_capacity: 0,
-            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+            compression_algorithm: CompressionAlgorithm::None,
         };
 
         let b = SSTableBuilder::new(opt);
@@ -302,33 +222,21 @@ pub(super) mod tests {
             b.add(&test_key_of(i), HummockValue::Put(&test_value_of(i)));
         }
 
-        assert_eq!(test_key_of(0), b.meta.smallest_key);
-        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), b.meta.largest_key);
-    }
+        let (_, meta) = b.finish();
 
-    #[test]
-    fn test_header_encode_decode() {
-        let header = Header {
-            overlap: 23333,
-            diff: 23334,
-        };
-
-        let mut buf = BytesMut::new();
-        header.encode(&mut buf);
-        let mut buf = buf.freeze();
-        let decoded_header = Header::decode(&mut buf);
-        assert_eq!(decoded_header.overlap, 23333);
-        assert_eq!(decoded_header.diff, 23334);
+        assert_eq!(test_key_of(0), meta.smallest_key);
+        assert_eq!(test_key_of(TEST_KEYS_COUNT - 1), meta.largest_key);
     }
 
     async fn test_with_bloom_filter(with_blooms: bool) {
         let key_count = 1000;
 
         let opts = SSTableBuilderOptions {
+            capacity: 0,
+            block_capacity: 4096,
+            restart_interval: 16,
             bloom_false_positive: if with_blooms { 0.01 } else { 0.0 },
-            block_size: 4096,
-            table_capacity: 0,
-            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
+            compression_algorithm: CompressionAlgorithm::None,
         };
 
         // build remote table
