@@ -179,6 +179,7 @@ where
 
             let mut dispatch_upstreams = vec![];
             let mut upstream_actors = builder.get_upstream_actors();
+            // reverse the vector so we can pop from the back.
             upstream_actors.reverse();
 
             actor.nodes = Some(self.build_inner(
