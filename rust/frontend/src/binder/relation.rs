@@ -194,29 +194,17 @@ impl Binder {
         let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
-        let (table_alias, column_aliases) = match alias {
-            None => (table_name.clone(), vec![]),
-            Some(TableAlias { name, columns }) => (name.value, columns),
-        };
-        if columns.len() < column_aliases.len() {
-            return Err(ErrorCode::BindError(format!(
-                "table \"{}\" has {} columns available but {} columns specified",
-                table_alias,
-                columns.len(),
-                column_aliases.len()
-            ))
-            .into());
-        }
-        let columns = columns.iter().zip_longest(column_aliases).map(|pair| {
-            let (c, name) = match pair {
-                itertools::EitherOrBoth::Both(c, a) => (c, a.value),
-                itertools::EitherOrBoth::Left(c) => (c, c.column_desc.name.clone()),
-                itertools::EitherOrBoth::Right(_) => unreachable!(),
-            };
-            (name, c.column_desc.data_type.clone(), c.is_hidden)
-        });
-
-        self.bind_context(columns, table_alias)?;
+        self.bind_context(
+            columns.iter().map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            }),
+            table_name.clone(),
+            alias,
+        )?;
 
         Ok(BoundBaseTable {
             name: table_name,
@@ -255,12 +243,28 @@ impl Binder {
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
+        alias: Option<TableAlias>,
     ) -> Result<()> {
+        let (table_name, column_aliases) = match alias {
+            None => (table_name, vec![]),
+            Some(TableAlias { name, columns }) => (name.value, columns),
+        };
+
         let begin = self.context.columns.len();
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type, is_hidden))| {
+            .zip_longest(column_aliases)
+            .try_for_each(|pair| {
+                let (index, (name, data_type, is_hidden)) = match pair {
+                    itertools::EitherOrBoth::Both((index, (_name, data_type, is_hidden)), alias) => (
+                        index, (alias.value, data_type, is_hidden)
+                    ),
+                    itertools::EitherOrBoth::Left(t) => t,
+                    itertools::EitherOrBoth::Right(_) => return Err(ErrorCode::BindError(format!(
+                        "table \"{table_name}\" has less columns available but more aliases specified",
+                    ))),
+                };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
@@ -273,7 +277,8 @@ impl Binder {
                     .entry(name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
-            });
+                Ok(())
+            })?;
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
@@ -299,35 +304,14 @@ impl Binder {
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
-
-        let (table_alias, column_aliases) = match alias {
-            None => (format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id), vec![]),
-            Some(TableAlias { name, columns }) => (name.value, columns),
-        };
-        let column_names = query.names();
-        if column_names.len() < column_aliases.len() {
-            return Err(ErrorCode::BindError(format!(
-                "table \"{}\" has {} columns available but {} columns specified",
-                table_alias,
-                column_names.len(),
-                column_aliases.len()
-            ))
-            .into());
-        }
-        let column_names = column_names
-            .iter()
-            .zip_longest(column_aliases)
-            .map(|pair| match pair {
-                itertools::EitherOrBoth::Both(_, a) => a.value,
-                itertools::EitherOrBoth::Left(c) => c.clone(),
-                itertools::EitherOrBoth::Right(_) => unreachable!(),
-            });
-
         self.bind_context(
-            column_names
+            query
+                .names()
+                .into_iter()
                 .zip_eq(query.data_types().into_iter())
                 .map(|(x, y)| (x, y, false)),
-            table_alias,
+            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+            alias,
         )?;
         Ok(BoundSubquery { query })
     }

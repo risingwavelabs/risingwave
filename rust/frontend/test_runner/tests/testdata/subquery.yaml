@@ -68,3 +68,16 @@
         LogicalProject { exprs: [$1, $2], expr_alias: [v1, v2] }
           LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
         LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t) as tt(a) join t on a=v1;
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $3, $4], expr_alias: [a, v2, v1, v2] }
+      LogicalJoin { type: Inner, on: ($0 = $3) }
+        LogicalProject { exprs: [$1, $2], expr_alias: [v1, v2] }
+          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+- sql: |
+    create table t (v1 bigint, v2 double precision);
+    select * from (select * from t) as tt(a, b, c) join t on a=v1;
+  binder_error: 'Bind error: table "tt" has less columns available but more aliases specified'
