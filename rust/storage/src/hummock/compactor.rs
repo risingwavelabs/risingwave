@@ -255,6 +255,12 @@ impl Compactor {
                 .await?;
 
             if self.context.is_share_buffer_compact {
+                self.context.stats.addtable_upload_sst_counts.inc();
+            } else {
+                self.context.stats.compaction_upload_sst_counts.inc();
+            }
+
+            if self.context.is_share_buffer_compact {
                 self.context
                     .stats
                     .write_shared_buffer_sync_size
@@ -322,16 +328,20 @@ impl Compactor {
     ) {
         if let Some(vacuum_task) = vacuum_task {
             tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
-            if let Err(e) = Vacuum::vacuum(
+            match Vacuum::vacuum(
                 sstable_store.clone(),
                 vacuum_task,
                 hummock_meta_client.clone(),
             )
             .await
             {
-                tracing::warn!("Failed to vacuum SSTs. {}", e);
+                Ok(_) => {
+                    tracing::debug!("Finish vacuuming SSTs");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to vacuum SSTs. {}", e);
+                }
             }
-            tracing::debug!("Finish vacuuming SSTs");
         }
     }
 

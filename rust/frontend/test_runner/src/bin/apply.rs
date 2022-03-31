@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
 
                     for case in cases {
                         let result = case.run(false).await?;
-                        let updated_case = result.as_test_case(&case);
+                        let updated_case = result.as_test_case(&case)?;
                         updated_cases.push(updated_case);
                     }
 

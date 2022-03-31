@@ -1892,7 +1892,7 @@ fn parse_literal_time() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TypedString {
-            data_type: DataType::Time,
+            data_type: DataType::Time(false),
             value: "01:23:34".into()
         },
         expr_from_projection(only(&select.projection)),
@@ -1905,7 +1905,7 @@ fn parse_literal_timestamp() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TypedString {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamp(false),
             value: "1999-01-01 01:23:34".into()
         },
         expr_from_projection(only(&select.projection)),
