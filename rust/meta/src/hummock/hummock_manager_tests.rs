@@ -424,7 +424,7 @@ async fn test_hummock_transaction() -> Result<()> {
             .get_ssts_to_delete(pinned_version.id)
             .await
             .unwrap();
-        sstables_to_delete.sort();
+        sstables_to_delete.sort_unstable();
         assert_eq!(
             get_sorted_sstable_ids(&tables_in_epoch3),
             sstables_to_delete
