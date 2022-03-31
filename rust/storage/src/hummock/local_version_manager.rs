@@ -185,10 +185,7 @@ impl LocalVersionManager {
     pub async fn pick_few_tables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
         let mut ssts = Vec::with_capacity(sst_ids.len());
         for sst_id in sst_ids {
-            ssts.push(Arc::new(Sstable {
-                id: *sst_id,
-                meta: self.sstable_store.meta(*sst_id).await?,
-            }));
+            ssts.push(self.sstable_store.sstable(*sst_id).await?);
         }
         Ok(ssts)
     }
