@@ -18,10 +18,12 @@ impl FromStr for WindowTableFunctionKind {
     type Err = ();
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "tumble" => Ok(WindowTableFunctionKind::Tumble),
-            "hop" => Ok(WindowTableFunctionKind::Hop),
-            _ => Err(()),
+        if s.eq_ignore_ascii_case("tumble") {
+            Ok(WindowTableFunctionKind::Tumble)
+        } else if s.eq_ignore_ascii_case("hop") {
+            Ok(WindowTableFunctionKind::Hop)
+        } else {
+            Err(())
         }
     }
 }
