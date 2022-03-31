@@ -85,6 +85,9 @@ macro_rules! for_all_metrics {
             sst_block_put_remote_duration: Histogram,
 
             cell_table_next_pack_cell_duration: Histogram,
+
+            addtable_upload_sst_counts: GenericCounter<AtomicU64>,
+            compaction_upload_sst_counts: GenericCounter<AtomicU64>,
         }
     };
 }
@@ -393,6 +396,22 @@ impl StateStoreMetrics {
         let cell_table_next_pack_cell_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        // --
+        let addtable_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_addtable_upload_sst_counts",
+            "Total number of sst uploads when shared buffer adds tables",
+            registry
+        )
+        .unwrap();
+
+        // --
+        let compaction_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_compaction_upload_sst_counts",
+            "Total number of sst uploads during compaction",
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -432,8 +451,10 @@ impl StateStoreMetrics {
             sst_block_request_miss_counts,
             sst_block_fetch_remote_duration,
             sst_block_put_remote_duration,
-
             cell_table_next_pack_cell_duration,
+
+            addtable_upload_sst_counts,
+            compaction_upload_sst_counts,
         }
     }
 

@@ -345,6 +345,7 @@ impl CompactStatus {
                             cnt: 0,
                         }),
                     }),
+                    task_status: false,
                 };
                 Some(compact_task)
             }
@@ -359,9 +360,9 @@ impl CompactStatus {
         &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
-        task_result: bool,
     ) -> Option<Vec<HummockSSTableId>> {
         let mut delete_table_ids = vec![];
+        let task_result = compact_task.task_status;
         match task_result {
             true => {
                 for LevelEntry { level_idx, .. } in compact_task.input_ssts {

@@ -109,8 +109,18 @@ pub struct TestCaseResult {
 
 impl TestCaseResult {
     /// Convert a result to test case
-    pub fn as_test_case(self, original_test_case: &TestCase) -> TestCase {
-        TestCase {
+    pub fn as_test_case(self, original_test_case: &TestCase) -> Result<TestCase> {
+        if original_test_case.binder_error.is_none() && let Some(ref err) = self.binder_error {
+            return Err(anyhow!("unexpected binder error: {}", err));
+        }
+        if original_test_case.planner_error.is_none() && let Some(ref err) = self.planner_error {
+            return Err(anyhow!("unexpected planner error: {}", err));
+        }
+        if original_test_case.optimizer_error.is_none() && let Some(ref err) = self.optimizer_error {
+            return Err(anyhow!("unexpected optimizer error: {}", err));
+        }
+
+        let case = TestCase {
             id: original_test_case.id.clone(),
             before: original_test_case.before.clone(),
             sql: original_test_case.sql.to_string(),
@@ -124,7 +134,8 @@ impl TestCaseResult {
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
             binder_error: self.binder_error,
-        }
+        };
+        Ok(case)
     }
 }
 
@@ -145,7 +156,7 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(&self.sql))
         {
-            let statements = Parser::parse_sql(sql).unwrap();
+            let statements = Parser::parse_sql(sql)?;
 
             for stmt in statements {
                 let context = OptimizerContext::new(session.clone());

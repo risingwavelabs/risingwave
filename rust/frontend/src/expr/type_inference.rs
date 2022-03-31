@@ -312,6 +312,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &str_types,
         T::Varchar,
     );
+    build_binary_funcs(
+        &mut map,
+        &[E::RoundDigit],
+        &[T::Decimal],
+        &[T::Int32],
+        T::Decimal,
+    );
 
     map
 }
