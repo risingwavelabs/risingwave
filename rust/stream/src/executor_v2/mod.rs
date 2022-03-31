@@ -22,8 +22,8 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
-mod filter;
 mod chain;
+mod filter;
 mod simple;
 #[cfg(test)]
 mod test_utils;
@@ -63,6 +63,10 @@ pub trait Executor: Send + 'static {
 
     /// Identity of the executor.
     fn identity(&self) -> &str;
+
+    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
+        self.execute()
+    }
 
     #[inline(always)]
     fn info(&self) -> ExecutorInfo {

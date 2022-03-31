@@ -55,7 +55,6 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
 impl ChainExecutor {
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
-        let snapshot = self.snapshot.execute();
         let mut upstream = self.upstream.execute();
 
         // 1. Consume the upstream to get the first barrier.
@@ -87,7 +86,8 @@ impl ChainExecutor {
         // no mapping required.
         //
         if to_consume_snapshot {
-            // TODO: init the snapshot with epoch.prev
+            // Init the snapshot with reading epoch.
+            let snapshot = self.snapshot.execute_with_epoch(epoch.prev);
 
             #[for_await]
             for msg in snapshot {

@@ -86,6 +86,11 @@ impl Executor for ExecutorV1AsV2 {
     fn identity(&self) -> &str {
         self.0.identity()
     }
+
+    fn execute_with_epoch(mut self: Box<Self>, epoch: u64) -> BoxedMessageStream {
+        self.0.init(epoch).expect("failed to init executor epoch");
+        self.execute()
+    }
 }
 
 impl ExecutorV1AsV2 {
