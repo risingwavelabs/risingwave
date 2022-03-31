@@ -33,8 +33,8 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager,
-    SSTableBuilder, SSTableIterator, Sstable,
+    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
+    SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;

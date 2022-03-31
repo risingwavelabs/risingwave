@@ -263,7 +263,7 @@ mod tests {
     use crate::hummock::sstable::SSTableIterator;
     use crate::hummock::value::{delete_without_meta, HummockValue};
     use crate::monitor::StateStoreMetrics;
-    
+
     #[tokio::test]
     async fn test_basic() {
         let sstable_store = mock_sstable_store();
