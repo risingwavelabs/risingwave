@@ -20,6 +20,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
 };
@@ -41,6 +42,7 @@ pub enum Relation {
 
 #[derive(Debug)]
 pub struct BoundJoin {
+    pub join_type: JoinType,
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
@@ -79,6 +81,7 @@ impl Binder {
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
             root = Relation::Join(Box::new(BoundJoin {
+                join_type: JoinType::Inner,
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
@@ -91,18 +94,22 @@ impl Binder {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
-            match join.join_operator {
-                JoinOperator::Inner(constraint) => {
-                    let cond = self.bind_join_constraint(constraint)?;
-                    let join = BoundJoin {
-                        left: root,
-                        right,
-                        cond,
-                    };
-                    root = Relation::Join(Box::new(join));
-                }
-                _ => return Err(ErrorCode::NotImplementedError("Non inner-join".into()).into()),
-            }
+            let (constraint, join_type) = match join.join_operator {
+                JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
+                JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
+                JoinOperator::RightOuter(constraint) => (constraint, JoinType::RightOuter),
+                JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
+                // Cross join equals to inner join with with no constraint.
+                JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+            };
+            let cond = self.bind_join_constraint(constraint)?;
+            let join = BoundJoin {
+                join_type,
+                left: root,
+                right,
+                cond,
+            };
+            root = Relation::Join(Box::new(join));
         }
 
         Ok(root)
@@ -225,7 +232,7 @@ impl Binder {
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
-    fn bind_context(
+    pub(super) fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
@@ -262,7 +269,7 @@ impl Binder {
         }
     }
 
-    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// Binds a subquery using [`bind_query`](Self::bind_query), which will use a new empty
     /// [`BindContext`](super::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.

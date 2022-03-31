@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
-use log::info;
+use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -279,12 +279,14 @@ where
         Ok(())
     }
 
-    /// Flush means waiting for the next barrier to finish.
+    /// Flush means waiting for the next barrier to collect.
     pub async fn flush(&self) -> Result<()> {
         let start = Instant::now();
 
-        info!("start barrier flush");
-        self.barrier_manager.wait_for_next_barrier().await?;
+        debug!("start barrier flush");
+        self.barrier_manager
+            .wait_for_next_barrier_to_collect()
+            .await?;
 
         let elapsed = Instant::now().duration_since(start);
         info!("barrier flushed in {:?}", elapsed);
@@ -419,6 +421,13 @@ mod tests {
             &self,
             _request: Request<ShutdownRequest>,
         ) -> std::result::Result<Response<ShutdownResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn force_stop_actors(
+            &self,
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
             unimplemented!()
         }
     }

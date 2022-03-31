@@ -51,6 +51,14 @@
     BatchProject { exprs: [Normalized(1.0):Decimal, Neg(Normalized(2.0):Decimal)], expr_alias: [ ,  ] }
       BatchValues { rows: [[]] }
 - sql: |
+    values(round(42.4382, 2));
+  batch_plan: |
+    BatchValues { rows: [[RoundDigit(Normalized(42.4382):Decimal, 2:Int32)]] }
+- sql: |
+    values(round('abc'));
+  binder_error: |
+    Feature is not yet implemented: function round(Varchar) doesn't exist
+- sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
   batch_plan: |
@@ -88,6 +96,12 @@
     create table t (v1 real, v2 int, v3 varchar);
     insert into t values (1, 2), (3, 4);
   binder_error: 'Invalid input syntax: values length mismatched: expected 3, given 2'
+- sql: |
+    create table t(v1 int);
+    insert into t values(NULL);
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[null:Int32]] }
 - sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;

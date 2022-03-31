@@ -19,7 +19,6 @@ use futures::channel::mpsc::{Receiver, Sender};
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::addr::HostAddr;
-use tokio::sync::oneshot;
 
 use crate::executor::Message;
 
@@ -99,41 +98,32 @@ impl SharedContext {
     }
 
     /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    /// [`ChainExecutor`]) finishes its DDL job, it can report that using this notifier.
-    /// Note that a DDL of MV always corresponds to an epoch in our system.
+    /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
+    /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
     ///
     /// Creation of an MV may last for several epochs to finish.
-    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will send the
-    /// DDL epoch using this notifier, which can be collected by the barrier manager and reported to
-    /// the meta service soon.
+    /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is finished,
+    /// it will send the DDL epoch using this notifier, which can be collected by the barrier
+    /// manager and reported to the meta service soon.
     pub fn register_finish_create_mview_notifier(
         &self,
         actor_id: ActorId,
-    ) -> FinishCreateMviewNotifierTx {
-        let (tx, rx) = oneshot::channel();
+    ) -> FinishCreateMviewNotifier {
         debug!("register finish create mview notifier: {}", actor_id);
 
         let barrier_manager = self.barrier_manager.clone();
-        tokio::spawn(async move {
-            match rx.await {
-                Ok(ddl_epoch) => {
-                    // Report to the local barrier manager.
-                    barrier_manager
-                        .lock()
-                        .finish_create_mview(ddl_epoch, actor_id);
-                }
-                Err(_) => info!(
-                    "finish create mview notifier for actor {} dropped, are we recovering?",
-                    actor_id
-                ),
-            }
-        });
-
-        tx
+        FinishCreateMviewNotifier {
+            barrier_manager,
+            actor_id,
+        }
     }
 
     pub fn lock_barrier_manager(&self) -> MutexGuard<LocalBarrierManager> {
         self.barrier_manager.lock()
+    }
+
+    pub fn reset_barrier_manager(&self) {
+        *self.barrier_manager.lock() = LocalBarrierManager::new();
     }
 
     #[inline]

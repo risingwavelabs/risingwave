@@ -244,7 +244,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     );
 
     // Date comparisons
-    build_binary_funcs(&mut map, &cmp_exprs, &[T::Date], &[T::Date], T::Boolean);
+    build_binary_funcs(
+        &mut map,
+        &cmp_exprs,
+        &[T::Date, T::Timestamp],
+        &[T::Date, T::Timestamp],
+        T::Boolean,
+    );
     // Date minus and plus
     map.insert(
         FuncSign::new_binary(E::Add, T::Date, T::Interval),
@@ -305,6 +311,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &str_types,
         &str_types,
         T::Varchar,
+    );
+    build_binary_funcs(
+        &mut map,
+        &[E::RoundDigit],
+        &[T::Decimal],
+        &[T::Int32],
+        T::Decimal,
     );
 
     map

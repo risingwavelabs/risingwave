@@ -39,7 +39,7 @@ impl AggArgs {
         }
     }
 
-    /// return the indices of the arguments in [`StreamChunk`].
+    /// return the indices of the arguments in [`risingwave_common::array::StreamChunk`].
     pub fn val_indices(&self) -> &[usize] {
         use AggArgs::*;
         match self {
@@ -53,7 +53,7 @@ impl AggArgs {
 /// Represents an aggregation function.
 #[derive(Clone, Debug)]
 pub struct AggCall {
-    /// Aggregation Kind for constructing [`StreamingAggStateImpl`]
+    /// Aggregation Kind for constructing [`crate::executor::StreamingAggStateImpl`]
     pub kind: AggKind,
     /// Arguments of aggregation function input.
     pub args: AggArgs,

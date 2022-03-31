@@ -17,6 +17,9 @@ use bytes::Bytes;
 /// Size of value meta in bytes.
 pub const VALUE_META_SIZE: usize = 2;
 
+/// Value meta stores some metadata for a kv pair. When writing to storage, it is located right
+/// after user key and before user value. Currently, value meta consists of a 2-byte consistent hash
+/// value.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ValueMeta(Bytes);
 
@@ -26,15 +29,15 @@ impl Default for ValueMeta {
     }
 }
 
-impl Into<Vec<u8>> for ValueMeta {
-    fn into(self) -> Vec<u8> {
-        self.0.to_vec()
+impl From<ValueMeta> for Vec<u8> {
+    fn from(value_meta: ValueMeta) -> Self {
+        value_meta.0.to_vec()
     }
 }
 
-impl Into<Bytes> for ValueMeta {
-    fn into(self) -> Bytes {
-        self.0
+impl From<ValueMeta> for Bytes {
+    fn from(value_meta: ValueMeta) -> Self {
+        value_meta.0
     }
 }
 

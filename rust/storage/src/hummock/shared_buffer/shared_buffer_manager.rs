@@ -193,10 +193,10 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
-    /// Deletes shared buffers before a given `epoch` inclusively.
+    /// Deletes shared buffers before a given `epoch` exclusively.
     pub fn delete_before(&self, epoch: u64) {
         let mut guard = self.shared_buffer.write();
-        let new = guard.split_off(&(epoch + 1));
+        let new = guard.split_off(&epoch);
         *guard = new;
     }
 
@@ -212,6 +212,11 @@ impl SharedBufferManager {
             .unwrap();
         // Remove items of the given epoch from shared buffer
         self.shared_buffer.write().remove(&epoch);
+    }
+
+    #[cfg(test)]
+    pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
+        self.shared_buffer.read().clone()
     }
 }
 

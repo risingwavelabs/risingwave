@@ -19,7 +19,6 @@ use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use risingwave_common::error::Result;
@@ -215,12 +214,11 @@ impl MemoryStateStoreIter {
     }
 }
 
-#[async_trait]
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
-
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        Ok(self.inner.next())
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { Ok(self.inner.next()) }
     }
 }
 

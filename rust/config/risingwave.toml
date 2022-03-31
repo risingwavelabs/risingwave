@@ -12,5 +12,4 @@ sstable_size = 268435456
 block_size = 4096
 bloom_false_positive = 0.1
 data_directory = "hummock_001"
-checksum_algo = "crc32c"
 async_checkpoint_enabled = true

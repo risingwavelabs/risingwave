@@ -19,6 +19,10 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum HummockError {
+    #[error("Magic number mismatch: expected {expected}, found: {found}.")]
+    MagicMismatch { expected: u32, found: u32 },
+    #[error("Invalid format version: {0}.")]
+    InvalidFormatVersion(u32),
     #[error("Checksum mismatch: expected {expected}, found: {found}.")]
     ChecksumMismatch { expected: u64, found: u64 },
     #[error("Invalid block.")]
