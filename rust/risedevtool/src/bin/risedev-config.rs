@@ -56,6 +56,7 @@ enum Commands {
 
 #[derive(Clone, Copy, Debug, IntoEnumIterator, PartialEq, ArgEnum)]
 pub enum Components {
+    #[clap(name = "minio")]
     MinIO,
     PrometheusAndGrafana,
     Etcd,
