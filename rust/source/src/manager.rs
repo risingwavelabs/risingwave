@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,6 +27,8 @@ use risingwave_common::{ensure, gen_error};
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::kinesis::source::reader::KinesisSplitReader;
 use risingwave_connector::ConnectorConfig;
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::meta::SourceSnapshot;
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
@@ -48,6 +51,9 @@ pub trait SourceManager: Debug + Sync + Send {
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
+
+    /// Create sources according to meta provided snapshot when compute node starts.
+    fn apply_snapshot(&self, snapshot: SourceSnapshot) -> Result<()>;
 }
 
 /// `SourceColumnDesc` is used to describe a column in the Source and is used as the column
@@ -175,6 +181,24 @@ impl SourceManager for MemSourceManager {
             table_id
         );
         sources.remove(table_id);
+        Ok(())
+    }
+
+    fn apply_snapshot(&self, snapshot: SourceSnapshot) -> Result<()> {
+        for source in snapshot.sources {
+            match source.info.unwrap() {
+                Info::StreamSource(_) => todo!("support stream source"),
+                Info::TableSource(info) => {
+                    let columns = info
+                        .columns
+                        .into_iter()
+                        .map(|c| c.column_desc.unwrap().into())
+                        .collect_vec();
+
+                    self.create_table_source_v2(&TableId::new(source.id), columns)?
+                }
+            }
+        }
         Ok(())
     }
 }

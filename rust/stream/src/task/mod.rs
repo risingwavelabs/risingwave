@@ -26,11 +26,13 @@ mod barrier_manager;
 mod compute_client_pool;
 mod env;
 mod stream_manager;
+mod observer_manager;
 
 pub use barrier_manager::*;
 pub use compute_client_pool::*;
 pub use env::*;
 pub use stream_manager::*;
+pub use observer_manager::*;
 
 #[cfg(test)]
 mod tests;

@@ -272,7 +272,7 @@ message MetaSnapshot {
   repeated catalog.VirtualTable view = 6;
 }
 
-message SourcesSnapShot {
+message SourceSnapshot {
   repeated catalog.Source sources = 1;
 }
 
@@ -300,7 +300,7 @@ message SubscribeResponse {
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
     MetaSnapshot fe_snapshot = 12;
-    SourcesSnapShot be_snapshot = 13;
+    SourceSnapshot be_snapshot = 13;
   }
 }
 
