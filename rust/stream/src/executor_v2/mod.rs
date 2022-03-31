@@ -26,6 +26,7 @@ mod chain;
 mod filter;
 #[allow(dead_code)]
 mod rearranged_chain;
+mod merge;
 mod simple;
 #[cfg(test)]
 mod test_utils;
@@ -33,6 +34,7 @@ mod v1_compat;
 
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
+pub use merge::MergeExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 

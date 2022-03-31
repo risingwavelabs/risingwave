@@ -25,6 +25,7 @@ use tokio::sync::oneshot;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
+use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor};
 use crate::task::{ActorHandle, SharedContext};
 
 pub struct MockConsumer {
@@ -139,7 +140,7 @@ async fn test_merger_sum_aggr() {
     });
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs, "MergerExecutor".to_string());
+    let merger = Box::new(MergeExecutor::new(schema, vec![], 0, outputs)).v1();
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(
