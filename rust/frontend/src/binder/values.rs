@@ -109,7 +109,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    /// TODO: Check implicit-castiblility.
+    /// TODO: check castiblility with context.
     pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
