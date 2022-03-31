@@ -13,7 +13,8 @@ You may start RisingWave with our pre-built binary, or build from source.
 **Use Pre-built Binary**
 
 ```shell
-wget <future risingwave binary URL>
+wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4-alpha/risingwave-v0.1.4-alpha-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.4-alpha-unknown-linux.tar.gz
 ./risingwave playground
 ```
 
@@ -21,11 +22,12 @@ wget <future risingwave binary URL>
 
 ```shell
 git clone https://github.com/singularity-data/risingwave.git
-./risedev dev  # start the cluster
-./risedev kill # stop the cluster
+./risedev playground
 ```
 
-Build from source requires several tools to be installed in the system. Refer to `CONTRIBUTING.md` for more information.
+Building from source requires several tools to be installed in the system. See [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+
+If you want to start a full cluster, enable metrics, and persist data, you may also refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
 
 ### The First Query
 
