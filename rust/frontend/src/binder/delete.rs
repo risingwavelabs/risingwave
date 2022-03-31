@@ -37,7 +37,7 @@ impl Binder {
     ) -> Result<BoundDelete> {
         let delete = BoundDelete {
             table_source: self.bind_table_source(source_name.clone())?,
-            table: self.bind_table(source_name)?,
+            table: self.bind_table(source_name, None)?,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
         };
 
