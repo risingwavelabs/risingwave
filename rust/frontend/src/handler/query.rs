@@ -21,7 +21,15 @@ use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
-use crate::session::OptimizerContext;
+use crate::session::{OptimizerContext, SessionImpl};
+
+lazy_static::lazy_static! {
+    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+    /// until the entire dataflow is refreshed. In other words, every related table & MV will
+    /// be able to see the write.
+    static ref IMPLICIT_FLUSH: bool =
+     std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "true".to_string() }).parse().unwrap();
+}
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -73,7 +81,22 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         _ => unreachable!(),
     };
 
+    // Implicitly flush the writes.
+    if *IMPLICIT_FLUSH {
+        flush_for_write(&session, stmt_type).await?;
+    }
+
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+}
+
+async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+    match stmt_type {
+        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
+            let client = session.env().meta_client();
+            client.flush().await
+        }
+        _ => Ok(()),
+    }
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

@@ -90,6 +90,22 @@ impl ExprImpl {
     pub fn is_null(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
+
+    /// Check if cast needs to be inserted.
+    /// TODO: check castiblility with context.
+    pub fn ensure_type(self, ty: DataType) -> ExprImpl {
+        if self.is_null() {
+            ExprImpl::Literal(Box::new(Literal::new(None, ty)))
+        } else if ty == self.return_type() {
+            self
+        } else {
+            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
+                ExprType::Cast,
+                vec![self],
+                ty,
+            )))
+        }
+    }
 }
 
 /// Implement downcast functions, e.g., `as_subquery(self) -> Option<Subquery>`
