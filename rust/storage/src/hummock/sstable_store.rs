@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use moka::future::Cache;
 
-use super::{Block, BlockCache, Sstable, SstableMeta};
+use super::{Block, BlockCache, Sstable, SstableMeta, TracedHummockError};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
@@ -36,7 +36,7 @@ pub struct SstableStore {
     store: ObjectStoreRef,
     block_cache: BlockCache,
     /// TODO: meta is also supposed to be block based, and meta cache will be removed.
-    meta_cache: Cache<u64, SstableMeta>,
+    sstable_cache: Cache<u64, Arc<Sstable>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
@@ -47,7 +47,7 @@ impl SstableStore {
             path,
             store,
             block_cache: BlockCache::new(65536),
-            meta_cache: Cache::new(1024),
+            sstable_cache: Cache::new(1024),
             stats,
         }
     }
@@ -144,19 +144,23 @@ impl SstableStore {
         }
     }
 
-    pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
-        if let Some(meta) = self.meta_cache.get(&sst_id) {
-            return Ok(meta);
-        }
-        let path = self.get_sst_meta_path(sst_id);
-        let buf = self
-            .store
-            .read(&path, None)
+    pub async fn sstable(&self, sst_id: u64) -> HummockResult<Arc<Sstable>> {
+        let fetch = async move {
+            let path = self.get_sst_meta_path(sst_id);
+            let buf = self
+                .store
+                .read(&path, None)
+                .await
+                .map_err(HummockError::object_io_error)?;
+            let meta = SstableMeta::decode(&mut &buf[..])?;
+            let sst = Arc::new(Sstable { id: sst_id, meta });
+            Ok::<_, TracedHummockError>(sst)
+        };
+
+        self.sstable_cache
+            .try_get_with(sst_id, fetch)
             .await
-            .map_err(HummockError::object_io_error)?;
-        let meta = SstableMeta::decode(&mut &buf[..])?;
-        self.meta_cache.insert(sst_id, meta.clone()).await;
-        Ok(meta)
+            .map_err(|e| HummockError::Other(e.to_string()).into())
     }
 
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
