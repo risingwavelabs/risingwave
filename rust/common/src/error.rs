@@ -278,7 +278,7 @@ pub trait ToErrorStr {
 pub trait ToRwResult<T, E> {
     fn to_rw_result(self) -> Result<T>;
 
-    fn to_rw_result_with(self, func: impl Fn() -> String) -> Result<T>;
+    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T>;
 }
 
 impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
@@ -286,7 +286,7 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
         self.map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
     }
 
-    fn to_rw_result_with(self, func: impl Fn() -> String) -> Result<T> {
+    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T> {
         self.map_err(|e| {
             ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
         })
