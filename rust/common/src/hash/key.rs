@@ -40,9 +40,6 @@ use crate::util::hash_util::CRC32FastBuilder;
 /// are encoded from both `t.b, t.c`. If t.b="abc", t.c=1, the hashkey may be
 /// encoded in certain format of ("abc", 1).
 
-/// Max element count in [`FixedSizeKeyWithHashCode`]
-pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
-
 pub trait HashKeySerializer {
     type K: HashKey;
     fn from_hash_code(hash_code: u64) -> Self;
@@ -119,7 +116,7 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
 /// Designed for hash keys with at most `N` serialized bytes.
 ///
-/// See [`crate::executor::hash_map::calc_hash_key_kind`]
+/// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct FixedSizeKey<const N: usize> {
     hash_code: u64,
@@ -129,7 +126,7 @@ pub struct FixedSizeKey<const N: usize> {
 
 /// Designed for hash keys which can't be represented by [`FixedSizeKey`].
 ///
-/// See [`crate::executor::hash_map::calc_hash_key_kind`]
+/// See [`crate::hash::calc_hash_key_kind`]
 #[derive(Clone, Debug)]
 pub struct SerializedKey {
     key: Vec<Datum>,
