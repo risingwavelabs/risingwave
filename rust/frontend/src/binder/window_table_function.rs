@@ -52,8 +52,8 @@ impl Binder {
             .into());
         };
         let table_name = match expr {
-            Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident.clone()])),
-            Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents.clone())),
+            Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident])),
+            Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents)),
             _ => Err(ErrorCode::BindError(
                 "the 1st arg of window table function should be table".to_string(),
             )
