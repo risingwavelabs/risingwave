@@ -212,8 +212,8 @@ where
         Ok(())
     }
 
-    /// Kill all compute nodes and wait for them to be online again.
-    async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<HashSet<u32>> {
+    /// Reset all compute nodes and wait for them to be online again.
+    async fn reset_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<HashSet<u32>> {
         let mut failed_worker_id = HashSet::<u32>::new();
         for worker_node in info.node_map.values() {
             // force shutdown actors on running compute nodes
