@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::ops::{Add, Sub};
 
@@ -163,8 +164,8 @@ impl CheckedSub for IntervalUnit {
     }
 }
 
-impl ToString for IntervalUnit {
-    fn to_string(&self) -> String {
+impl Display for IntervalUnit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let years = self.months / 12;
         let months = self.months % 12;
         let days = self.days;
@@ -188,7 +189,7 @@ impl ToString for IntervalUnit {
             v.push(format!("{days} days"));
         }
         v.push(format!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"));
-        v.join(" ")
+        Display::fmt(&v.join(" "), f)
     }
 }
 
