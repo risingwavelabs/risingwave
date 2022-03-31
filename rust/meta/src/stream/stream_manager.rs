@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, NodeId};
+use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
@@ -45,7 +45,7 @@ pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
@@ -198,7 +198,7 @@ where
                     info: actor_infos.clone(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
 
             let stream_actors = actors
                 .iter()
@@ -215,7 +215,7 @@ where
                     hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
@@ -232,7 +232,7 @@ where
                     hanging_channels,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -251,7 +251,7 @@ where
                     actor_id: actors,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // Add table fragments to meta store with state: `State::Creating`.

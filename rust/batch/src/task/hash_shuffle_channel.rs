@@ -114,16 +114,17 @@ impl HashShuffleSender {
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
                     .send(Some(new_data_chunk))
-                    .to_rw_result_with("HashShuffleSender::send")?;
+                    .to_rw_result_with(|| "HashShuffleSender::send".into())?;
             }
         }
         Ok(())
     }
 
     async fn send_done(&mut self) -> Result<()> {
-        self.senders
-            .iter_mut()
-            .try_for_each(|s| s.send(None).to_rw_result_with("HashShuffleSender::send"))
+        self.senders.iter_mut().try_for_each(|s| {
+            s.send(None)
+                .to_rw_result_with(|| "HashShuffleSender::send".into())
+        })
     }
 }
 

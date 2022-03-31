@@ -173,7 +173,7 @@ where
                     info: actor_infos.clone(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "update actors");
@@ -185,7 +185,7 @@ where
                     ..Default::default()
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         Ok(())
@@ -206,7 +206,7 @@ where
                     actor_id: actors.to_owned(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         Ok(())

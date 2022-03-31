@@ -23,14 +23,14 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::stream_service::stream_service_client::StreamServiceClient;
 use tonic::transport::{Channel, Endpoint};
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 
 pub type StreamClient = StreamServiceClient<Channel>;
 
 /// [`StreamClients`] maintains stream service clients to known compute nodes.
 pub struct StreamClients {
     /// Stores the [`StreamClient`] mapping: `node_id` => client.
-    clients: Cache<NodeId, StreamClient>,
+    clients: Cache<WorkerId, StreamClient>,
 }
 
 impl Default for StreamClients {
@@ -59,7 +59,7 @@ impl StreamClients {
                         .connect_timeout(Duration::from_secs(5))
                         .connect()
                         .await
-                        .to_rw_result_with(format!("failed to connect to {}", node.get_id()))?,
+                        .to_rw_result_with(|| format!("failed to connect to {}", node.get_id()))?,
                 );
                 Ok::<_, RwError>(client)
             })

@@ -249,10 +249,10 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
-            inputs.push(Binder::ensure_type(result, return_type.clone()));
+            inputs.push(result.ensure_type(return_type.clone()));
         }
         if let Some(expr) = else_result_expr {
-            inputs.push(Binder::ensure_type(expr, return_type.clone()));
+            inputs.push(expr.ensure_type(return_type.clone()));
         }
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,

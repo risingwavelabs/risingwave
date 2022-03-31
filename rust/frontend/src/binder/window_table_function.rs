@@ -60,7 +60,8 @@ impl Binder {
             .into()),
         }?;
 
-        let base = self.bind_table(table_name.clone())?;
+        // TODO: support alias.
+        let base = self.bind_table(table_name.clone(), None)?;
 
         let Some(time_col_arg) = args.next() else {
             return Err(ErrorCode::BindError(
@@ -115,7 +116,8 @@ impl Binder {
                 ]
                 .into_iter(),
             );
-        self.bind_context(columns, table_name.clone())?;
+        // TODO: support alias.
+        self.bind_context(columns, table_name.clone(), None)?;
 
         let exprs: Vec<_> = args
             .map(|arg| self.bind_function_arg(arg))

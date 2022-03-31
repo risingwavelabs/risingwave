@@ -65,8 +65,15 @@ value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+criterion = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
 rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]
+
+[[bench]]
+name = "bench_block_iter"
+harness = false
+# Enable debug if you want to generate flamegraph.
+# debug = true
