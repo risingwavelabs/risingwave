@@ -13,13 +13,12 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_pb::hummock::{BlockMeta, SstableMeta};
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
 use super::{
-    BlockBuilder, BlockBuilderOptions, DEFAULT_BLOCK_SIZE, DEFAULT_ENTRY_SIZE,
-    DEFAULT_RESTART_INTERVAL,
+    BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, DEFAULT_BLOCK_SIZE,
+    DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
 use crate::hummock::key::user_key;
 use crate::hummock::value::HummockValue;
@@ -155,6 +154,7 @@ impl SSTableBuilder {
             key_count: self.key_count as u32,
             smallest_key,
             largest_key,
+            version: VERSION,
         };
 
         (self.buf.freeze(), meta)

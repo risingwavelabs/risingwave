@@ -55,9 +55,7 @@ impl BlockCache {
             .await
         {
             Ok(block) => Ok(block),
-            Err(arc_e) => {
-                Err(Arc::try_unwrap(arc_e).map_err(|e| HummockError::Other(e.to_string()))?)
-            }
+            Err(e) => Err(HummockError::Other(e.to_string()).into()),
         }
     }
 

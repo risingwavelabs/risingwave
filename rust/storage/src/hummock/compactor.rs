@@ -181,8 +181,8 @@ impl Compactor {
                 .extend(sst.iter().map(|sst| SstableInfo {
                     id: sst.id,
                     key_range: Some(risingwave_pb::hummock::KeyRange {
-                        left: sst.meta.get_smallest_key().to_vec(),
-                        right: sst.meta.get_largest_key().to_vec(),
+                        left: sst.meta.smallest_key.clone(),
+                        right: sst.meta.largest_key.clone(),
                         inf: false,
                     }),
                 }));

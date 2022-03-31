@@ -18,10 +18,8 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use moka::future::Cache;
-use prost::Message;
-use risingwave_pb::hummock::SstableMeta;
 
-use super::{Block, BlockCache, Sstable};
+use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
@@ -64,7 +62,7 @@ impl SstableStore {
 
         // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
         // reuse block encoding later.
-        let meta = Bytes::from(sst.meta.encode_to_vec());
+        let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
 
         let data_path = self.get_sst_data_path(sst.id);
@@ -147,7 +145,6 @@ impl SstableStore {
     }
 
     pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
-        // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
         if let Some(meta) = self.meta_cache.get(&sst_id) {
             return Ok(meta);
         }
@@ -157,17 +154,15 @@ impl SstableStore {
             .read(&path, None)
             .await
             .map_err(HummockError::object_io_error)?;
-        let meta = SstableMeta::decode(buf).map_err(HummockError::decode_error)?;
+        let meta = SstableMeta::decode(&mut &buf[..])?;
         self.meta_cache.insert(sst_id, meta.clone()).await;
         Ok(meta)
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     pub fn get_sst_data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
     }

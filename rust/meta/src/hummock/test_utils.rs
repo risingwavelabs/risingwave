@@ -18,12 +18,12 @@ use std::time::Duration;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, SstableMeta};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder,
-    SSTableBuilderOptions,
+    SSTableBuilderOptions, SstableMeta,
 };
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
