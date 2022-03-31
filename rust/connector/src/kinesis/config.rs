@@ -57,7 +57,7 @@ pub struct AwsCredentials {
 }
 
 impl AwsConfigInfo {
-    pub async fn load(&self) -> Result<aws_config::Config> {
+    pub async fn load(&self) -> Result<aws_types::SdkConfig> {
         let region = self
             .region
             .as_ref()
