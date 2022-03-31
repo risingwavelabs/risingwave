@@ -26,9 +26,9 @@ use crate::utils::ColIndexMapping;
 pub struct LogicalTopN {
     pub base: PlanBase,
     input: PlanRef,
-    limit: usize,
-    offset: usize,
-    order: Order,
+    pub(crate) limit: usize,
+    pub(crate) offset: usize,
+    pub(crate) order: Order,
 }
 
 impl LogicalTopN {
