@@ -274,21 +274,119 @@ impl LocalVersionManager {
         shared_buffer_manager: &SharedBufferManager,
     ) {
         let mut epoch_ref_guard = self.committed_epoch_refcnts.lock();
-        let min_epoch = match epoch_ref_guard.first_key_value() {
+        let epoch_low_watermark = match epoch_ref_guard.first_key_value() {
             Some(e) => *e.0,
             None => return,
         };
         match epoch_ref_guard.entry(committed_epoch) {
             std::collections::btree_map::Entry::Vacant(_) => (),
-            std::collections::btree_map::Entry::Occupied(e) => {
-                if *e.get() == 1 {
-                    if e.key() == &min_epoch {
-                        // Clean up shared buffer if the min_epoch is pop
-                        shared_buffer_manager.delete_before(min_epoch);
-                    }
+            std::collections::btree_map::Entry::Occupied(mut e) => {
+                let refcnt = e.get_mut();
+                if *refcnt == 1 {
                     e.remove();
+                    if epoch_low_watermark == committed_epoch {
+                        // Delete data before ref epoch low watermark in shared buffer if the epoch
+                        // low watermark changes after ref epoch removal.
+                        shared_buffer_manager.delete_before(
+                            epoch_ref_guard
+                                .first_key_value()
+                                .map(|e| *e.0)
+                                .unwrap_or(committed_epoch + 1),
+                        );
+                    }
+                } else {
+                    *refcnt -= 1;
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::borrow::Borrow;
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+
+    use super::LocalVersionManager;
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_key_of_epoch, mock_sstable_store_with_object_store,
+    };
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+    use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
+    use crate::hummock::test_utils::default_config_for_test;
+    use crate::hummock::value::HummockValue;
+    use crate::monitor::StateStoreMetrics;
+    use crate::object::InMemObjectStore;
+
+    fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, HummockValue<Bytes>)> {
+        vec![(
+            iterator_test_key_of_epoch(0, epoch).into(),
+            HummockValue::Put(b"value1".to_vec()).into(),
+        )]
+    }
+
+    #[tokio::test]
+    async fn test_shared_buffer_cleanup() {
+        let object_store = Arc::new(InMemObjectStore::new());
+        let sstable_store = mock_sstable_store_with_object_store(object_store);
+        let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        )));
+        let shared_buffer_manager = Arc::new(SharedBufferManager::new(
+            Arc::new(default_config_for_test()),
+            local_version_manager.clone(),
+            sstable_store,
+            Arc::new(StateStoreMetrics::unused()),
+            mock_hummock_meta_client,
+        ));
+
+        let epochs = vec![1, 2, 3, 4];
+
+        // Fill shared buffer with a dummy empty batch in epochs[0]
+        shared_buffer_manager
+            .write_batch(gen_dummy_batch(epochs[0]), epochs[0])
+            .unwrap();
+        assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
+
+        // Ref epoch1 twice
+        local_version_manager.ref_committed_epoch(epochs[0]);
+        local_version_manager.ref_committed_epoch(epochs[0]);
+
+        // Unref epoch1. Shared buffer should not change.
+        local_version_manager.unref_committed_epoch(epochs[0], shared_buffer_manager.borrow());
+        assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
+
+        // Unref epoch1 again. Shared buffer should be empty now.
+        local_version_manager.unref_committed_epoch(epochs[0], shared_buffer_manager.borrow());
+        assert!(shared_buffer_manager.get_shared_buffer().is_empty());
+
+        // Fill shared buffer with a dummy empty batch in epochs[1..=3] and ref them
+        for epoch in epochs.iter().skip(1) {
+            shared_buffer_manager
+                .write_batch(gen_dummy_batch(*epoch), *epoch)
+                .unwrap();
+            local_version_manager.ref_committed_epoch(*epoch);
+        }
+
+        // Unref epochs[2]. Shared buffer should not change.
+        local_version_manager.unref_committed_epoch(epochs[2], shared_buffer_manager.borrow());
+        let shared_buffer = shared_buffer_manager.get_shared_buffer();
+        for epoch in epochs.iter().skip(1) {
+            assert!(shared_buffer.contains_key(epoch));
+        }
+
+        // Unref epochs[1]. epochs[1..=2] should now be removed from shared buffer
+        local_version_manager.unref_committed_epoch(epochs[1], shared_buffer_manager.borrow());
+        let shared_buffer = shared_buffer_manager.get_shared_buffer();
+        println!("{:?}", shared_buffer);
+        assert_eq!(shared_buffer.len(), 1);
+        assert!(shared_buffer.contains_key(&epochs[3]));
+
+        // Unref epochs[3]. Shared buffer should be empty.
+        local_version_manager.unref_committed_epoch(epochs[3], shared_buffer_manager.borrow());
+        assert!(shared_buffer_manager.get_shared_buffer().is_empty());
     }
 }
