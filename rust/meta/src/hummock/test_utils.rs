@@ -65,8 +65,9 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     compact_task.sorted_output_ssts = test_tables_2.clone();
+    compact_task.task_status = true;
     hummock_manager
-        .report_compact_task(compact_task, true)
+        .report_compact_task(compact_task)
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,

@@ -21,6 +21,7 @@ use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
     HummockVersionRefId,
 };
+use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::{
     HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH, INVALID_VERSION_ID,
 };
@@ -148,7 +149,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version1.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager
+    let mut compact_task = hummock_manager
         .get_compact_task(context_id)
         .await
         .unwrap()
@@ -164,13 +165,14 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(compact_task.get_task_id(), 1);
 
     // Cancel the task and succeed.
+    compact_task.task_status = false;
     assert!(hummock_manager
-        .report_compact_task(compact_task.clone(), false)
+        .report_compact_task(compact_task.clone())
         .await
         .unwrap());
     // Cancel the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compact_task.clone(), false)
+        .report_compact_task(compact_task.clone())
         .await
         .unwrap());
 
@@ -192,20 +194,22 @@ async fn test_hummock_compaction_task() -> Result<()> {
     assert_eq!(INVALID_EPOCH, hummock_version2.safe_epoch);
 
     // Get a compaction task.
-    let compact_task = hummock_manager
+    let mut compact_task = hummock_manager
         .get_compact_task(context_id)
         .await
         .unwrap()
         .unwrap();
     assert_eq!(compact_task.get_task_id(), 2);
     // Finish the task and succeed.
+    compact_task.task_status = true;
+
     assert!(hummock_manager
-        .report_compact_task(compact_task.clone(), true)
+        .report_compact_task(compact_task.clone())
         .await
         .unwrap());
     // Finish the task and told the task is not found, which may have been processed previously.
     assert!(!hummock_manager
-        .report_compact_task(compact_task.clone(), true)
+        .report_compact_task(compact_task.clone())
         .await
         .unwrap());
 
@@ -859,4 +863,40 @@ async fn test_retryable_pin_snapshot() {
         .await
         .unwrap();
     assert_eq!(snapshot_3.epoch, snapshot_2.epoch + 2);
+}
+
+#[tokio::test]
+async fn test_print_compact_task() -> Result<()> {
+    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    // Add some sstables and commit.
+    let epoch: u64 = 1;
+    let table_id = 1;
+    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    hummock_manager
+        .add_tables(context_id, original_tables.clone(), epoch)
+        .await
+        .unwrap();
+    hummock_manager.commit_epoch(epoch).await.unwrap();
+
+    // Get a compaction task.
+    let compact_task = hummock_manager
+        .get_compact_task(context_id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        compact_task
+            .get_input_ssts()
+            .first()
+            .unwrap()
+            .get_level_idx(),
+        0
+    );
+
+    let s = Compactor::compact_task_to_string(compact_task);
+    assert!(s.contains("Compaction task id: 1, target level: 1"));
+
+    Ok(())
 }

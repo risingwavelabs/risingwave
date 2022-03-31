@@ -14,7 +14,7 @@ In this document we give an overview of RisingWave streaming engine. We begin wi
 
 ## Background: Overall architecture
 
-![streaming-architecture](./images/streaming-architecture.png)
+![streaming-architecture](./images/streaming-overview/streaming-architecture.svg)
 
 The overall architecture of RisingWave is depicted in the figure above. In this document, we mainly focus on the compute node side, and explains on how the streaming engine is designed on the compute node. 
 
@@ -49,11 +49,11 @@ The streaming engine consists of multiple compute nodes (CN), where each compute
 * Actor runtime.
 * State storage.
 
-![compute-node-arch](./images/compute-node-arch.png)
+![compute-node-arch](./images/streaming-overview/compute-node-arch.svg)
 
 ## Executor, actor and states
 
-![streaming-executor](./images/streaming-executor.png)
+![streaming-executor](./images/streaming-overview/streaming-executor.svg)
 
 TODO
 
