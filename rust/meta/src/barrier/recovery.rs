@@ -50,8 +50,8 @@ where
 
             let info = self.resolve_actor_info(None).await;
 
-            // kill all compute nodes and wait for online, and create sources on failed nodes.
-            match self.kill_and_wait_compute_nodes(&info).await {
+            // reset all compute nodes and wait for online, and create sources on failed nodes.
+            match self.reset_and_wait_compute_nodes(&info).await {
                 Ok(failed_node_ids) => {
                     if let Err(e) = self.create_sources(&info, failed_node_ids).await {
                         debug!("create_sources failed: {:?}", e);
@@ -59,7 +59,7 @@ where
                     }
                 }
                 Err(e) => {
-                    debug!("kill_and_wait_compute_nodes failed: {:?}", e);
+                    debug!("reset_and_wait_compute_nodes failed: {:?}", e);
                     continue;
                 }
             }
