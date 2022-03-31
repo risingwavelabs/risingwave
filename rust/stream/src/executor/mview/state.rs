@@ -19,6 +19,7 @@ use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -86,7 +87,8 @@ impl<S: StateStore> ManagedMViewState<S> {
             let bytes = serialize_pk_and_row(&arrange_key_buf, &row, &self.column_ids)?;
             for (key, value) in bytes {
                 match value {
-                    Some(val) => local.put(key, val),
+                    // TODO(Yuanxin): Implement value meta
+                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
                     None => local.delete(key),
                 }
             }

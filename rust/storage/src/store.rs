@@ -22,8 +22,8 @@ use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
-pub trait GetFutureTrait<'a> = Future<Output = Result<Option<StorageValue>>> + Send;
-pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, StorageValue)>>> + Send;
+pub trait GetFutureTrait<'a> = Future<Output = Result<Option<Bytes>>> + Send;
+pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send;
 
 #[macro_export]
@@ -42,7 +42,7 @@ macro_rules! define_state_store_associated_type {
 }
 
 pub trait StateStore: Send + Sync + 'static + Clone {
-    type Iter<'a>: StateStoreIter<Item = (Bytes, StorageValue)>
+    type Iter<'a>: StateStoreIter<Item = (Bytes, Bytes)>
     where
         Self: 'a;
 
@@ -116,14 +116,14 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     ///   per-key modification history (e.g. in compaction), not across different keys.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_>;
 
     /// Functions the same as `ingest_batch`, except that data won't be persisted.
     fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_>;
 

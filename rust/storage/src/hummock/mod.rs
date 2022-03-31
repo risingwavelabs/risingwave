@@ -69,7 +69,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::storage_value::StorageValue;
+use crate::storage_value::{value_to_user_value, StorageValue};
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
@@ -172,7 +172,7 @@ impl HummockStorage {
         table: Arc<Sstable>,
         internal_key: &[u8],
         key: &[u8],
-    ) -> HummockResult<Option<Vec<u8>>> {
+    ) -> HummockResult<Option<Bytes>> {
         if table.surely_not_have_user_key(key) {
             self.stats.bloom_filter_true_negative_counts.inc();
             return Ok(None);
@@ -189,7 +189,10 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match user_key(iter.key()) == key {
-            true => iter.value().into_put_value().map(|x| x.to_vec()),
+            true => iter
+                .value()
+                .into_put_value()
+                .map(|x| value_to_user_value(Bytes::copy_from_slice(x))),
             false => None,
         };
         Ok(value)
@@ -244,7 +247,7 @@ impl StateStore for HummockStorage {
                 .get(key, (version.max_committed_epoch() + 1)..=epoch)
             {
                 self.stats.get_shared_buffer_hit_counts.inc();
-                return Ok(v.into_put_value().map(StorageValue::from));
+                return Ok(v.into_put_value().map(value_to_user_value));
             }
             let internal_key = key_with_epoch(key.to_vec(), epoch);
 
@@ -260,7 +263,7 @@ impl StateStore for HummockStorage {
                         for table in tables {
                             table_counts += 1;
                             if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
-                                return Ok(Some(StorageValue::from(v)));
+                                return Ok(Some(v));
                             }
                         }
                     }
@@ -282,7 +285,7 @@ impl StateStore for HummockStorage {
                                 .get_from_table(tables[table_idx].clone(), &internal_key, key)
                                 .await?
                             {
-                                return Ok(Some(StorageValue::from(v)));
+                                return Ok(Some(v));
                             }
                         }
                     }
@@ -357,7 +360,7 @@ impl StateStore for HummockStorage {
     ///   been committed. If such case happens, the outcome is non-predictable.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -382,7 +385,7 @@ impl StateStore for HummockStorage {
     /// Replicates a batch to shared buffer, without uploading to the storage backend.
     fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
@@ -551,7 +554,7 @@ impl<'a> HummockStateStoreIter<'a> {
 
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
     type NextFuture<'b> = impl Future<Output = Result<Option<Self::Item>>> where Self:'b;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -560,7 +563,7 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
             if iter.is_valid() {
                 let kv = (
                     Bytes::copy_from_slice(iter.key()),
-                    StorageValue::from(Bytes::copy_from_slice(iter.value())),
+                    Bytes::copy_from_slice(iter.value()),
                 );
                 iter.next().await?;
                 Ok(Some(kv))
