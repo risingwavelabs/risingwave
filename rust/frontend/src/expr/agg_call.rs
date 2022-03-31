@@ -49,7 +49,14 @@ impl AggCall {
         match (&agg_kind, inputs) {
             (AggKind::Min, [input]) => input.clone(),
             (AggKind::Max, [input]) => input.clone(),
-            (AggKind::Avg, [input]) => input.clone(),
+            (AggKind::Avg, [input]) => match input {
+                DataType::Int16 => DataType::Decimal,
+                DataType::Int32 => DataType::Decimal,
+                DataType::Int64 => DataType::Decimal,
+                DataType::Float32 => DataType::Float64,
+                DataType::Float64 => DataType::Float64,
+                other_type => other_type.clone(),
+            },
             (AggKind::Sum, [input]) => match input {
                 DataType::Int16 => DataType::Int64,
                 DataType::Int32 => DataType::Int64,

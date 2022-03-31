@@ -127,6 +127,40 @@ impl ExprHandler {
             error: None,
         })
     }
+
+    /// Rewrite avg to sum / count.
+    fn rewrite_avg(&mut self, inputs: &[InputRef], return_type: DataType) -> ExprImpl {
+        self.agg_calls.push(PlanAggCall {
+            agg_kind: AggKind::Sum,
+            return_type: return_type.clone(),
+            inputs: inputs.to_vec(),
+        });
+
+        let left = InputRef::new(
+            self.group_column_index.len() + self.agg_calls.len() - 1,
+            return_type,
+        );
+
+        let right_return_type =
+            AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]);
+
+        self.agg_calls.push(PlanAggCall {
+            agg_kind: AggKind::Count,
+            return_type: right_return_type.clone(),
+            inputs: inputs.to_vec(),
+        });
+
+        let right = InputRef::new(
+            self.group_column_index.len() + self.agg_calls.len() - 1,
+            right_return_type,
+        );
+
+        println!("{:?}, {:?}", left, right);
+
+        ExprImpl::from(
+            FunctionCall::new(ExprType::Divide, vec![left.into(), right.into()]).unwrap(),
+        )
+    }
 }
 
 impl ExprRewriter for ExprHandler {
@@ -152,37 +186,7 @@ impl ExprRewriter for ExprHandler {
         if agg_kind == AggKind::Avg {
             assert_eq!(inputs.len(), 1);
 
-            let left_return_type =
-                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]);
-
-            // Rewrite avg to sum / count.
-            self.agg_calls.push(PlanAggCall {
-                agg_kind: AggKind::Sum,
-                return_type: left_return_type.clone(),
-                inputs: inputs.clone(),
-            });
-            let left = InputRef::new(
-                self.group_column_index.len() + self.agg_calls.len() - 1,
-                left_return_type,
-            );
-
-            let right_return_type =
-                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]);
-
-            self.agg_calls.push(PlanAggCall {
-                agg_kind: AggKind::Count,
-                return_type: right_return_type.clone(),
-                inputs,
-            });
-
-            let right = InputRef::new(
-                self.group_column_index.len() + self.agg_calls.len() - 1,
-                right_return_type,
-            );
-
-            ExprImpl::from(
-                FunctionCall::new(ExprType::Divide, vec![left.into(), right.into()]).unwrap(),
-            )
+            self.rewrite_avg(&inputs, return_type)
         } else {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
