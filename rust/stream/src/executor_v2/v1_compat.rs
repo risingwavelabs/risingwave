@@ -18,13 +18,14 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 pub use risingwave_common::catalog::Schema;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::BoxedExpression;
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use super::{Executor, ExecutorInfo, FilterExecutor};
+use super::{ChainExecutor, Executor, ExecutorInfo, FilterExecutor};
+use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
 ///
@@ -97,11 +98,12 @@ impl ExecutorV1AsV2 {
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(mut self: Box<Self>) {
         loop {
-            yield self
-                .0
-                .next()
-                .await
-                .map_err(StreamExecutorError::executor_v1)?;
+            let msg = self.0.next().await;
+            match msg {
+                // For snapshot input of `Chain`, we use `Eof` to represent the end of stream.
+                Err(e) if matches!(e.inner(), ErrorCode::Eof) => break,
+                _ => yield msg.map_err(StreamExecutorError::executor_v1)?,
+            }
         }
     }
 }
@@ -116,12 +118,40 @@ impl FilterExecutor {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
             pk_indices: input.pk_indices().to_owned(),
-            identity: input.identity().to_owned(),
+            identity: "Filter".to_owned(),
         };
         let input = Box::new(ExecutorV1AsV2(input));
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleFilterExecutor::new(info, expr, executor_id),
         }
+    }
+}
+
+impl ChainExecutor {
+    pub fn new_from_v1(
+        snapshot: Box<dyn ExecutorV1>,
+        mview: Box<dyn ExecutorV1>,
+        notifier: FinishCreateMviewNotifier,
+        schema: Schema,
+        column_idxs: Vec<usize>,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema,
+            pk_indices: mview.pk_indices().to_owned(),
+            identity: "Chain".to_owned(),
+        };
+
+        let actor_id = notifier.actor_id;
+
+        Self::new(
+            Box::new(ExecutorV1AsV2(snapshot)),
+            Box::new(ExecutorV1AsV2(mview)),
+            column_idxs,
+            notifier,
+            actor_id,
+            info,
+        )
     }
 }

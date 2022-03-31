@@ -53,6 +53,24 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
 }
 
 impl ChainExecutor {
+    pub fn new(
+        snapshot: BoxedExecutor,
+        upstream: BoxedExecutor,
+        upstream_indices: Vec<usize>,
+        notifier: FinishCreateMviewNotifier,
+        actor_id: ActorId,
+        info: ExecutorInfo,
+    ) -> Self {
+        Self {
+            snapshot,
+            upstream,
+            upstream_indices,
+            notifier,
+            actor_id,
+            info,
+        }
+    }
+
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
         let mut upstream = self.upstream.execute();
@@ -71,8 +89,7 @@ impl ChainExecutor {
             Some(Mutation::AddOutput(map)) => map
                 .values()
                 .flatten()
-                .find(|info| info.actor_id == self.actor_id)
-                .is_some(),
+                .any(|info| info.actor_id == self.actor_id),
 
             // If the barrier is not a conf change, it means we've recovered and the snapshot is
             // already consumed.
@@ -127,3 +144,5 @@ impl Executor for ChainExecutor {
         &self.info.identity
     }
 }
+
+// TODO: restore the unit tests
