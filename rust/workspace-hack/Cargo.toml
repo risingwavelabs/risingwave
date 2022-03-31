@@ -15,6 +15,8 @@ publish = false
 [dependencies]
 anyhow = { version = "1", features = ["backtrace", "std"] }
 bytes = { version = "1", features = ["serde", "std"] }
+crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
+crossbeam-utils = { version = "0.8", features = ["lazy_static", "std"] }
 either = { version = "1", features = ["use_std"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "compat", "executor", "futures-executor", "std", "thread-pool"] }
@@ -58,6 +60,8 @@ url = { version = "2", default-features = false, features = ["serde"] }
 anyhow = { version = "1", features = ["backtrace", "std"] }
 bytes = { version = "1", features = ["serde", "std"] }
 cc = { version = "1", default-features = false, features = ["jobserver", "parallel"] }
+crossbeam-deque = { version = "0.8", features = ["crossbeam-epoch", "crossbeam-utils", "std"] }
+crossbeam-utils = { version = "0.8", features = ["lazy_static", "std"] }
 either = { version = "1", features = ["use_std"] }
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", features = ["alloc", "async-await", "compat", "executor", "futures-executor", "std", "thread-pool"] }

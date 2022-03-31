@@ -5689,6 +5689,8 @@ dependencies = [
  "anyhow",
  "bytes",
  "cc",
+ "crossbeam-deque",
+ "crossbeam-utils 0.8.8",
  "either",
  "fixedbitset 0.4.1",
  "futures 0.3.21",
