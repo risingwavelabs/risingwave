@@ -20,8 +20,8 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, ForceStopActorsRequest,
-    UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest,
+    ForceStopActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -216,7 +216,7 @@ where
     async fn kill_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<HashSet<u32>> {
         let mut failed_worker_id = HashSet::<u32>::new();
         for worker_node in info.node_map.values() {
-            // gracefully shutdown actors on running compute nodes
+            // force shutdown actors on running compute nodes
             match self.env.stream_clients().get(worker_node).await {
                 Ok(client) => {
                     match client

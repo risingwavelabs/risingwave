@@ -71,7 +71,7 @@ impl Actor {
                             self.context
                                 .lock_barrier_manager()
                                 .collect(self.id, &barrier)?;
-        
+
                             // then stop this actor if asked
                             if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
                                 if actors.contains(&self.id) {
@@ -79,7 +79,7 @@ impl Actor {
                                     break;
                                 }
                             }
-        
+
                             // tracing related work
                             let span_parent = barrier.span;
                             if !span_parent.is_none() {
@@ -110,10 +110,8 @@ impl Actor {
                         }
                     }
                 }
-            
-            }
 
-            
+            }
         }
         Ok(())
     }
