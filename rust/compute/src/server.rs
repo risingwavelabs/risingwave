@@ -173,11 +173,11 @@ pub async fn compute_node_serve(
                     _ = shutdown_recv.recv() => {
                         for (join_handle, shutdown_sender) in sub_tasks {
                             if let Err(err) = shutdown_sender.send(()) {
-                                tracing::warn!("Failed to send shutdown: {}", err);
+                                tracing::warn!("Failed to send shutdown: {:?}", err);
                                 continue;
                             }
                             if let Err(err) = join_handle.await {
-                                tracing::warn!("Failed to join shutdown: {}", err);
+                                tracing::warn!("Failed to join shutdown: {:?}", err);
                             }
                         }
                     },

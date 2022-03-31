@@ -250,7 +250,7 @@ impl LocalVersionManager {
                 Err(err) => {
                     let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                     tracing::warn!(
-                        "Failed to pin version {}. Will retry after about {} milliseconds",
+                        "Failed to pin version {:?}. Will retry after about {} milliseconds",
                         err,
                         retry_after.as_millis()
                     );
@@ -324,7 +324,7 @@ impl LocalVersionManager {
                 Err(err) => {
                     let retry_after = retry_backoff.next().unwrap_or(max_retry_interval);
                     tracing::warn!(
-                        "Failed to unpin version {}. Will retry after about {} milliseconds",
+                        "Failed to unpin version {:?}. Will retry after about {} milliseconds",
                         err,
                         retry_after.as_millis()
                     );
