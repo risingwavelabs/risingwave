@@ -34,13 +34,13 @@ impl std::fmt::Debug for Literal {
             use risingwave_common::for_all_scalar_variants;
             use risingwave_common::types::ScalarImpl::*;
             macro_rules! scalar_write_inner {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match &self.data {
-                    None => write!(f, "null"),
-                    $( Some($variant_name(v)) => write!(f, "{:?}", v) ),*
-                }?;
-            };
-        }
+                ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
+                    match &self.data {
+                        None => write!(f, "null"),
+                        $( Some($variant_name(v)) => write!(f, "{}", v) ),*
+                    }?;
+                };
+            }
             for_all_scalar_variants! { scalar_write_inner }
             write!(f, ":{:?}", self.data_type)
         }
