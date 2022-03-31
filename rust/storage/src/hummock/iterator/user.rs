@@ -261,10 +261,9 @@ mod tests {
     use crate::hummock::iterator::BoxedHummockIterator;
     use crate::hummock::key::user_key;
     use crate::hummock::sstable::SSTableIterator;
-    use crate::hummock::value::HummockValue;
+    use crate::hummock::value::{delete_without_meta, HummockValue};
     use crate::monitor::StateStoreMetrics;
-    use crate::storage_value::ValueMeta;
-
+    
     #[tokio::test]
     async fn test_basic() {
         let sstable_store = mock_sstable_store();
@@ -423,13 +422,13 @@ mod tests {
         // key=[idx, epoch], value
         let kv_pairs = vec![
             (1, 100, HummockValue::Put(iterator_test_value_of(1))),
-            (2, 300, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 300, delete_without_meta()),
         ];
         let table0 =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
-            (1, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 200, delete_without_meta()),
             (2, 400, HummockValue::Put(iterator_test_value_of(2))),
         ];
         let table1 =
@@ -466,18 +465,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];
@@ -547,15 +546,15 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
@@ -627,18 +626,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];
@@ -710,18 +709,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];

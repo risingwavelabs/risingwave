@@ -59,7 +59,7 @@ impl StreamClients {
                         .connect_timeout(Duration::from_secs(5))
                         .connect()
                         .await
-                        .to_rw_result_with(format!("failed to connect to {}", node.get_id()))?,
+                        .to_rw_result_with(|| format!("failed to connect to {}", node.get_id()))?,
                 );
                 Ok::<_, RwError>(client)
             })

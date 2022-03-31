@@ -33,7 +33,7 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
-    HummockMetaClient, HummockResult, HummockStorage, HummockValue, LocalVersionManager,
+    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager,
     SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
@@ -494,7 +494,7 @@ impl Compactor {
             // and the latest key which satisfies `epoch` < `watermark`
             if epoch < watermark {
                 skip_key = BytesMut::from(iter_key);
-                if matches!(iter.value(), HummockValue::Delete(_)) && !has_user_key_overlap {
+                if iter.value().is_delete() && !has_user_key_overlap {
                     iter.next().await?;
                     continue;
                 }

@@ -280,7 +280,7 @@ mod tests {
     use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::value::HummockValue;
+    use crate::hummock::value::{delete_without_meta, HummockValue};
     use crate::hummock::version_cmp::VersionedComparator;
     use crate::hummock::{ReverseSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
@@ -446,7 +446,7 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (1, 300, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 300, delete_without_meta()),
             (2, 100, HummockValue::Put(iterator_test_value_of(2))),
         ];
         let table0 =
@@ -454,7 +454,7 @@ mod tests {
 
         let kv_pairs = vec![
             (1, 400, HummockValue::Put(iterator_test_value_of(1))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
         ];
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
@@ -489,20 +489,20 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 400, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
+            (2, 400, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
             (2, 100, HummockValue::Put(iterator_test_value_of(2))),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
             (7, 300, HummockValue::Put(iterator_test_value_of(7))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];
@@ -572,15 +572,15 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
@@ -652,18 +652,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];
@@ -731,18 +731,18 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (0, 200, delete_without_meta()),
             (0, 100, HummockValue::Put(iterator_test_value_of(0))),
             (1, 200, HummockValue::Put(iterator_test_value_of(1))),
-            (1, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (1, 100, delete_without_meta()),
             (2, 300, HummockValue::Put(iterator_test_value_of(2))),
-            (2, 200, HummockValue::Delete(ValueMeta::default().into())),
-            (2, 100, HummockValue::Delete(ValueMeta::default().into())),
+            (2, 200, delete_without_meta()),
+            (2, 100, delete_without_meta()),
             (3, 100, HummockValue::Put(iterator_test_value_of(3))),
-            (5, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (5, 200, delete_without_meta()),
             (5, 100, HummockValue::Put(iterator_test_value_of(5))),
             (6, 100, HummockValue::Put(iterator_test_value_of(6))),
-            (7, 200, HummockValue::Delete(ValueMeta::default().into())),
+            (7, 200, delete_without_meta()),
             (7, 100, HummockValue::Put(iterator_test_value_of(7))),
             (8, 100, HummockValue::Put(iterator_test_value_of(8))),
         ];
@@ -906,10 +906,10 @@ mod tests {
                 let is_delete = rng.gen_range(0..=1usize) < 1usize;
                 match is_delete {
                     true => {
-                        truth.entry(key_bytes.clone()).or_default().insert(
-                            Reverse(time),
-                            HummockValue::Delete(ValueMeta::default().into()),
-                        );
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(Reverse(time), delete_without_meta());
                     }
                     false => {
                         let value_size = rng.gen_range(100..=200);

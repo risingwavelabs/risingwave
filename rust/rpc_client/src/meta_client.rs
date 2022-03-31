@@ -299,7 +299,7 @@ impl GrpcMetaClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .to_rw_result_with(format!("failed to connect to {}", addr))?;
+            .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());

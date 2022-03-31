@@ -15,7 +15,7 @@
 use bytes::{Buf, BufMut, Bytes};
 
 use super::{HummockError, HummockResult};
-use crate::storage_value::StorageValue;
+use crate::storage_value::{StorageValue, ValueMeta};
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;
@@ -79,6 +79,17 @@ where
             Self::Delete(_) => None,
         }
     }
+
+    pub fn is_delete(&self) -> bool {
+        matches!(self, Self::Delete(_))
+    }
+}
+
+pub fn delete_without_meta<T>() -> HummockValue<T>
+where
+    T: From<ValueMeta>,
+{
+    HummockValue::Delete(ValueMeta::default().into())
 }
 
 impl HummockValue<Vec<u8>> {
