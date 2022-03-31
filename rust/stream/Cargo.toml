@@ -16,13 +16,13 @@ dyn-clone = "1"
 either = "1"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-async-stream = { git = "https://github.com/taiki-e/futures-async-stream", rev = "944f407" }
+futures-async-stream = "0.2"
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.7", features = ["future"] }
+moka = { version = "0.8", features = ["future"] }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"

@@ -15,14 +15,13 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::InputRefDisplay;
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchHashAgg {
@@ -82,13 +81,6 @@ impl PlanTreeNodeUnary for BatchHashAgg {
     }
 }
 impl_plan_tree_node_for_unary! { BatchHashAgg }
-
-impl WithSchema for BatchHashAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchHashAgg {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self.input().to_distributed_with_required(

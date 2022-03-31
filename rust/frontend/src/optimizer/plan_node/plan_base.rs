@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use paste::paste;
 use risingwave_common::catalog::Schema;
 
-use super::PlanNodeId;
+use super::*;
+use crate::for_all_plan_nodes;
 use crate::optimizer::property::{Distribution, Order};
 use crate::session::OptimizerContextRef;
 
@@ -89,3 +91,33 @@ impl PlanBase {
         }
     }
 }
+macro_rules! impl_base_delegate {
+    ([], $( { $convention:ident, $name:ident }),*) => {
+        $(paste! {
+            impl [<$convention $name>] {
+                pub fn id(&self) -> PlanNodeId {
+                    self.plan_base().id
+                }
+                 pub fn ctx(&self) -> OptimizerContextRef {
+                    self.plan_base().ctx.clone()
+                }
+                pub fn schema(&self) -> &Schema {
+                    &self.plan_base().schema
+                }
+                pub fn pk_indices(&self) -> &[usize] {
+                    &self.plan_base().pk_indices
+                }
+                pub fn order(&self) -> &Order {
+                    &self.plan_base().order
+                }
+                pub fn distribution(&self) -> &Distribution {
+                    &self.plan_base().dist
+                }
+                pub fn append_only(&self) -> bool {
+                    self.plan_base().append_only
+                }
+            }
+        })*
+    }
+}
+for_all_plan_nodes! { impl_base_delegate }

@@ -51,7 +51,7 @@ impl BlockCache {
     {
         match self
             .inner
-            .get_or_try_insert_with(Self::key(sst_id, block_idx), f)
+            .try_get_with(Self::key(sst_id, block_idx), f)
             .await
         {
             Ok(block) => Ok(block),

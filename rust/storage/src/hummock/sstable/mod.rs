@@ -15,32 +15,14 @@
 //! Hummock state store's SST builder, format and iterator
 
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
-#[cfg(not(feature = "blockv2"))]
 mod block;
-#[cfg(not(feature = "blockv2"))]
 pub use block::*;
-#[cfg(not(feature = "blockv2"))]
 mod block_iterator;
-#[cfg(not(feature = "blockv2"))]
 pub use block_iterator::*;
-#[cfg(feature = "blockv2")]
-mod blockv2;
-#[cfg(feature = "blockv2")]
-pub use blockv2::*;
-#[cfg(feature = "blockv2")]
-mod block_iterator_v2;
-#[cfg(feature = "blockv2")]
-pub use block_iterator_v2::*;
 mod bloom;
 use bloom::Bloom;
-#[cfg(not(feature = "blockv2"))]
 pub mod builder;
-#[cfg(not(feature = "blockv2"))]
 pub use builder::*;
-#[cfg(feature = "blockv2")]
-pub mod builderv2;
-#[cfg(feature = "blockv2")]
-pub use builderv2::*;
 pub mod multi_builder;
 mod sstable_iterator;
 use bytes::{Buf, BufMut};
@@ -59,6 +41,7 @@ const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
+#[derive(Clone)]
 /// [`SSTable`] is a handle for accessing SST in [`TableManager`].
 pub struct Sstable {
     pub id: u64,
@@ -147,7 +130,7 @@ impl SstableMeta {
     pub fn encode_to_bytes(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(DEFAULT_META_BUFFER_CAPACITY);
         buf.put_u32_le(self.block_metas.len() as u32);
-        for block_meta in self.block_metas.iter() {
+        for block_meta in &self.block_metas {
             block_meta.encode(&mut buf);
         }
         put_length_prefixed_slice(&mut buf, &self.bloom_filter);
@@ -184,7 +167,7 @@ impl SstableMeta {
         cursor -= 8;
         let checksum = (&buf[cursor..cursor + 8]).get_u64_le();
         let buf = &mut &buf[..cursor];
-        xxhash64_verify(&buf, checksum)?;
+        xxhash64_verify(buf, checksum)?;
 
         let block_meta_count = buf.get_u32_le() as usize;
         let mut block_metas = Vec::with_capacity(block_meta_count);

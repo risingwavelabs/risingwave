@@ -9,7 +9,9 @@ include ../../tpch/insert_partsupp.slt.part
 include ../../tpch/insert_region.slt.part
 include ../../tpch/insert_supplier.slt.part
 
+include ../../streaming/tpch/views/q6.slt.part
+
 statement ok
-flush;
+drop materialized view tpch_q6;
 
 include ../../tpch/drop_tables.slt.part

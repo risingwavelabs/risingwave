@@ -23,7 +23,7 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.7", features = ["future"] }
+moka = { version = "0.8", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
@@ -48,6 +48,7 @@ tokio = { version = "1", features = [
     "time",
     "signal",
 ] }
+tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
 tonic = "0.6"
 tower = { version = "0.4", features = ["util", "load-shed"] }
@@ -60,7 +61,3 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 assert_matches = "1"
 rand = "0.8"
 tempfile = "3"
-
-[features]
-default = ["blockv2"]
-blockv2 = ["risingwave_storage/blockv2"]

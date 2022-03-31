@@ -21,9 +21,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
 use risingwave_common::error::Result;
 
-use super::{ColPrunable, PlanBase, PlanRef, StreamTableScan, ToBatch, ToStream};
+use super::{ColPrunable, PlanBase, PlanNode, PlanRef, StreamTableScan, ToBatch, ToStream};
 use crate::optimizer::plan_node::BatchSeqScan;
-use crate::optimizer::property::WithSchema;
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 

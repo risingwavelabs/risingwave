@@ -28,16 +28,15 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::{LogicalProject, StreamMaterialize};
-use self::property::Convention;
+use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::expr::InputRef;
 
-/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with [`LogicalNode`]
+/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
-/// batch Plan with optimization. the required Order and Distribution columns might be more than the
+/// batch plan with optimization. the required Order and Distribution columns might be more than the
 /// output columns. for example:
-/// ```SQL
+/// ```sql
 ///    select v1 from t order by id;
 /// ```
 /// the plan will return two columns (id, v1), and the required order column is id. the id

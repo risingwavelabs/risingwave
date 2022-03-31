@@ -20,11 +20,10 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::compactor::{Compactor, SubCompactContext};
+use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
-use crate::hummock::key_range::KeyRange;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -108,7 +107,7 @@ impl SharedBufferUploader {
                 .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
             MergeIterator::new(iters, self.stats.clone())
         };
-        let sub_compact_context = SubCompactContext {
+        let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
@@ -116,20 +115,9 @@ impl SharedBufferUploader {
             stats: self.stats.clone(),
             is_share_buffer_compact: true,
         };
-        let mut tables = Vec::new();
-        Compactor::sub_compact(
-            sub_compact_context,
-            KeyRange::inf(),
-            merge_iters,
-            &mut tables,
-            false,
-            u64::MAX,
-        )
-        .await?;
 
-        if tables.is_empty() {
-            return Ok(());
-        }
+        let tables =
+            Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), merge_iters).await?;
 
         // Add all tables at once.
         let version = self

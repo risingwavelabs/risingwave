@@ -34,7 +34,6 @@ pub(crate) struct MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
-    #[allow(dead_code)]
     pub fn new(
         hummock_manager: Arc<HummockManager<MemStore>>,
         context_id: HummockContextId,
@@ -100,13 +99,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(HummockError::meta_error)
     }
 
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> HummockResult<()> {
+    async fn report_compaction_task(&self, compact_task: CompactTask) -> HummockResult<()> {
         self.hummock_manager
-            .report_compact_task(compact_task, task_result)
+            .report_compact_task(compact_task)
             .await
             .map_err(HummockError::meta_error)
             .map(|_| ())
@@ -138,7 +133,6 @@ impl HummockMetaClient for MockHummockMetaClient {
 }
 
 impl MockHummockMetaClient {
-    #[allow(dead_code)]
     pub fn hummock_manager_ref(&self) -> Arc<HummockManager<MemStore>> {
         self.hummock_manager.clone()
     }

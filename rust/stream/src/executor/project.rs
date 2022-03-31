@@ -26,7 +26,7 @@ use risingwave_storage::StateStore;
 
 use super::{Executor, Message, PkIndicesRef, SimpleExecutor, StreamChunk};
 use crate::executor::{ExecutorBuilder, PkIndices};
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
@@ -65,7 +65,7 @@ impl ExecutorBuilder for ProjectExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         _store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::ProjectNode)?;
         let project_exprs = node

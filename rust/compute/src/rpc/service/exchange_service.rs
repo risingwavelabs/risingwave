@@ -26,7 +26,7 @@ use risingwave_pb::task_service::{
     GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
 };
 use risingwave_stream::executor::Message;
-use risingwave_stream::task::StreamManager;
+use risingwave_stream::task::LocalStreamManager;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 
@@ -36,7 +36,7 @@ const EXCHANGE_BUFFER_SIZE: usize = 1024;
 #[derive(Clone)]
 pub struct ExchangeServiceImpl {
     batch_mgr: Arc<BatchManager>,
-    stream_mgr: Arc<StreamManager>,
+    stream_mgr: Arc<LocalStreamManager>,
 }
 
 type ExchangeDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
@@ -99,7 +99,7 @@ impl ExchangeService for ExchangeServiceImpl {
 }
 
 impl ExchangeServiceImpl {
-    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<StreamManager>) -> Self {
+    pub fn new(mgr: Arc<BatchManager>, stream_mgr: Arc<LocalStreamManager>) -> Self {
         ExchangeServiceImpl {
             batch_mgr: mgr,
             stream_mgr,
@@ -115,16 +115,16 @@ impl ExchangeServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
         let tsid = TaskOutputId::try_from(&pb_tsid)?;
-        debug!("Serve exchange RPC from {} [{:?}]", peer_addr, tsid);
+        tracing::debug!(peer_addr = %peer_addr, from = ?tsid, "serve exchange RPC");
         let mut task_output = self.batch_mgr.take_output(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
             match task_output.take_data(&mut writer).await {
                 Ok(_) => {
-                    info!(
-                        "Exchanged {} chunks from output {:?}",
+                    tracing::debug!(
+                        from = ?tsid,
+                        "exchanged {} chunks",
                         writer.written_chunks(),
-                        tsid,
                     );
                     Ok(())
                 }

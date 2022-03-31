@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::error::Result;
+use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview as ProstFinishedCreateMview;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::oneshot;
 
@@ -30,8 +32,54 @@ mod tests;
 /// Note that this option will significantly increase the overhead of tracing.
 pub const ENABLE_BARRIER_AGGREGATION: bool = false;
 
-pub type DdlFinishNotifierTx = oneshot::Sender<u64>;
-pub type DdlFinishNotifierRx = oneshot::Receiver<u64>;
+/// Represents the Create MV DDL with `epoch` is finished on the actor with `actor_id`.
+#[derive(Debug)]
+pub struct FinishedCreateMview {
+    /// The epoch of the configuration change barrier for this DDL.
+    pub epoch: u64,
+
+    /// The id of the actor that is responsible for running this DDL. Usually the actor of
+    /// [`ChainExecutor`] for creating MV.
+    pub actor_id: ActorId,
+}
+
+impl From<FinishedCreateMview> for ProstFinishedCreateMview {
+    fn from(f: FinishedCreateMview) -> Self {
+        Self {
+            epoch: f.epoch,
+            actor_id: f.actor_id,
+        }
+    }
+}
+
+/// To notify about the finish of an DDL with the `u64` epoch.
+pub struct FinishCreateMviewNotifier {
+    pub barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
+    pub actor_id: ActorId,
+}
+
+impl FinishCreateMviewNotifier {
+    pub fn notify(self, ddl_epoch: u64) {
+        self.barrier_manager
+            .lock()
+            .finish_create_mview(ddl_epoch, self.actor_id);
+    }
+}
+
+impl std::fmt::Debug for FinishCreateMviewNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FinishCreateMviewNotifier")
+            .field("actor_id", &self.actor_id)
+            .finish_non_exhaustive()
+    }
+}
+
+/// Collect result of some barrier on current compute node. Will be reported to the meta service.
+#[derive(Debug)]
+pub struct CollectResult {
+    /// Finished Create MV DDLs in current epoch.
+    pub finished_create_mviews: Vec<FinishedCreateMview>,
+}
 
 enum BarrierState {
     /// `Local` mode should be only used for tests. In this mode, barriers are not managed or
@@ -76,46 +124,13 @@ impl LocalBarrierManager {
 
     /// Create a [`LocalBarrierManager`] with managed mode.
     pub fn new() -> Self {
-        Self::with_state(BarrierState::Managed(ManagedBarrierState::Pending {
-            last_epoch: None, // TODO: specify last epoch
-        }))
+        Self::with_state(BarrierState::Managed(ManagedBarrierState::new()))
     }
 
     /// Register sender for source actors, used to send barriers.
     pub fn register_sender(&mut self, actor_id: ActorId, sender: UnboundedSender<Message>) {
-        debug!("register sender: {}", actor_id);
+        tracing::trace!(actor_id = actor_id, "register sender");
         self.senders.insert(actor_id, sender);
-    }
-
-    /// Create a notifier for DDL finish. When an executor/actor finishes its DDL job, it can report
-    /// that using this notifier.
-    /// Note that a DDL of MV always corresponds to an epoch in our system.
-    ///
-    /// Take the creation of an MV for an example, it may last for several epochs to finish.
-    /// Therefore, when the [`ChainExecutor`] finds that the creation is finished, it will send the
-    /// DDL epoch using this notifier, which can be collected by the barrier manager and reported to
-    /// the meta service soon.
-    pub fn register_ddl_finish_notifier(&mut self, actor_id: ActorId) -> DdlFinishNotifierTx {
-        let (tx, rx) = oneshot::channel();
-        debug!("register ddl finish notifier: {}", actor_id);
-
-        // TODO: process the reporting
-        tokio::spawn(async move {
-            match rx.await {
-                Ok(ddl_epoch) => {
-                    info!(
-                        "ddl with epoch {} finishes on actor {}",
-                        ddl_epoch, actor_id
-                    )
-                }
-                Err(_) => info!(
-                    "ddl notifier for actor {} dropped, are we recovering?",
-                    actor_id
-                ),
-            }
-        });
-
-        tx
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
@@ -125,7 +140,7 @@ impl LocalBarrierManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<Option<oneshot::Receiver<()>>> {
+    ) -> Result<Option<oneshot::Receiver<CollectResult>>> {
         let to_send = {
             let to_send: HashSet<ActorId> = actor_ids_to_send.into_iter().collect();
             match &self.state {
@@ -166,8 +181,8 @@ impl LocalBarrierManager {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+            trace!("remove actors {:?} from senders", actors);
             for actor in actors {
-                trace!("remove actor {} from senders", actor);
                 self.senders.remove(actor);
             }
         }
@@ -188,6 +203,25 @@ impl LocalBarrierManager {
         }
 
         Ok(())
+    }
+
+    /// Report that a Create MV DDL with given `ddl_epoch` is finished on the actor with `actor_id`.
+    /// This will be piggybacked by the collection of current/next barrier and then be reported
+    /// to the meta service.
+    pub fn finish_create_mview(&mut self, ddl_epoch: u64, actor_id: ActorId) {
+        match &mut self.state {
+            #[cfg(test)]
+            BarrierState::Local => {}
+
+            BarrierState::Managed(managed_state) => {
+                managed_state
+                    .finished_create_mviews
+                    .push(FinishedCreateMview {
+                        epoch: ddl_epoch,
+                        actor_id,
+                    })
+            }
+        }
     }
 }
 

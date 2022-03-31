@@ -15,15 +15,13 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
-    ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -53,10 +51,19 @@ impl LogicalFilter {
         }
     }
 
+    /// Create a `LogicalFilter` unless the predicate is always true
+    pub fn create(input: PlanRef, predicate: Condition) -> PlanRef {
+        if predicate.always_true() {
+            input
+        } else {
+            LogicalFilter::new(input, predicate).into()
+        }
+    }
+
     /// the function will check if the predicate is bool expression
-    pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
+    pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
         let predicate = Condition::with_expr(predicate);
-        Ok(Self::new(input, predicate).into())
+        Self::new(input, predicate).into()
     }
 
     /// Get the predicate of the logical join.
@@ -148,7 +155,6 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::optimizer::property::ctx::WithId;
     use crate::session::OptimizerContext;
 
     #[tokio::test]

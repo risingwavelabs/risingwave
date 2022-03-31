@@ -16,8 +16,10 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
+use aws_config::timeout::Http;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use aws_sdk_sqs::client as sqs_client;
+use aws_smithy_types::tristate::TriState;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
 use log::{debug, error, info};
@@ -115,7 +117,7 @@ fn find_prefix(match_pattern: &str) -> String {
 pub async fn new_share_config(
     region: String,
     credential: AwsCredential,
-) -> anyhow::Result<aws_config::Config> {
+) -> anyhow::Result<aws_types::SdkConfig> {
     let region_obj = Some(Region::new(region));
     let credential_provider = match credential {
         AwsCredential::Default => SharedCredentialsProvider::new(
@@ -145,7 +147,7 @@ pub async fn new_share_config(
 pub struct S3SourceConfig {
     pub(crate) bucket: String,
     pub(crate) sqs_queue_name: String,
-    pub(crate) shared_config: aws_config::Config,
+    pub(crate) shared_config: aws_types::SdkConfig,
     pub(crate) custom_config: Option<AwsCustomConfig>,
     pub(crate) sqs_config: SqsReceiveMsgConfig,
     pub(crate) match_pattern: Option<String>,
@@ -155,9 +157,11 @@ pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Clie
     let config_for_s3 = match s3_source_config.custom_config {
         Some(conf) => {
             let retry_conf = aws_config::RetryConfig::new().with_max_attempts(conf.max_retry_times);
-            let timeout_conf = aws_config::TimeoutConfig::new()
-                .with_connect_timeout(Some(conf.conn_time_out))
-                .with_read_timeout(Some(conf.read_time_out));
+            let timeout_conf = aws_config::timeout::Config::new().with_http_timeouts(
+                Http::new()
+                    .with_connect_timeout(TriState::Set(conf.conn_time_out))
+                    .with_read_timeout(TriState::Set(conf.read_time_out)),
+            );
 
             s3_config::Builder::from(&s3_source_config.shared_config)
                 .retry_config(retry_conf)
@@ -488,7 +492,7 @@ pub(crate) mod test {
         println!("put_object complete");
     }
 
-    pub fn new_s3_source_config(shared_config: aws_config::Config) -> S3SourceConfig {
+    pub fn new_s3_source_config(shared_config: aws_types::SdkConfig) -> S3SourceConfig {
         S3SourceConfig {
             bucket: BUCKET_NAME.to_string(),
             sqs_queue_name: "s3-dd-storage-notify-queue".to_string(),

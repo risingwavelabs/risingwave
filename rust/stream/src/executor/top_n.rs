@@ -33,7 +33,7 @@ use crate::executor::{
     generate_output, top_n_executor_next, Executor, ExecutorBuilder, Message, PkIndices,
     PkIndicesRef, TopNExecutorBase,
 };
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -93,7 +93,7 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::TopNNode)?;
         let order_types: Vec<_> = node

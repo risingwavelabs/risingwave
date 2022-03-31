@@ -15,7 +15,6 @@
 use std::future::Future;
 use std::ops::RangeBounds;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
@@ -123,11 +122,10 @@ impl StateStore for PanicStateStore {
 
 pub struct PanicStateStoreIter {}
 
-#[async_trait]
 impl StateStoreIter for PanicStateStoreIter {
     type Item = (Bytes, StorageValue);
-
-    async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
-        unreachable!()
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+    fn next(&'_ mut self) -> Self::NextFuture<'_> {
+        async move { unreachable!() }
     }
 }

@@ -20,10 +20,20 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 #[cfg_attr(coverage, no_coverage)]
-#[tokio::main]
+#[cfg(not(feature = "all-in-one"))]
+#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
 async fn main() {
+    use clap::StructOpt;
+
+    let opts = risingwave_ctl::CliOpts::parse();
+
     risingwave_logging::oneshot_common();
     risingwave_logging::init_risingwave_logger(false, true);
 
-    risingwave_ctl::start().await
+    risingwave_ctl::start(opts).await
+}
+
+#[cfg(feature = "all-in-one")]
+fn main() {
+    panic!("risectl binary cannot be used in all-in-one mode")
 }

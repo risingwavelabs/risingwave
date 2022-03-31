@@ -27,17 +27,17 @@ use uuid::Uuid;
 
 use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
-use crate::barrier::{BarrierManager, Command};
+use crate::barrier::{Command, GlobalBarrierManager};
 use crate::manager::Epoch;
 use crate::storage::MetaStore;
 
-impl<S> BarrierManager<S>
+impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
     /// Recovery the whole cluster from the latest epoch.
     pub(crate) async fn recovery(&self, prev_epoch: u64, prev_command: &Command) -> Epoch {
-        let new_epoch = self.epoch_generator.generate();
+        let new_epoch = self.env.epoch_generator().generate();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
@@ -65,7 +65,7 @@ where
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
-                self.clients.clone(),
+                self.env.stream_clients_ref(),
                 &info,
                 prev_epoch,
                 new_epoch.into_inner(),
@@ -107,7 +107,7 @@ where
         let sources = self.catalog_manager.list_sources().await?;
 
         for worker_node in info.node_map.values() {
-            let client = &self.clients.get(worker_node).await?;
+            let client = &self.env.stream_clients().get(worker_node).await?;
             let futures = sources.iter().map(|source| {
                 let request = CreateSourceRequest {
                     source: Some(source.to_owned()),
@@ -150,7 +150,7 @@ where
         let node_actors = self.fragment_manager.all_node_actors(false).await?;
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.clients.get(node).await?;
+            let client = self.env.stream_clients().get(node).await?;
 
             client
                 .to_owned()
@@ -180,7 +180,7 @@ where
     async fn build_actors(&self, info: &BarrierActorInfo) -> Result<()> {
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
-            let client = self.clients.get(node).await?;
+            let client = self.env.stream_clients().get(node).await?;
 
             let request_id = Uuid::new_v4().to_string();
             tracing::debug!(request_id = request_id.as_str(), actors = ?actors, "build actors");
@@ -202,7 +202,7 @@ where
         for worker_node in info.node_map.values() {
             loop {
                 tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
-                match self.clients.get(worker_node).await {
+                match self.env.stream_clients().get(worker_node).await {
                     Ok(client) => {
                         if client.to_owned().shutdown(ShutdownRequest {}).await.is_ok() {
                             self.cluster_manager
