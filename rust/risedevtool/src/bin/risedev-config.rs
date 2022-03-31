@@ -249,6 +249,9 @@ fn main() -> Result<()> {
             let mut enabled = vec![];
             for line in reader.lines() {
                 let line = line?;
+                if line.trim().is_empty() || line.trim().starts_with('#') {
+                    continue;
+                }
                 let Some((component, val)) = line.split_once('=') else {
                     println!("invalid config line {}, discarded", line);
                     continue;
