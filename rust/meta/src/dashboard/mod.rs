@@ -47,8 +47,9 @@ pub type Service<S> = Arc<DashboardService<S>>;
 
 mod handlers {
     use axum::Json;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::{ActorLocation, Table};
+    use risingwave_pb::meta::ActorLocation;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
@@ -96,16 +97,10 @@ mod handlers {
 
     pub async fn list_materialized_views<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<(TableId, Table)>>> {
+    ) -> Result<Json<Vec<Table>>> {
         use crate::model::MetadataModel;
 
-        let materialized_views = Table::list(&*srv.meta_store)
-            .await
-            .map_err(err)?
-            .iter()
-            .filter(|t| t.is_materialized_view())
-            .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
-            .collect::<Vec<_>>();
+        let materialized_views = Table::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(materialized_views))
     }
 

@@ -14,8 +14,8 @@
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_pb::hummock::SstableMeta;
 
+use super::SstableMeta;
 use crate::hummock::key::{Epoch, FullKey};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder};
@@ -140,17 +140,12 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use itertools::Itertools;
-    #[cfg(not(feature = "blockv2"))]
-    use risingwave_pb::hummock::checksum;
     use HummockValue::Put;
 
     use super::*;
-    #[cfg(feature = "blockv2")]
     use crate::hummock::sstable::utils::CompressionAlgorithm;
     use crate::hummock::test_utils::default_builder_opt_for_test;
-    use crate::hummock::SSTableBuilderOptions;
-    #[cfg(feature = "blockv2")]
-    use crate::hummock::DEFAULT_RESTART_INTERVAL;
+    use crate::hummock::{SSTableBuilderOptions, DEFAULT_RESTART_INTERVAL};
 
     #[tokio::test]
     async fn test_empty() {
@@ -160,14 +155,6 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                #[cfg(not(feature = "blockv2"))]
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    table_capacity,
-                    block_size,
-                    bloom_false_positive: 0.1,
-                    checksum_algo: checksum::Algorithm::XxHash64,
-                }),
-                #[cfg(feature = "blockv2")]
                 SSTableBuilder::new(SSTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
@@ -191,14 +178,6 @@ mod tests {
         let get_id_and_builder = || async {
             Ok((
                 next_id.fetch_add(1, SeqCst),
-                #[cfg(not(feature = "blockv2"))]
-                SSTableBuilder::new(SSTableBuilderOptions {
-                    table_capacity,
-                    block_size,
-                    bloom_false_positive: 0.1,
-                    checksum_algo: checksum::Algorithm::XxHash64,
-                }),
-                #[cfg(feature = "blockv2")]
                 SSTableBuilder::new(SSTableBuilderOptions {
                     capacity: table_capacity,
                     block_capacity: block_size,
