@@ -20,7 +20,7 @@ use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, StopActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest, ForceStopActorsRequest,
     UpdateActorsRequest,
 };
 use uuid::Uuid;
@@ -221,7 +221,7 @@ where
                 Ok(client) => {
                     match client
                         .to_owned()
-                        .stop_actors(StopActorsRequest {
+                        .force_stop_actors(ForceStopActorsRequest {
                             request_id: String::new(),
                         })
                         .await

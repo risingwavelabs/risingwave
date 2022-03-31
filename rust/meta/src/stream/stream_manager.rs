@@ -422,10 +422,10 @@ mod tests {
             unimplemented!()
         }
 
-        async fn stop_actors(
+        async fn force_stop_actors(
             &self,
-            _request: Request<StopActorsRequest>,
-        ) -> std::result::Result<Response<StopActorsResponse>, Status> {
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
             unimplemented!()
         }
     }

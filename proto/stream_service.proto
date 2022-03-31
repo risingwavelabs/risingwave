@@ -54,11 +54,11 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
-message StopActorsRequest {
+message ForceStopActorsRequest {
   string request_id = 1;
 }
 
-message StopActorsResponse {
+message ForceStopActorsResponse {
   string request_id = 1;
   common.Status status = 2;
 }
@@ -112,7 +112,7 @@ service StreamService {
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
-  rpc StopActors(StopActorsRequest) returns (StopActorsResponse);
+  rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);

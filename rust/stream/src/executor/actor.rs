@@ -59,55 +59,61 @@ impl Actor {
         );
         // Drive the streaming task with an infinite loop
         loop {
-            // We also continue if the sender is dropped, which only appear in tests.
-            if self.stop_rx.try_recv().is_ok() {
-                break;
-            }
-            let message = self.consumer.next().instrument(span.clone()).await;
-            match message {
-                Ok(Some(barrier)) => {
-                    // collect barriers to local barrier manager
-                    self.context
-                        .lock_barrier_manager()
-                        .collect(self.id, &barrier)?;
-
-                    // then stop this actor if asked
-                    if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
-                        if actors.contains(&self.id) {
-                            tracing::trace!(actor_id = self.id, "actor exit");
-                            break;
+            tokio::select! {
+                _ = &mut self.stop_rx => {
+                    tracing::debug!("Actor {:X} received force stop msg", self.id);
+                    break;
+                }
+                message = self.consumer.next().instrument(span.clone()) => {
+                    match message {
+                        Ok(Some(barrier)) => {
+                            // collect barriers to local barrier manager
+                            self.context
+                                .lock_barrier_manager()
+                                .collect(self.id, &barrier)?;
+        
+                            // then stop this actor if asked
+                            if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+                                if actors.contains(&self.id) {
+                                    tracing::trace!(actor_id = self.id, "actor exit");
+                                    break;
+                                }
+                            }
+        
+                            // tracing related work
+                            let span_parent = barrier.span;
+                            if !span_parent.is_none() {
+                                span = tracing::trace_span!(
+                                    parent: span_parent,
+                                    "actor_poll",
+                                    otel.name = span_name.as_str(),
+                                    // For the upstream trace pipe, its output is our input.
+                                    actor_id = self.id,
+                                    next = "Outbound",
+                                    epoch = barrier.epoch.curr,
+                                );
+                            } else {
+                                span = tracing::trace_span!(
+                                    "actor_poll",
+                                    otel.name = span_name.as_str(),
+                                    // For the upstream trace pipe, its output is our input.
+                                    actor_id = self.id,
+                                    next = "Outbound",
+                                    epoch = barrier.epoch.curr,
+                                );
+                            }
+                        }
+                        Ok(None) => {}
+                        Err(err) => {
+                            warn!("Actor polling failed: {:?}", err);
+                            return Err(err);
                         }
                     }
-
-                    // tracing related work
-                    let span_parent = barrier.span;
-                    if !span_parent.is_none() {
-                        span = tracing::trace_span!(
-                            parent: span_parent,
-                            "actor_poll",
-                            otel.name = span_name.as_str(),
-                            // For the upstream trace pipe, its output is our input.
-                            actor_id = self.id,
-                            next = "Outbound",
-                            epoch = barrier.epoch.curr,
-                        );
-                    } else {
-                        span = tracing::trace_span!(
-                            "actor_poll",
-                            otel.name = span_name.as_str(),
-                            // For the upstream trace pipe, its output is our input.
-                            actor_id = self.id,
-                            next = "Outbound",
-                            epoch = barrier.epoch.curr,
-                        );
-                    }
                 }
-                Ok(None) => {}
-                Err(err) => {
-                    warn!("Actor polling failed: {:?}", err);
-                    return Err(err);
-                }
+            
             }
+
+            
         }
         Ok(())
     }

@@ -46,7 +46,7 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
-/// `ActorHandle` contains the join handle of actor's future, and a sender used to gracefully stop
+/// `ActorHandle` contains the join handle of actor's future, and a sender used to force stop
 /// the actor.
 pub struct ActorHandle {
     pub handle: JoinHandle<()>,
@@ -226,7 +226,7 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    /// Gracefully stop all actors on this worker.
+    /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> Result<()> {
         let futures = {
             let mut core = self.core.lock();
@@ -916,7 +916,6 @@ impl LocalStreamManagerCore {
     }
 
     fn stop_all_actors(&mut self) -> Result<Vec<JoinHandle<()>>> {
-        // let actor_ids = .collect_vec();
         let futures = self
             .handles
             .drain()

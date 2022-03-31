@@ -114,16 +114,16 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn stop_actors(
+    async fn force_stop_actors(
         &self,
-        request: Request<StopActorsRequest>,
-    ) -> std::result::Result<Response<StopActorsResponse>, Status> {
+        request: Request<ForceStopActorsRequest>,
+    ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
         self.mgr
             .stop_all_actors()
             .await
             .map_err(|e| e.to_grpc_status())?;
-        Ok(Response::new(StopActorsResponse {
+        Ok(Response::new(ForceStopActorsResponse {
             request_id: req.request_id,
             status: None,
         }))
