@@ -198,7 +198,7 @@ pub struct BlockBuilder {
     /// Restart points.
     restart_points: Vec<u32>,
     /// Last key.
-    last_key: Bytes,
+    last_key: Vec<u8>,
     /// Count of entries in current block.
     entry_count: usize,
     /// Compression algorithm.
@@ -213,7 +213,7 @@ impl BlockBuilder {
             restart_points: Vec::with_capacity(
                 options.capacity / DEFAULT_ENTRY_SIZE / options.restart_interval + 1,
             ),
-            last_key: Bytes::default(),
+            last_key: vec![],
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
         }
@@ -243,7 +243,7 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            self.last_key = key.to_vec().into();
+            self.last_key = key.to_vec();
             key
         } else {
             bytes_diff(&self.last_key, key)
@@ -260,7 +260,7 @@ impl BlockBuilder {
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
-        self.last_key = key.to_vec().into();
+        self.last_key = key.to_vec();
         self.entry_count += 1;
     }
 
