@@ -22,7 +22,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
@@ -140,17 +140,19 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, .. } => {
-                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
+            TableFactor::Table { name, alias, .. } => {
+                Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
             }
             TableFactor::Derived {
-                lateral, subquery, ..
+                lateral,
+                subquery,
+                alias,
             } => {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
                     Ok(Relation::Subquery(Box::new(
-                        self.bind_subquery_relation(*subquery)?,
+                        self.bind_subquery_relation(*subquery, alias)?,
                     )))
                 }
             }
@@ -178,7 +180,11 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
+    pub(super) fn bind_table(
+        &mut self,
+        name: ObjectName,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let table_catalog =
             self.catalog
@@ -188,16 +194,29 @@ impl Binder {
         let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
-        self.bind_context(
-            columns.iter().map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            }),
-            table_name.clone(),
-        )?;
+        let (table_alias, column_aliases) = match alias {
+            None => (table_name.clone(), vec![]),
+            Some(TableAlias { name, columns }) => (name.value, columns),
+        };
+        if columns.len() < column_aliases.len() {
+            return Err(ErrorCode::BindError(format!(
+                "table \"{}\" has {} columns available but {} columns specified",
+                table_alias,
+                columns.len(),
+                column_aliases.len()
+            ))
+            .into());
+        }
+        let columns = columns.iter().zip_longest(column_aliases).map(|pair| {
+            let (c, name) = match pair {
+                itertools::EitherOrBoth::Both(c, a) => (c, a.value),
+                itertools::EitherOrBoth::Left(c) => (c, c.column_desc.name.clone()),
+                itertools::EitherOrBoth::Right(_) => unreachable!(),
+            };
+            (name, c.column_desc.data_type.clone(), c.is_hidden)
+        });
+
+        self.bind_context(columns, table_alias)?;
 
         Ok(BoundBaseTable {
             name: table_name,
@@ -273,16 +292,42 @@ impl Binder {
     /// [`BindContext`](super::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
-    pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
+    pub(super) fn bind_subquery_relation(
+        &mut self,
+        query: Query,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
+
+        let (table_alias, column_aliases) = match alias {
+            None => (format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id), vec![]),
+            Some(TableAlias { name, columns }) => (name.value, columns),
+        };
+        let column_names = query.names();
+        if column_names.len() < column_aliases.len() {
+            return Err(ErrorCode::BindError(format!(
+                "table \"{}\" has {} columns available but {} columns specified",
+                table_alias,
+                column_names.len(),
+                column_aliases.len()
+            ))
+            .into());
+        }
+        let column_names = column_names
+            .iter()
+            .zip_longest(column_aliases)
+            .map(|pair| match pair {
+                itertools::EitherOrBoth::Both(_, a) => a.value,
+                itertools::EitherOrBoth::Left(c) => c.clone(),
+                itertools::EitherOrBoth::Right(_) => unreachable!(),
+            });
+
         self.bind_context(
-            query
-                .names()
-                .into_iter()
+            column_names
                 .zip_eq(query.data_types().into_iter())
                 .map(|(x, y)| (x, y, false)),
-            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+            table_alias,
         )?;
         Ok(BoundSubquery { query })
     }

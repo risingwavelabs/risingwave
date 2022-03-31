@@ -59,7 +59,12 @@
           LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
         LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
 - sql: |
-    /* table alias not supported yet */
+    /* table alias */
     create table t (v1 bigint, v2 double precision);
     select * from (select * from t) as tt join t on tt.v1=t.v1;
-  binder_error: 'Item not found: missing FROM-clause entry for table "tt"'
+  logical_plan: |
+    LogicalProject { exprs: [$0, $1, $3, $4], expr_alias: [v1, v2, v1, v2] }
+      LogicalJoin { type: Inner, on: ($0 = $3) }
+        LogicalProject { exprs: [$1, $2], expr_alias: [v1, v2] }
+          LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
