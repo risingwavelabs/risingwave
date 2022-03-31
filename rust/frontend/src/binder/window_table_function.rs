@@ -41,72 +41,71 @@ impl Binder {
         kind: WindowTableFunctionKind,
         args: Vec<FunctionArg>,
     ) -> Result<BoundWindowTableFunction> {
-        if let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.get(0) {
-            let table_name = match expr {
-                Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident.clone()])),
-                Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents.clone())),
-                _ => Err(ErrorCode::BindError(
-                    "the 1st arg of window table function should be table".to_string(),
-                )
-                .into()),
-            }?;
-            let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
-            let table_catalog =
-                self.catalog
-                    .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
-
-            let table_id = table_catalog.id();
-            let table_desc = table_catalog.table_desc();
-            let columns = table_catalog.columns().to_vec();
-            if columns.iter().any(|col| {
-                col.name().eq_ignore_ascii_case("window_start")
-                    || col.name().eq_ignore_ascii_case("window_end")
-            }) {
-                return Err(ErrorCode::BindError(
-                    "column names `window_start` and `window_end` are not allowed in window table function's input."
-                    .into())
-                .into());
-            }
-
-            let columns = columns
-                .iter()
-                .map(|c| {
-                    (
-                        c.column_desc.name.clone(),
-                        c.column_desc.data_type.clone(),
-                        c.is_hidden,
-                    )
-                })
-                .chain(
-                    [
-                        ("window_start".to_string(), DataType::Timestamp, false),
-                        ("window_end".to_string(), DataType::Timestamp, false),
-                    ]
-                    .into_iter(),
-                );
-            self.bind_context(columns, table_name.clone())?;
-
-            let base = BoundBaseTable {
-                name: table_name,
-                table_desc,
-                table_id,
-            };
-            let exprs: Vec<_> = args
-                .into_iter()
-                .skip(1)
-                .map(|arg| self.bind_function_arg(arg))
-                .flatten_ok()
-                .try_collect()?;
-            Ok(BoundWindowTableFunction {
-                input: base,
-                kind,
-                args: exprs,
-            })
-        } else {
-            Err(ErrorCode::BindError(
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.get(0) else {
+            return Err(ErrorCode::BindError(
                 "the 1st arg of window table function should be table".to_string(),
             )
-            .into())
+            .into());
+        };
+        let table_name = match expr {
+            Expr::Identifier(ident) => Ok::<_, RwError>(ObjectName(vec![ident.clone()])),
+            Expr::CompoundIdentifier(idents) => Ok(ObjectName(idents.clone())),
+            _ => Err(ErrorCode::BindError(
+                "the 1st arg of window table function should be table".to_string(),
+            )
+            .into()),
+        }?;
+        let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
+        let table_catalog =
+            self.catalog
+                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
+
+        let table_id = table_catalog.id();
+        let table_desc = table_catalog.table_desc();
+        let columns = table_catalog.columns().to_vec();
+        if columns.iter().any(|col| {
+            col.name().eq_ignore_ascii_case("window_start")
+                || col.name().eq_ignore_ascii_case("window_end")
+        }) {
+            return Err(ErrorCode::BindError(
+                "column names `window_start` and `window_end` are not allowed in window table function's input."
+                .into())
+            .into());
         }
+
+        let columns = columns
+            .iter()
+            .map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            })
+            .chain(
+                [
+                    ("window_start".to_string(), DataType::Timestamp, false),
+                    ("window_end".to_string(), DataType::Timestamp, false),
+                ]
+                .into_iter(),
+            );
+        self.bind_context(columns, table_name.clone())?;
+
+        let base = BoundBaseTable {
+            name: table_name,
+            table_desc,
+            table_id,
+        };
+        let exprs: Vec<_> = args
+            .into_iter()
+            .skip(1)
+            .map(|arg| self.bind_function_arg(arg))
+            .flatten_ok()
+            .try_collect()?;
+        Ok(BoundWindowTableFunction {
+            input: base,
+            kind,
+            args: exprs,
+        })
     }
 }
