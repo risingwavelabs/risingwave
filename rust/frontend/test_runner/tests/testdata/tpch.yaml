@@ -122,7 +122,7 @@
                       BatchHashJoin { type: Inner, predicate: $0 = $2 }
                         BatchProject { exprs: [$0], expr_alias: [ ] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
                         BatchExchange { order: [], dist: HashShard([1]) }
                           BatchScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority] }
@@ -140,7 +140,7 @@
                     StreamHashJoin { type: Inner, predicate: $0 = $3 }
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamFilter { predicate: ($1 = "FURNITURE":Varchar) AND true:Boolean AND true:Boolean }
+                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
                             StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
                       StreamExchange { dist: HashShard([1]) }
                         StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id#0], pk_indices: [4] }
@@ -164,12 +164,12 @@
       BatchSimpleAgg { aggs: [sum($0)] }
         BatchExchange { order: [], dist: Single }
           BatchProject { exprs: [($1 * $2)], expr_alias: [ ] }
-            BatchFilter { predicate: ($3 >= "1994-01-01":Varchar::Date) AND ($3 < ("1994-01-01":Varchar::Date + IntervalUnit { months: 12, days: 0, ms: 0 }:Interval)) AND ($2 >= (Normalized(0.08):Decimal - Normalized(0.01):Decimal)) AND ($2 <= (Normalized(0.08):Decimal + Normalized(0.01):Decimal)) AND ($0 < 24:Int32) }
+            BatchFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + 1 year 00:00:00:Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
               BatchScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate] }
   stream_plan: |
     StreamMaterialize { columns: [revenue, agg#0(hidden)], pk_columns: [agg#0, revenue] }
       StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
         StreamSimpleAgg { aggs: [count, sum($0)] }
           StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
-            StreamFilter { predicate: ($3 >= "1994-01-01":Varchar::Date) AND ($3 < ("1994-01-01":Varchar::Date + IntervalUnit { months: 12, days: 0, ms: 0 }:Interval)) AND ($2 >= (Normalized(0.08):Decimal - Normalized(0.01):Decimal)) AND ($2 <= (Normalized(0.08):Decimal + Normalized(0.01):Decimal)) AND ($0 < 24:Int32) }
+            StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + 1 year 00:00:00:Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
               StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
