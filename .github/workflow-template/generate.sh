@@ -34,6 +34,7 @@ jobs_main=(
    "jobs/compute-node-build-release.gen.yml"
    "jobs/compute-node-test.yml"
    "jobs/misc-check.yml"
+   "jobs/release.yml"
 )
 
 echo "$HEADER" > ../workflows/main.yml
