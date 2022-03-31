@@ -164,18 +164,9 @@ mod tests {
 
         assert!(write_batch.is_empty());
         let mut key_space_batch = write_batch.prefixify(&key_space);
-        key_space_batch.put(
-            Bytes::from("aa"),
-            StorageValue::new(Default::default(), Some(Bytes::from("444"))),
-        );
-        key_space_batch.put(
-            Bytes::from("cc"),
-            StorageValue::new(Default::default(), Some(Bytes::from("444"))),
-        );
-        key_space_batch.put(
-            Bytes::from("bb"),
-            StorageValue::new(Default::default(), Some(Bytes::from("444"))),
-        );
+        key_space_batch.put(Bytes::from("aa"), StorageValue::new_default_put("444"));
+        key_space_batch.put(Bytes::from("cc"), StorageValue::new_default_put("444"));
+        key_space_batch.put(Bytes::from("bb"), StorageValue::new_default_put("444"));
         key_space_batch.delete(Bytes::from("aa"));
 
         write_batch

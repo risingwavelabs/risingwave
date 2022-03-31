@@ -68,7 +68,7 @@ async fn test_basic() {
     let mut batch3 = vec![
         (Bytes::from("dd"), StorageValue::new_default_put("444")),
         (Bytes::from("ee"), StorageValue::new_default_put("555")),
-        (anchor.clone(), StorageValue::new(Default::default(), None)),
+        (anchor.clone(), StorageValue::new_default_delete()),
     ];
 
     // Make sure the batch is sorted.

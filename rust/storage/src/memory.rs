@@ -234,11 +234,11 @@ mod tests {
                 vec![
                     (
                         b"a".to_vec().into(),
-                        StorageValue::new(Default::default(), Some(b"v1".to_vec().into())),
+                        StorageValue::new_default_put(b"v1".to_vec()),
                     ),
                     (
                         b"b".to_vec().into(),
-                        StorageValue::new(Default::default(), Some(b"v1".to_vec().into())),
+                        StorageValue::new_default_put(b"v1".to_vec()),
                     ),
                 ],
                 0,
@@ -250,12 +250,9 @@ mod tests {
                 vec![
                     (
                         b"a".to_vec().into(),
-                        StorageValue::new(Default::default(), Some(b"v2".to_vec().into())),
+                        StorageValue::new_default_put(b"v2".to_vec()),
                     ),
-                    (
-                        b"b".to_vec().into(),
-                        StorageValue::new(Default::default(), None),
-                    ),
+                    (b"b".to_vec().into(), StorageValue::new_default_delete()),
                 ],
                 1,
             )
