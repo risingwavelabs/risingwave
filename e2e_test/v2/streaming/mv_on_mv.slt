@@ -192,6 +192,18 @@ select * from m14;
 3
 
 statement ok
+create materialized view m15 as select * from (select t1.v1 as t1v1, t2.v1 as t2v1 from m13 t1 join m13 t2 on t1.v1 = t2.v1);
+
+query II
+select t1v1, t2v1 from m15;
+----
+1 1
+2 2
+3 3
+
+
+
+statement ok
 drop materialized view m3;
 
 statement ok
@@ -241,6 +253,9 @@ drop table t3;
 
 statement ok
 drop materialized view m14;
+
+statement ok
+drop materialized view m15;
 
 statement ok
 drop materialized view m13;
