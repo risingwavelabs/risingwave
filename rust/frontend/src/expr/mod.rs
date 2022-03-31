@@ -85,6 +85,11 @@ impl ExprImpl {
         visitor.visit_expr(self);
         visitor.collect()
     }
+
+    /// Check whether self is NULL.
+    pub fn is_null(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
+    }
 }
 
 /// Implement downcast functions, e.g., `as_subquery(self) -> Option<Subquery>`
