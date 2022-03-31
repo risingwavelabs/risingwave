@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::{
     ActorMapping, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
@@ -226,7 +226,7 @@ where
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
-        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
         upstream_actor_id: &mut Vec<Vec<ActorId>>,
     ) -> Result<StreamNode> {
@@ -290,7 +290,7 @@ where
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
-        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
