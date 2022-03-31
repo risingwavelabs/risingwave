@@ -15,8 +15,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use serde::de::Error;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::error::ErrorCode::InternalError;
 use crate::error::{Result, RwError};
@@ -104,13 +103,6 @@ pub struct StorageConfig {
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
 
-    /// Checksum algorithm (Crc32c, XxHash64).
-    #[serde(
-        default = "default::checksum_algorithm",
-        deserialize_with = "ser_parse_checksum_algo"
-    )]
-    pub checksum_algo: risingwave_pb::hummock::checksum::Algorithm,
-
     /// Whether to enable async checkpoint
     #[serde(default = "default::async_checkpoint_enabled")]
     pub async_checkpoint_enabled: bool,
@@ -118,32 +110,6 @@ pub struct StorageConfig {
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
-}
-
-fn ser_parse_checksum_algo<'de, D>(
-    deserializer: D,
-) -> core::result::Result<risingwave_pb::hummock::checksum::Algorithm, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let checksum_algo = String::deserialize(deserializer)?;
-    match parse_checksum_algo(checksum_algo.as_str()) {
-        Some(algo) => Ok(algo),
-        _ => Err(D::Error::custom(format!(
-            "{} is not supported for Hummock",
-            checksum_algo
-        ))),
-    }
-}
-
-pub fn parse_checksum_algo(
-    checksum_algo: &str,
-) -> Option<risingwave_pb::hummock::checksum::Algorithm> {
-    match checksum_algo {
-        "crc32c" => Some(risingwave_pb::hummock::checksum::Algorithm::Crc32c),
-        "xxhash64" => Some(risingwave_pb::hummock::checksum::Algorithm::XxHash64),
-        _ => None,
-    }
 }
 
 impl Default for StorageConfig {
@@ -208,10 +174,6 @@ mod default {
         "hummock_001".to_string()
     }
 
-    pub fn checksum_algorithm() -> risingwave_pb::hummock::checksum::Algorithm {
-        risingwave_pb::hummock::checksum::Algorithm::XxHash64
-    }
-
     pub fn async_checkpoint_enabled() -> bool {
         true
     }
@@ -258,7 +220,6 @@ mod tests {
             default::bloom_false_positive()
         );
         assert_eq!(cfg.storage.data_directory, "test");
-        assert_eq!(cfg.storage.checksum_algo, default::checksum_algorithm());
         assert!(!cfg.storage.async_checkpoint_enabled);
     }
 }

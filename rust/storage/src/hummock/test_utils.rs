@@ -37,7 +37,6 @@ pub fn default_config_for_test() -> StorageConfig {
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,
         data_directory: "hummock_001".to_string(),
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
     }

@@ -73,7 +73,6 @@ async fn get_hummock_storage() -> (HummockStorage, Arc<HummockManager<MemStore>>
         block_size: 1 << 10,
         bloom_false_positive: 0.1,
         data_directory: remote_dir.clone(),
-        checksum_algo: ChecksumAlg::XxHash64,
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
     });

@@ -27,36 +27,6 @@ message SstableInfo {
   KeyRange key_range = 2;
 }
 
-message BlockMeta {
-  bytes smallest_key = 1;
-  uint32 offset = 2;
-  uint32 len = 3;
-}
-
-message SstableMeta {
-  // Offsets of different blocks
-  repeated BlockMeta block_metas = 1;
-  bytes bloom_filter = 2;
-  // Estimated size, only used on encryption or compression
-  uint32 estimated_size = 3;
-  uint32 key_count = 5;
-  // Serve as cheap index.
-  // Since table is ordered, they are exactly the first key and last key.
-  // The keys are appended by timestamp.
-  bytes smallest_key = 6;
-  bytes largest_key = 7;
-}
-
-message Checksum {
-  enum Algorithm {
-    CRC32C = 0;
-    XX_HASH64 = 1;
-  }
-  // For storing type of Checksum algorithm used
-  Algorithm algo = 1;
-  uint64 sum = 2;
-}
-
 enum LevelType {
   NONOVERLAPPING = 0;
   OVERLAPPING = 1;
