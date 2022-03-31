@@ -196,13 +196,13 @@ where
         }
     }
 
-    /// [`generate`] function generates id as `current_id`.
+    /// [`Self::generate`] function generates id as `current_id`.
     pub async fn generate<const C: IdCategoryType>(&self) -> Result<Id> {
         self.get::<C>().generate().await
     }
 
-    /// [`generate_interval`] function generates ids as [`current_id`, `current_id` + interval), the
-    /// next id will be `current_id` + interval.
+    /// [`Self::generate_interval`] function generates ids as [`current_id`, `current_id` +
+    /// interval), the next id will be `current_id` + interval.
     pub async fn generate_interval<const C: IdCategoryType>(&self, interval: i32) -> Result<Id> {
         self.get::<C>().generate_interval(interval).await
     }
