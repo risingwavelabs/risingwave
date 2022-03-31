@@ -48,11 +48,8 @@ async fn test_basic() {
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), Some(StorageValue::from(Bytes::from("111")))),
-        (
-            Bytes::from("bb"),
-            Some(StorageValue::from(Bytes::from("222"))),
-        ),
+        (anchor.clone(), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -60,14 +57,8 @@ async fn test_basic() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (
-            Bytes::from("cc"),
-            Some(StorageValue::from(Bytes::from("333"))),
-        ),
-        (
-            anchor.clone(),
-            Some(StorageValue::from(Bytes::from("111111"))),
-        ),
+        (Bytes::from("cc"), StorageValue::new_default_put("333")),
+        (anchor.clone(), StorageValue::new_default_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -75,15 +66,9 @@ async fn test_basic() {
 
     // Third batch deletes the anchor
     let mut batch3 = vec![
-        (
-            Bytes::from("dd"),
-            Some(StorageValue::from(Bytes::from("444"))),
-        ),
-        (
-            Bytes::from("ee"),
-            Some(StorageValue::from(Bytes::from("555"))),
-        ),
-        (anchor.clone(), None),
+        (Bytes::from("dd"), StorageValue::new_default_put("444")),
+        (Bytes::from("ee"), StorageValue::new_default_put("555")),
+        (anchor.clone(), StorageValue::new(Default::default(), None)),
     ];
 
     // Make sure the batch is sorted.
@@ -97,13 +82,13 @@ async fn test_basic() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111"));
+    assert_eq!(value, Bytes::from("111"));
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch1)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("222"));
+    assert_eq!(value, Bytes::from("222"));
 
     // Test looking for a nonexistent key. `next()` would return the next key.
     let value = hummock_storage
@@ -118,7 +103,7 @@ async fn test_basic() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111111"));
+    assert_eq!(value, Bytes::from("111111"));
 
     // Write the third batch.
     let epoch3 = epoch2 + 1;
@@ -145,11 +130,11 @@ async fn test_basic() {
 
     // Get the anchor value at the first snapshot
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111"));
+    assert_eq!(value, Bytes::from("111"));
 
     // Get the anchor value at the second snapshot
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111111"));
+    assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(..=b"ee".to_vec(), epoch2)
@@ -200,11 +185,8 @@ async fn test_reload_storage() {
 
     // First batch inserts the anchor and others.
     let mut batch1 = vec![
-        (anchor.clone(), Some(StorageValue::from(Bytes::from("111")))),
-        (
-            Bytes::from("bb"),
-            Some(StorageValue::from(Bytes::from("222"))),
-        ),
+        (anchor.clone(), StorageValue::new_default_put("111")),
+        (Bytes::from("bb"), StorageValue::new_default_put("222")),
     ];
 
     // Make sure the batch is sorted.
@@ -212,14 +194,8 @@ async fn test_reload_storage() {
 
     // Second batch modifies the anchor.
     let mut batch2 = vec![
-        (
-            Bytes::from("cc"),
-            Some(StorageValue::from(Bytes::from("333"))),
-        ),
-        (
-            anchor.clone(),
-            Some(StorageValue::from(Bytes::from("111111"))),
-        ),
+        (Bytes::from("cc"), StorageValue::new_default_put("333")),
+        (anchor.clone(), StorageValue::new_default_put("111111")),
     ];
 
     // Make sure the batch is sorted.
@@ -245,7 +221,7 @@ async fn test_reload_storage() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111"));
+    assert_eq!(value, Bytes::from("111"));
 
     // Test looking for a nonexistent key. `next()` would return the next key.
     let value = hummock_storage
@@ -260,7 +236,7 @@ async fn test_reload_storage() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111111"));
+    assert_eq!(value, Bytes::from("111111"));
 
     // Write aa bb
     let mut iter = hummock_storage
@@ -272,11 +248,11 @@ async fn test_reload_storage() {
 
     // Get the anchor value at the first snapshot
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111"));
+    assert_eq!(value, Bytes::from("111"));
 
     // Get the anchor value at the second snapshot
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
-    assert_eq!(value.to_bytes(), Bytes::from("111111"));
+    assert_eq!(value, Bytes::from("111111"));
     // Update aa, write cc
     let mut iter = hummock_storage
         .iter(..=b"ee".to_vec(), epoch2)

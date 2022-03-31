@@ -109,7 +109,7 @@ impl Operations {
                     let start = Instant::now();
                     let batch = batch
                         .into_iter()
-                        .map(|(k, v)| (k, v.map(StorageValue::from)))
+                        .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
                         .collect_vec();
                     store.ingest_batch(batch, get_epoch()).await.unwrap();
                     let time_nano = start.elapsed().as_nanos();

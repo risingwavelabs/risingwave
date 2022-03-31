@@ -68,7 +68,7 @@ use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
-use crate::storage_value::StorageValue;
+use crate::storage_value::{value_to_user_value, StorageValue};
 use crate::store::{collect_from_iter, *};
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
@@ -228,7 +228,7 @@ impl StateStore for HummockStorage {
                 .get(key, (version.max_committed_epoch() + 1)..=epoch)
             {
                 self.stats.get_shared_buffer_hit_counts.inc();
-                return Ok(v.into_put_value().map(StorageValue::from));
+                return Ok(v.into_put_value().map(value_to_user_value));
             }
 
             let mut table_counts = 0;
@@ -282,11 +282,14 @@ impl StateStore for HummockStorage {
             // Iterator gets us the key, we tell if it's the key we want
             // or key next to it.
             let value = match user_key(it.key()) == key {
-                true => it.value().into_put_value().map(|x| x.to_vec()),
+                true => it
+                    .value()
+                    .into_put_value()
+                    .map(|x| value_to_user_value(Bytes::copy_from_slice(x))),
                 false => None,
             };
 
-            Ok(value.map(StorageValue::from))
+            Ok(value)
         }
     }
 
@@ -327,7 +330,7 @@ impl StateStore for HummockStorage {
     ///   been committed. If such case happens, the outcome is non-predictable.
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -352,7 +355,7 @@ impl StateStore for HummockStorage {
     /// Replicates a batch to shared buffer, without uploading to the storage backend.
     fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<crate::storage_value::StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
@@ -522,7 +525,7 @@ impl<'a> HummockStateStoreIter<'a> {
 #[async_trait]
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         let iter = &mut self.inner;
@@ -530,7 +533,7 @@ impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
         if iter.is_valid() {
             let kv = (
                 Bytes::copy_from_slice(iter.key()),
-                StorageValue::from(Bytes::copy_from_slice(iter.value())),
+                Bytes::copy_from_slice(iter.value()),
             );
             iter.next().await?;
             Ok(Some(kv))

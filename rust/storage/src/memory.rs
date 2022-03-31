@@ -39,7 +39,7 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// store should never be used in production.
 #[derive(Clone)]
 pub struct MemoryStateStore {
-    /// Stores (key, epoch) -> value
+    /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
     inner: Arc<Mutex<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
 }
 
@@ -123,7 +123,7 @@ impl StateStore for MemoryStateStore {
                 }
                 if Some(key) != last_key.as_ref() {
                     if let Some(value) = value {
-                        data.push((key.clone(), StorageValue::from(value.clone())));
+                        data.push((key.clone(), value.clone()));
                     }
                     last_key = Some(key.clone());
                 }
@@ -150,13 +150,13 @@ impl StateStore for MemoryStateStore {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let mut inner = self.inner.lock().await;
             for (key, value) in kv_pairs {
-                inner.insert((key, Reverse(epoch)), value.map(|v| v.to_bytes()));
+                inner.insert((key, Reverse(epoch)), value.user_value());
             }
             Ok(())
         }
@@ -164,7 +164,7 @@ impl StateStore for MemoryStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
@@ -206,18 +206,18 @@ impl StateStore for MemoryStateStore {
 }
 
 pub struct MemoryStateStoreIter {
-    inner: std::vec::IntoIter<(Bytes, StorageValue)>,
+    inner: std::vec::IntoIter<(Bytes, Bytes)>,
 }
 
 impl MemoryStateStoreIter {
-    fn new(iter: std::vec::IntoIter<(Bytes, StorageValue)>) -> Self {
+    fn new(iter: std::vec::IntoIter<(Bytes, Bytes)>) -> Self {
         Self { inner: iter }
     }
 }
 
 #[async_trait]
 impl StateStoreIter for MemoryStateStoreIter {
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
 
     async fn next(&mut self) -> Result<Option<Self::Item>> {
         Ok(self.inner.next())
@@ -234,8 +234,14 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (b"a".to_vec().into(), Some(b"v1".to_vec().into())),
-                    (b"b".to_vec().into(), Some(b"v1".to_vec().into())),
+                    (
+                        b"a".to_vec().into(),
+                        StorageValue::new(Default::default(), Some(b"v1".to_vec().into())),
+                    ),
+                    (
+                        b"b".to_vec().into(),
+                        StorageValue::new(Default::default(), Some(b"v1".to_vec().into())),
+                    ),
                 ],
                 0,
             )
@@ -244,8 +250,14 @@ mod tests {
         state_store
             .ingest_batch(
                 vec![
-                    (b"a".to_vec().into(), Some(b"v2".to_vec().into())),
-                    (b"b".to_vec().into(), None),
+                    (
+                        b"a".to_vec().into(),
+                        StorageValue::new(Default::default(), Some(b"v2".to_vec().into())),
+                    ),
+                    (
+                        b"b".to_vec().into(),
+                        StorageValue::new(Default::default(), None),
+                    ),
                 ],
                 1,
             )

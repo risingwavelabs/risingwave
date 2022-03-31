@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
 /// `SourceState` Represents an abstraction of state,
@@ -113,7 +114,8 @@ impl<S: StateStore> SourceStateHandler<S> {
                 // state inner key format (state_identifier | epoch)
                 let inner_key = StateStoredKey::new(state.identifier(), epoch).build_stored_key();
                 let value = state.encode();
-                local_batch.put(inner_key, value);
+                // TODO(Yuanxin): Implement value meta
+                local_batch.put(inner_key, StorageValue::new_default_put(value));
             });
             // If an error is returned, the underlying state should be rollback
             let ingest_rs = write_batch.ingest(epoch).await;
@@ -148,7 +150,7 @@ impl<S: StateStore> SourceStateHandler<S> {
                         .state_identifier
                         .eq(&state_identifier.clone())
                     {
-                        restore_values.push((stored_key.epoch, pair.1.to_bytes()))
+                        restore_values.push((stored_key.epoch, pair.1))
                     }
                 }
                 Ok(restore_values)

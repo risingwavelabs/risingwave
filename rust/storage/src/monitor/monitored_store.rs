@@ -147,7 +147,7 @@ where
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -162,7 +162,7 @@ where
 
             let total_size = kv_pairs
                 .iter()
-                .map(|(k, v)| k.len() + v.as_ref().map(|v| v.len()).unwrap_or_default())
+                .map(|(k, v)| k.len() + v.size())
                 .sum::<usize>();
 
             let timer = self.stats.write_batch_shared_buffer_time.start_timer();
@@ -214,7 +214,7 @@ where
 
     fn replicate_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { self.inner.replicate_batch(kv_pairs, epoch).await }
@@ -231,7 +231,7 @@ pub struct MonitoredStateStoreIter<I> {
 #[async_trait]
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
 where
-    I: StateStoreIter<Item = (Bytes, StorageValue)>,
+    I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
     type Item = I::Item;
 

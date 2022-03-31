@@ -70,7 +70,7 @@ impl StateStore for PanicStateStore {
 
     fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
@@ -80,7 +80,7 @@ impl StateStore for PanicStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move {
@@ -125,7 +125,7 @@ pub struct PanicStateStoreIter {}
 
 #[async_trait]
 impl StateStoreIter for PanicStateStoreIter {
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
 
     async fn next(&'_ mut self) -> Result<Option<Self::Item>> {
         unreachable!()
