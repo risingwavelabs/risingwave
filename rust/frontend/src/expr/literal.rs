@@ -33,8 +33,9 @@ impl std::fmt::Debug for Literal {
         } else {
             match &self.data {
                 None => write!(f, "null"),
-                // Add single quotation marks for string literals
+                // Add single quotation marks for string and interval literals
                 Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
+                Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
                 Some(v) => write!(f, "{}", v),
             }?;
             write!(f, ":{:?}", self.data_type)
