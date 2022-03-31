@@ -18,7 +18,6 @@ use std::future::Future;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use itertools::Itertools;
 
@@ -35,8 +34,7 @@ mod iterator;
 pub mod key;
 pub mod key_range;
 pub mod local_version_manager;
-#[cfg(test)]
-pub(crate) mod mock;
+pub mod mock;
 mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
@@ -69,7 +67,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
 use crate::storage_value::StorageValue;
-use crate::store::{collect_from_iter, *};
+use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 pub type HummockTTL = u64;
@@ -155,17 +153,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    #[cfg(not(feature = "blockv2"))]
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            table_capacity: options.sstable_size,
-            block_size: options.block_size,
-            bloom_false_positive: options.bloom_false_positive,
-            checksum_algo: options.checksum_algo,
-        })
-    }
-
-    #[cfg(feature = "blockv2")]
     fn get_builder(options: &StorageConfig) -> SSTableBuilder {
         SSTableBuilder::new(SSTableBuilderOptions {
             capacity: options.sstable_size as usize,
@@ -300,7 +287,19 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { collect_from_iter(self.iter(key_range, epoch).await?, limit).await }
+        async move {
+            let mut iter = self.iter(key_range, epoch).await?;
+            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+            for _ in 0..limit.unwrap_or(usize::MAX) {
+                match iter.next().await? {
+                    Some(kv) => kvs.push(kv),
+                    None => break,
+                }
+            }
+
+            Ok(kvs)
+        }
     }
 
     fn reverse_scan<R, B>(
@@ -313,7 +312,19 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await }
+        async move {
+            let mut iter = self.reverse_iter(key_range, epoch).await?;
+            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+            for _ in 0..limit.unwrap_or(usize::MAX) {
+                match iter.next().await? {
+                    Some(kv) => kvs.push(kv),
+                    None => break,
+                }
+            }
+
+            Ok(kvs)
+        }
     }
 
     /// Writes a batch to storage. The batch should be:
@@ -519,23 +530,24 @@ impl<'a> HummockStateStoreIter<'a> {
     }
 }
 
-#[async_trait]
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, StorageValue);
+    type NextFuture<'b> = impl Future<Output = Result<Option<Self::Item>>> where Self:'b;
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            let iter = &mut self.inner;
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let iter = &mut self.inner;
-
-        if iter.is_valid() {
-            let kv = (
-                Bytes::copy_from_slice(iter.key()),
-                StorageValue::from(Bytes::copy_from_slice(iter.value())),
-            );
-            iter.next().await?;
-            Ok(Some(kv))
-        } else {
-            Ok(None)
+            if iter.is_valid() {
+                let kv = (
+                    Bytes::copy_from_slice(iter.key()),
+                    StorageValue::from(Bytes::copy_from_slice(iter.value())),
+                );
+                iter.next().await?;
+                Ok(Some(kv))
+            } else {
+                Ok(None)
+            }
         }
     }
 }

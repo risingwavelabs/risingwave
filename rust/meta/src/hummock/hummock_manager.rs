@@ -345,7 +345,7 @@ where
     pub async fn unpin_version(
         &self,
         context_id: HummockContextId,
-        pinned_version_id: HummockVersionId,
+        pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_versions =
@@ -356,7 +356,9 @@ where
             }
             Some(context_pinned_version) => context_pinned_version,
         };
-        context_pinned_version.unpin_version(pinned_version_id);
+        for pinned_version_id in pinned_version_ids.as_ref() {
+            context_pinned_version.unpin_version(*pinned_version_id);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_version)?;
 
         #[cfg(test)]
@@ -658,7 +660,7 @@ where
     pub async fn unpin_snapshot(
         &self,
         context_id: HummockContextId,
-        hummock_snapshot: HummockSnapshot,
+        hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
         let mut pinned_snapshots =
@@ -670,7 +672,9 @@ where
             }
             Some(context_pinned_snapshot) => context_pinned_snapshot,
         };
-        context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        for hummock_snapshot in hummock_snapshots.as_ref() {
+            context_pinned_snapshot.unpin_snapshot(hummock_snapshot.epoch);
+        }
         commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
 
         #[cfg(test)]
@@ -748,11 +752,7 @@ where
     /// `report_compact_task` is retryable. `task_id` in `compact_task` parameter is used as the
     /// idempotency key. Return Ok(false) to indicate the `task_id` is not found, which may have
     /// been processed previously.
-    pub async fn report_compact_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> Result<bool> {
+    pub async fn report_compact_task(&self, compact_task: CompactTask) -> Result<bool> {
         let output_table_compact_entries: Vec<_> = compact_task
             .sorted_output_ssts
             .iter()
@@ -785,17 +785,15 @@ where
             return Ok(false);
         }
         compact_task_assignment.remove(&compact_task.task_id);
-        let delete_table_ids = match compact_status.report_compact_task(
-            output_table_compact_entries,
-            compact_task,
-            task_result,
-        ) {
+        let delete_table_ids = match compact_status
+            .report_compact_task(output_table_compact_entries, compact_task.clone())
+        {
             None => {
                 panic!("Inconsistent compact status");
             }
             Some(delete_table_ids) => delete_table_ids,
         };
-        if task_result {
+        if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
             let (
@@ -1013,11 +1011,11 @@ where
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let (mut current_version_id, mut sstable_id_infos, mut hummock_versions) = split_fields_mut_ref!(
+        let (mut current_version_id, mut hummock_versions, mut stale_sstables) = split_fields_mut_ref!(
             versioning_guard.deref_mut(),
             var_txn(current_version_id),
-            var_txn(sstable_id_infos),
-            var_txn(hummock_versions)
+            var_txn(hummock_versions),
+            var_txn(stale_sstables)
         );
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
@@ -1025,45 +1023,38 @@ where
         let mut new_hummock_version =
             hummock_versions.new_entry_txn_or_default(new_version_id, old_hummock_version);
 
-        let mut should_commit = false;
-
-        // Get tables in the committing epoch
-        let ret = match new_hummock_version
+        // Get and remove tables in the committing epoch
+        let uncommitted_epoch = new_hummock_version
             .uncommitted_epochs
             .iter()
             .position(|e| e.epoch == epoch)
-        {
-            Some(idx) => {
-                let uncommitted_epoch = &new_hummock_version.uncommitted_epochs[idx];
+            .map(|idx| new_hummock_version.uncommitted_epochs.swap_remove(idx));
 
-                // Remove tables of the aborting epoch
-                for sst in &uncommitted_epoch.tables {
-                    if let Some(mut sst_id_info) = sstable_id_infos.get_mut(&sst.id) {
-                        sst_id_info.meta_delete_timestamp = sstable_id_info::get_timestamp_now();
-                    }
-                }
-                new_hummock_version.uncommitted_epochs.swap_remove(idx);
+        if let Some(epoch_info) = uncommitted_epoch {
+            // Remove tables of the aborting epoch
+            let mut version_stale_sstables = stale_sstables.new_entry_txn_or_default(
+                old_version_id,
+                HummockStaleSstables {
+                    version_id: old_version_id,
+                    id: vec![],
+                },
+            );
+            version_stale_sstables
+                .id
+                .extend(epoch_info.tables.iter().map(|t| t.id));
 
-                // Create new_version
-                new_hummock_version.id = new_version_id;
+            // Create new_version
+            new_hummock_version.id = new_version_id;
 
-                should_commit = true;
-
-                Ok(())
-            }
-            None => Ok(()),
-        };
-
-        if should_commit {
             commit_multi_var!(
                 self,
                 None,
                 current_version_id,
                 new_hummock_version,
-                sstable_id_infos
+                version_stale_sstables
             )?;
         } else {
-            abort_multi_var!(current_version_id, new_hummock_version, sstable_id_infos);
+            abort_multi_var!(current_version_id, new_hummock_version, stale_sstables);
         }
 
         #[cfg(test)]
@@ -1072,7 +1063,7 @@ where
             self.check_state_consistency().await;
         }
 
-        ret
+        Ok(())
     }
 
     pub async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
@@ -1204,6 +1195,7 @@ where
 
     /// Get the `SSTable` ids which are guaranteed not to be included after `version_id`, thus they
     /// can be deleted if all versions LE than `version_id` are not referenced.
+    #[cfg(test)]
     pub async fn get_ssts_to_delete(
         &self,
         version_id: HummockVersionId,

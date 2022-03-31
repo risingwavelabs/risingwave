@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use risingwave_common::error::Result;
 use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview as ProstFinishedCreateMview;
@@ -52,8 +53,26 @@ impl From<FinishedCreateMview> for ProstFinishedCreateMview {
 }
 
 /// To notify about the finish of an DDL with the `u64` epoch.
-pub type FinishCreateMviewNotifierTx = oneshot::Sender<u64>;
-pub type FinishCreateMviewNotifierRx = oneshot::Receiver<u64>;
+pub struct FinishCreateMviewNotifier {
+    pub barrier_manager: Arc<parking_lot::Mutex<LocalBarrierManager>>,
+    pub actor_id: ActorId,
+}
+
+impl FinishCreateMviewNotifier {
+    pub fn notify(self, ddl_epoch: u64) {
+        self.barrier_manager
+            .lock()
+            .finish_create_mview(ddl_epoch, self.actor_id);
+    }
+}
+
+impl std::fmt::Debug for FinishCreateMviewNotifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FinishCreateMviewNotifier")
+            .field("actor_id", &self.actor_id)
+            .finish_non_exhaustive()
+    }
+}
 
 /// Collect result of some barrier on current compute node. Will be reported to the meta service.
 #[derive(Debug)]
@@ -162,8 +181,8 @@ impl LocalBarrierManager {
 
         // Actors to stop should still accept this barrier, but won't get sent to in next times.
         if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
+            trace!("remove actors {:?} from senders", actors);
             for actor in actors {
-                trace!("remove actor {} from senders", actor);
                 self.senders.remove(actor);
             }
         }

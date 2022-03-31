@@ -89,6 +89,12 @@
     insert into t values (1, 2), (3, 4);
   binder_error: 'Invalid input syntax: values length mismatched: expected 3, given 2'
 - sql: |
+    create table t(v1 int);
+    insert into t values(NULL);
+  batch_plan: |
+    BatchInsert { table: t }
+      BatchValues { rows: [[null:Int32]] }
+- sql: |
     create table t (v1 int, v2 int);
     delete from t where v1 = 1;
   batch_plan: |

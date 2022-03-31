@@ -74,7 +74,8 @@ where
 
         let req = request.into_inner();
 
-        tracing::debug!(
+        tracing::trace!(
+            target: "events::meta::create_mv_v1",
             plan = serde_json::to_string(&req).unwrap().as_str(),
             "create materialized view"
         );

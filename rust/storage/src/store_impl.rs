@@ -17,13 +17,12 @@ use std::sync::Arc;
 
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::{Result, RwError};
-use risingwave_rpc_client::MetaClient;
 
-use crate::hummock::hummock_meta_client::RpcHummockMetaClient;
+use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
-use crate::monitor::{HummockMetrics, MonitoredStateStore as Monitored, StateStoreMetrics};
+use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
 use crate::object::{InMemObjectStore, ObjectStore, S3ObjectStore};
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
@@ -87,9 +86,8 @@ impl StateStoreImpl {
     pub async fn new(
         s: &str,
         config: Arc<StorageConfig>,
-        meta_client: MetaClient,
+        hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
-        hummock_stats: Arc<HummockMetrics>,
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
@@ -125,10 +123,7 @@ impl StateStoreImpl {
                     config.clone(),
                     sstable_store.clone(),
                     Arc::new(LocalVersionManager::new(sstable_store)),
-                    Arc::new(RpcHummockMetaClient::new(
-                        meta_client,
-                        hummock_stats.clone(),
-                    )),
+                    hummock_meta_client,
                     state_store_stats.clone(),
                 )
                 .await

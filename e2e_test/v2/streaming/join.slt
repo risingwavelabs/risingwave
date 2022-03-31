@@ -81,9 +81,6 @@ statement ok
 insert into t7 values (1,4,2), (2,3,3);
 
 statement ok
-flush;
-
-statement ok
 insert into t8 values (3,3,5), (4,4,6);
 
 statement ok

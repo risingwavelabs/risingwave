@@ -58,7 +58,7 @@ impl<S: StateStore> ManagedMViewState<S> {
         }
     }
 
-    /// Put a key into the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// Put a key into the managed mview state. `arrange_keys` is composed of group keys and
     /// primary keys.
     pub fn put(&mut self, pk: Row, value: Row) {
         assert_eq!(self.order_types.len(), pk.size());
@@ -67,7 +67,7 @@ impl<S: StateStore> ManagedMViewState<S> {
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
-    /// Delete a key from the managed mview state. [`arrange_keys`] is composed of group keys and
+    /// Delete a key from the managed mview state. `arrange_keys` is composed of group keys and
     /// primary keys.
     pub fn delete(&mut self, pk: Row) {
         assert_eq!(self.order_types.len(), pk.size());
