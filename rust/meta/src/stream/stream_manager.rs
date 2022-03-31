@@ -198,7 +198,7 @@ where
                     info: actor_infos.clone(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
 
             let stream_actors = actors
                 .iter()
@@ -215,7 +215,7 @@ where
                     hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
@@ -232,7 +232,7 @@ where
                     hanging_channels,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -251,7 +251,7 @@ where
                     actor_id: actors,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // Add table fragments to meta store with state: `State::Creating`.
@@ -421,6 +421,13 @@ mod tests {
             &self,
             _request: Request<ShutdownRequest>,
         ) -> std::result::Result<Response<ShutdownResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn force_stop_actors(
+            &self,
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
             unimplemented!()
         }
     }

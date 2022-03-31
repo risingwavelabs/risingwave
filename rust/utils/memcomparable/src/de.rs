@@ -135,7 +135,7 @@ impl<B: Buf> Deserializer<B> {
     }
 
     /// Read u8 from Bytes input in decimal form (Do not include null tag). Used by value encoding
-    /// ([`serialize_cell`]). TODO: It is a temporal solution For value encoding. Will moved to
+    /// (`serialize_cell`). TODO: It is a temporal solution For value encoding. Will moved to
     /// value encoding serializer in future.
     pub fn read_decimal_v2(&mut self) -> Result<Vec<u8>> {
         let flag = self.input.get_u8();

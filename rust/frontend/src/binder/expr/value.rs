@@ -25,9 +25,8 @@ impl Binder {
             Value::Number(s, b) => self.bind_number(s, b),
             Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
-            // FIXME: For now we just use a dummy type (Boolean) for null. We should
-            // bind the actual type according to the table schema if it's an
-            // `INSERT INTO ... VALUES` statement.
+            // We just bind a dummy type (Boolean) for null here, and its type will be changed
+            // according to its context later.
             Value::Null => Ok(Literal::new(None, DataType::Boolean)),
             Value::Interval {
                 value,

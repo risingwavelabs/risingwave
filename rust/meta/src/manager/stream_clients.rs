@@ -50,7 +50,7 @@ impl StreamClients {
     /// new client will be created and returned.
     pub async fn get(&self, node: &WorkerNode) -> Result<StreamServiceClient<Channel>> {
         self.clients
-            .get_or_try_insert_with(node.id, async {
+            .try_get_with(node.id, async {
                 let addr: HostAddr = node.get_host()?.into();
                 let endpoint = Endpoint::from_shared(format!("http://{}", addr));
                 let client = StreamServiceClient::new(
@@ -59,7 +59,7 @@ impl StreamClients {
                         .connect_timeout(Duration::from_secs(5))
                         .connect()
                         .await
-                        .to_rw_result_with(format!("failed to connect to {}", node.get_id()))?,
+                        .to_rw_result_with(|| format!("failed to connect to {}", node.get_id()))?,
                 );
                 Ok::<_, RwError>(client)
             })

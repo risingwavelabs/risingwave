@@ -79,6 +79,9 @@ impl CompactStatus {
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {
+        // When we compact the files, we must make the result of compaction meet the following
+        // conditions, for any user key, the epoch of it in the file existing in the lower
+        // layer must be larger.
         let num_levels = self.level_handlers.len();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
         for (level_handler_idx, level_handler) in
@@ -345,6 +348,7 @@ impl CompactStatus {
                             cnt: 0,
                         }),
                     }),
+                    task_status: false,
                 };
                 Some(compact_task)
             }
@@ -359,9 +363,9 @@ impl CompactStatus {
         &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
-        task_result: bool,
     ) -> Option<Vec<HummockSSTableId>> {
         let mut delete_table_ids = vec![];
+        let task_result = compact_task.task_status;
         match task_result {
             true => {
                 for LevelEntry { level_idx, .. } in compact_task.input_ssts {

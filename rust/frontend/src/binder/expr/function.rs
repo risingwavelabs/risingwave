@@ -31,8 +31,8 @@ impl Binder {
             .try_collect()?;
 
         if f.name.0.len() == 1 {
-            let function_name = f.name.0.get(0).unwrap();
-            let agg_kind = match function_name.value.as_str() {
+            let function_name = f.name.0.get(0).unwrap().value.as_str();
+            let agg_kind = match function_name {
                 "count" => Some(AggKind::Count),
                 "sum" => Some(AggKind::Sum),
                 "min" => Some(AggKind::Min),
@@ -44,7 +44,7 @@ impl Binder {
                 self.ensure_aggregate_allowed()?;
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
             }
-            let function_type = match function_name.value.as_str() {
+            let function_type = match function_name {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
                 "like" => ExprType::Like,
@@ -62,6 +62,7 @@ impl Binder {
                 "is not false" => ExprType::IsNotFalse,
                 "is null" => ExprType::IsNull,
                 "is not null" => ExprType::IsNotNull,
+                "round" => ExprType::RoundDigit,
                 _ => {
                     return Err(ErrorCode::NotImplementedError(format!(
                         "unsupported function: {:?}",
@@ -70,9 +71,7 @@ impl Binder {
                     .into())
                 }
             };
-            Ok(ExprImpl::FunctionCall(Box::new(
-                FunctionCall::new(function_type, inputs).unwrap(),
-            )))
+            Ok(FunctionCall::try_new(function_name, function_type, inputs)?.into())
         } else {
             Err(
                 ErrorCode::NotImplementedError(format!("unsupported function: {:?}", f.name))
