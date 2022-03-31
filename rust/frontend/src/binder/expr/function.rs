@@ -15,7 +15,6 @@
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::expr::AggKind;
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
 use crate::binder::bind_context::Clause;
@@ -24,7 +23,7 @@ use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
-        let mut inputs = f
+        let inputs = f
             .args
             .into_iter()
             .map(|arg| self.bind_function_arg(arg))
@@ -63,10 +62,7 @@ impl Binder {
                 "is not false" => ExprType::IsNotFalse,
                 "is null" => ExprType::IsNull,
                 "is not null" => ExprType::IsNotNull,
-                "round" => {
-                    inputs = Self::rewrite_round_args(inputs);
-                    ExprType::RoundDigit
-                }
+                "round" => ExprType::RoundDigit,
                 _ => {
                     return Err(ErrorCode::NotImplementedError(format!(
                         "unsupported function: {:?}",
@@ -81,21 +77,6 @@ impl Binder {
                 ErrorCode::NotImplementedError(format!("unsupported function: {:?}", f.name))
                     .into(),
             )
-        }
-    }
-
-    /// Rewrite expr to be consistent with the `round` function signature.
-    /// - round(Decimal, Int) -> Decimal
-    fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
-        if inputs.len() == 2 {
-            let digits = inputs.pop().unwrap();
-            let input = inputs.pop().unwrap();
-            vec![
-                Self::ensure_type(input, DataType::Decimal),
-                Self::ensure_type(digits, DataType::Int32),
-            ]
-        } else {
-            inputs
         }
     }
 

@@ -109,8 +109,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
-    /// TODO: Check implicit-castiblility. For example, a decimal can be explicitly casted to
-    /// int32 via a CAST AS expression, but it's illegal to be casted implicitly to int32.
+    /// TODO: Check implicit-castiblility.
     pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if ty == expr.return_type() {
             expr
