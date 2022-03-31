@@ -282,6 +282,7 @@ impl ToStream for LogicalProject {
         let stream_plan = StreamProject::new(new_logical);
         required_dist.enforce_if_not_satisfies(stream_plan.into(), Order::any())
     }
+
     fn to_stream(&self) -> PlanRef {
         self.to_stream_with_dist_required(Distribution::any())
     }

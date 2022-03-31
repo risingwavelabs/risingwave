@@ -248,7 +248,7 @@ template:
     port: 4567
 
     # Id of this instance
-    id: frontend-legacy
+    id: frontend-legacy-${port}
 
     # Meta-nodes used by this frontend-legacy instance
     provide-meta-node: "meta-node*"
@@ -264,7 +264,7 @@ template:
     port: 4566
 
     # Id of this instance
-    id: frontend
+    id: frontend-${port}
 
     # Meta-nodes used by this frontend instance
     provide-meta-node: "meta-node*"
