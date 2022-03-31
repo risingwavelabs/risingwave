@@ -423,6 +423,13 @@ mod tests {
         ) -> std::result::Result<Response<ShutdownResponse>, Status> {
             unimplemented!()
         }
+
+        async fn force_stop_actors(
+            &self,
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {
