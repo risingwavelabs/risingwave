@@ -30,7 +30,6 @@ pub use sstable_iterator::*;
 mod reverse_sstable_iterator;
 pub use reverse_sstable_iterator::*;
 mod utils;
-use risingwave_pb::hummock::SstableMeta as PbSstableMeta;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 
@@ -45,11 +44,11 @@ const VERSION: u32 = 1;
 /// [`SSTable`] is a handle for accessing SST in [`TableManager`].
 pub struct Sstable {
     pub id: u64,
-    pub meta: PbSstableMeta,
+    pub meta: SstableMeta,
 }
 
 impl Sstable {
-    pub fn new(id: u64, meta: PbSstableMeta) -> Self {
+    pub fn new(id: u64, meta: SstableMeta) -> Self {
         Self { id, meta }
     }
 

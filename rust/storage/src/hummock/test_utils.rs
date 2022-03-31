@@ -19,9 +19,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_pb::hummock::SstableMeta;
 
-use super::{CompressionAlgorithm, DEFAULT_RESTART_INTERVAL};
+use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::key::key_with_epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
