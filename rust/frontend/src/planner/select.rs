@@ -92,7 +92,7 @@ impl Planner {
     /// [`LogicalApply`] (correlated) or [`LogicalJoin`].
     ///
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
-    /// [`LogicalJoin`] using [`substitute_subqueries`].
+    /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
             return Ok(LogicalFilter::create_with_expr(input, where_clause));

@@ -38,7 +38,7 @@ pub trait Session: Send + Sync {
     ) -> Result<PgResponse, Box<dyn Error + Send + Sync>>;
 }
 
-/// Binds a Tcp listener at [`addr`]. Spawn a coroutine to serve every new connection.
+/// Binds a Tcp listener at `addr`. Spawn a coroutine to serve every new connection.
 pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::Result<()> {
     let listener = TcpListener::bind(addr).await.unwrap();
     // accept connections and process them, spawning a new thread for each one

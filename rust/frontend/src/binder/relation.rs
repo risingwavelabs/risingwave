@@ -232,7 +232,7 @@ impl Binder {
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
-    fn bind_context(
+    pub(super) fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
@@ -269,7 +269,7 @@ impl Binder {
         }
     }
 
-    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// Binds a subquery using [`bind_query`](Self::bind_query), which will use a new empty
     /// [`BindContext`](super::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.

@@ -153,17 +153,6 @@ impl HummockStorage {
         Ok(instance)
     }
 
-    #[cfg(not(feature = "blockv2"))]
-    fn get_builder(options: &StorageConfig) -> SSTableBuilder {
-        SSTableBuilder::new(SSTableBuilderOptions {
-            table_capacity: options.sstable_size,
-            block_size: options.block_size,
-            bloom_false_positive: options.bloom_false_positive,
-            checksum_algo: options.checksum_algo,
-        })
-    }
-
-    #[cfg(feature = "blockv2")]
     fn get_builder(options: &StorageConfig) -> SSTableBuilder {
         SSTableBuilder::new(SSTableBuilderOptions {
             capacity: options.sstable_size as usize,
