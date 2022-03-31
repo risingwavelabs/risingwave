@@ -180,7 +180,8 @@ impl ExprRewriter for ExprHandler {
             .ensure_type(return_type);
 
             let right_return_type =
-                AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()]).unwrap();
+                AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
+                    .unwrap();
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
