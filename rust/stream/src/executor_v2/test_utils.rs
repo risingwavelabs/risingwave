@@ -50,7 +50,6 @@ impl MockSource {
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
         Self {
             schema,
@@ -69,6 +68,7 @@ impl MockSource {
         }
     }
 
+    #[must_use]
     pub fn stop_on_finish(self, stop_on_finish: bool) -> Self {
         Self {
             stop_on_finish,
