@@ -111,6 +111,7 @@ impl Binder {
     }
 
     /// Check if cast needs to be inserted.
+    /// TODO: check castiblility with context.
     pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
         if expr.is_null() {
             ExprImpl::Literal(Box::new(Literal::new(None, ty)))

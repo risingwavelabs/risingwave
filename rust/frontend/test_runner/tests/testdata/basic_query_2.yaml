@@ -23,7 +23,7 @@
     BatchValues { rows: [[Not(true:Boolean)]] }
 - sql: |
     values(must_be_unimplemented_func(1));
-  binder_error: 'Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }'
+  binder_error: 'Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"'
 - sql: |
     values(sum(1));
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
