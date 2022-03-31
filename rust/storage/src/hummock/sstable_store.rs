@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO(MrCroxx): This file needs to be refactored.
-
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -35,7 +33,6 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    /// TODO: meta is also supposed to be block based, and meta cache will be removed.
     sstable_cache: Cache<u64, Arc<Sstable>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
@@ -60,8 +57,6 @@ impl SstableStore {
     ) -> HummockResult<usize> {
         let timer = self.stats.sst_block_put_remote_duration.start_timer();
 
-        // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
-        // reuse block encoding later.
         let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
 
