@@ -94,9 +94,10 @@ impl Block {
 
     /// Searches the index of the restart point that the given `offset` belongs to.
     pub fn search_restart_point(&self, offset: usize) -> usize {
+        // Find the first restart point that equals or largers than given offset.
         self.restart_points
-            .binary_search(&(offset as u32))
-            .unwrap_or_else(|x| x.saturating_sub(1))
+            .partition_point(|&position| position <= offset as u32)
+            - 1
     }
 
     pub fn search_restart_point_by<F>(&self, f: F) -> usize
