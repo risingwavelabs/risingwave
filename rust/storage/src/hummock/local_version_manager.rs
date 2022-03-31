@@ -279,22 +279,28 @@ impl LocalVersionManager {
         // For each run in the loop, accumulate versions to unpin and call unpin RPC once.
         loop {
             min_execute_interval_tick.tick().await;
+            let local_version_manager = match local_version_manager.upgrade() {
+                None => {
+                    tracing::info!("Shutdown hummock unpin worker");
+                    return;
+                }
+                Some(local_version_manager) => local_version_manager,
+            };
             // 1. Collect new versions to unpin.
             'collect: loop {
                 match rx.try_recv() {
                     Ok(version) => {
                         versions_to_unpin.push(version);
                     }
-                    Err(err) => {
-                        match err {
-                            TryRecvError::Empty => {}
-                            TryRecvError::Disconnected => {
-                                tracing::info!("Shutdown hummock unpin worker");
-                                return;
-                            }
+                    Err(err) => match err {
+                        TryRecvError::Empty => {
+                            break 'collect;
                         }
-                        break 'collect;
-                    }
+                        TryRecvError::Disconnected => {
+                            tracing::info!("Shutdown hummock unpin worker");
+                            return;
+                        }
+                    },
                 }
             }
             if versions_to_unpin.is_empty() {
@@ -306,13 +312,11 @@ impl LocalVersionManager {
                 .await
             {
                 Ok(_) => {
-                    if let Some(local_version_manager) = local_version_manager.upgrade() {
-                        for version in &versions_to_unpin {
-                            local_version_manager.unref_committed_epoch(
-                                version.max_committed_epoch,
-                                shared_buffer_manager.borrow(),
-                            )
-                        }
+                    for version in &versions_to_unpin {
+                        local_version_manager.unref_committed_epoch(
+                            version.max_committed_epoch,
+                            shared_buffer_manager.borrow(),
+                        )
                     }
                     versions_to_unpin.clear();
                     retry_backoff = get_backoff_strategy();

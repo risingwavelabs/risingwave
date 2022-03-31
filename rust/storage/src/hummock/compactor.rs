@@ -328,16 +328,20 @@ impl Compactor {
     ) {
         if let Some(vacuum_task) = vacuum_task {
             tracing::debug!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
-            if let Err(e) = Vacuum::vacuum(
+            match Vacuum::vacuum(
                 sstable_store.clone(),
                 vacuum_task,
                 hummock_meta_client.clone(),
             )
             .await
             {
-                tracing::warn!("Failed to vacuum SSTs. {}", e);
+                Ok(_) => {
+                    tracing::debug!("Finish vacuuming SSTs");
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to vacuum SSTs. {}", e);
+                }
             }
-            tracing::debug!("Finish vacuuming SSTs");
         }
     }
 
