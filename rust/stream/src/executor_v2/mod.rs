@@ -27,11 +27,11 @@ mod filter;
 mod simple;
 #[cfg(test)]
 mod test_utils;
-mod v1_compact;
+mod v1_compat;
 
 pub use filter::FilterExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
-pub use v1_compact::StreamExecutorV1;
+pub use v1_compat::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
