@@ -102,7 +102,7 @@ impl FunctionCall {
                 .map(|i| format!("{:?}", i.return_type()))
                 .join(",");
             ErrorCode::NotImplementedError(format!(
-                "function: {}({}) doesn't exist",
+                "function {}({}) doesn't exist",
                 function_name, args
             ))
             .into()
