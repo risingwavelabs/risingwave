@@ -24,6 +24,7 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![feature(trait_alias)]
+#![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
 #![feature(binary_heap_drain_sorted)]
@@ -34,6 +35,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
+#![feature(associated_type_defaults)]
 
 #[macro_use]
 extern crate log;

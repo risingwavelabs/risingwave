@@ -126,7 +126,7 @@ async fn test_merger_sum_aggr() {
         ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
-        RoundRobinDataDispatcher::new(inputs),
+        DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
         0,
         ctx,
     );
