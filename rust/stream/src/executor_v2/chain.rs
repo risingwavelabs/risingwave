@@ -21,6 +21,10 @@ use super::error::TracedStreamExecutorError;
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
+/// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
+/// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
+/// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
+/// existing MVs are dispatched.
 pub struct ChainExecutor {
     snapshot: BoxedExecutor,
 
