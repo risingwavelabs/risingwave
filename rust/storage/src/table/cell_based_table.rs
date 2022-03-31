@@ -268,7 +268,7 @@ pub struct CellBasedTableRowIter<S: StateStore> {
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
     /// Statistics
-    stats: Arc<StateStoreMetrics>,
+    _stats: Arc<StateStoreMetrics>,
 }
 
 impl<S: StateStore> CellBasedTableRowIter<S> {
@@ -278,7 +278,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         keyspace: Keyspace<S>,
         table_descs: Vec<ColumnDesc>,
         epoch: u64,
-        stats: Arc<StateStoreMetrics>,
+        _stats: Arc<StateStoreMetrics>,
     ) -> Result<Self> {
         keyspace.state_store().wait_epoch(epoch).await?;
 
@@ -292,7 +292,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             err_msg: None,
             epoch,
             cell_based_row_deserializer,
-            stats,
+            _stats,
         };
         Ok(iter)
     }
@@ -372,11 +372,6 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
         }
 
         loop {
-            let _pack_cell_timer = self
-                .stats
-                .cell_table_next_pack_cell_duration
-                .local()
-                .start_timer();
             let (key, value) = match self.buf.get(self.next_idx) {
                 Some(kv) => kv,
                 None => {
