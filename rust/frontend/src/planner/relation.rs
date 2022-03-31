@@ -15,7 +15,6 @@
 use std::rc::Rc;
 
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
@@ -53,7 +52,11 @@ impl Planner {
     ) -> Result<PlanRef> {
         use WindowTableFunctionKind::*;
         match table_function.kind {
-            Tumble => self.plan_tumble_window(table_function.input, table_function.args),
+            Tumble => self.plan_tumble_window(
+                table_function.input,
+                table_function.time_col,
+                table_function.args,
+            ),
             Hop => Err(ErrorCode::NotImplementedError(
                 "HOP window function is not implemented yet".to_string(),
             )
@@ -64,15 +67,12 @@ impl Planner {
     fn plan_tumble_window(
         &mut self,
         input: BoundBaseTable,
+        time_col: InputRef,
         args: Vec<ExprImpl>,
     ) -> Result<PlanRef> {
         let mut args = args.into_iter();
-        match (args.next(), args.next(), args.next()) {
-            (
-                Some(time_col_ref @ ExprImpl::InputRef(_)),
-                Some(window_size @ ExprImpl::Literal(_)),
-                None,
-            ) => {
+        match (args.next(), args.next()) {
+            (Some(window_size @ ExprImpl::Literal(_)), None) => {
                 let cols = &input.table_desc.columns;
                 let mut exprs = Vec::with_capacity(cols.len() + 2);
                 let mut expr_aliases = Vec::with_capacity(cols.len() + 2);
@@ -83,11 +83,12 @@ impl Planner {
                     ))));
                     expr_aliases.push(None);
                 }
+                let time_col_data_type = time_col.data_type();
                 let window_start =
                     ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                         ExprType::TumbleStart,
-                        vec![time_col_ref, window_size.clone()],
-                        DataType::Timestamp,
+                        vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                        time_col_data_type.clone(),
                     )));
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
@@ -96,7 +97,7 @@ impl Planner {
                     ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                         ExprType::Add,
                         vec![window_start.clone(), window_size],
-                        DataType::Timestamp,
+                        time_col_data_type,
                     )));
                 exprs.push(window_start);
                 exprs.push(window_end);

@@ -2,11 +2,10 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, BoundBaseTable, Result};
-use crate::expr::ExprImpl;
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {
@@ -32,6 +31,7 @@ impl FromStr for WindowTableFunctionKind {
 pub struct BoundWindowTableFunction {
     pub(crate) input: BoundBaseTable,
     pub(crate) kind: WindowTableFunctionKind,
+    pub(crate) time_col: InputRef,
     pub(crate) args: Vec<ExprImpl>,
 }
 
@@ -41,7 +41,11 @@ impl Binder {
         kind: WindowTableFunctionKind,
         args: Vec<FunctionArg>,
     ) -> Result<BoundWindowTableFunction> {
-        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.get(0) else {
+        let mut args = args.into_iter();
+
+        self.push_context();
+
+        let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(expr))) = args.next() else {
             return Err(ErrorCode::BindError(
                 "the 1st arg of window table function should be table".to_string(),
             )
@@ -55,13 +59,31 @@ impl Binder {
             )
             .into()),
         }?;
+
+        let base = self.bind_table(table_name.clone())?;
+
+        let Some(time_col_arg) = args.next() else {
+            return Err(ErrorCode::BindError(
+                "the 2st arg of window table function should be time_col".to_string(),
+            )
+            .into());
+        };
+        let Some(ExprImpl::InputRef(time_col)) = self.bind_function_arg(time_col_arg)?.into_iter().next() else {
+            return Err(ErrorCode::BindError(
+                "the 2st arg of window table function should be time_col".to_string(),
+            )
+            .into());
+        };
+
+        let time_col_data_type = time_col.data_type();
+
+        self.pop_context();
+
         let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
         let table_catalog =
             self.catalog
                 .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
 
-        let table_id = table_catalog.id();
-        let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
         if columns.iter().any(|col| {
             col.name().eq_ignore_ascii_case("window_start")
@@ -84,26 +106,24 @@ impl Binder {
             })
             .chain(
                 [
-                    ("window_start".to_string(), DataType::Timestamp, false),
-                    ("window_end".to_string(), DataType::Timestamp, false),
+                    (
+                        "window_start".to_string(),
+                        time_col_data_type.clone(),
+                        false,
+                    ),
+                    ("window_end".to_string(), time_col_data_type, false),
                 ]
                 .into_iter(),
             );
         self.bind_context(columns, table_name.clone())?;
 
-        let base = BoundBaseTable {
-            name: table_name,
-            table_desc,
-            table_id,
-        };
         let exprs: Vec<_> = args
-            .into_iter()
-            .skip(1)
             .map(|arg| self.bind_function_arg(arg))
             .flatten_ok()
             .try_collect()?;
         Ok(BoundWindowTableFunction {
             input: base,
+            time_col: *time_col,
             kind,
             args: exprs,
         })
