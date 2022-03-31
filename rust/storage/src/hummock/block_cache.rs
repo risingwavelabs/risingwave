@@ -49,14 +49,10 @@ impl BlockCache {
     where
         F: Future<Output = HummockResult<Arc<Block>>>,
     {
-        match self
-            .inner
+        self.inner
             .try_get_with(Self::key(sst_id, block_idx), f)
             .await
-        {
-            Ok(block) => Ok(block),
-            Err(e) => Err(HummockError::Other(e.to_string()).into()),
-        }
+            .map_err(|e| HummockError::Other(e.to_string()).into())
     }
 
     fn key(sst_id: u64, block_idx: u64) -> Bytes {
