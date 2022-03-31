@@ -10,7 +10,7 @@
 
 You may start RisingWave with our pre-built binary, or build from source.
 
-**Use Pre-built Binary**
+**Use Pre-built Binary (Linux x86_64)**
 
 ```shell
 wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4-alpha/risingwave-v0.1.4-alpha-unknown-linux.tar.gz
@@ -18,14 +18,15 @@ tar xvf risingwave-v0.1.4-alpha-unknown-linux.tar.gz
 ./risingwave playground
 ```
 
-**Build from Source**
+**Build from Source (macOS, Linux)**
 
 ```shell
-git clone https://github.com/singularity-data/risingwave.git
-./risedev playground
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh                 # Install Rust toolchain
+git clone https://github.com/singularity-data/risingwave.git && cd risingwave  # Clone the repo
+./risedev playground                                                           # Compile and start the playground
 ```
 
-Building from source requires several tools to be installed in the system. See [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+Building from source requires several tools to be installed in the system. You may also use `./risedev configure` to adjust compile settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
 
 If you want to start a full cluster, enable metrics, and persist data, you may also refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
 
