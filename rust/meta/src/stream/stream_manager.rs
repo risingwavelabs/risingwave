@@ -97,6 +97,7 @@ where
         mut table_fragments: TableFragments,
         ctx: CreateMaterializedViewContext,
     ) -> Result<()> {
+        debug!("create_materialized_view: {:#?}", table_fragments);
         let nodes = self
             .cluster_manager
             .list_worker_node(

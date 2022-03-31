@@ -42,7 +42,7 @@ pub struct StreamActorBuilder {
     dispatcher: Option<Dispatcher>,
     /// downstream actor set.
     downstream_actors: BTreeSet<ActorId>,
-    /// upstream actor array.
+    /// upstream actor array, here we build and set upstream actors in exactly the same order.
     upstream_actors: Vec<Vec<ActorId>>,
 }
 
@@ -177,16 +177,16 @@ where
             let mut actor = builder.build();
             let actor_id = actor.actor_id;
 
-            let upstream_actors = builder.get_upstream_actors();
             let mut dispatch_upstreams = vec![];
+            let mut upstream_actors = builder.get_upstream_actors();
+            upstream_actors.reverse();
 
             actor.nodes = Some(self.build_inner(
                 &mut table_sink_map,
                 &mut dispatch_upstreams,
                 &mut upstream_node_actors,
                 actor.get_nodes()?,
-                &upstream_actors,
-                0,
+                &mut upstream_actors,
             )?);
 
             graph
@@ -227,8 +227,7 @@ where
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
         stream_node: &StreamNode,
-        upstream_actor_id: &[Vec<ActorId>],
-        next_idx: usize,
+        upstream_actor_id: &mut Vec<Vec<ActorId>>,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => self.build_inner(
@@ -237,7 +236,6 @@ where
                 upstream_node_actors,
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
-                next_idx,
             ),
             Node::ChainNode(_) => self.resolve_chain_node(
                 table_sink_map,
@@ -247,25 +245,21 @@ where
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                let mut next_idx_new = next_idx;
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(exchange_node) => {
-                            assert!(next_idx_new < upstream_actor_id.len());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
                                 pk_indices: input.pk_indices.clone(),
                                 node: Some(Node::MergeNode(MergeNode {
                                     upstream_actor_id: upstream_actor_id
-                                        .get(next_idx_new)
-                                        .cloned()
-                                        .unwrap(),
+                                        .pop()
+                                        .expect("failed to pop upstream actor id"),
                                     fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
                             };
-                            next_idx_new += 1;
                         }
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] = self.resolve_chain_node(
@@ -282,7 +276,6 @@ where
                                 upstream_node_actors,
                                 input,
                                 upstream_actor_id,
-                                next_idx_new,
                             )?;
                         }
                     }
