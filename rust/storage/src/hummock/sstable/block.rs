@@ -94,19 +94,18 @@ impl Block {
 
     /// Searches the index of the restart point that the given `offset` belongs to.
     pub fn search_restart_point(&self, offset: usize) -> usize {
-        // Find the first restart point that equals or largers than given offset.
+        // Find the largest restart point that equals or less than the given offset.
         self.restart_points
             .partition_point(|&position| position <= offset as u32)
-            - 1
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
     }
 
-    pub fn search_restart_point_by<F>(&self, f: F) -> usize
+    /// Searches the index of the restart point by partition point.
+    pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
     where
-        F: FnMut(&u32) -> Ordering,
+        P: FnMut(&u32) -> bool,
     {
-        self.restart_points
-            .binary_search_by(f)
-            .unwrap_or_else(|x| x.saturating_sub(1))
+        self.restart_points.partition_point(pred)
     }
 
     pub fn data(&self) -> &Bytes {

@@ -178,11 +178,17 @@ impl BlockIterator {
 
     /// Searchs the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
-        self.block.search_restart_point_by(|probe| {
-            let prefix = self.decode_prefix_at(*probe as usize);
-            let probe_key = &self.block.data()[prefix.diff_key_range()];
-            VersionedComparator::compare_key(probe_key, key)
-        })
+        // Find the largest restart point that restart key equals or less than the given key.
+        self.block
+            .search_restart_partition_point(|&probe| {
+                let prefix = self.decode_prefix_at(probe as usize);
+                let probe_key = &self.block.data()[prefix.diff_key_range()];
+                match VersionedComparator::compare_key(probe_key, key) {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                }
+            })
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
