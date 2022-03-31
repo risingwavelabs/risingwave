@@ -18,10 +18,10 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::TracedStreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::task::FinishCreateMviewNotifier;
+use super::{BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
+use crate::task::{ActorId, FinishCreateMviewNotifier};
 
-pub struct RearrangeChainExecutor {
+pub struct ChainExecutor {
     snapshot: BoxedExecutor,
 
     upstream: BoxedExecutor,
@@ -29,6 +29,8 @@ pub struct RearrangeChainExecutor {
     upstream_indices: Vec<usize>,
 
     notifier: FinishCreateMviewNotifier,
+
+    actor_id: ActorId,
 
     info: ExecutorInfo,
 }
@@ -50,7 +52,7 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
     }
 }
 
-impl RearrangeChainExecutor {
+impl ChainExecutor {
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
         let snapshot = self.snapshot.execute();
@@ -64,16 +66,20 @@ impl RearrangeChainExecutor {
             .expect("the first message received by chain must be a barrier");
         let epoch = barrier.epoch;
 
-        let to_consume_snapshot = if barrier.is_add_output_mutation() {
+        let to_consume_snapshot = match barrier.mutation.as_ref().cloned().as_deref() {
             // If the barrier is a conf change of creating this mview, init snapshot from its epoch
             // and begin to consume the snapshot.
-            // TODO: init the snapshot with epoch.prev
-            true
-        } else {
+            Some(Mutation::AddOutput(map)) => map
+                .values()
+                .flatten()
+                .find(|info| info.actor_id == self.actor_id)
+                .is_some(),
+
             // If the barrier is not a conf change, it means we've recovered and the snapshot is
             // already consumed.
-            false
+            _ => false,
         };
+
         // The first barrier message should be propagated.
         yield first_msg;
 
@@ -81,6 +87,8 @@ impl RearrangeChainExecutor {
         // no mapping required.
         //
         if to_consume_snapshot {
+            // TODO: init the snapshot with epoch.prev
+
             #[for_await]
             for msg in snapshot {
                 let msg = msg?;
@@ -102,7 +110,7 @@ impl RearrangeChainExecutor {
     }
 }
 
-impl Executor for RearrangeChainExecutor {
+impl Executor for ChainExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }
