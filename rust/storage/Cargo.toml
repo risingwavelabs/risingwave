@@ -75,4 +75,5 @@ tikv = ["tikv-client"]
 [[bench]]
 name = "bench_block_iter"
 harness = false
-debug = true
+# Enable debug if you want to generate flamegraph.
+# debug = true
