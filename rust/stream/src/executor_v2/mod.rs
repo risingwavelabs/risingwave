@@ -23,6 +23,7 @@ pub use super::executor::{
 };
 
 mod filter;
+mod rearrange_chain;
 mod simple;
 #[cfg(test)]
 mod test_utils;
