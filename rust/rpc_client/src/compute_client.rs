@@ -45,7 +45,7 @@ impl ComputeClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .to_rw_result_with(format!("failed to connect to {}", &addr))?;
+            .to_rw_result_with(|| format!("failed to connect to {}", &addr))?;
         let exchange_client = ExchangeServiceClient::new(channel.clone());
         let task_client = TaskServiceClient::new(channel);
         Ok(Self {
@@ -89,10 +89,12 @@ impl ComputeClient {
                 down_fragment_id,
             })
             .await
-            .to_rw_result_with(format!(
-                "failed to create stream from remote_input {} from fragment {} to fragment {}",
-                self.addr, up_fragment_id, down_fragment_id
-            ))?
+            .to_rw_result_with(|| {
+                format!(
+                    "failed to create stream from remote_input {} from fragment {} to fragment {}",
+                    self.addr, up_fragment_id, down_fragment_id
+                )
+            })?
             .into_inner())
     }
 
