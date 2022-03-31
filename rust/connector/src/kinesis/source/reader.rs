@@ -140,11 +140,11 @@ impl SourceReader for KinesisSplitReader {
             let split_id = String::from_utf8(state.identifier.to_vec())?;
 
             let mut start_offset = KinesisOffset::Earliest;
-            if state.start_offset != *"" {
+            if !state.start_offset.is_empty() {
                 start_offset = KinesisOffset::SequenceNumber(state.start_offset);
             }
             let mut end_offset = KinesisOffset::None;
-            if state.end_offset != *"" {
+            if !state.end_offset.is_empty() {
                 end_offset = KinesisOffset::SequenceNumber(state.end_offset);
             }
             let split = KinesisSplit {

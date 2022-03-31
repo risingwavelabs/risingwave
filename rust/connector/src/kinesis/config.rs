@@ -23,8 +23,6 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use serde::{Deserialize, Serialize};
 
-
-
 const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
 const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
 const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
