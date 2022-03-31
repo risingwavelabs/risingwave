@@ -768,6 +768,7 @@ jobs:
           path: .
       - name: package as tar
         run: |
+          chmod +x risingwave
           tar -czvf risingwave-${GITHUB_REF_NAME}-unknown-linux.tar.gz risingwave
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
