@@ -198,7 +198,7 @@ impl Binder {
                             .map(|t| Relation::WindowTableFunction(Box::new(t)))
                     }
                     _ => Err(
-                        ErrorCode::NotImplementedError(format!("unknown table function")).into(),
+                        ErrorCode::NotImplementedError("unknown table function".to_string()).into(),
                     ),
                 }
             }
