@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::from_utf8;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -22,7 +21,7 @@ use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
 use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
-use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
+use rdkafka::{ClientConfig, Message, TopicPartitionList};
 
 use crate::base::{InnerMessage, SourceReader};
 use crate::kafka::split::{KafkaOffset, KafkaSplit};
@@ -74,31 +73,41 @@ impl SourceReader for KafkaSplitReader {
         Ok(Some(ret))
     }
 
-    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
-        let kafka_split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
-        let mut tpl = TopicPartitionList::new();
+    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
+    //     let kafka_split: KafkaSplit = serde_json::from_str(from_utf8(split)?)?;
+    //     let mut tpl = TopicPartitionList::new();
 
-        let offset = match kafka_split.start_offset {
-            KafkaOffset::None | KafkaOffset::Earliest => Offset::Beginning,
-            KafkaOffset::Latest => Offset::End,
-            KafkaOffset::Offset(offset) => Offset::Offset(offset),
-            KafkaOffset::Timestamp(_) => unimplemented!(),
-        };
+    //     let offset = match kafka_split.start_offset {
+    //         KafkaOffset::None | KafkaOffset::Earliest => Offset::Beginning,
+    //         KafkaOffset::Latest => Offset::End,
+    //         KafkaOffset::Offset(offset) => Offset::Offset(offset),
+    //         KafkaOffset::Timestamp(_) => unimplemented!(),
+    //     };
 
-        tpl.add_partition_offset(self.topic.as_str(), kafka_split.partition, offset)
-            .map_err(|e| anyhow!(e))?;
+    //     tpl.add_partition_offset(self.topic.as_str(), kafka_split.partition, offset)
+    //         .map_err(|e| anyhow!(e))?;
 
-        self.consumer.assign(&tpl).map_err(|e| anyhow!(e))?;
+    //     self.consumer.assign(&tpl).map_err(|e| anyhow!(e))?;
 
-        let partition_queue = self
-            .consumer
-            .split_partition_queue(self.topic.as_str(), kafka_split.partition)
-            .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
+    //     let partition_queue = self
+    //         .consumer
+    //         .split_partition_queue(self.topic.as_str(), kafka_split.partition)
+    //         .ok_or_else(|| anyhow!("Failed to split partition queue"))?;
 
-        self.partition_queue = partition_queue;
-        self.assigned_split = kafka_split;
+    //     self.partition_queue = partition_queue;
+    //     self.assigned_split = kafka_split;
 
-        Ok(())
+    //     Ok(())
+    // }
+
+    async fn new(
+        _config: std::collections::HashMap<String, String>,
+        _state: Option<crate::ConnectorState>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 }
 
