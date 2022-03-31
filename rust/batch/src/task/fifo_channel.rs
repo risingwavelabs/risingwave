@@ -35,7 +35,7 @@ impl ChanSender for FifoSender {
         async move {
             self.sender
                 .send(chunk)
-                .to_rw_result_with("FifoSender::send")
+                .to_rw_result_with(|| "FifoSender::send".into())
         }
     }
 }

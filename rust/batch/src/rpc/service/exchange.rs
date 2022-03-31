@@ -48,7 +48,7 @@ impl ExchangeWriter for GrpcExchangeWriter {
         self.sender
             .send(Ok(data))
             .await
-            .to_rw_result_with("failed to write data to ExchangeWriter")
+            .to_rw_result_with(|| "Failed to send data to exchange".into())
     }
 }
 
