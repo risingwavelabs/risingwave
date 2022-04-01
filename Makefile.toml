@@ -518,3 +518,14 @@ dependencies = [
   "check-logs",
 ]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.slt]
+category = "RiseDev - SQLLogitTest"
+dependencies = ["warn-on-missing-tools"]
+script = """
+#!/bin/bash
+set -e
+
+sqllogictest "$@"
+"""
+description = "Run SQLLogicTest"
