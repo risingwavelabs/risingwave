@@ -98,6 +98,7 @@ impl ChainExecutor {
 
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self) {
+        // 0. Project the upstream with `upstream_indices`.
         let upstream_indices = self.upstream_indices.clone();
         let mut upstream = self
             .upstream
@@ -129,19 +130,31 @@ impl ChainExecutor {
         yield first_msg;
 
         if to_consume_snapshot {
+            // If we need to consume the snapshot ...
+            // We will spawn a background task to poll the upstream actively, in order to get the
+            // barrier as soon as possible and then to rearrange(steal) it.
+
+            // The barriers polled from upstream to rearrange.
             let (rearranged_barrier_tx, rearranged_barrier_rx) = mpsc::unbounded();
+            // The upstream after transforming the barriers to phajtom barriers.
             let (upstream_tx, upstream_rx) = mpsc::unbounded();
+            // When we catch-up the progress, notify the task to stop.
             let (stop_rearrange_tx, mut stop_rearrange_rx) = oneshot::channel();
 
+            // 2. Actually, the `first_msg` is rearranged too. So we need to put a phantom barrier.
+            //
             upstream_tx
                 .unbounded_send(RearrangedMessage::PhantomBarrier(create_epoch))
                 .unwrap();
 
+            // 3. Spawn the background task.
+            //
             let upstream_poll_handle = tokio::spawn(async move {
                 #[for_await]
                 for msg in &mut upstream {
                     let msg = msg?;
                     match msg {
+                        // If we polled a chunk, simply put it to the `upstream_tx`.
                         Message::Chunk(chunk) => {
                             info!("polled chunk");
 
@@ -149,6 +162,9 @@ impl ChainExecutor {
                                 .unbounded_send(RearrangedMessage::Chunk(chunk))
                                 .unwrap();
                         }
+
+                        // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
+                        // a phantom barrier in-place.
                         Message::Barrier(barrier) => {
                             info!("polled barrier, rearrange");
 
@@ -161,46 +177,66 @@ impl ChainExecutor {
                         }
                     };
 
+                    // Check that whether we should stop.
                     if stop_rearrange_rx.try_recv().unwrap().is_some() {
                         info!("rearrange stop");
                         break;
                     }
                 }
 
-                info!("rearrange finish");
+                // Return the remaining upstream back. There's no need to rearrange it any more.
                 Ok::<_, TracedStreamExecutorError>(upstream)
             });
 
+            // 4. Init the snapshot with reading epoch.
+            //
             let snapshot = self.snapshot.execute_with_epoch(create_epoch.prev);
 
+            // Chain the `snapshot` and `upstream_rx` to get a unified `rearranged_chunks` stream.
             let rearranged_chunks = snapshot
                 .map(|result| result.map(RearrangedMessage::from))
                 .chain(upstream_rx.map(Ok));
 
+            // 5. Merge the rearranged barriers with chunks, with the priority of barrier.
+            //
             let rearranged = select_with_strategy(
                 rearranged_barrier_rx.map(Ok),
                 rearranged_chunks,
                 |_state: &mut ()| stream::PollNext::Left,
             );
 
+            // Record the epoch of the last rearranged barrier we received.
             let mut last_rearranged_epoch = create_epoch;
+            // When we stop the rearrangement task, we should also tell the barrier manager that
+            // we've finish the creation.
             let mut rearrange_finish_tx = Some((stop_rearrange_tx, self.notifier));
 
+            // 6. Consume the merged `rearranged` stream.
+            //
             #[for_await]
             for rearranged_msg in rearranged {
                 info!("recv rearranged: {:?}", rearranged_msg);
 
                 match rearranged_msg? {
+                    // If we received a phantom barrier, check whether we catches up with the
+                    // progress of upstream MV.
+                    //
+                    // Note that there's no phantom barrier in the snapshot. So we must have already
+                    // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(epoch) => {
                         if epoch.curr >= last_rearranged_epoch.curr {
                             if let Some((stop_tx, create_notifier)) = rearrange_finish_tx.take() {
+                                // Stop the background rearrangement task.
                                 stop_tx.send(()).unwrap();
+                                // Notify about the finish.
                                 create_notifier.notify(create_epoch.curr);
+
                                 info!("notified");
                             }
                         }
                     }
 
+                    // If we received a message, yield it.
                     RearrangedMessage::RearrangedBarrier(barrier) => {
                         last_rearranged_epoch = barrier.epoch;
                         yield Message::Barrier(barrier);
@@ -209,6 +245,8 @@ impl ChainExecutor {
                 }
             }
 
+            // 7. Rearranged stream finished. Now we take back the remaining upstream.
+            //
             let remaining_upstream = upstream_poll_handle
                 .await
                 .unwrap()
@@ -216,12 +254,17 @@ impl ChainExecutor {
 
             info!("begin to consume remaining upstream");
 
+            // 8. Begin to consume remainig upstream.
+            //
             #[for_await]
             for msg in remaining_upstream {
                 let msg = msg?;
                 yield msg;
             }
         } else {
+            // If there's no need to consume the snapshot ...
+            // We directly forward the messages from the upstream.
+
             #[for_await]
             for msg in upstream {
                 let msg = msg?;
