@@ -114,7 +114,9 @@ impl<S: StateStore> JoinSide<S> {
             !self.is_dirty(),
             "cannot clear cache while states of hash join are dirty"
         );
-        self.ht.clear();
+
+        // TODO: not working with rearranged chain
+        // self.ht.clear();
     }
 }
 
