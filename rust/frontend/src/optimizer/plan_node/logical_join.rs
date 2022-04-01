@@ -235,6 +235,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
         Self::new(left, right, self.join_type, self.on.clone())
     }
+
     #[must_use]
     fn rewrite_with_left_right(
         &self,
@@ -244,8 +245,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
         let new_on = {
-            let (mut left_map, _) = left_col_change.into_parts();
-            let (mut right_map, _) = right_col_change.into_parts();
+            let (mut left_map, _) = left_col_change.clone().into_parts();
+            let (mut right_map, _) = right_col_change.clone().into_parts();
             for i in &mut right_map {
                 *i = Some(i.unwrap() + left.schema().len());
             }
@@ -256,8 +257,8 @@ impl PlanTreeNodeBinary for LogicalJoin {
         };
         let join = Self::new(left, right, self.join_type, new_on);
 
-        let old_o2l = self.o2l_col_mapping();
-        let old_o2r = self.o2r_col_mapping();
+        let old_o2l = self.o2l_col_mapping().composite(&left_col_change);
+        let old_o2r = self.o2r_col_mapping().composite(&right_col_change);
         let new_l2o = join.l2o_col_mapping();
         let new_r2o = join.r2o_col_mapping();
 
