@@ -51,8 +51,7 @@ impl FeQueryMessage {
 impl FeMessage {
     /// Read one message from the stream.
     pub async fn read(stream: &mut (impl AsyncRead + Unpin)) -> Result<FeMessage> {
-        let val = &[stream.read_u8().await?];
-        let tag = std::str::from_utf8(val).unwrap();
+        let val = stream.read_u8().await?;
         let len = stream.read_i32().await?;
 
         let payload_len = len - 4;
@@ -62,9 +61,9 @@ impl FeMessage {
         }
         let sql_bytes = Bytes::from(payload);
 
-        match tag {
-            "Q" => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
-            "X" => Ok(FeMessage::Terminate),
+        match val {
+            b'Q' => Ok(FeMessage::Query(FeQueryMessage { sql_bytes })),
+            b'X' => Ok(FeMessage::Terminate),
             _ => {
                 unimplemented!("Do not support other tags regular message yet")
             }

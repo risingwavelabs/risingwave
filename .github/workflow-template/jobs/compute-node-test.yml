@@ -40,7 +40,7 @@ jobs:
 
       - name: Run rust test with coverage
         run: |
-          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info
+          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
 
       - uses: codecov/codecov-action@v2
         with:

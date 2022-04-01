@@ -96,12 +96,12 @@ pub enum ArrangeMessage {
 /// For example, the executor will receive the following message sequence from
 /// `stream_lookup_arrange_prev_epoch`:
 ///
-/// * [Msg] Barrier (prev = [1], current = [2])
-/// * [Msg] Stream (key = a)
-/// * [Do] lookup `a` in arrangement of epoch [1] (prev epoch)
-/// * [Msg] Arrangement (batch)
-/// * [Do] replicate batch with epoch [2]
-/// * Barrier (prev = [2], current = [3])
+/// * `[Msg`] Barrier (prev = `[1`], current = `[2`])
+/// * `[Msg`] Stream (key = a)
+/// * `[Do`] lookup `a` in arrangement of epoch `[1`] (prev epoch)
+/// * `[Msg`] Arrangement (batch)
+/// * `[Do`] replicate batch with epoch `[2`]
+/// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = RwError)]
 pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,

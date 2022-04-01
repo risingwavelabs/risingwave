@@ -41,7 +41,7 @@ const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
 #[derive(Clone)]
-/// [`SSTable`] is a handle for accessing SST in [`TableManager`].
+/// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,

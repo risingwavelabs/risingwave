@@ -19,7 +19,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,

@@ -425,19 +425,19 @@ impl LocalStreamManagerCore {
                     .hash_mapping;
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(
+                    DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
                         hash_mapping,
-                    ),
+                    )),
                     actor_id,
                     self.context.clone(),
                 ))
             }
             Broadcast => Box::new(DispatchExecutor::new(
                 input,
-                BroadcastDispatcher::new(outputs),
+                DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
                 actor_id,
                 self.context.clone(),
             )),
@@ -446,7 +446,7 @@ impl LocalStreamManagerCore {
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(
                     input,
-                    SimpleDispatcher::new(output),
+                    DispatcherImpl::Simple(SimpleDispatcher::new(output)),
                     actor_id,
                     self.context.clone(),
                 ))
