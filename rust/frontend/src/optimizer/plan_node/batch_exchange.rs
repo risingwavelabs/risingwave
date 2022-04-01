@@ -68,7 +68,8 @@ impl ToDistributedBatch for BatchExchange {
 impl ToBatchProst for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Exchange(ExchangeNode {
-            ..Default::default()
+            sources: vec![],
+            input_schema: self.base.schema.to_prost(),
         })
     }
 }

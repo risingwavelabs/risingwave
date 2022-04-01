@@ -26,7 +26,7 @@ impl StreamingMetrics {
     pub fn new(registry: Registry) -> Self {
         let actor_row_count = register_int_counter_vec_with_registry!(
             "stream_actor_row_count",
-            "Total number of rows that have been ouput from each actor",
+            "Total number of rows that have been output from each actor",
             &["actor_id"],
             registry
         )
@@ -34,7 +34,7 @@ impl StreamingMetrics {
 
         let source_output_row_count = register_int_counter_vec_with_registry!(
             "stream_source_output_rows_counts",
-            "Total number of rows that have been ouput from source",
+            "Total number of rows that have been output from source",
             &["source_id"],
             registry
         )

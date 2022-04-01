@@ -21,18 +21,15 @@ use risingwave_storage::monitor::StateStoreMetrics;
 
 #[derive(Clone, Default)]
 pub(crate) struct MyStateStoreStats {
-    pub(crate) write_batch_shared_buffer_time: MyHistogram,
+    pub(crate) write_batch_duration: MyHistogram,
     pub(crate) write_batch_size: MyHistogram,
 }
 
 impl MyStateStoreStats {
     pub(crate) fn from_prom_stats(stats: &StateStoreMetrics) -> Self {
         Self {
-            write_batch_shared_buffer_time: MyHistogram::from_prom_hist(
-                stats
-                    .write_batch_shared_buffer_time
-                    .metric()
-                    .get_histogram(),
+            write_batch_duration: MyHistogram::from_prom_hist(
+                stats.write_batch_duration.metric().get_histogram(),
             ),
             write_batch_size: MyHistogram::from_prom_hist(
                 stats.write_batch_size.metric().get_histogram(),
@@ -103,7 +100,7 @@ impl MyHistogram {
         for (&upper_bound, &count) in self.upper_bound_list.iter().zip_eq(self.count_list.iter()) {
             if count >= threshold {
                 // assume scale linearly within this bucket,
-                // return a value bwtween last_upper_bound and upper_bound
+                // return a value between last_upper_bound and upper_bound
                 let right_left_diff = upper_bound - last_upper_bound;
                 return last_upper_bound
                     + right_left_diff * (threshold - last_count) as f64

@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_sqlparser::ast::{BinaryOperator, Expr};
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
     pub(super) fn bind_binary_op(
@@ -42,15 +42,37 @@ impl Binder {
             BinaryOperator::And => ExprType::And,
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
+            BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
             _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", op)).into()),
         };
+        FunctionCall::new_or_else(func_type, vec![bound_left, bound_right], |inputs| {
+            Self::err_unsupported_binary_op(op, inputs)
+        })
+    }
+
+    /// Apply a NOT on top of LIKE.
+    fn bind_not_like(&mut self, left: ExprImpl, right: ExprImpl) -> Result<FunctionCall> {
+        Ok(FunctionCall::new(
+            ExprType::Not,
+            vec![
+                FunctionCall::new_or_else(ExprType::Like, vec![left, right], |inputs| {
+                    Self::err_unsupported_binary_op(BinaryOperator::NotLike, inputs)
+                })?
+                .into(),
+            ],
+        )
+        .unwrap())
+    }
+
+    fn err_unsupported_binary_op(op: BinaryOperator, inputs: &[ExprImpl]) -> RwError {
+        let bound_left = inputs.get(0).unwrap();
+        let bound_right = inputs.get(1).unwrap();
         let desc = format!(
             "{:?} {:?} {:?}",
             bound_left.return_type(),
             op,
             bound_right.return_type(),
         );
-        FunctionCall::new(func_type, vec![bound_left, bound_right])
-            .ok_or_else(|| ErrorCode::NotImplementedError(desc).into())
+        ErrorCode::NotImplementedError(desc).into()
     }
 }

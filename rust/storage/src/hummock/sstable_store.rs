@@ -69,7 +69,7 @@ impl SstableStore {
         data: Bytes,
         policy: CachePolicy,
     ) -> HummockResult<usize> {
-        let timer = self.stats.sst_block_put_remote_duration.start_timer();
+        let timer = self.stats.sst_store_put_remote_duration.start_timer();
 
         let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
@@ -112,11 +112,10 @@ impl SstableStore {
         block_index: u64,
         policy: CachePolicy,
     ) -> HummockResult<Arc<Block>> {
-        self.stats.sst_block_request_counts.inc();
+        self.stats.sst_store_block_request_counts.inc();
 
         let fetch_block = async move {
-            self.stats.sst_block_request_miss_counts.inc();
-            let timer = self.stats.sst_block_fetch_remote_duration.start_timer();
+            let timer = self.stats.sst_store_get_remote_duration.start_timer();
 
             let block_meta = sst
                 .meta

@@ -26,7 +26,7 @@ pub enum SubqueryKind {
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
     /// `IN` | `NOT IN` | `SOME` | `ALL` subquery. Returns a boolean.
-    SetComparision,
+    SetComparison,
 }
 
 /// Subquery expression.
@@ -74,7 +74,7 @@ impl Expr for Subquery {
                 types[0].clone()
             }
             SubqueryKind::Existential => DataType::Boolean,
-            SubqueryKind::SetComparision => DataType::Boolean,
+            SubqueryKind::SetComparison => DataType::Boolean,
         }
     }
 
