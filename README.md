@@ -13,8 +13,8 @@ You may start RisingWave with our pre-built binary, or build from source.
 **Use Pre-built Binary (Linux x86_64)**
 
 ```shell
-wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4-alpha/risingwave-v0.1.4-alpha-unknown-linux.tar.gz
-tar xvf risingwave-v0.1.4-alpha-unknown-linux.tar.gz
+wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4/risingwave-v0.1.4-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.4-unknown-linux.tar.gz
 ./risingwave playground
 ```
 
