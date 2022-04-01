@@ -146,7 +146,7 @@ impl<S: StateStore> CellBasedTable<S> {
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());
         for (key, value) in state_store_range_scan_res {
-            cell_based_row_deserializer.deserialize(&key, value.as_bytes())?;
+            cell_based_row_deserializer.deserialize(&key, &value.as_bytes())?;
         }
         let pk_and_row = cell_based_row_deserializer.take();
         match pk_and_row {
