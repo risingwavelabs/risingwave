@@ -163,9 +163,9 @@ impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
 impl From<StorageValue> for HummockValue<Bytes> {
     fn from(data: StorageValue) -> Self {
         if data.is_some() {
-            HummockValue::Put(data.to_bytes())
+            HummockValue::Put(data.encode_to_bytes())
         } else {
-            HummockValue::Delete(data.to_bytes())
+            HummockValue::Delete(data.encode_to_bytes())
         }
     }
 }
