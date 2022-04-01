@@ -1,43 +1,41 @@
+use async_stream::stream;
 use futures::channel::mpsc::Receiver;
-use futures::StreamExt;
-use futures_async_stream::{for_await, try_stream};
+use futures::{Stream, StreamExt};
+use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use tracing_futures::Instrument;
 
 use crate::executor_v2::error::TracedStreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef};
+use crate::executor_v2::{
+    BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
+};
+
 /// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
 /// there should be a `ReceiverExecutor` running in the background, so as to push
 /// messages down to the executors.
 pub struct ReceiverExecutor {
-    schema: Schema,
-    pk_indices: PkIndices,
     receiver: Receiver<Message>,
     /// Logical Operator Info
-    op_info: String,
+    info: ExecutorInfo,
 }
 
 impl std::fmt::Debug for ReceiverExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReceiverExecutor")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
+            .field("schema", &self.info.schema)
+            .field("pk_indices", &self.info.pk_indices)
             .finish()
     }
 }
 
 impl ReceiverExecutor {
-    pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
-        receiver: Receiver<Message>,
-        op_info: String,
-    ) -> Self {
+    pub fn new(schema: Schema, pk_indices: PkIndices, receiver: Receiver<Message>) -> Self {
         Self {
-            schema,
-            pk_indices,
             receiver,
-            op_info,
+            info: ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "ReceiverExecutor".to_string(),
+            },
         }
     }
 }
@@ -48,43 +46,34 @@ impl Executor for ReceiverExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        "ReceiverExecutor"
+        &self.info.identity
     }
 }
 
 impl ReceiverExecutor {
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
-    async fn execute_inner(mut self) {
-        // TODO: Rewrite it in a more stream way be replace the channel to stream channel.
-        yield self
-            .receiver
-            .next()
-            .instrument(tracing::trace_span!("idle"))
-            .await
-            .expect(
-                "upstream channel closed unexpectedly, please check error in upstream executors",
-            );
+    async fn execute_inner(self) {
+        let stream = Self::stream(self.receiver);
+        #[for_await]
+        for val in stream {
+            yield val;
+        }
     }
 
-    pub fn new_from_v1(
-        schema: Schema,
-        pk_indices: PkIndices,
-        receiver: Receiver<Message>,
-        op_info: String,
-    ) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            receiver,
-            op_info,
+    /// Drains message in receiver and convert it into stream.
+    fn stream(recv: Receiver<Message>) -> impl Stream<Item = Message> {
+        stream! {
+            for await value in recv {
+                yield value;
+            }
         }
     }
 }

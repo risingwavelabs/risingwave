@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
-use futures::channel::mpsc::{Receiver, Sender};
+use futures::channel::mpsc::Sender;
 use futures::{SinkExt, StreamExt};
-use risingwave_common::catalog::Schema;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -23,10 +21,9 @@ use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use risingwave_storage::StateStore;
 use tonic::Streaming;
-use tracing_futures::Instrument;
 
-use super::{Executor, Message, PkIndicesRef, Result};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::{Executor, Message, Result};
+use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
@@ -93,4 +90,3 @@ impl ExecutorBuilder for MergeExecutorBuilder {
         stream.create_merge_node(params, node)
     }
 }
-
