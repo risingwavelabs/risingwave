@@ -20,6 +20,11 @@ use super::Expr;
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
+/// A reference to a column outside the subquery.
+/// 
+/// `depth` is the number of of nesting levels of the subquery relative to the refered relation, and should be non-zero. 
+/// 
+/// `index` is the index in the refered relation.
 pub struct CorrelatedInputRef {
     index: usize,
     data_type: DataType,
