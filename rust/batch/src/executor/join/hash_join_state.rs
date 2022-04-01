@@ -85,7 +85,7 @@ impl BuildTable {
 }
 
 /// The numbers about key matched need to
-/// maintain in join with non_equi condition.
+/// maintain in join with non-equi condition.
 #[derive(Clone, Debug)]
 struct ProbeMatchInfo {
     /// The number of matched rows in build side.
@@ -179,8 +179,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
         let mut build_matched = None;
         let mut remaining_build_row_id = None;
         let mut probe_matched_list = None;
-        if build_table.params.join_type().need_build_flag()
-        {
+        if build_table.params.join_type().need_build_flag() {
             build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
                 build_table.build_data.iter().map(|c| c.cardinality()),
             )?);
@@ -224,7 +223,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
 }
 
 impl<K: HashKey> ProbeTable<K> {
-    pub(super) fn has_non_equi_cond(&self) ->bool {
+    pub(super) fn has_non_equi_cond(&self) -> bool {
         self.params.has_non_equi_cond()
     }
 
@@ -238,9 +237,15 @@ impl<K: HashKey> ProbeTable<K> {
         ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
         if self.params.join_type().need_probe_flag() && self.params.has_non_equi_cond() {
-            self.probe_matched_list
-                .as_mut()
-                .map(|list| list.push_back(vec![ProbeMatchInfo { matched: 0, row_cnt: 0 }; probe_data_chunk.capacity()]));
+            if let Some(list) = self.probe_matched_list.as_mut() {
+                list.push_back(vec![
+                    ProbeMatchInfo {
+                        matched: 0,
+                        row_cnt: 0
+                    };
+                    probe_data_chunk.capacity()
+                ])
+            };
         }
         self.cur_probe_row_id = 0;
         self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
@@ -286,9 +291,9 @@ impl<K: HashKey> ProbeTable<K> {
         let build_start_pos = self.params.left_len();
         for col_idx in 0..self.params.right_len() {
             data_chunk
-            .column_mut_at(build_start_pos + col_idx)
-            .array_mut_ref()
-            .set_bitmap(filter.clone());
+                .column_mut_at(build_start_pos + col_idx)
+                .array_mut_ref()
+                .set_bitmap(filter.clone());
         }
     }
 
@@ -298,31 +303,29 @@ impl<K: HashKey> ProbeTable<K> {
         let mut result_row_id = 0;
         let chunk_len = filter.len();
         let mut new_filter = Vec::with_capacity(chunk_len);
-        println!{"filter {:?}", filter};
+        println! {"filter {:?}", filter};
         while let Some(mut probe_matched) = probe_matched_list.pop_front() {
             while self.cur_probe_matched < probe_matched.len() {
-
                 let probe_row_matched = &mut probe_matched[self.cur_probe_matched];
 
                 while probe_row_matched.row_cnt > 0 {
-                    println!{"result_row_id: {}", result_row_id};
+                    println! {"result_row_id: {}", result_row_id};
                     let filter_bit = filter.is_set(result_row_id).unwrap();
 
-                    if probe_row_matched.matched == 0 {
-                        new_filter.push(true);
-                    } else if probe_row_matched.matched == 1
-                        && !(self.has_pending_matched && result_row_id == chunk_len - 1)
+                    if probe_row_matched.matched == 0
+                        || (probe_row_matched.matched == 1
+                            && !(self.has_pending_matched && result_row_id == chunk_len - 1))
                     {
                         new_filter.push(true);
                     } else {
-                        if filter_bit == false {
+                        if !filter_bit {
                             probe_row_matched.matched -= 1;
                         }
                         new_filter.push(filter_bit);
-                    }    
+                    }
 
                     result_row_id += 1;
-                    probe_row_matched.row_cnt -=1;
+                    probe_row_matched.row_cnt -= 1;
                 }
                 self.cur_probe_matched += 1;
             }
@@ -350,7 +353,7 @@ impl<K: HashKey> ProbeTable<K> {
                 while probe_row_matched.row_cnt > 0 {
                     let filter_bit = filter.is_set(result_row_id).unwrap();
 
-                    if filter_bit == true {
+                    if filter_bit {
                         if probe_row_matched.matched == 0 {
                             probe_row_matched.matched = 1;
                             new_filter.push(true);
@@ -397,7 +400,7 @@ impl<K: HashKey> ProbeTable<K> {
                     {
                         probe_row_matched.matched -= 1;
                         new_filter.push(!filter_bit);
-                    } else if filter_bit == false {
+                    } else if !filter_bit {
                         probe_row_matched.matched -= 1;
                         new_filter.push(filter_bit);
                     } else {
@@ -424,7 +427,7 @@ impl<K: HashKey> ProbeTable<K> {
         let chunk_len = filter.len();
         for result_row_id in 0..chunk_len {
             let filter_bit = filter.is_set(result_row_id).unwrap();
-            if filter_bit == true {
+            if filter_bit {
                 // Not possible to have a null row in right side in right outer join.
                 // Thus just unwrap.
                 let build_row_id = self.result_build_index[result_row_id].unwrap();
@@ -439,7 +442,7 @@ impl<K: HashKey> ProbeTable<K> {
         let mut new_filter = Vec::with_capacity(chunk_len);
         for result_row_id in 0..chunk_len {
             let filter_bit = filter.is_set(result_row_id).unwrap();
-            if filter_bit == true {
+            if filter_bit {
                 // Not possible to have a null row in right side in right semi join.
                 // Thus just unwrap.
                 let build_row_id = self.result_build_index[result_row_id].unwrap();
@@ -460,7 +463,7 @@ impl<K: HashKey> ProbeTable<K> {
         let chunk_len = filter.len();
         for result_row_id in 0..chunk_len {
             let filter_bit = filter.is_set(result_row_id).unwrap();
-            if filter_bit == true {
+            if filter_bit {
                 // Not possible to have a null row in right side in right anti join.
                 // Thus just unwrap.
                 let build_row_id = self.result_build_index[result_row_id].unwrap();
@@ -489,7 +492,7 @@ impl<K: HashKey> ProbeTable<K> {
                     } else if probe_row_matched.matched == 1
                         && !(self.has_pending_matched && result_row_id == chunk_len - 1)
                     {
-                        if filter_bit == true {
+                        if filter_bit {
                             // Not possible to have a null row in right side when probe
                             // matched >= 1. Thus just unwrap.
                             self.set_build_matched(
@@ -498,7 +501,7 @@ impl<K: HashKey> ProbeTable<K> {
                         }
                         new_filter.push(true);
                     } else {
-                        if filter_bit == false {
+                        if !filter_bit {
                             probe_row_matched.matched -= 1;
                         } else {
                             self.set_build_matched(
@@ -538,7 +541,10 @@ impl<K: HashKey> ProbeTable<K> {
         }
     }
 
-    pub(super) fn process_non_equi_condition(&mut self, data_chunk: DataChunk) -> Result<Option<DataChunk>> {
+    pub(super) fn process_non_equi_condition(
+        &mut self,
+        data_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
         let processed_chunk = match self.params.join_type() {
             JoinType::Inner => self.process_inner_join_non_equi_condition(data_chunk)?,
             JoinType::LeftOuter | JoinType::FullOuter => {
@@ -555,16 +561,20 @@ impl<K: HashKey> ProbeTable<K> {
         Ok(processed_chunk)
     }
 
-    fn process_inner_join_non_equi_condition(&mut self, mut data_chunk: DataChunk) -> Result<Option<DataChunk>> {
-        let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?;
+    fn process_inner_join_non_equi_condition(
+        &mut self,
+        mut data_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
+        let filter = self.get_non_equi_cond_filter(&data_chunk)?;
         data_chunk.set_visibility(filter);
         Ok(Some(data_chunk))
     }
 
-    fn process_outer_join_non_equi_condition(&mut self, mut data_chunk: DataChunk) -> Result<Option<DataChunk>> {
-        let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?;
+    fn process_outer_join_non_equi_condition(
+        &mut self,
+        mut data_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
+        let filter = self.get_non_equi_cond_filter(&data_chunk)?;
         self.nullify_build_side_for_non_equi_condition(&mut data_chunk, &filter);
         let filter = self.remove_duplicate_rows(filter)?;
         // TODO(yuhao): We can calculate the cardinality in remove_duplicate_rows.
@@ -572,9 +582,11 @@ impl<K: HashKey> ProbeTable<K> {
         Ok(Some(data_chunk))
     }
 
-    fn process_semi_join_non_equi_condition(&mut self, mut data_chunk: DataChunk) -> Result<Option<DataChunk>> {
-        let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?;
+    fn process_semi_join_non_equi_condition(
+        &mut self,
+        mut data_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
+        let filter = self.get_non_equi_cond_filter(&data_chunk)?;
         let filter = self.remove_duplicate_rows(filter)?;
         data_chunk.set_visibility(filter);
         Ok(Some(data_chunk))
@@ -582,9 +594,9 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn process_right_anti_join_non_equi_condition(
         &mut self,
-        data_chunk: DataChunk) -> Result<Option<DataChunk>> {
-        let filter = self
-            .get_non_equi_cond_filter(&data_chunk)?;
+        data_chunk: DataChunk,
+    ) -> Result<Option<DataChunk>> {
+        let filter = self.get_non_equi_cond_filter(&data_chunk)?;
         self.remove_duplicate_rows(filter)?;
         // Right anti join only need probe_remain results.
         Ok(None)
@@ -600,7 +612,7 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     pub(super) fn consume_left(&mut self) -> Result<DataChunk> {
-        Ok(self.finish_data_chunk()?)
+        self.finish_data_chunk()
     }
 
     fn next_probe_row(&mut self) {
@@ -942,8 +954,7 @@ impl<K: HashKey> ProbeTable<K> {
                         .probe_data_chunk
                         .columns()[col_idx]
                         .array_ref();
-                    self.array_builders[builder_idx]
-                        .append_array_element(array, *row_id)?;
+                    self.array_builders[builder_idx].append_array_element(array, *row_id)?;
                 } else {
                     self.array_builders[builder_idx].append_null()?;
                 }
@@ -986,7 +997,7 @@ impl<K: HashKey> ProbeTable<K> {
             .into_iter()
             .map(|array| Column::new(Arc::new(array)))
             .collect_vec();
-            
+
         let data_chunk = DataChunk::try_from(new_columns)?;
 
         Ok(data_chunk)
@@ -1007,13 +1018,14 @@ impl<K: HashKey> ProbeTable<K> {
             let keep_columns = if join_type.keep_left() {
                 columns[0..self.params.left_len()].to_vec()
             } else if join_type.keep_right() {
-                columns[self.params.left_len()..self.params.left_len() + self.params.right_len()].to_vec()
+                columns[self.params.left_len()..self.params.left_len() + self.params.right_len()]
+                    .to_vec()
             } else {
                 unreachable!()
             };
             DataChunk::new(keep_columns, vis)
         }
-    } 
+    }
 
     fn get_build_array(&self, row_id: RowId, idx: usize) -> ArrayRef {
         self.build_data[row_id.chunk_id()].columns()[idx].array()

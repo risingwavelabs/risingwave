@@ -51,7 +51,7 @@ pub(super) struct EquiJoinParams {
     right_key_types: Vec<DataType>,
     /// Data types of right columns in equi join, e.g., the column types of `a1` `a2` `a3` in `a`.
     right_col_len: usize,
-    /// Column types of the concatenation of two input side, e.g. the column types of 
+    /// Column types of the concatenation of two input side, e.g. the column types of
     /// `a1`, `a2`, `a3`, `b1`, `b2`, `b3`.
     full_data_types: Vec<DataType>,
     /// Data chunk buffer size
@@ -237,11 +237,12 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 } else {
                     Some(ret_data_chunk)
                 };
-                
-                // TODO(yuhao): Current we handle cut null columns in semi/anti join just 
+
+                // TODO(yuhao): Current we handle cut null columns in semi/anti join just
                 // before returning chunks. We can furthur optimize this by cut columns earlier.
-                let output_data_chunk = data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
-                
+                let output_data_chunk =
+                    data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
+
                 print!("data_chunk after process: {:?}", output_data_chunk);
                 probe_table.reset_result_index();
 
@@ -261,9 +262,10 @@ impl<K: HashKey> HashJoinExecutor<K> {
                         } else {
                             Some(ret_data_chunk)
                         };
-                        
-                        let output_data_chunk = data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
-                        
+
+                        let output_data_chunk = data_chunk
+                            .map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
+
                         probe_table.reset_result_index();
 
                         if probe_table.join_type().need_join_remaining() {
@@ -291,7 +293,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         } else {
             let ret_data_chunk = probe_table.consume_left()?;
             let output_data_chunk = probe_table.remove_null_columns_for_semi_anti(ret_data_chunk);
-        
+
             self.state = HashJoinState::Done;
             output_data_chunk
         };
@@ -360,11 +362,13 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             NodeBody::HashJoin
         )?;
 
-        let join_type =JoinType::from_prost(hash_join_node.get_join_type()?);
+        let join_type = JoinType::from_prost(hash_join_node.get_join_type()?);
 
-        let full_schema_fields = [left_child.schema().fields.clone(),
-        right_child.schema().fields.clone(),
-        ].concat();
+        let full_schema_fields = [
+            left_child.schema().fields.clone(),
+            right_child.schema().fields.clone(),
+        ]
+        .concat();
         let schema_fields = if join_type.keep_all() {
             full_schema_fields.clone()
         } else if join_type.keep_left() {
@@ -379,7 +383,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             .iter()
             .map(|field| field.data_type.clone())
             .collect();
-        
+
         let mut params = EquiJoinParams {
             join_type,
             left_col_len: left_child.schema().len(),
@@ -413,7 +417,9 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             params,
             left_child,
             right_child,
-            schema: Schema { fields: schema_fields },
+            schema: Schema {
+                fields: schema_fields,
+            },
             task_id: context.task_id.clone(),
         };
 
@@ -623,30 +629,20 @@ mod tests {
         }
 
         fn full_data_types(&self) -> Vec<DataType> {
-            let output_data_types = [
-            self.left_types.clone(),
-            self.right_types.clone(),
-            ]
-            .concat();
-
-            output_data_types
+            [self.left_types.clone(), self.right_types.clone()].concat()
         }
 
         fn output_data_types(&self) -> Vec<DataType> {
             let join_type = self.join_type;
-            let data_types = if join_type.keep_all() {
-                [self.left_types.clone(),
-                self.right_types.clone(),
-                ]
-                .concat()
+            if join_type.keep_all() {
+                [self.left_types.clone(), self.right_types.clone()].concat()
             } else if join_type.keep_left() {
                 self.left_types.clone()
             } else if join_type.keep_right() {
                 self.right_types.clone()
             } else {
                 unreachable!()
-            };
-            data_types
+            }
         }
 
         fn create_cond() -> BoxedExpression {
@@ -667,8 +663,9 @@ mod tests {
             let right_child = self.create_right_executor();
 
             let schema_fields = if join_type.keep_all() {
-                [left_child.schema().fields.clone(),
-                right_child.schema().fields.clone(),
+                [
+                    left_child.schema().fields.clone(),
+                    right_child.schema().fields.clone(),
                 ]
                 .concat()
             } else if join_type.keep_left() {
@@ -703,7 +700,9 @@ mod tests {
                 cond,
             };
 
-            let schema = Schema { fields: schema_fields };
+            let schema = Schema {
+                fields: schema_fields,
+            };
 
             Box::new(HashJoinExecutor::<Key32>::new(
                 left_child,
@@ -717,7 +716,7 @@ mod tests {
         fn select_from_chunk(&self, data_chunk: DataChunk) -> DataChunk {
             let join_type = self.join_type;
             let (columns, vis) = data_chunk.into_parts();
-            
+
             let keep_columns = if join_type.keep_all() {
                 vec![columns[1].clone(), columns[3].clone()]
             } else if join_type.keep_left() || join_type.keep_right() {
@@ -729,7 +728,7 @@ mod tests {
             DataChunk::new(keep_columns, vis)
         }
 
-        async fn do_test(&self,expected: DataChunk, has_non_equi_cond: bool) {
+        async fn do_test(&self, expected: DataChunk, has_non_equi_cond: bool) {
             let mut join_executor = self.create_join_executor(has_non_equi_cond);
             join_executor
                 .open()
@@ -739,7 +738,7 @@ mod tests {
             let mut data_chunk_merger = DataChunkMerger::new(self.output_data_types()).unwrap();
 
             let fields = &join_executor.schema().fields;
-            
+
             if self.join_type.keep_all() {
                 assert_eq!(fields[1].data_type, DataType::Float32);
                 assert_eq!(fields[3].data_type, DataType::Float64);
@@ -758,7 +757,7 @@ mod tests {
 
             let result_chunk = data_chunk_merger.finish().unwrap();
 
-            // Take (t1.v2, t2.v2) in inner and left/right/full outer 
+            // Take (t1.v2, t2.v2) in inner and left/right/full outer
             // or v2 decided by side of anti/semi.
             let output_chunk = self.select_from_chunk(result_chunk);
 
@@ -833,8 +832,9 @@ mod tests {
         ));
 
         let column2 = Column::new(Arc::new(
-            array! {F64Array, [None, None, None, None, None, Some(7.5f64), None, None, None, None]}.into(),
-    ));
+            array! {F64Array, [None, None, None, None, None, Some(7.5f64), None, None, None, None]}
+                .into(),
+        ));
 
         let expected_chunk =
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
@@ -905,7 +905,7 @@ mod tests {
 
         test_fixture.do_test(expected_chunk, true).await;
     }
-    
+
     /// ```sql
     /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 full outer join t2 on t1.v1 = t2.v1;
     /// ```

@@ -84,17 +84,11 @@ impl JoinType {
     }
 
     fn keep_left(self) -> bool {
-        matches!(
-            self,
-            JoinType::LeftAnti | JoinType::LeftSemi
-        )
+        matches!(self, JoinType::LeftAnti | JoinType::LeftSemi)
     }
 
     fn keep_right(self) -> bool {
-        matches!(
-            self,
-            JoinType::RightAnti | JoinType::RightSemi
-        )
+        matches!(self, JoinType::RightAnti | JoinType::RightSemi)
     }
 }
 
