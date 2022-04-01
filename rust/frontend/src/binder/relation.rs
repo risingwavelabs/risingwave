@@ -23,8 +23,7 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
-    Expr as ExprAst, Function, Ident, JoinConstraint, JoinOperator, ObjectName, Query, TableAlias,
-    TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
@@ -170,32 +169,6 @@ impl Binder {
                     Ok(Relation::Subquery(Box::new(
                         self.bind_subquery_relation(*subquery, alias)?,
                     )))
-                }
-            }
-            TableFactor::TableFunction {
-                expr:
-                    ExprAst::Function(Function {
-                        name,
-                        args,
-                        over: None,
-                        distinct: false,
-                    }),
-                alias: None,
-            } => {
-                let mut name = name.0.into_iter();
-                match (name.next(), name.next()) {
-                    (Some(Ident { value: fn_name, .. }), None) => {
-                        let fn_name = fn_name.to_lowercase();
-                        let Ok(kind) = WindowTableFunctionKind::from_str(&fn_name) else {
-                            // TODO: handle normal table function here.
-                            return Err(ErrorCode::NotImplementedError(format!("unknown table function {:?}", fn_name)).into());
-                        };
-                        self.bind_window_table_function(kind, args)
-                            .map(|t| Relation::WindowTableFunction(Box::new(t)))
-                    }
-                    _ => Err(
-                        ErrorCode::NotImplementedError("unknown table function".to_string()).into(),
-                    ),
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
