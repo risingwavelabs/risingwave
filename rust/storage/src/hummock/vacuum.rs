@@ -72,6 +72,8 @@ mod tests {
             Arc::new(InMemObjectStore::new()),
             String::from("test_dir"),
             Arc::new(StateStoreMetrics::unused()),
+            64 << 20,
+            64 << 20,
         ));
 
         // Put some SSTs to object store

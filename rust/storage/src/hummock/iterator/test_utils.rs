@@ -52,6 +52,8 @@ pub fn mock_sstable_store_with_object_store(object_store: ObjectStoreRef) -> Sst
         object_store,
         path,
         Arc::new(StateStoreMetrics::unused()),
+        64 << 20,
+        64 << 20,
     ))
 }
 

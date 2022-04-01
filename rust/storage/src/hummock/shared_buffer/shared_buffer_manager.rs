@@ -244,6 +244,8 @@ mod tests {
             obj_client,
             remote_dir.to_string(),
             Arc::new(StateStoreMetrics::unused()),
+            64 << 20,
+            64 << 20,
         ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(

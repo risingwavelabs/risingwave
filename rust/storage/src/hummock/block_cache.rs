@@ -18,7 +18,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::Future;
 use moka::future::Cache;
 
-use super::{Block, HummockError, HummockResult};
+use super::{Block, HummockError, HummockResult, DEFAULT_ENTRY_SIZE};
 
 pub struct BlockCache {
     inner: Cache<Bytes, Arc<Block>>,
@@ -26,9 +26,12 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            inner: Cache::new(capacity as u64),
-        }
+        let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
+            .weigher(|_k, v: &Arc<Block>| v.len() as u32)
+            .initial_capacity(capacity / DEFAULT_ENTRY_SIZE)
+            .max_capacity(capacity as u64)
+            .build();
+        Self { inner: cache }
     }
 
     // TODO: Optimize for concurrent get https://github.com/singularity-data/risingwave/pull/627#discussion_r817354730.

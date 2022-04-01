@@ -69,6 +69,11 @@ impl Sstable {
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
     }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        8 + self.meta.encoded_size()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -99,6 +104,11 @@ impl BlockMeta {
             offset,
             len,
         }
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        12 + self.smallest_key.len()
     }
 }
 
@@ -188,6 +198,26 @@ impl SstableMeta {
             largest_key,
             version,
         })
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        4 + self
+            .block_metas
+            .iter()
+            .map(|block_meta| block_meta.encoded_size())
+            .sum::<usize>()
+            + 4
+            + self.bloom_filter.len()
+            + 4
+            + 4
+            + 4
+            + self.smallest_key.len()
+            + 4
+            + self.largest_key.len()
+            + 8
+            + 4
+            + 4
     }
 }
 
