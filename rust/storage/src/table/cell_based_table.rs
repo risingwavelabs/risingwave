@@ -131,8 +131,7 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         // get row by state_store scan
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let column_ids = generate_column_id(&self.column_descs);
-        let mut row = vec![None; column_ids.len()];
+        let mut row = vec![None; self.column_ids.len()];
         let start_key = self
             .keyspace
             .prefixed_key(&serialize_pk(pk, pk_serializer)?);
