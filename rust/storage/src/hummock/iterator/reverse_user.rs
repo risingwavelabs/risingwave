@@ -172,9 +172,7 @@ impl<'a> ReverseUserIterator<'a> {
                         self.last_val.clear();
                         assert!(val.len() >= VALUE_META_SIZE);
                         // Currently, upper layer does not need value meta, so we simply exclude it.
-                        if val.len() > VALUE_META_SIZE {
-                            self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
-                        }
+                        self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
                         self.last_delete = false;
                     }
                     HummockValue::Delete(_) => {

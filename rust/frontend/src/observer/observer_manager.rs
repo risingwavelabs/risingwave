@@ -77,7 +77,7 @@ impl ObserverManager {
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
-                    "the first notify should be snapshot, but get {:?}",
+                    "the first notify should be frontend snapshot, but get {:?}",
                     resp
                 ))
                 .into())
@@ -142,7 +142,7 @@ impl ObserverManager {
                     resp
                 )
             }
-            None => panic!("receive an unsupported notify {:?}", resp),
+            _ => panic!("receive an unsupported notify {:?}", resp),
         }
         assert!(
             resp.version > catalog_guard.version(),

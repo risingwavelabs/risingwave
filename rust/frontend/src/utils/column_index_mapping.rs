@@ -17,7 +17,6 @@ use std::vec;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use log::debug;
 
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
@@ -55,6 +54,10 @@ impl ColIndexMapping {
 
     pub fn into_parts(self) -> (Vec<Option<usize>>, usize) {
         (self.map, self.target_size)
+    }
+
+    pub fn to_parts(&self) -> (&[Option<usize>], usize) {
+        (&self.map, self.target_size)
     }
 
     pub fn identity(size: usize) -> Self {
@@ -168,7 +171,7 @@ impl ColIndexMapping {
 
     #[must_use]
     pub fn composite(&self, following: &Self) -> Self {
-        debug!("composing {:?} and {:?}", self, following);
+        // debug!("composing {:?} and {:?}", self, following);
         let mut map = self.map.clone();
         for tar in &mut map {
             *tar = tar.and_then(|index| following.try_map(index));
@@ -184,7 +187,7 @@ impl ColIndexMapping {
     /// Will panic if a source appears in both to mapping
     #[must_use]
     pub fn union(&self, other: &Self) -> Self {
-        debug!("union {:?} and {:?}", self, other);
+        // debug!("union {:?} and {:?}", self, other);
         let target_size = max(self.target_size(), other.target_size());
         let source_size = max(self.source_size(), other.source_size());
         let mut map = vec![None; source_size];

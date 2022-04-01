@@ -18,7 +18,7 @@ use risingwave_common::types::DataType;
 use super::{infer_type, Expr, ExprImpl};
 use crate::expr::ExprType;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
     func_type: ExprType,
     return_type: DataType,

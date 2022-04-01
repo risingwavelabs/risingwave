@@ -31,12 +31,12 @@ use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
 use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
 
-/// A placeholder function that return bool in [`gen_binary_expr_atm`]
+/// A placeholder function that returns bool in [`gen_binary_expr_atm`]
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
     Err(InternalError("The function is not supported".to_string()).into())
 }
 
-/// A placeholder function that return T3 in [`gen_binary_expr_atm`]
+/// A placeholder function that returns T3 in [`gen_binary_expr_atm`]
 pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
     Err(InternalError("The function is not supported".to_string()).into())
 }

@@ -109,11 +109,6 @@ where
         core.get_catalog().await
     }
 
-    pub async fn list_sources(&self) -> Result<Vec<Source>> {
-        let core = self.core.lock().await;
-        Source::list(core.env.meta_store()).await
-    }
-
     pub async fn create_database(&self, database: &Database) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         if !core.has_database(database) {
@@ -665,6 +660,10 @@ where
             Table::list(self.env.meta_store()).await?,
             Source::list(self.env.meta_store()).await?,
         ))
+    }
+
+    pub async fn list_sources(&self) -> Result<Vec<Source>> {
+        Source::list(self.env.meta_store()).await
     }
 
     fn has_database(&self, database: &Database) -> bool {

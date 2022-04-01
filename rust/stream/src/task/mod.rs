@@ -25,11 +25,13 @@ use crate::executor::Message;
 mod barrier_manager;
 mod compute_client_pool;
 mod env;
+mod observer_manager;
 mod stream_manager;
 
 pub use barrier_manager::*;
 pub use compute_client_pool::*;
 pub use env::*;
+pub use observer_manager::*;
 pub use stream_manager::*;
 
 #[cfg(test)]
@@ -98,13 +100,13 @@ impl SharedContext {
     }
 
     /// Create a notifier for Create MV DDL finish. When an executor/actor (essentially a
-    /// [`crate::executor::ChainExecutor`]) finishes its DDL job, it can report that using this
+    /// [`crate::executor_v2::ChainExecutor`]) finishes its DDL job, it can report that using this
     /// notifier. Note that a DDL of MV always corresponds to an epoch in our system.
     ///
     /// Creation of an MV may last for several epochs to finish.
-    /// Therefore, when the [`crate::executor::ChainExecutor`] finds that the creation is finished,
-    /// it will send the DDL epoch using this notifier, which can be collected by the barrier
-    /// manager and reported to the meta service soon.
+    /// Therefore, when the [`crate::executor_v2::ChainExecutor`] finds that the creation is
+    /// finished, it will send the DDL epoch using this notifier, which can be collected by the
+    /// barrier manager and reported to the meta service soon.
     pub fn register_finish_create_mview_notifier(
         &self,
         actor_id: ActorId,
