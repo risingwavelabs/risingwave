@@ -258,10 +258,9 @@ mod tests {
 
     use bytes::Bytes;
 
-    use super::TikvStateStore;
+    use super::{TikvStateStore, *};
     use crate::hummock::key::next_key;
     use crate::StateStore;
-    use super::*;
 
     #[tokio::test]
     #[ignore]
@@ -336,6 +335,5 @@ mod tests {
         assert!(res.is_ok());
         let value = tikv_storage.get(&anchor, epoch3).await.unwrap();
         assert_eq!(value, None);
-
     }
 }
