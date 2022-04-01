@@ -12,10 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::catalog::source::Info as SourceInfo;
+use risingwave_pb::catalog::Source;
 use risingwave_pb::common::WorkerType;
-use risingwave_pb::meta::subscribe_response::Info;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use risingwave_rpc_client::{MetaClient, NotificationStream};
 use risingwave_source::SourceManagerRef;
@@ -39,8 +43,9 @@ impl ObserverManager {
     pub fn handle_first_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         match resp.info {
             Some(Info::BeSnapshot(sources)) => {
-                // Create sources here
-                self.source_manager.apply_snapshot(sources)?;
+                for source in sources.sources {
+                    self.handle_create_source(&source)?;
+                }
                 Ok(())
             }
             _ => {
@@ -53,8 +58,40 @@ impl ObserverManager {
         }
     }
 
-    pub fn handle_notification(&mut self, _resp: SubscribeResponse) {
-        todo!("handle more notifications");
+    pub fn handle_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+        match &resp.info {
+            Some(Info::BeSnapshot(_)) => {
+                panic!(
+                    "receiving an BeSnapshot in the middle is unsupported now {:?}",
+                    resp
+                )
+            }
+            Some(Info::Source(source)) => match resp.operation() {
+                Operation::Add => self.handle_create_source(source),
+                Operation::Delete => self.source_manager.drop_source(&TableId::new(source.id)),
+                _ => {
+                    panic!("unsupported operation {:?}", resp)
+                }
+            },
+            _ => panic!("receive an unsupported notify {:?}", resp),
+        }
+    }
+
+    // TODO: using `source_manager.create_source` instead when stream source supported.
+    fn handle_create_source(&self, source: &Source) -> Result<()> {
+        match source.get_info()? {
+            SourceInfo::StreamSource(_) => todo!("support stream source"),
+            SourceInfo::TableSource(info) => {
+                let columns = info
+                    .columns
+                    .iter()
+                    .map(|c| c.column_desc.clone().unwrap().into())
+                    .collect_vec();
+
+                self.source_manager
+                    .create_table_source_v2(&TableId::new(source.id), columns)
+            }
+        }
     }
 
     pub async fn start(mut self) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
@@ -80,7 +117,7 @@ impl ObserverManager {
                                     tracing::error!("Stream of notification terminated.");
                                     break;
                                 }
-                                self.handle_notification(resp.unwrap());
+                                self.handle_notification(resp.unwrap()).expect("handle notification");
                             }
                             Err(e) => {
                                 tracing::error!("Stream of notification terminated with error: {:?}", e);

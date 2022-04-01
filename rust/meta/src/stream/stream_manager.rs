@@ -403,27 +403,6 @@ mod tests {
             Ok(Response::new(InjectBarrierResponse::default()))
         }
 
-        async fn create_source(
-            &self,
-            _request: Request<CreateSourceRequest>,
-        ) -> std::result::Result<Response<CreateSourceResponse>, Status> {
-            unimplemented!()
-        }
-
-        async fn drop_source(
-            &self,
-            _request: Request<DropSourceRequest>,
-        ) -> std::result::Result<Response<DropSourceResponse>, Status> {
-            unimplemented!()
-        }
-
-        async fn shutdown(
-            &self,
-            _request: Request<ShutdownRequest>,
-        ) -> std::result::Result<Response<ShutdownResponse>, Status> {
-            unimplemented!()
-        }
-
         async fn force_stop_actors(
             &self,
             _request: Request<ForceStopActorsRequest>,

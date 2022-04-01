@@ -38,6 +38,7 @@
 
 #[macro_use]
 extern crate log;
+extern crate core;
 
 pub mod common;
 pub mod executor;

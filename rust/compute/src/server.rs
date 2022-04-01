@@ -76,7 +76,6 @@ pub async fn compute_node_serve(
         config,
         get_compile_mode()
     );
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
@@ -159,7 +158,6 @@ pub async fn compute_node_serve(
         stream_config,
         worker_id,
         state_store,
-        shutdown_send.clone(),
     );
 
     // Boot the runtime gRPC services.
@@ -167,6 +165,7 @@ pub async fn compute_node_serve(
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))

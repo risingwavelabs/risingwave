@@ -312,61 +312,17 @@ where
         }
     }
 
-    pub async fn start_create_source_procedure(&self, source: &Source) -> Result<()> {
+    pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
         let mut core = self.core.lock().await;
         let key = (source.database_id, source.schema_id, source.name.clone());
         if !core.has_source(source) && !core.has_in_progress_creation(&key) {
-            core.mark_creating(&key);
-            Ok(())
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exists or in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn finish_create_source_procedure(&self, source: &Source) -> Result<CatalogVersion> {
-        let mut core = self.core.lock().await;
-        let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
             source.insert(self.env.meta_store()).await?;
             core.add_source(source);
 
-            let version = self
-                .env
+            self.env
                 .notification_manager()
-                .notify_frontend(Operation::Add, &Info::Source(source.to_owned()))
-                .await
-                .into_inner();
-
-            Ok(version)
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn cancel_create_source_procedure(&self, source: &Source) -> Result<()> {
-        let mut core = self.core.lock().await;
-        let key = (source.database_id, source.schema_id, source.name.clone());
-        if !core.has_source(source) && core.has_in_progress_creation(&key) {
-            core.unmark_creating(&key);
-            Ok(())
-        } else {
-            Err(RwError::from(InternalError(
-                "source already exist or not in creating procedure".to_string(),
-            )))
-        }
-    }
-
-    pub async fn create_source(&self, source: &Source) -> Result<CatalogVersion> {
-        let mut core = self.core.lock().await;
-        if !core.has_source(source) {
-            source.insert(self.env.meta_store()).await?;
-            core.add_source(source);
-
+                .notify_compute(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
             let version = self
                 .env
                 .notification_manager()
@@ -400,6 +356,10 @@ where
                     Source::delete(self.env.meta_store(), &source_id).await?;
                     core.drop_source(&source);
 
+                    self.env
+                        .notification_manager()
+                        .notify_compute(Operation::Delete, &Info::Source(source.to_owned()))
+                        .await;
                     let version = self
                         .env
                         .notification_manager()
@@ -433,6 +393,11 @@ where
             core.mark_creating(&source_key);
             core.mark_creating(&mview_key);
             ensure!(mview.dependent_relations.is_empty());
+
+            self.env
+                .notification_manager()
+                .notify_compute(Operation::Add, &Info::Source(source.to_owned()))
+                .await;
             Ok(())
         } else {
             Err(RwError::from(InternalError(
@@ -498,6 +463,11 @@ where
         {
             core.unmark_creating(&source_key);
             core.unmark_creating(&mview_key);
+
+            self.env
+                .notification_manager()
+                .notify_compute(Operation::Delete, &Info::Source(source.to_owned()))
+                .await;
             Ok(())
         } else {
             Err(RwError::from(InternalError(
@@ -565,6 +535,10 @@ where
                     core.decrease_ref_count(dependent_relation_id);
                 }
 
+                self.env
+                    .notification_manager()
+                    .notify_compute(Operation::Delete, &Info::Source(source.clone()))
+                    .await;
                 self.env
                     .notification_manager()
                     .notify_frontend(Operation::Delete, &Info::TableV2(mview))

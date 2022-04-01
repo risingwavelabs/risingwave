@@ -85,28 +85,6 @@ message BroadcastActorInfoTableResponse {
   common.Status status = 1;
 }
 
-message CreateSourceRequest {
-  catalog.Source source = 1;
-}
-
-message CreateSourceResponse {
-  common.Status status = 1;
-}
-
-message DropSourceRequest {
-  uint32 source_id = 1;
-}
-
-message DropSourceResponse {
-  common.Status status = 1;
-}
-
-message ShutdownRequest {}
-
-message ShutdownResponse {
-  common.Status status = 1;
-}
-
 service StreamService {
   rpc UpdateActors(UpdateActorsRequest) returns (UpdateActorsResponse);
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
@@ -114,9 +92,6 @@ service StreamService {
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
   rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
-  rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
-  rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
-  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // TODO: Lifecycle management for actors.

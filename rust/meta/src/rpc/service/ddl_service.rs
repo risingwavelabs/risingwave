@@ -15,26 +15,19 @@
 #![allow(dead_code)]
 use std::collections::HashSet;
 
-use futures::future::try_join_all;
 use risingwave_common::catalog::CatalogVersion;
-use risingwave_common::error::{tonic_err, Result as RwResult, ToRwResult};
+use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::*;
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::StreamNode;
-use risingwave_pb::stream_service::{
-    CreateSourceRequest as ComputeNodeCreateSourceRequest,
-    DropSourceRequest as ComputeNodeDropSourceRequest,
-};
 use tonic::{Request, Response, Status};
 
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, StreamClient, TableId};
+use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableId};
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
@@ -167,35 +160,22 @@ where
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let mut source = request.into_inner().source.unwrap();
 
-        let id = self
+        source.id = self
             .env
             .id_gen_manager()
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
 
-        self.catalog_manager
-            .start_create_source_procedure(&source)
-            .await
-            .map_err(tonic_err)?;
-
-        if let Err(e) = self.create_source_on_compute_node(&source).await {
-            self.catalog_manager
-                .cancel_create_source_procedure(&source)
-                .await
-                .map_err(tonic_err)?;
-            return Err(e.to_grpc_status());
-        }
-
-        source.id = id;
         let version = self
             .catalog_manager
-            .finish_create_source_procedure(&source)
+            .create_source(&source)
             .await
             .map_err(tonic_err)?;
+
         Ok(Response::new(CreateSourceResponse {
             status: None,
-            source_id: id,
+            source_id: source.id,
             version,
         }))
     }
@@ -206,15 +186,9 @@ where
     ) -> Result<Response<DropSourceResponse>, Status> {
         let source_id = request.into_inner().source_id;
 
-        // 1. Drop source in catalog. Ref count will be checked.
         let version = self
             .catalog_manager
             .drop_source(source_id)
-            .await
-            .map_err(tonic_err)?;
-
-        // 2. Drop source on compute nodes.
-        self.drop_source_on_compute_node(source_id)
             .await
             .map_err(tonic_err)?;
 
@@ -371,54 +345,6 @@ impl<S> DdlServiceImpl<S>
 where
     S: MetaStore,
 {
-    async fn all_stream_clients(&self) -> RwResult<impl Iterator<Item = StreamClient>> {
-        let all_compute_nodes = self
-            .cluster_manager
-            .list_worker_node(WorkerType::ComputeNode, Some(Running))
-            .await;
-
-        let all_stream_clients = try_join_all(
-            all_compute_nodes
-                .iter()
-                .map(|worker| self.env.stream_clients().get(worker)),
-        )
-        .await?
-        .into_iter();
-
-        Ok(all_stream_clients)
-    }
-
-    async fn create_source_on_compute_node(&self, source: &Source) -> RwResult<()> {
-        // TODO: restore the source on other nodes when scale out / fail over
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeCreateSourceRequest {
-                    source: Some(source.clone()),
-                };
-                async move { client.create_source(request).await.to_rw_result() }
-            });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
-        Ok(())
-    }
-
-    async fn drop_source_on_compute_node(&self, source_id: SourceId) -> RwResult<()> {
-        let futures = self
-            .all_stream_clients()
-            .await?
-            .into_iter()
-            .map(|mut client| {
-                let request = ComputeNodeDropSourceRequest { source_id };
-                async move { client.drop_source(request).await.to_rw_result() }
-            });
-        let _responses: Vec<_> = try_join_all(futures).await?;
-
-        Ok(())
-    }
-
     async fn create_mview_on_compute_node(
         &self,
         mut stream_node: StreamNode,
@@ -495,14 +421,6 @@ where
             .start_create_materialized_source_procedure(&source, &mview)
             .await?;
 
-        // Create source on compute node.
-        if let Err(e) = self.create_source_on_compute_node(&source).await {
-            self.catalog_manager
-                .cancel_create_materialized_source_procedure(&source, &mview)
-                .await?;
-            return Err(e);
-        }
-
         // Fill in the correct source id for stream node.
         fn fill_source_id(stream_node: &mut StreamNode, source_id: u32) -> usize {
             use risingwave_common::catalog::TableId;
@@ -544,8 +462,6 @@ where
             self.catalog_manager
                 .cancel_create_materialized_source_procedure(&source, &mview)
                 .await?;
-            // drop previously created source
-            self.drop_source_on_compute_node(source_id).await?;
             return Err(e);
         }
 
@@ -570,8 +486,7 @@ where
             .drop_materialized_source(source_id, table_id)
             .await?;
 
-        // 2. Drop source and mv separately.
-        self.drop_source_on_compute_node(source_id).await?;
+        // 2. Drop materialized view on compute node.
         self.drop_mview_on_compute_node(table_id).await?;
 
         Ok(version)
