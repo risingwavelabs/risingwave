@@ -62,9 +62,7 @@ impl_plan_tree_node_for_unary! { BatchInsert }
 
 impl ToDistributedBatch for BatchInsert {
     fn to_distributed(&self) -> PlanRef {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+        let new_input = self.input().to_distributed();
         self.clone_with_input(new_input).into()
     }
 }

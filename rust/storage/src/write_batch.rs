@@ -23,7 +23,7 @@ use crate::{Keyspace, StateStore};
 pub struct WriteBatch<S: StateStore> {
     store: S,
 
-    batch: Vec<(Bytes, Option<StorageValue>)>,
+    batch: Vec<(Bytes, StorageValue)>,
 }
 
 impl<S> WriteBatch<S>
@@ -115,35 +115,35 @@ impl<'a, S: StateStore> KeySpaceWriteBatch<'a, S> {
     /// Pushes `key` and `value` into the `WriteBatch`.
     /// If `key` is valid, it will be prefixed with `keyspace` key.
     /// Otherwise, only `keyspace` key is pushed.
-    fn do_push(&mut self, key: Option<&[u8]>, value: Option<Bytes>) {
+    fn do_push(&mut self, key: Option<&[u8]>, value: StorageValue) {
         let key = match key {
             Some(key) => self.keyspace.prefixed_key(key),
             None => self.keyspace.key().to_vec(),
         }
         .into();
-        self.global.batch.push((key, value.map(StorageValue::from)));
+        self.global.batch.push((key, value));
     }
 
     /// Treats the keyspace as a single key, and put a value.
-    pub fn put_single(&mut self, value: impl Into<Bytes>) {
-        self.do_push(None, Some(value.into()));
+    pub fn put_single(&mut self, value: StorageValue) {
+        self.do_push(None, value);
     }
 
     /// Treats the keyspace as a single key, and delete a value.
     pub fn delete_single(&mut self) {
-        self.do_push(None, None);
+        self.do_push(None, StorageValue::new_default_delete());
     }
 
     /// Puts a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
-    pub fn put(&mut self, key: impl AsRef<[u8]>, value: impl Into<Bytes>) {
-        self.do_push(Some(key.as_ref()), Some(value.into()));
+    pub fn put(&mut self, key: impl AsRef<[u8]>, value: StorageValue) {
+        self.do_push(Some(key.as_ref()), value);
     }
 
     /// Deletes a value, with the key prepended by the prefix of `keyspace`, like `[prefix | given
     /// key]`.
     pub fn delete(&mut self, key: impl AsRef<[u8]>) {
-        self.do_push(Some(key.as_ref()), None);
+        self.do_push(Some(key.as_ref()), StorageValue::new_default_delete());
     }
 }
 
@@ -153,6 +153,7 @@ mod tests {
 
     use super::WriteBatch;
     use crate::memory::MemoryStateStore;
+    use crate::storage_value::StorageValue;
     use crate::Keyspace;
 
     #[tokio::test]
@@ -163,9 +164,9 @@ mod tests {
 
         assert!(write_batch.is_empty());
         let mut key_space_batch = write_batch.prefixify(&key_space);
-        key_space_batch.put(Bytes::from("aa"), Bytes::from("444"));
-        key_space_batch.put(Bytes::from("cc"), Bytes::from("444"));
-        key_space_batch.put(Bytes::from("bb"), Bytes::from("444"));
+        key_space_batch.put(Bytes::from("aa"), StorageValue::new_default_put("444"));
+        key_space_batch.put(Bytes::from("cc"), StorageValue::new_default_put("444"));
+        key_space_batch.put(Bytes::from("bb"), StorageValue::new_default_put("444"));
         key_space_batch.delete(Bytes::from("aa"));
 
         write_batch

@@ -149,4 +149,89 @@ impl Executor for ChainExecutor {
     }
 }
 
-// TODO: restore the unit tests
+#[cfg(test)]
+mod test {
+    use std::sync::Arc;
+
+    use futures::StreamExt;
+    use risingwave_common::array::{Array, I32Array, Op, StreamChunk};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::column_nonnull;
+    use risingwave_common::types::DataType;
+
+    use super::ChainExecutor;
+    use crate::executor::{Barrier, Message, PkIndices};
+    use crate::executor_v2::test_utils::MockSource;
+    use crate::executor_v2::{Executor, ExecutorInfo};
+    use crate::task::{FinishCreateMviewNotifier, LocalBarrierManager};
+
+    #[tokio::test]
+    async fn test_basic() {
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+        let first = Box::new(
+            MockSource::with_chunks(
+                schema.clone(),
+                PkIndices::new(),
+                vec![
+                    StreamChunk::new(
+                        vec![Op::Insert],
+                        vec![column_nonnull! { I32Array, [1] }],
+                        None,
+                    ),
+                    StreamChunk::new(
+                        vec![Op::Insert],
+                        vec![column_nonnull! { I32Array, [2] }],
+                        None,
+                    ),
+                ],
+            )
+            .stop_on_finish(false),
+        );
+
+        let second = Box::new(MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [3] }],
+                    None,
+                )),
+                Message::Chunk(StreamChunk::new(
+                    vec![Op::Insert],
+                    vec![column_nonnull! { I32Array, [4] }],
+                    None,
+                )),
+            ],
+        ));
+
+        let barrier_manager = LocalBarrierManager::for_test();
+        let notifier = FinishCreateMviewNotifier {
+            barrier_manager: Arc::new(parking_lot::Mutex::new(barrier_manager)),
+            actor_id: 0,
+        };
+
+        let chain = ChainExecutor::new(
+            first,
+            second,
+            vec![0],
+            notifier,
+            0,
+            ExecutorInfo {
+                schema,
+                pk_indices: Vec::new(),
+                identity: "Chain".to_owned(),
+            },
+        );
+
+        let mut chain = Box::new(chain).execute();
+
+        let mut count = 0;
+        while let Some(Message::Chunk(ck)) = chain.next().await.transpose().unwrap() {
+            count += 1;
+            let target = ck.column_at(0).array_ref().as_int32().value_at(0).unwrap();
+            assert_eq!(target, count);
+        }
+    }
+}

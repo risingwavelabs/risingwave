@@ -48,12 +48,12 @@
 - sql: |
     select +1.0, -2.0;
   batch_plan: |
-    BatchProject { exprs: [Normalized(1.0):Decimal, Neg(Normalized(2.0):Decimal)], expr_alias: [ ,  ] }
+    BatchProject { exprs: [1.0:Decimal, Neg(2.0:Decimal)], expr_alias: [ ,  ] }
       BatchValues { rows: [[]] }
 - sql: |
     values(round(42.4382, 2));
   batch_plan: |
-    BatchValues { rows: [[RoundDigit(Normalized(42.4382):Decimal, 2:Int32)]] }
+    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 2:Int32)]] }
 - sql: |
     values(round('abc'));
   binder_error: 'Feature is not yet implemented: function round(Varchar) doesn''t exist'
@@ -62,22 +62,22 @@
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal)], expr_alias: [ ] }
+      BatchProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal)], expr_alias: [ ] }
         BatchScan { table: t, columns: [v1] }
   stream_plan: |
     StreamMaterialize { columns: [expr#0, _row_id#0(hidden)], pk_columns: [_row_id#0] }
-      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, Normalized(0.0):Decimal), $1], expr_alias: [ ,  ] }
+      StreamProject { exprs: [Case(($0 = 1:Int32), 1:Int32::Decimal, ($0 = 2:Int32), 2:Int32::Decimal, 0.0:Decimal), $1], expr_alias: [ ,  ] }
         StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
 - sql: |
     select length(trim(trailing '1' from '12'))+length(trim(leading '2' from '23'))+length(trim(both '3' from '34'));
   batch_plan: |
-    BatchProject { exprs: [((Length(Rtrim("12":Varchar, "1":Varchar)) + Length(Ltrim("23":Varchar, "2":Varchar))) + Length(Trim("34":Varchar, "3":Varchar)))], expr_alias: [ ] }
+    BatchProject { exprs: [((Length(Rtrim('12':Varchar, '1':Varchar)) + Length(Ltrim('23':Varchar, '2':Varchar))) + Length(Trim('34':Varchar, '3':Varchar)))], expr_alias: [ ] }
       BatchValues { rows: [[]] }
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchProject { exprs: [Position(Replace("1":Varchar, "1":Varchar, "2":Varchar), "123":Varchar)], expr_alias: [ ] }
-      BatchFilter { predicate: Like("12":Varchar, "%1":Varchar) }
+    BatchProject { exprs: [Position(Replace('1':Varchar, '1':Varchar, '2':Varchar), '123':Varchar)], expr_alias: [ ] }
+      BatchFilter { predicate: Like('12':Varchar, '%1':Varchar) }
         BatchValues { rows: [[]] }
 - sql: |
     create table t (v1 int, v2 int);
@@ -90,7 +90,7 @@
     insert into t values (22.33, '33'), (44, 55.0);
   batch_plan: |
     BatchInsert { table: t }
-      BatchValues { rows: [[Normalized(22.33):Decimal::Float32, "33":Varchar::Int32], [44:Int32::Float32, Normalized(55.0):Decimal::Int32]] }
+      BatchValues { rows: [[22.33:Decimal::Float32, '33':Varchar::Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
 - sql: |
     create table t (v1 real, v2 int, v3 varchar);
     insert into t values (1, 2), (3, 4);

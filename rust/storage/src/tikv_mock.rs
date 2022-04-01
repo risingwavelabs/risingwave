@@ -42,7 +42,7 @@ impl StateStore for TikvStateStore {
 
     fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move { unimplemented!() }
@@ -58,7 +58,7 @@ impl StateStore for TikvStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
@@ -116,7 +116,7 @@ impl TikvStateStoreIter {
 }
 
 impl StateStoreIter for TikvStateStoreIter {
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
     type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
@@ -45,9 +46,9 @@ macro_rules! impl_chrono_wrapper {
                 }
             }
 
-            impl ToString for $variant_name {
-                fn to_string(&self) -> String {
-                    self.0.to_string()
+            impl Display for $variant_name {
+                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                    Display::fmt(&self.0, f)
                 }
             }
         )*

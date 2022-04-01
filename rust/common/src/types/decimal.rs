@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Display, Formatter};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
@@ -350,13 +351,13 @@ impl Sub for Decimal {
     }
 }
 
-impl ToString for Decimal {
-    fn to_string(&self) -> String {
+impl Display for Decimal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Normalized(d) => d.to_string(),
-            Self::NaN => "NaN".to_string(),
-            Self::PositiveINF => "+Inf".to_string(),
-            Self::NegativeINF => "-Inf".to_string(),
+            Self::Normalized(d) => Display::fmt(&d, f),
+            Self::NaN => Display::fmt("NaN", f),
+            Self::PositiveINF => Display::fmt("+Inf", f),
+            Self::NegativeINF => Display::fmt("-Inf", f),
         }
     }
 }

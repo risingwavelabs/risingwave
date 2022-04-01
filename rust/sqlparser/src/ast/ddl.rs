@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! AST types specific to CREATE/ALTER variants of [Statement]
+//! AST types specific to CREATE/ALTER variants of [`crate::ast::Statement`]
 //! (commonly referred to as Data Definition Language, or DDL)
 
 #[cfg(not(feature = "std"))]
