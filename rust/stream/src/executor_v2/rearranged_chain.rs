@@ -50,15 +50,12 @@ pub struct RearrangedChainExecutor {
 fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
     match msg {
         Message::Chunk(chunk) => {
-            let columns = upstream_indices
+            let (ops, columns, visibility) = chunk.into_inner();
+            let mapped_columns = upstream_indices
                 .iter()
-                .map(|i| chunk.columns()[*i].clone())
+                .map(|&i| columns[i].clone())
                 .collect();
-            Message::Chunk(StreamChunk::new(
-                chunk.ops().to_vec(),
-                columns,
-                chunk.visibility().clone(),
-            ))
+            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
         }
         _ => msg,
     }
