@@ -59,7 +59,7 @@
 	"fiscalYearStartMonth": 0,
 	"graphTooltip": 0,
 	"id": 2,
-	"iteration": 1648044787564,
+	"iteration": 1648732210970,
 	"links": [],
 	"liveNow": true,
 	"panels": [
@@ -392,44 +392,75 @@
 			"type": "row"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 2
 			},
-			"hiddenSeries": false,
 			"id": 30,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -437,7 +468,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_get_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_get_duration_count[1m])) by (instance)",
 					"interval": "",
 					"intervalFactor": 2,
 					"legendFormat": "get (cn:{{instance}})",
@@ -449,7 +480,7 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_range_scan_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_range_scan_duration_count[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "range_scan (cn:{{instance}})",
@@ -461,7 +492,7 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_range_reverse_scan_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_range_reverse_scan_duration_count[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "reverse_range_scan (cn:{{instance}})",
@@ -480,77 +511,79 @@
 					"refId": "F"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "read ops",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 2
 			},
-			"hiddenSeries": false,
 			"id": 128,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -558,10 +591,10 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_block_request_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_sst_store_block_request_counts[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "block request (cn:{{instance}})",
+					"legendFormat": "get (cn:{{instance}})",
 					"refId": "D"
 				},
 				{
@@ -570,22 +603,10 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_block_request_miss_counts[1m])) by (instance)",
+					"expr": "sum(rate(state_store_sst_store_get_remote_duration_count[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "block cache miss (cn:{{instance}})",
-					"refId": "E"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "PEDE6B306CC9C0CD0"
-					},
-					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_block_fetch_remote_duration_count[1m])) by (instance)",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "block fetch (cn:{{instance}})",
+					"legendFormat": "get remote (cn:{{instance}})",
 					"refId": "A"
 				},
 				{
@@ -594,90 +615,86 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_sst_block_put_remote_duration_count[1m])) by (instance)",
+					"expr": "sum(rate(state_store_sst_store_put_remote_duration_count[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "block put (cn:{{instance}})",
+					"legendFormat": "put remote (cn:{{instance}})",
 					"refId": "B"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "block ops",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
 			"fieldConfig": {
 				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
 					"unit": "s"
 				},
 				"overrides": []
 			},
-			"fill": 1,
-			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 10
 			},
-			"hiddenSeries": false,
 			"id": 28,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -686,6 +703,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
 					"legendFormat": "get p50 (cn: {{instance}})",
 					"refId": "A"
@@ -697,7 +715,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "get p99 (cn: {{instance}})",
 					"refId": "B"
@@ -709,7 +727,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.9, sum(rate(state_store_get_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "get p90 (cn: {{instance}})",
 					"refId": "C"
@@ -733,7 +751,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "range_scan p50 (cn: {{instance}})",
 					"refId": "E"
@@ -745,7 +763,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "range_scan p99 (cn: {{instance}})",
 					"refId": "F"
@@ -757,7 +775,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.9, sum(rate(state_store_range_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "range_scan p90 (cn: {{instance}})",
 					"refId": "G"
@@ -781,7 +799,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "reverse_range_scan p50 (cn: {{instance}})",
 					"refId": "I"
@@ -793,7 +811,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(state_store_range_reverse_scan_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "reverse_range_scan p99 (cn: {{instance}})",
 					"refId": "J"
@@ -811,77 +829,79 @@
 					"refId": "K"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "read duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:123",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:124",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 0,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "auto",
+						"spanNulls": false,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "cpm"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 10
 			},
-			"hiddenSeries": false,
 			"id": 130,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -892,7 +912,7 @@
 					"expr": "sum(rate(state_store_bloom_filter_true_negative_counts[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "BF true negative (cn:{{instance}})",
+					"legendFormat": "bloom filter true negative (cn:{{instance}})",
 					"refId": "G"
 				},
 				{
@@ -904,7 +924,7 @@
 					"expr": "sum(rate(state_store_bloom_filter_might_positive_counts[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "BF might positive (cn:{{instance}})",
+					"legendFormat": "bloom filter might positive (cn:{{instance}})",
 					"refId": "H"
 				},
 				{
@@ -914,22 +934,10 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
-					"legendFormat": "# merged SSTs p90 (cn:{{instance}})",
+					"legendFormat": "# merged ssts p90 (cn:{{instance}})",
 					"refId": "A"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "PEDE6B306CC9C0CD0"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "# merged SSTs p50 (cn:{{instance}})",
-					"refId": "B"
 				},
 				{
 					"datasource": {
@@ -938,89 +946,97 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_sstable_counts_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
-					"legendFormat": "# merged SSTs p99 (cn:{{instance}})",
+					"legendFormat": "# merged ssts p99 (cn:{{instance}})",
 					"refId": "C"
-				}
-			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "sstable ops",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
 				},
 				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
+					"datasource": {
+						"type": "prometheus",
+						"uid": "PEDE6B306CC9C0CD0"
+					},
+					"exemplar": true,
+					"expr": "sum by(le, instance)(rate(state_store_iter_merge_sstable_counts_sum[1m]))  / sum by(le, instance)(rate(state_store_iter_merge_sstable_counts_count[1m]))",
+					"hide": false,
+					"interval": "",
+					"legendFormat": "# merged ssts avg (cn:{{instance}})",
+					"refId": "B"
 				}
 			],
-			"yaxis": {
-				"align": false
-			}
+			"title": "sst read counters",
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
 			"fieldConfig": {
 				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
 					"unit": "s"
 				},
 				"overrides": []
 			},
-			"fill": 1,
-			"fillGradient": 0,
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 18
 			},
-			"hiddenSeries": false,
 			"id": 126,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1028,9 +1044,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_sst_block_fetch_remote_duration_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_sst_store_get_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "fetch p50 (cn: {{instance}})",
+					"legendFormat": "get block p50 (cn: {{instance}})",
 					"refId": "A"
 				},
 				{
@@ -1039,10 +1056,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_sst_block_fetch_remote_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_sst_store_get_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "fetch p99 (cn: {{instance}})",
+					"legendFormat": "get block p99 (cn: {{instance}})",
 					"refId": "B"
 				},
 				{
@@ -1051,10 +1068,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_sst_block_fetch_remote_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_sst_store_get_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "fetch p90 (cn: {{instance}})",
+					"legendFormat": "get block p90 (cn: {{instance}})",
 					"refId": "C"
 				},
 				{
@@ -1063,10 +1080,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_sst_block_fetch_remote_duration_sum[1m])) / sum by(le, instance) (rate(state_store_sst_block_fetch_remote_duration_count[1m]))",
+					"expr": "sum by(le, instance)(rate(state_store_sst_store_get_remote_duration_sum[1m])) / sum by(le, instance) (rate(state_store_sst_store_get_remote_duration_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "fetch avg (cn: {{instance}})",
+					"legendFormat": "get block avg (cn: {{instance}})",
 					"refId": "D"
 				},
 				{
@@ -1075,10 +1092,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_sst_block_put_remote_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_sst_store_put_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "put p50 (cn: {{instance}})",
+					"legendFormat": "put sst p50 (cn: {{instance}})",
 					"refId": "E"
 				},
 				{
@@ -1087,10 +1104,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_sst_block_put_remote_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_sst_store_put_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "put p99 (cn: {{instance}})",
+					"legendFormat": "put sst p99 (cn: {{instance}})",
 					"refId": "F"
 				},
 				{
@@ -1099,10 +1116,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_sst_block_put_remote_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_sst_store_put_remote_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
-					"legendFormat": "put p90 (cn: {{instance}})",
+					"legendFormat": "put sst p90 (cn: {{instance}})",
 					"refId": "G"
 				},
 				{
@@ -1111,84 +1128,86 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_sst_block_put_remote_duration_sum[1m])) / sum by(le, instance) (rate(state_store_sst_block_put_remote_duration_count[1m]))",
+					"expr": "sum by(le, instance)(rate(state_store_sst_store_put_remote_duration_sum[1m])) / sum by(le, instance) (rate(state_store_sst_store_put_remote_duration_count[1m]))",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "put avg (cn: {{instance}})",
+					"legendFormat": "put sst avg (cn: {{instance}})",
 					"refId": "H"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
-			"title": "block io duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:123",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:124",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"title": "sst store remote io",
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "Bps"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 18
 			},
-			"hiddenSeries": false,
 			"id": 32,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1250,77 +1269,79 @@
 					"refId": "E"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "read throughput",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:160",
-					"format": "Bps",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:161",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 26
 			},
-			"hiddenSeries": false,
 			"id": 43,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1328,10 +1349,10 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(state_store_write_batch_counts[30s])) by (instance)",
+					"expr": "sum(rate(state_store_write_batch_duration_count[1m])) by (instance)",
 					"interval": "",
 					"intervalFactor": 2,
-					"legendFormat": "write_batch_count compute_node = {{instance}} ",
+					"legendFormat": "write batch cn= {{instance}} ",
 					"refId": "A"
 				},
 				{
@@ -1340,84 +1361,86 @@
 						"uid": "PEDE6B306CC9C0CD0"
 					},
 					"exemplar": true,
-					"expr": "sum(irate(state_store_write_shared_buffer_sync_counts[30s])) by (instance)",
+					"expr": "sum(rate(state_store_shared_buffer_to_l0_duration_count[1m])) by (instance)",
 					"hide": false,
 					"interval": "",
-					"legendFormat": "write_shared_buffer_sync_counts compute_node = {{instance}} ",
+					"legendFormat": "l0 cn = {{instance}} ",
 					"refId": "B"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "write ops",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "ops"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 26
 			},
-			"hiddenSeries": false,
 			"id": 132,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1444,77 +1467,79 @@
 					"refId": "H"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "merge iterators ops",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "ops",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 34
 			},
-			"hiddenSeries": false,
 			"id": 40,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1522,7 +1547,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_batch_shared_buffer_time_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
 					"interval": "",
 					"legendFormat": "shared_buffer p50  (cn: {{instance}})",
 					"refId": "A"
@@ -1533,7 +1558,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_batch_shared_buffer_time_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "shared_buffer p90  (cn: {{instance}})",
@@ -1545,7 +1570,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_batch_shared_buffer_time_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_batch_duration_bucket[1m])) by (le, instance))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "shared_buffer p99  (cn: {{instance}})",
@@ -1557,7 +1582,7 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum by(le, instance)(rate(state_store_write_batch_shared_buffer_time_sum[1m]))  / sum by(le, instance)(rate(state_store_write_batch_shared_buffer_time_count[1m]))",
+					"expr": "sum by(le, instance)(rate(state_store_write_batch_duration_sum[1m]))  / sum by(le, instance)(rate(state_store_write_batch_duration_count[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "shared_buffer avg (cn: {{instance}})",
@@ -1612,77 +1637,79 @@
 					"refId": "H"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "write duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 34
 			},
-			"hiddenSeries": false,
 			"id": 48,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1691,7 +1718,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "mi_seek p50 (cn:{{instance}})",
 					"refId": "E"
@@ -1703,7 +1730,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.9, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "mi_seek p90 (cn:{{instance}})",
 					"refId": "F"
@@ -1715,7 +1742,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_seek_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "mi_seek p99 (cn:{{instance}})",
 					"refId": "G"
@@ -1731,127 +1758,81 @@
 					"interval": "",
 					"legendFormat": "mi_seek avg (cn:{{instance}})",
 					"refId": "H"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_next_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "mi_next p50 (cn:{{instance}})",
-					"refId": "I"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_iter_merge_next_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "mi_next p99 (cn:{{instance}})",
-					"refId": "J"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_iter_merge_next_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "mi_next p50 (cn:{{instance}})",
-					"refId": "K"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(state_store_iter_merge_next_duration_sum[1m])) / sum by(le, instance) (rate(state_store_iter_merge_next_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "mi_next avg (cn:{{instance}})",
-					"refId": "L"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "merge iterators duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 42
 			},
-			"hiddenSeries": false,
 			"id": 41,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1859,7 +1840,8 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.5, sum(rate(state_store_write_build_l0_sst_time_bucket[1m])) by (le, instance))",
+					"expr": "histogram_quantile(0.5, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
 					"legendFormat": "p50 (cn: {{instance}})",
 					"refId": "A"
@@ -1870,8 +1852,8 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.9, sum(rate(state_store_write_build_l0_sst_time_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.9, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
 					"legendFormat": "p90 (cn: {{instance}})",
 					"refId": "B"
@@ -1882,8 +1864,8 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_write_build_l0_sst_time_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"expr": "histogram_quantile(0.99, sum(rate(state_store_shared_buffer_to_l0_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
 					"legendFormat": "p99 (cn: {{instance}})",
 					"refId": "C"
@@ -1894,84 +1876,86 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(state_store_write_build_l0_sst_time_sum[1m])) / sum by(le, instance) (rate(state_store_write_build_l0_sst_time_count[1m]))",
+					"expr": "sum by(le, instance) (rate(state_store_shared_buffer_to_l0_duration_sum[1m])) / sum by(le, instance) (rate(state_store_shared_buffer_to_l0_duration_count[1m]))",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "avg (cn: {{instance}})",
 					"refId": "D"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "build sstable duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "cps"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 42
 			},
-			"hiddenSeries": false,
 			"id": 44,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -1986,77 +1970,79 @@
 					"refId": "A"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "write kv pair counts",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:90",
-					"format": "cps",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:91",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "s"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 0,
 				"y": 50
 			},
-			"hiddenSeries": false,
 			"id": 134,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -2065,6 +2051,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.5, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
+					"hide": true,
 					"interval": "",
 					"legendFormat": "row_seq_scan next p50 (cn: {{instance}})",
 					"refId": "A"
@@ -2076,7 +2063,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.9, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "p90 (cn: {{instance}})",
 					"refId": "B"
@@ -2088,7 +2075,7 @@
 					},
 					"exemplar": true,
 					"expr": "histogram_quantile(0.99, sum(rate(batch_row_seq_scan_next_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
+					"hide": true,
 					"interval": "",
 					"legendFormat": "p99 (cn: {{instance}})",
 					"refId": "C"
@@ -2104,127 +2091,81 @@
 					"interval": "",
 					"legendFormat": "row_seq_scan next avg (cn: {{instance}})",
 					"refId": "D"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.50, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pack cell p50 (cn: {{instance}})",
-					"refId": "N"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.90, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pack cell p90 (cn: {{instance}})",
-					"refId": "O"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "histogram_quantile(0.99, sum(rate(state_store_cell_table_next_pack_cell_duration_bucket[1m])) by (le, instance))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pack cell p99 (cn: {{instance}})",
-					"refId": "P"
-				},
-				{
-					"datasource": {
-						"type": "prometheus",
-						"uid": "${DS_RISEDEV-PROMETHEUS}"
-					},
-					"exemplar": true,
-					"expr": "sum by(le, instance) (rate(state_store_cell_table_next_pack_cell_duration_sum[1m])) / sum by(le, instance) (rate(state_store_cell_table_next_pack_cell_duration_count[1m]))",
-					"hide": false,
-					"interval": "",
-					"legendFormat": "pack cell avg (cn: {{instance}})",
-					"refId": "J"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "row seq scan next duration",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:664",
-					"format": "s",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:665",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
-			"aliasColors": {},
-			"bars": false,
-			"dashLength": 10,
-			"dashes": false,
-			"fill": 1,
-			"fillGradient": 0,
+			"fieldConfig": {
+				"defaults": {
+					"color": {
+						"mode": "palette-classic"
+					},
+					"custom": {
+						"axisLabel": "",
+						"axisPlacement": "auto",
+						"barAlignment": 0,
+						"drawStyle": "line",
+						"fillOpacity": 10,
+						"gradientMode": "none",
+						"hideFrom": {
+							"legend": false,
+							"tooltip": false,
+							"viz": false
+						},
+						"lineInterpolation": "linear",
+						"lineWidth": 1,
+						"pointSize": 5,
+						"scaleDistribution": {
+							"type": "linear"
+						},
+						"showPoints": "never",
+						"spanNulls": true,
+						"stacking": {
+							"group": "A",
+							"mode": "none"
+						},
+						"thresholdsStyle": {
+							"mode": "off"
+						}
+					},
+					"mappings": [],
+					"thresholds": {
+						"mode": "absolute",
+						"steps": [
+							{
+								"color": "green",
+								"value": null
+							},
+							{
+								"color": "red",
+								"value": 80
+							}
+						]
+					},
+					"unit": "Bps"
+				},
+				"overrides": []
+			},
 			"gridPos": {
 				"h": 8,
 				"w": 12,
 				"x": 12,
 				"y": 50
 			},
-			"hiddenSeries": false,
 			"id": 45,
-			"legend": {
-				"avg": false,
-				"current": false,
-				"max": false,
-				"min": false,
-				"show": true,
-				"total": false,
-				"values": false
-			},
-			"lines": true,
-			"linewidth": 1,
-			"nullPointMode": "null",
 			"options": {
-				"alertThreshold": true
+				"legend": {
+					"calcs": [],
+					"displayMode": "list",
+					"placement": "bottom"
+				},
+				"tooltip": {
+					"mode": "single"
+				}
 			},
-			"percentage": false,
 			"pluginVersion": "8.3.3",
-			"pointradius": 2,
-			"points": false,
-			"renderer": "flot",
-			"seriesOverrides": [],
-			"spaceLength": 10,
-			"stack": false,
-			"steppedLine": false,
 			"targets": [
 				{
 					"datasource": {
@@ -2243,44 +2184,15 @@
 						"uid": "${DS_RISEDEV-PROMETHEUS}"
 					},
 					"exemplar": true,
-					"expr": "sum(rate(state_store_write_shared_buffer_sync_size_sum[1m]))by(instance) / sum(rate(state_store_write_shared_buffer_sync_size_count[1m]))by(instance)",
+					"expr": "sum(rate(state_store_shared_buffer_to_sstable_size_sum[1m]))by(instance) / sum(rate(state_store_shared_buffer_to_sstable_size_count[1m]))by(instance)",
 					"hide": false,
 					"interval": "",
 					"legendFormat": "sync (cn: {{instance}})",
 					"refId": "B"
 				}
 			],
-			"thresholds": [],
-			"timeRegions": [],
 			"title": "write throughput",
-			"tooltip": {
-				"shared": true,
-				"sort": 0,
-				"value_type": "individual"
-			},
-			"type": "graph",
-			"xaxis": {
-				"mode": "time",
-				"show": true,
-				"values": []
-			},
-			"yaxes": [
-				{
-					"$$hashKey": "object:160",
-					"format": "Bps",
-					"logBase": 1,
-					"show": true
-				},
-				{
-					"$$hashKey": "object:161",
-					"format": "short",
-					"logBase": 1,
-					"show": true
-				}
-			],
-			"yaxis": {
-				"align": false
-			}
+			"type": "timeseries"
 		},
 		{
 			"collapsed": true,
@@ -6772,13 +6684,13 @@
 		]
 	},
 	"time": {
-		"from": "now-15m",
+		"from": "now-30m",
 		"to": "now"
 	},
 	"timepicker": {},
 	"timezone": "",
 	"title": "risingwave_dashboard",
 	"uid": "Ecy3uV1nz",
-	"version": 5,
+	"version": 7,
 	"weekStart": ""
 }

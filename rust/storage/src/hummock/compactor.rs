@@ -224,7 +224,7 @@ impl Compactor {
 
         // Monitor time cost building shared buffer to SSTs.
         let build_l0_sst_timer = if self.context.is_share_buffer_compact {
-            Some(self.context.stats.write_build_l0_sst_time.start_timer())
+            Some(self.context.stats.write_build_l0_sst_duration.start_timer())
         } else {
             None
         };
@@ -255,16 +255,12 @@ impl Compactor {
                 .await?;
 
             if self.context.is_share_buffer_compact {
-                self.context.stats.addtable_upload_sst_counts.inc();
-            } else {
-                self.context.stats.compaction_upload_sst_counts.inc();
-            }
-
-            if self.context.is_share_buffer_compact {
                 self.context
                     .stats
-                    .write_shared_buffer_sync_size
+                    .shared_buffer_to_sstable_size
                     .observe(len as _);
+            } else {
+                self.context.stats.compaction_upload_sst_counts.inc();
             }
 
             ssts.push(sst);
