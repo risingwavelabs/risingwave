@@ -23,6 +23,7 @@ use crate::session::{OptimizerContext, SessionImpl};
 pub mod create_mv;
 mod create_source;
 pub mod create_table;
+mod describe_table;
 pub mod drop_mv;
 pub mod drop_table;
 mod explain;
@@ -43,6 +44,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateSource(stmt) => create_source::handle_create_source(context, stmt).await,
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
+        }
+        Statement::DescribeTable { name } => {
+            describe_table::handle_describe_table(context, name).await
         }
         Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
         Statement::ShowCommand(show_object) => {

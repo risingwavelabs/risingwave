@@ -764,6 +764,11 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// DESCRIBE TABLE
+    DescribeTable {
+        /// Table name
+        name: ObjectName,
+    },
     /// SHOW SOURCE
     ShowSource {
         /// Table name
@@ -903,6 +908,10 @@ impl fmt::Display for Statement {
             }
             Statement::Analyze { table_name } => {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::DescribeTable { name } => {
+                write!(f, "DESCRIBE TABLE {}", name)?;
                 Ok(())
             }
             Statement::ShowSource { name } => {

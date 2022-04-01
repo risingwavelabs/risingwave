@@ -170,7 +170,7 @@ impl Parser {
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
                 Keyword::SHOW => Ok(self.parse_show()?),
-                Keyword::DESCRIBE => Ok(self.parse_show()?),
+                Keyword::DESCRIBE => Ok(self.parse_describe()?),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -2481,7 +2481,18 @@ impl Parser {
         }
     }
 
-    // If first word is table or source, return show table or show source
+    /// Parser sql like `describe table t`.
+    pub fn parse_describe(&mut self) -> Result<Statement, ParserError> {
+        if !self.parse_keyword(Keyword::TABLE) {
+            self.expected("table after describe", self.peek_token())
+        } else {
+            Ok(Statement::DescribeTable {
+                name: self.parse_object_name()?,
+            })
+        }
+    }
+
+    /// Parser sql like `show databases` command.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let index = self.index;
         if let Token::Word(w) = self.next_token() {
@@ -2504,11 +2515,6 @@ impl Parser {
                 }
                 Keyword::VIEWS => {
                     return Ok(Statement::ShowCommand(ShowCommandObject::View));
-                }
-                Keyword::TABLE => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Column(
-                        self.parse_object_name()?,
-                    )));
                 }
                 Keyword::SOURCE => {
                     return Ok(Statement::ShowSource {
