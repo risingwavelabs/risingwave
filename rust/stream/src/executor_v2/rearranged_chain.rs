@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
-use futures::{stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::{stream, Stream, StreamExt};
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
-use super::error::TracedStreamExecutorError;
+use super::error::{StreamExecutorResult, TracedStreamExecutorError};
 use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
 use crate::executor::Epoch;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
@@ -141,7 +141,7 @@ impl RearrangedChainExecutor {
             // The upstream after transforming the barriers to phantom barriers.
             let (upstream_tx, upstream_rx) = mpsc::unbounded();
             // When we catch-up the progress, notify the task to stop.
-            let (stop_rearrange_tx, mut stop_rearrange_rx) = oneshot::channel();
+            let (stop_rearrange_tx, stop_rearrange_rx) = oneshot::channel();
 
             // 2. Actually, the `first_msg` is rearranged too. So we need to put a phantom barrier.
             upstream_tx
@@ -149,39 +149,12 @@ impl RearrangedChainExecutor {
                 .unwrap();
 
             // 3. Spawn the background task.
-            let upstream_poll_handle = tokio::spawn(async move {
-                #[for_await]
-                for msg in &mut upstream {
-                    let msg = msg?;
-                    match msg {
-                        // If we polled a chunk, simply put it to the `upstream_tx`.
-                        Message::Chunk(chunk) => {
-                            upstream_tx
-                                .unbounded_send(RearrangedMessage::Chunk(chunk))
-                                .expect("failed to put chunk");
-                        }
-
-                        // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
-                        // a phantom barrier in-place.
-                        Message::Barrier(barrier) => {
-                            upstream_tx
-                                .unbounded_send(RearrangedMessage::PhantomBarrier(barrier.epoch))
-                                .expect("failed to put phantom barrier");
-                            rearranged_barrier_tx
-                                .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier))
-                                .expect("failed to rearrange barrier");
-                        }
-                    };
-
-                    // Check that whether we should stop.
-                    if stop_rearrange_rx.try_recv().unwrap().is_some() {
-                        break;
-                    }
-                }
-
-                // Return the remaining upstream back. There's no need to rearrange it any more.
-                Ok::<_, TracedStreamExecutorError>(upstream)
-            });
+            let upstream_poll_handle = tokio::spawn(Self::rearrange(
+                upstream,
+                upstream_tx,
+                rearranged_barrier_tx,
+                stop_rearrange_rx,
+            ));
 
             // 4. Init the snapshot with reading epoch.
             let snapshot = self.snapshot.execute_with_epoch(create_epoch.prev);
@@ -263,6 +236,46 @@ impl RearrangedChainExecutor {
                 yield msg;
             }
         }
+    }
+
+    /// Background rearrangement task. Check `execute_inner` for more details.
+    async fn rearrange(
+        mut upstream: impl Stream<Item = StreamExecutorResult<Message>> + std::marker::Unpin,
+        upstream_tx: mpsc::UnboundedSender<RearrangedMessage>,
+        rearranged_barrier_tx: mpsc::UnboundedSender<RearrangedMessage>,
+        mut stop_rearrange_rx: oneshot::Receiver<()>,
+    ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<Message>>> {
+        #[for_await]
+        for msg in &mut upstream {
+            let msg = msg?;
+            match msg {
+                // If we polled a chunk, simply put it to the `upstream_tx`.
+                Message::Chunk(chunk) => {
+                    upstream_tx
+                        .unbounded_send(RearrangedMessage::Chunk(chunk))
+                        .expect("failed to put chunk");
+                }
+
+                // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
+                // a phantom barrier in-place.
+                Message::Barrier(barrier) => {
+                    upstream_tx
+                        .unbounded_send(RearrangedMessage::PhantomBarrier(barrier.epoch))
+                        .expect("failed to put phantom barrier");
+                    rearranged_barrier_tx
+                        .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier))
+                        .expect("failed to rearrange barrier");
+                }
+            };
+
+            // Check that whether we should stop.
+            if stop_rearrange_rx.try_recv().unwrap().is_some() {
+                break;
+            }
+        }
+
+        // Return the remaining upstream back. There's no need to rearrange it any more.
+        Ok(upstream)
     }
 }
 
