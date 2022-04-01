@@ -50,8 +50,11 @@ impl Column {
         &*self.array
     }
 
-    pub fn array_mut_ref(&mut self) -> &mut ArrayImpl {
-        Arc::get_mut(&mut self.array).unwrap()
+    /// This gets the mutable reference of the array in column.
+    /// Should be used very careful!!!
+    /// If the array is not shared before calling this function, it will return `None`.
+    pub fn array_mut_ref(&mut self) -> Option<&mut ArrayImpl> {
+        Arc::get_mut(&mut self.array)
     }
 }
 

@@ -291,6 +291,7 @@ impl<K: HashKey> ProbeTable<K> {
             data_chunk
                 .column_mut_at(build_start_pos + col_idx)
                 .array_mut_ref()
+                .unwrap()
                 .set_bitmap(filter.clone());
         }
     }
