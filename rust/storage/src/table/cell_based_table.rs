@@ -162,22 +162,7 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn delete_row(&mut self, pk: &Row, old_value: &Row, epoch: u64) -> Result<()> {
         // TODO(wcy-fdu): TODO: support only serialize key mode. We only need keys in this case to
         // delete.
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(&self.column_descs);
-        let bytes = self.cell_based_row_serializer.serialize(
-            &arrange_key_buf,
-            Some(old_value.clone()),
-            &column_ids,
-        )?;
-        for (key, value) in bytes {
-            if value.is_some() {
-                local.delete(key);
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!()
     }
 
     pub async fn update_row(
@@ -187,34 +172,7 @@ impl<S: StateStore> CellBasedTable<S> {
         new_value: Option<Row>,
         epoch: u64,
     ) -> Result<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        let arrange_key_buf = serialize_pk(pk, self.pk_serializer.as_ref().unwrap())?;
-        let column_ids = generate_column_id(&self.column_descs);
-
-        let old_bytes =
-            self.cell_based_row_serializer
-                .serialize(&arrange_key_buf, old_value, &column_ids)?;
-        let new_bytes =
-            self.cell_based_row_serializer
-                .serialize(&arrange_key_buf, new_value, &column_ids)?;
-        // delete original kv_pairs in state_store
-        for (key, value) in &old_bytes {
-            if value.is_some() {
-                local.delete(key);
-            }
-        }
-        // write updated kv_pairs in state_store
-        let mut batch = self.keyspace.state_store().start_write_batch();
-        let mut local = batch.prefixify(&self.keyspace);
-        for (key, value) in new_bytes {
-            match value {
-                Some(val) => local.put(key, val),
-                None => local.delete(key),
-            }
-        }
-        batch.ingest(epoch).await?;
-        Ok(())
+        todo!()
     }
 
     pub async fn batch_write_rows(
