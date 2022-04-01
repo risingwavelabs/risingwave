@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 
 use super::{infer_type, Expr, ExprImpl};
 use crate::expr::ExprType;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
     func_type: ExprType,
     return_type: DataType,
@@ -84,6 +85,19 @@ impl std::fmt::Debug for FunctionCall {
 }
 
 impl FunctionCall {
+    /// Returns error if the function call is not valid.
+    pub fn new_or_else<F>(func_type: ExprType, inputs: Vec<ExprImpl>, err_f: F) -> Result<Self>
+    where
+        F: FnOnce(&Vec<ExprImpl>) -> RwError,
+    {
+        infer_type(
+            func_type,
+            inputs.iter().map(|expr| expr.return_type()).collect(),
+        )
+        .ok_or_else(|| err_f(&inputs))
+        .map(|return_type| Self::new_with_return_type(func_type, inputs, return_type))
+    }
+
     pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
         let return_type = infer_type(
             func_type,

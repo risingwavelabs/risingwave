@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
+use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -45,8 +46,12 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
-
-pub type ActorHandle = JoinHandle<()>;
+/// `ActorHandle` contains the join handle of actor's future, and a sender used to force stop
+/// the actor.
+pub struct ActorHandle {
+    pub handle: JoinHandle<()>,
+    pub stop_tx: oneshot::Sender<()>,
+}
 
 pub struct LocalStreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -221,6 +226,20 @@ impl LocalStreamManager {
         Ok(())
     }
 
+    /// Force stop all actors on this worker.
+    pub async fn stop_all_actors(&self) -> Result<()> {
+        let futures = {
+            let mut core = self.core.lock();
+            let futures = core.stop_all_actors()?;
+            // Reset barrier manager to a clean state.
+            core.context.reset_barrier_manager();
+            futures
+        };
+        join_all(futures).await;
+
+        Ok(())
+    }
+
     pub fn take_receiver(&self, ids: UpDownActorIds) -> Result<Receiver<Message>> {
         let core = self.core.lock();
         core.context.take_receiver(&ids)
@@ -239,7 +258,7 @@ impl LocalStreamManager {
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await?;
+            handle.handle.await?;
         }
         Ok(())
     }
@@ -248,7 +267,7 @@ impl LocalStreamManager {
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await.unwrap();
+            handle.handle.await.unwrap();
         }
         Ok(())
     }
@@ -406,19 +425,19 @@ impl LocalStreamManagerCore {
                     .hash_mapping;
                 Box::new(DispatchExecutor::new(
                     input,
-                    HashDataDispatcher::new(
+                    DispatcherImpl::Hash(HashDataDispatcher::new(
                         dispatcher.downstream_actor_id.to_vec(),
                         outputs,
                         column_indices,
                         hash_mapping,
-                    ),
+                    )),
                     actor_id,
                     self.context.clone(),
                 ))
             }
             Broadcast => Box::new(DispatchExecutor::new(
                 input,
-                BroadcastDispatcher::new(outputs),
+                DispatcherImpl::Broadcast(BroadcastDispatcher::new(outputs)),
                 actor_id,
                 self.context.clone(),
             )),
@@ -427,7 +446,7 @@ impl LocalStreamManagerCore {
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(
                     input,
-                    SimpleDispatcher::new(output),
+                    DispatcherImpl::Simple(SimpleDispatcher::new(output)),
                     actor_id,
                     self.context.clone(),
                 ))
@@ -714,12 +733,17 @@ impl LocalStreamManagerCore {
 
             trace!("build actor: {:#?}", &dispatcher);
 
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
+            let (stop_tx, stop_rx) = oneshot::channel();
+
+            let actor = Actor::new(dispatcher, actor_id, self.context.clone(), stop_rx);
             self.handles.insert(
                 actor_id,
-                tokio::spawn(async move {
-                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
-                }),
+                ActorHandle {
+                    handle: tokio::spawn(async move {
+                        actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                    }),
+                    stop_tx,
+                },
             );
         }
 
@@ -770,7 +794,7 @@ impl LocalStreamManagerCore {
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.abort();
+        handle.handle.abort();
     }
 
     fn build_channel_for_chain_node(
@@ -889,5 +913,23 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    fn stop_all_actors(&mut self) -> Result<Vec<JoinHandle<()>>> {
+        let futures = self
+            .handles
+            .drain()
+            .map(|(actor_id, handle)| {
+                self.context.retain(|&(up_id, _)| up_id != actor_id);
+                self.actors.remove(&actor_id);
+                handle.stop_tx.send(()).ok();
+                handle.handle
+            })
+            .collect_vec();
+
+        // meta will rebuild this soon
+        self.actor_infos.clear();
+
+        Ok(futures)
     }
 }

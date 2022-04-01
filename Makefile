@@ -5,16 +5,16 @@ all: java rust
 java: java_test
 
 java_test:
-	cd java && ./gradlew test
+	cd legacy && ./gradlew test
 
 java_build:
-	cd java && ./gradlew build
+	cd legacy && ./gradlew build
 
 java_check:
-	cd java && ./gradlew check
+	cd legacy && ./gradlew check
 
 java_coverage_report:
-	cd java && ./gradlew jacocoRootReport
+	cd legacy && ./gradlew jacocoRootReport
 
 rust:
 	echo "This command is deprecated. Use ./risedev check instead."

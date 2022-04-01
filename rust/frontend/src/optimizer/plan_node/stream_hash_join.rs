@@ -33,7 +33,7 @@ pub struct StreamHashJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
 
-    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 }
@@ -114,12 +114,6 @@ impl PlanTreeNodeBinary for StreamHashJoin {
             self.logical.clone_with_left_right(left, right),
             self.eq_join_predicate.clone(),
         )
-    }
-    fn left_dist_required(&self) -> &Distribution {
-        todo!()
-    }
-    fn right_dist_required(&self) -> &Distribution {
-        todo!()
     }
 }
 

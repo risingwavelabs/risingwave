@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_meta"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 
 [dependencies]
@@ -23,13 +23,14 @@ itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.7", features = ["future"] }
+moka = { version = "0.8", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = "0.13"
 prost = "0.9"
+rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
 risingwave_pb = { path = "../prost" }
@@ -61,7 +62,3 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 assert_matches = "1"
 rand = "0.8"
 tempfile = "3"
-
-[features]
-default = ["blockv2"]
-blockv2 = ["risingwave_storage/blockv2"]

@@ -18,7 +18,6 @@ use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::LimitNode;
 
 use super::{LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::Distribution;
 
 /// `BatchLimit` implements [`super::LogicalLimit`] to fetch specified rows from input
 #[derive(Debug, Clone)]
@@ -57,9 +56,7 @@ impl PlanTreeNodeUnary for BatchLimit {
 impl_plan_tree_node_for_unary! {BatchLimit}
 impl ToDistributedBatch for BatchLimit {
     fn to_distributed(&self) -> PlanRef {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+        let new_input = self.input().to_distributed();
         self.clone_with_input(new_input).into()
     }
 }

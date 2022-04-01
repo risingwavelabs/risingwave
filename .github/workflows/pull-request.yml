@@ -11,10 +11,105 @@ on:
     branches: [main]
 env:
   RUST_TOOLCHAIN: nightly-2022-03-09
-  CACHE_KEY_SUFFIX: v20220320
+  CACHE_KEY_SUFFIX: v20220331
   CARGO_TERM_COLOR: always
   RW_CI: true
+  RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
+  RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
+  RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
+  RUSTFLAGS: -D warnings
 jobs:
+  start-runner-a:
+    name: ec2-start-a
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.WUTAO_PAT }}
+          ec2-image-id: ami-05a99cf0eb100c377
+          ec2-instance-type: c5.4xlarge
+          subnet-id: subnet-59743123
+          security-group-id: sg-9ec32bfe
+  start-runner-b:
+    name: ec2-start-b
+    runs-on: ubuntu-latest
+    outputs:
+      label: ${{ steps.start-ec2-runner.outputs.label }}
+      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Start EC2 runner
+        id: start-ec2-runner
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: start
+          github-token: ${{ secrets.WUTAO_PAT }}
+          ec2-image-id: ami-05a99cf0eb100c377
+          ec2-instance-type: c5.4xlarge
+          subnet-id: subnet-59743123
+          security-group-id: sg-9ec32bfe
+  stop-runner-a:
+    name: ec2-stop-a
+    needs:
+      - start-runner-a
+      - compute-node-build-dev
+      - end-to-end-risedev-dev
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Stop EC2 runner A
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.WUTAO_PAT }}
+          label: ${{ needs.start-runner-a.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
+        if: ${{ always() }}
+  stop-runner-b:
+    name: ec2-stop-b
+    needs:
+      - start-runner-b
+      - compute-node-test
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-2
+      - name: Stop EC2 runner B
+        uses: machulav/ec2-github-runner@v2
+        with:
+          mode: stop
+          github-token: ${{ secrets.WUTAO_PAT }}
+          label: ${{ needs.start-runner-b.outputs.label }}
+          ec2-instance-id: ${{ needs.start-runner-b.outputs.ec2-instance-id }}
+        if: ${{ always() }}
   frontend-check:
     name: frontend-check
     runs-on: ubuntu-latest
@@ -45,16 +140,16 @@ jobs:
           name: risingwave-fe-runnable.jar
           if-no-files-found: error
           path: |
-            java/pgserver/build/libs/risingwave-fe-runnable.jar
+            legacy/pgserver/build/libs/risingwave-fe-runnable.jar
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: java
+          directory: legacy
           flags: java
-  end-to-end-risedev:
-    name: e2e-test-risedev
+  end-to-end-risedev-dev:
+    name: e2e-test-risedev-dev
     needs:
-      - compute-node-build
+      - compute-node-build-dev
       - frontend-check
       - start-runner-a
     runs-on: ${{ needs.start-runner-a.outputs.label }}
@@ -80,7 +175,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
-          name: risingwave
+          name: risingwave-dev
           path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
@@ -90,7 +185,7 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download playground binary
         with:
-          name: risedev-playground
+          name: risedev-playground-dev
           path: ./rust/target/debug
       - name: Adjust permission
         run: |
@@ -105,33 +200,32 @@ jobs:
           cp risedev-components.ci.env risedev-components.user.env
       - name: Download sqllogictest
         run: |
-          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
         run: |
-          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
-          unzip ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -d ~
-          mv ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl ~/cargo-make
+          curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
+          unzip ~/cargo-make.zip -d ~
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - name: Prepare RiseDev playground
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
+      - name: e2e test w/ Rust frontend
+        timeout-minutes: 1
+        run: |
+          ~/cargo-make/makers ci-start ci-default
+          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node
         timeout-minutes: 3
         run: |
           ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e test rust frontend
-        timeout-minutes: 1
-        run: |
-          ~/cargo-make/makers ci-start ci-default
-          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node w/o cache
@@ -160,7 +254,7 @@ jobs:
   end-to-end-source:
     name: e2e-test-source
     needs:
-      - compute-node-build
+      - compute-node-build-dev
       - frontend-check
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -195,21 +289,20 @@ jobs:
         run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
         run: |
-          wget ${URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
           chmod +x ${DIR}/${BINARY}
         env:
-          URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
           DIR: /usr/local/bin
           BINARY: sqllogictest
       - name: Download cargo-make
         run: |
-          curl -fL https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -o ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
-          unzip ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip -d ~
-          mv ~/cargo-make-v0.35.10-x86_64-unknown-linux-musl ~/cargo-make
+          curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
+          unzip ~/cargo-make.zip -d ~
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
       - uses: actions/download-artifact@v2
         name: Download risingwave binary
         with:
-          name: risingwave
+          name: risingwave-dev
           path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
@@ -219,12 +312,12 @@ jobs:
       - uses: actions/download-artifact@v2
         name: Download playground binary
         with:
-          name: risedev-playground
+          name: risedev-playground-dev
           path: ./rust/target/debug
       - uses: actions/download-artifact@v2
         name: Download risingwave_regress_test binary
         with:
-          name: risingwave_regress_test
+          name: risingwave_regress_test-dev
           path: ./rust/target/debug
       - name: Adjust permission
         run: |
@@ -285,59 +378,13 @@ jobs:
         with:
           path: .risingwave/log/
           name: risedev-logs-source
-  start-runner-a:
-    name: ec2-start-a
-    runs-on: ubuntu-latest
-    outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-    steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
-      - name: Start EC2 runner
-        id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: start
-          github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
-          subnet-id: subnet-59743123
-          security-group-id: sg-9ec32bfe
-  start-runner-b:
-    name: ec2-start-b
-    runs-on: ubuntu-latest
-    outputs:
-      label: ${{ steps.start-ec2-runner.outputs.label }}
-      ec2-instance-id: ${{ steps.start-ec2-runner.outputs.ec2-instance-id }}
-    steps:
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
-      - name: Start EC2 runner
-        id: start-ec2-runner
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: start
-          github-token: ${{ secrets.WUTAO_PAT }}
-          ec2-image-id: ami-05a99cf0eb100c377
-          ec2-instance-type: c5.4xlarge
-          subnet-id: subnet-59743123
-          security-group-id: sg-9ec32bfe
-  compute-node-build:
+  compute-node-build-dev:
     needs: start-runner-a
     runs-on: ${{ needs.start-runner-a.outputs.label }}
     container:
       image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
       options: --security-opt seccomp=unconfined
-    name: compute-node-build
+    name: compute-node-build-dev
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -371,24 +418,27 @@ jobs:
       - name: Run rust format check
         run: |
           cd rust && cargo fmt --all -- --check
+      - name: Run rust doc check
+        run: |
+          cd rust && cargo doc --document-private-items
       - name: Build Rust components
         run: |
-          cd rust && cargo build --features=all-in-one
+          cd rust && cargo build --profile dev --features=all-in-one
       - uses: actions/upload-artifact@v2
         with:
-          name: risingwave
+          name: risingwave-dev
           if-no-files-found: error
           path: |
             rust/target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
-          name: risingwave_regress_test
+          name: risingwave_regress_test-dev
           if-no-files-found: error
           path: |
             rust/target/debug/risingwave_regress_test
       - uses: actions/upload-artifact@v2
         with:
-          name: risedev-playground
+          name: risedev-playground-dev
           if-no-files-found: error
           path: |
             rust/target/debug/risedev-playground
@@ -420,18 +470,15 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}-${{ env.CACHE_KEY_SUFFIX }}-test
-      - name: Install required tools
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          cargo install cargo-llvm-cov
-          cargo install cargo-nextest
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@nextest
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
           cd rust && cargo clippy --all-targets --locked -- -D warnings
       - name: Run rust test with coverage
         run: |
-          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info
+          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -465,7 +512,7 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:
-          ignore_paths: java
+          ignore_paths: legacy
       - name: Check protobuf code format
         run: |
           prototool format -d
@@ -474,51 +521,6 @@ jobs:
         run: |
           buf lint
         working-directory: proto
-  stop-runner-a:
-    name: ec2-stop-a
-    needs:
-      - start-runner-a
-      - compute-node-build
-      - end-to-end-risedev
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
-      - name: Stop EC2 runner A
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: stop
-          github-token: ${{ secrets.WUTAO_PAT }}
-          label: ${{ needs.start-runner-a.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner-a.outputs.ec2-instance-id }}
-        if: ${{ always() }}
-  stop-runner-b:
-    name: ec2-stop-b
-    needs:
-      - start-runner-b
-      - compute-node-test
-    runs-on: ubuntu-latest
-    if: ${{ always() }}
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v1
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-2
-      - name: Stop EC2 runner B
-        uses: machulav/ec2-github-runner@v2
-        with:
-          mode: stop
-          github-token: ${{ secrets.WUTAO_PAT }}
-          label: ${{ needs.start-runner-b.outputs.label }}
-          ec2-instance-id: ${{ needs.start-runner-b.outputs.ec2-instance-id }}
-        if: ${{ always() }}
 concurrency:
   group: environment-${{ github.ref }}
   cancel-in-progress: true

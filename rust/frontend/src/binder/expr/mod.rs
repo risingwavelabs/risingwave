@@ -16,7 +16,7 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -92,10 +92,30 @@ impl Binder {
             } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
+            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
             _ => Err(
                 ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
             ),
         }
+    }
+
+    pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
+        Ok(FunctionCall::new_or_else(
+            ExprType::Extract,
+            vec![
+                self.bind_string(field.to_string())?.into(),
+                self.bind_expr(expr)?,
+            ],
+            |inputs| {
+                ErrorCode::NotImplementedError(format!(
+                    "function extract({} from {:?}) doesn't exist",
+                    field,
+                    inputs[1].return_type()
+                ))
+                .into()
+            },
+        )?
+        .into())
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
@@ -249,10 +269,10 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
-            inputs.push(Binder::ensure_type(result, return_type.clone()));
+            inputs.push(result.ensure_type(return_type.clone()));
         }
         if let Some(expr) = else_result_expr {
-            inputs.push(Binder::ensure_type(expr, return_type.clone()));
+            inputs.push(expr.ensure_type(return_type.clone()));
         }
         Ok(FunctionCall::new_with_return_type(
             ExprType::Case,
@@ -282,21 +302,20 @@ impl Binder {
 
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let data_type = match data_type {
-        AstDataType::SmallInt(_) => DataType::Int16,
-        AstDataType::Int(_) => DataType::Int32,
-        AstDataType::BigInt(_) => DataType::Int64,
-        AstDataType::Float(_) => DataType::Float64,
-        AstDataType::Double => DataType::Float64,
-        AstDataType::String => DataType::Varchar,
         AstDataType::Boolean => DataType::Boolean,
+        AstDataType::SmallInt(None) => DataType::Int16,
+        AstDataType::Int(None) => DataType::Int32,
+        AstDataType::BigInt(None) => DataType::Int64,
+        AstDataType::Real | AstDataType::Float(Some(1..=24)) => DataType::Float32,
+        AstDataType::Double | AstDataType::Float(Some(25..=53) | None) => DataType::Float64,
+        AstDataType::Decimal(None, None) => DataType::Decimal,
         AstDataType::Char(_) => DataType::Char,
         AstDataType::Varchar(_) => DataType::Varchar,
-        AstDataType::Decimal(_, _) => DataType::Decimal,
         AstDataType::Date => DataType::Date,
-        AstDataType::Time => DataType::Time,
-        AstDataType::Timestamp => DataType::Timestamp,
+        AstDataType::Time(false) => DataType::Time,
+        AstDataType::Timestamp(false) => DataType::Timestamp,
+        AstDataType::Timestamp(true) => DataType::Timestampz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Real => DataType::Float32,
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
         },

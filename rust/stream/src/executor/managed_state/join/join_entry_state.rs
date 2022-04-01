@@ -89,7 +89,7 @@ impl<S: StateStore> JoinEntryState<S> {
     }
 
     fn fill_cached(
-        data: Vec<(Bytes, StorageValue)>,
+        data: Vec<(Bytes, Bytes)>,
         data_types: Arc<[DataType]>,
         pk_data_types: Arc<[DataType]>,
     ) -> Result<BTreeMap<PkType, StateValueType>> {
@@ -98,7 +98,7 @@ impl<S: StateStore> JoinEntryState<S> {
             let pk_deserializer = RowDeserializer::new(pk_data_types.to_vec());
             let key = pk_deserializer.deserialize_not_null(&raw_key)?;
             let deserializer = JoinRowDeserializer::new(data_types.to_vec());
-            let value = deserializer.deserialize(raw_value.as_bytes())?;
+            let value = deserializer.deserialize(&raw_value)?;
             cached.insert(key, value);
         }
         Ok(cached)
@@ -137,7 +137,8 @@ impl<S: StateStore> JoinEntryState<S> {
             match v.into_option() {
                 Some(v) => {
                     let value = v.serialize()?;
-                    local.put(key_encoded, value);
+                    // TODO(Yuanxin): Implement value meta
+                    local.put(key_encoded, StorageValue::new_default_put(value));
                 }
                 None => {
                     local.delete(key_encoded);

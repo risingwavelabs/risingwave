@@ -12,19 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// TODO(MrCroxx): This file needs to be refactored.
-
 use std::sync::Arc;
 
 use bytes::Bytes;
 use moka::future::Cache;
-use prost::Message;
-use risingwave_pb::hummock::SstableMeta;
 
-use super::{Block, BlockCache, Sstable};
+use super::{Block, BlockCache, Sstable, SstableMeta, TracedHummockError};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
+
+const DEFAULT_META_CACHE_INIT_CAPACITY: usize = 1024;
 
 // TODO: Define policy based on use cases (read / compaction / ...).
 pub enum CachePolicy {
@@ -37,19 +35,30 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    /// TODO: meta is also supposed to be block based, and meta cache will be removed.
-    meta_cache: Cache<u64, SstableMeta>,
+    meta_cache: Cache<u64, Arc<Sstable>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
 
 impl SstableStore {
-    pub fn new(store: ObjectStoreRef, path: String, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        store: ObjectStoreRef,
+        path: String,
+        stats: Arc<StateStoreMetrics>,
+        block_cache_capacity: usize,
+        meta_cache_capacity: usize,
+    ) -> Self {
+        let meta_cache: Cache<u64, Arc<Sstable>> = Cache::builder()
+            .weigher(|_k, v: &Arc<Sstable>| v.encoded_size() as u32)
+            .initial_capacity(DEFAULT_META_CACHE_INIT_CAPACITY)
+            .max_capacity(meta_cache_capacity as u64)
+            .build();
+
         Self {
             path,
             store,
-            block_cache: BlockCache::new(65536),
-            meta_cache: Cache::new(1024),
+            block_cache: BlockCache::new(block_cache_capacity),
+            meta_cache,
             stats,
         }
     }
@@ -62,9 +71,7 @@ impl SstableStore {
     ) -> HummockResult<usize> {
         let timer = self.stats.sst_block_put_remote_duration.start_timer();
 
-        // TODO(MrCroxx): Temporarily disable meta checksum. Make meta a normal block later and
-        // reuse block encoding later.
-        let meta = Bytes::from(sst.meta.encode_to_vec());
+        let meta = Bytes::from(sst.meta.encode_to_bytes());
         let len = data.len();
 
         let data_path = self.get_sst_data_path(sst.id);
@@ -146,28 +153,29 @@ impl SstableStore {
         }
     }
 
-    pub async fn meta(&self, sst_id: u64) -> HummockResult<SstableMeta> {
-        // TODO(MrCroxx): meta should also be a `Block` later and managed in block cache.
-        if let Some(meta) = self.meta_cache.get(&sst_id) {
-            return Ok(meta);
-        }
-        let path = self.get_sst_meta_path(sst_id);
-        let buf = self
-            .store
-            .read(&path, None)
+    pub async fn sstable(&self, sst_id: u64) -> HummockResult<Arc<Sstable>> {
+        let fetch = async move {
+            let path = self.get_sst_meta_path(sst_id);
+            let buf = self
+                .store
+                .read(&path, None)
+                .await
+                .map_err(HummockError::object_io_error)?;
+            let meta = SstableMeta::decode(&mut &buf[..])?;
+            let sst = Arc::new(Sstable { id: sst_id, meta });
+            Ok::<_, TracedHummockError>(sst)
+        };
+
+        self.meta_cache
+            .try_get_with(sst_id, fetch)
             .await
-            .map_err(HummockError::object_io_error)?;
-        let meta = SstableMeta::decode(buf).map_err(HummockError::decode_error)?;
-        self.meta_cache.insert(sst_id, meta.clone()).await;
-        Ok(meta)
+            .map_err(|e| HummockError::Other(e.to_string()).into())
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {
         format!("{}/{}.meta", self.path, sst_id)
     }
 
-    // TODO(MrCroxx): Maybe use `&SSTable` directly?
     pub fn get_sst_data_path(&self, sst_id: u64) -> String {
         format!("{}/{}.data", self.path, sst_id)
     }

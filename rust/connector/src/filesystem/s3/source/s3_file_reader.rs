@@ -14,6 +14,7 @@
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
 
+use anyhow::Result;
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
@@ -275,23 +276,33 @@ impl SourceReader for S3FileReader {
         Ok(Some(msg_vec))
     }
 
-    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> anyhow::Result<()> {
-        let split_json_str = std::str::from_utf8(split);
-        match split_json_str {
-            Err(convert_err) => Err(anyhow::Error::from(convert_err)),
-            Ok(json_str) => {
-                let s3_split_rs: Result<S3FileSplit, serde_json::Error> =
-                    serde_json::from_str(json_str);
-                if let Err(serde_err) = s3_split_rs {
-                    Err(anyhow::Error::from(serde_err))
-                } else {
-                    let s3_file_split = s3_split_rs.unwrap();
-                    println!("S3FileReader assign_split success. {:?}", s3_file_split);
-                    self.s3_split_tx.send(s3_file_split).unwrap();
-                    Ok(())
-                }
-            }
-        }
+    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> anyhow::Result<()> {
+    //     let split_json_str = std::str::from_utf8(split);
+    //     match split_json_str {
+    //         Err(convert_err) => Err(anyhow::Error::from(convert_err)),
+    //         Ok(json_str) => {
+    //             let s3_split_rs: Result<S3FileSplit, serde_json::Error> =
+    //                 serde_json::from_str(json_str);
+    //             if let Err(serde_err) = s3_split_rs {
+    //                 Err(anyhow::Error::from(serde_err))
+    //             } else {
+    //                 let s3_file_split = s3_split_rs.unwrap();
+    //                 println!("S3FileReader assign_split success. {:?}", s3_file_split);
+    //                 self.s3_split_tx.send(s3_file_split).unwrap();
+    //                 Ok(())
+    //             }
+    //         }
+    //     }
+    // }
+
+    async fn new(
+        _config: HashMap<String, String>,
+        _state: Option<crate::ConnectorState>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        todo!()
     }
 }
 
@@ -374,15 +385,16 @@ mod test {
         println!("S3FileReader next() msg = {:?}", msg_rs.unwrap());
     }
 
-    async fn create_and_assign_split(split_str: &str) -> S3FileReader {
-        let mut s3_file_reader = new_s3_file_reader().await;
-        let test_s3_file_split = new_test_s3_file_split(split_str);
+    async fn create_and_assign_split(_split_str: &str) -> S3FileReader {
+        // TODO here shows a proper new and assign process, redo later
+        let s3_file_reader = new_s3_file_reader().await;
+        // let test_s3_file_split = new_test_s3_file_split(split_str);
 
-        let s3_file_split_string = serde_json::to_string(&test_s3_file_split).unwrap();
-        let assign_rs = s3_file_reader
-            .assign_split(s3_file_split_string.as_bytes())
-            .await;
-        assert!(assign_rs.is_ok());
+        // let s3_file_split_string = serde_json::to_string(&test_s3_file_split).unwrap();
+        // let assign_rs = s3_file_reader
+        //     .assign_split(s3_file_split_string.as_bytes())
+        //     .await;
+        // assert!(assign_rs.is_ok());
         s3_file_reader
     }
 

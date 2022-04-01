@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
@@ -22,11 +23,11 @@ use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
-use super::{BoundQuery, UNNAMED_SUBQUERY};
+use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
@@ -38,6 +39,7 @@ pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    WindowTableFunction(Box<BoundWindowTableFunction>),
 }
 
 #[derive(Debug)]
@@ -140,17 +142,32 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, .. } => {
-                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
+            TableFactor::Table { name, alias, args } => {
+                if args.is_empty() {
+                    Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
+                } else {
+                    let kind =
+                        WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
+                            ErrorCode::NotImplementedError(format!(
+                                "unknown window function kind: {}",
+                                name.0[0].value
+                            ))
+                        })?;
+                    Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(kind, args)?,
+                    )))
+                }
             }
             TableFactor::Derived {
-                lateral, subquery, ..
+                lateral,
+                subquery,
+                alias,
             } => {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
                     Ok(Relation::Subquery(Box::new(
-                        self.bind_subquery_relation(*subquery)?,
+                        self.bind_subquery_relation(*subquery, alias)?,
                     )))
                 }
             }
@@ -178,7 +195,11 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
+    pub(super) fn bind_table(
+        &mut self,
+        name: ObjectName,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let table_catalog =
             self.catalog
@@ -197,6 +218,7 @@ impl Binder {
                 )
             }),
             table_name.clone(),
+            alias,
         )?;
 
         Ok(BoundBaseTable {
@@ -232,16 +254,33 @@ impl Binder {
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
-    fn bind_context(
+    pub(super) fn bind_context(
         &mut self,
         columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
+        alias: Option<TableAlias>,
     ) -> Result<()> {
+        let (table_name, column_aliases) = match alias {
+            None => (table_name, vec![]),
+            Some(TableAlias { name, columns }) => (name.value, columns),
+        };
+
         let begin = self.context.columns.len();
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type, is_hidden))| {
+            .zip_longest(column_aliases)
+            .try_for_each(|pair| {
+                // Column aliases can be less than columns, but not more.
+                let (index, (name, data_type, is_hidden)) = match pair {
+                    itertools::EitherOrBoth::Both((index, (_name, data_type, is_hidden)), alias) => (
+                        index, (alias.value, data_type, is_hidden)
+                    ),
+                    itertools::EitherOrBoth::Left(t) => t,
+                    itertools::EitherOrBoth::Right(_) => return Err(ErrorCode::BindError(format!(
+                        "table \"{table_name}\" has less columns available but more aliases specified",
+                    ))),
+                };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
@@ -254,7 +293,8 @@ impl Binder {
                     .entry(name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
-            });
+                Ok(())
+            })?;
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
@@ -269,11 +309,15 @@ impl Binder {
         }
     }
 
-    /// Binds a subquery by using [`bind_query`], which will use a new empty
+    /// Binds a subquery using [`bind_query`](Self::bind_query), which will use a new empty
     /// [`BindContext`](super::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
-    pub(super) fn bind_subquery_relation(&mut self, query: Query) -> Result<BoundSubquery> {
+    pub(super) fn bind_subquery_relation(
+        &mut self,
+        query: Query,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
         self.bind_context(
@@ -283,6 +327,7 @@ impl Binder {
                 .zip_eq(query.data_types().into_iter())
                 .map(|(x, y)| (x, y, false)),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+            alias,
         )?;
         Ok(BoundSubquery { query })
     }

@@ -23,7 +23,7 @@
     BatchValues { rows: [[Not(true:Boolean)]] }
 - sql: |
     values(must_be_unimplemented_func(1));
-  binder_error: 'Feature is not yet implemented: unsupported function: Ident { value: "must_be_unimplemented_func", quote_style: None }'
+  binder_error: 'Feature is not yet implemented: unsupported function: "must_be_unimplemented_func"'
 - sql: |
     values(sum(1));
   binder_error: 'Invalid input syntax: aggregate functions are not allowed in VALUES'
@@ -58,8 +58,8 @@
           BatchExchange { order: [], dist: HashShard([1]) }
             BatchScan { table: t3, columns: [v1, v2] }
   stream_plan: |
-    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [t2_v1, _row_id#0, _row_id#1] }
-      StreamProject { exprs: [$0, $1, $2, $3, $6, $7, $5, $8], expr_alias: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2,  ,  ] }
+    StreamMaterialize { columns: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2, _row_id#0(hidden), _row_id#1(hidden), _row_id#2(hidden)], pk_columns: [_row_id#0, _row_id#1, _row_id#2] }
+      StreamProject { exprs: [$0, $1, $3, $4, $6, $7, $2, $5, $8], expr_alias: [t1_v1, t1_v2, t2_v1, t2_v2, t3_v1, t3_v2,  ,  ,  ] }
         StreamHashJoin { type: Inner, predicate: $4 = $7 }
           StreamExchange { dist: HashShard([4]) }
             StreamHashJoin { type: Inner, predicate: $0 = $3 }
@@ -99,19 +99,15 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
       BatchProject { exprs: [$0, ($1 + ($2 * $3))], expr_alias: [v1,  ] }
-        BatchHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($3)] }
+        BatchHashAgg { group_keys: [$0], aggs: [min($1), max($2), count($0)] }
           BatchExchange { order: [], dist: HashShard([0]) }
-            BatchProject { exprs: [$0, $1, $2, $0], expr_alias: [ ,  ,  ,  ] }
-              BatchExchange { order: [], dist: HashShard([0]) }
-                BatchScan { table: t, columns: [v1, v2, v3] }
+            BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v1, expr#1], pk_columns: [v1] }
       StreamProject { exprs: [$0, ($2 + ($3 * $4))], expr_alias: [v1,  ] }
-        StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($3)] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, min($1), max($2), count($0)] }
           StreamExchange { dist: HashShard([0]) }
-            StreamProject { exprs: [$0, $1, $2, $0, $3], expr_alias: [ ,  ,  ,  ,  ] }
-              StreamExchange { dist: HashShard([0]) }
-                StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select min(v1) + max(v2) * count(v3) from t;
@@ -130,19 +126,53 @@
     select v1 from t group by v2;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
+    create table t(v1 int, v2 int);
+    select sum(v1), v1 from t group by v2, v2;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
+- sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) from t group by v3;
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-      BatchProject { exprs: [$0, ($1 * ($2 / $3))], expr_alias: [v3,  ] }
+      BatchProject { exprs: [$0, ($1 * ($2::Decimal / $3))], expr_alias: [v3,  ] }
         BatchHashAgg { group_keys: [$0], aggs: [min($1), sum($2), count($2)] }
           BatchProject { exprs: [$2, $0, ($0 + $1)], expr_alias: [ ,  ,  ] }
             BatchExchange { order: [], dist: HashShard([2]) }
               BatchScan { table: t, columns: [v1, v2, v3] }
   stream_plan: |
     StreamMaterialize { columns: [v3, expr#1], pk_columns: [v3] }
-      StreamProject { exprs: [$0, ($2 * ($3 / $4))], expr_alias: [v3,  ] }
+      StreamProject { exprs: [$0, ($2 * ($3::Decimal / $4))], expr_alias: [v3,  ] }
         StreamHashAgg { group_keys: [$0], aggs: [count, min($1), sum($2), count($2)] }
           StreamProject { exprs: [$2, $0, ($0 + $1), $3], expr_alias: [ ,  ,  ,  ] }
             StreamExchange { dist: HashShard([2]) }
+              StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+- sql: |
+    create table t(v1 int, v2 int);
+    select count(v1 + v2), sum(v1 + v2) from t;
+  batch_plan: |
+    BatchSimpleAgg { aggs: [count($0), sum($0)] }
+      BatchExchange { order: [], dist: Single }
+        BatchProject { exprs: [($0 + $1)], expr_alias: [ ] }
+          BatchScan { table: t, columns: [v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [agg#0(hidden), agg#1, agg#2], pk_columns: [agg#0, agg#1, agg#2] }
+      StreamSimpleAgg { aggs: [count, count($0), sum($0)] }
+        StreamProject { exprs: [($0 + $1), $2], expr_alias: [ ,  ] }
+          StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+- sql: |
+    create table t(v1 int, v2 int, v3 int);
+    select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) from t group by v1;
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0, (($1 / $2) + $3)], expr_alias: [v1,  ] }
+        BatchHashAgg { group_keys: [$0], aggs: [sum($1), count($1), max($0)] }
+          BatchProject { exprs: [$0, ($1 + $2)], expr_alias: [ ,  ] }
+            BatchExchange { order: [], dist: HashShard([0]) }
+              BatchScan { table: t, columns: [v1, v2, v3] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, expr#1], pk_columns: [v1] }
+      StreamProject { exprs: [$0, (($2 / $3) + $4)], expr_alias: [v1,  ] }
+        StreamHashAgg { group_keys: [$0], aggs: [count, sum($1), count($1), max($0)] }
+          StreamProject { exprs: [$0, ($1 + $2), $3], expr_alias: [ ,  ,  ] }
+            StreamExchange { dist: HashShard([0]) }
               StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }

@@ -1,0 +1,41 @@
+- sql: |
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    select * from t1, t2, t3 where t1.v1 = t2.v3 and t1.v1 = t3.v5;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2, $4, $5, $7, $8], expr_alias: [v1, v2, v3, v4, v5, v6] }
+      LogicalFilter { predicate: ($1 = $4) AND ($1 = $7) }
+        LogicalJoin { type: Inner, on: true:Boolean }
+          LogicalJoin { type: Inner, on: true:Boolean }
+            LogicalScan { table: t1, columns: [_row_id#0, v1, v2] }
+            LogicalScan { table: t2, columns: [_row_id#0, v3, v4] }
+          LogicalScan { table: t3, columns: [_row_id#0, v5, v6] }
+  stream_plan: |
+    StreamMaterialize { columns: [v1, v2, _row_id#0(hidden), v3, v4, _row_id#1(hidden), v5, v6, _row_id#2(hidden)], pk_columns: [_row_id#0, _row_id#1, _row_id#2] }
+      StreamHashJoin { type: Inner, predicate: $0 = $6 }
+        StreamHashJoin { type: Inner, predicate: $0 = $3 }
+          StreamExchange { dist: HashShard([0]) }
+            StreamFilter { predicate: true:Boolean AND true:Boolean }
+              StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: t2, columns: [v3, v4, _row_id#0], pk_indices: [2] }
+        StreamExchange { dist: HashShard([0]) }
+          StreamTableScan { table: t3, columns: [v5, v6, _row_id#0], pk_indices: [2] }
+- sql: |
+    /* self join */
+    create table t (v1 int, v2 int);
+    select t1.v1 as t1v1, t2.v1 as t2v1 from t t1 join t t2 on t1.v1 = t2.v1;
+  logical_plan: |
+    LogicalProject { exprs: [$1, $4], expr_alias: [t1v1, t2v1] }
+      LogicalJoin { type: Inner, on: ($1 = $4) }
+        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+        LogicalScan { table: t, columns: [_row_id#0, v1, v2] }
+  stream_plan: |
+    StreamMaterialize { columns: [t1v1, t2v1, _row_id#0(hidden), _row_id#1(hidden)], pk_columns: [_row_id#0, _row_id#1] }
+      StreamProject { exprs: [$0, $2, $1, $3], expr_alias: [t1v1, t2v1,  ,  ] }
+        StreamHashJoin { type: Inner, predicate: $0 = $2 }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }
+          StreamExchange { dist: HashShard([0]) }
+            StreamTableScan { table: t, columns: [v1, _row_id#0], pk_indices: [1] }

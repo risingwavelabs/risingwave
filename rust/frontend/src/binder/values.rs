@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{Expr as _, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -66,7 +66,9 @@ impl Binder {
                     .collect::<Vec<DataType>>();
                 for vec in &bound {
                     for (expr, ty) in vec.iter().zip_eq(types.iter_mut()) {
-                        *ty = Self::find_compat(ty.clone(), expr.return_type())?
+                        if !expr.is_null() {
+                            *ty = Self::find_compat(ty.clone(), expr.return_type())?
+                        }
                     }
                 }
                 types
@@ -79,7 +81,7 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .zip_eq(types.iter().cloned())
-                    .map(|(expr, ty)| Self::ensure_type(expr, ty))
+                    .map(|(expr, ty)| expr.ensure_type(ty))
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
@@ -105,19 +107,6 @@ impl Binder {
                 left, right
             ))
             .into())
-        }
-    }
-
-    /// Check if cast needs to be inserted.
-    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
-        if ty == expr.return_type() {
-            expr
-        } else {
-            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                ExprType::Cast,
-                vec![expr],
-                ty,
-            )))
         }
     }
 }

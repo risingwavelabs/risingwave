@@ -18,12 +18,12 @@ use std::time::Duration;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
-use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo, SstableMeta};
+use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 use risingwave_storage::hummock::key::key_with_epoch;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder,
-    SSTableBuilderOptions,
+    SSTableBuilderOptions, SstableMeta,
 };
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
@@ -65,8 +65,9 @@ where
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
     compact_task.sorted_output_ssts = test_tables_2.clone();
+    compact_task.task_status = true;
     hummock_manager
-        .report_compact_task(compact_task, true)
+        .report_compact_task(compact_task)
         .await
         .unwrap();
     // Current state: {v0: [], v1: [test_tables uncommitted], v2: [test_tables], v3: [test_tables_2,
@@ -92,14 +93,6 @@ pub fn generate_test_tables(
     table_ids: Vec<u64>,
 ) -> (Vec<SstableInfo>, Vec<(SstableMeta, Bytes)>) {
     // Tables to add
-    #[cfg(not(feature = "blockv2"))]
-    let opt = SSTableBuilderOptions {
-        bloom_false_positive: 0.1,
-        block_size: 4096,
-        table_capacity: 0,
-        checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-    };
-    #[cfg(feature = "blockv2")]
     let opt = SSTableBuilderOptions {
         capacity: 64 * 1024 * 1024,
         block_capacity: 4096,

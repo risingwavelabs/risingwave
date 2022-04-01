@@ -101,7 +101,7 @@ pub enum Mutation {
     AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Epoch {
     pub curr: u64,
     pub prev: u64,
@@ -200,7 +200,7 @@ impl Mutation {
         matches!(self, Mutation::Stop(_))
     }
 
-    /// Return ture if the mutation is add output.
+    /// Return true if the mutation is add output.
     pub fn is_add_output(&self) -> bool {
         matches!(self, Mutation::AddOutput(_))
     }
@@ -355,6 +355,13 @@ impl Message {
             _ => None,
         }
     }
+
+    pub fn as_barrier(&self) -> Option<&Barrier> {
+        match self {
+            Self::Barrier(barrier) => Some(barrier),
+            _ => None,
+        }
+    }
 }
 
 /// `Executor` supports handling of control messages.
@@ -419,7 +426,7 @@ pub trait StatefulExecutor: Executor {
     /// Try initializing the executor if not done.
     /// Return:
     /// - Some(Epoch) if the executor is successfully initialized
-    /// - None if the executor has been intialized
+    /// - None if the executor has been initialized
     fn try_init_executor<'a>(
         &'a mut self,
         msg: impl TryInto<&'a Barrier, Error = ()>,

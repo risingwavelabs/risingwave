@@ -66,18 +66,19 @@ enum HashJoinState<K> {
     Invalid,
     /// Initial state of hash join.
     ///
-    /// In this state, the executor [`Executor::init`] build side input, and calls
-    /// [`Executor::next`] of build side input till [`None`] is returned to create
+    /// In this state, the executor [`crate::executor::Executor::open`] build side input, and calls
+    /// [`crate::executor::Executor::next`] of build side input till [`None`] is returned to create
     /// `BuildTable`.
     Build(BuildTable),
     /// First state after finishing build state.
     ///
-    /// It's different from [`Probe`] in that we need to [`Executor::init`] probe side input.
+    /// It's different from [`Probe`] in that we need to [`crate::executor::Executor::open`] probe
+    /// side input.
     FirstProbe(ProbeTable<K>),
     /// State for executing join.
     ///
-    /// In this state, the executor calls [`Executor::init`]  method of probe side input, and
-    /// executes joining with the chunk against build table to create output.
+    /// In this state, the executor calls [`crate::executor::Executor::open`]  method of probe side
+    /// input, and executes joining with the chunk against build table to create output.
     Probe(ProbeTable<K>),
     /// State for executing join remaining.
     ///

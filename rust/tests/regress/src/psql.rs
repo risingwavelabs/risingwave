@@ -115,7 +115,7 @@ impl PsqlCommandBuilder {
             escaped_cmd.push(c);
         }
 
-        // Append comand
+        // Append command
         self.cmd.args(["-c", &escaped_cmd]);
 
         self

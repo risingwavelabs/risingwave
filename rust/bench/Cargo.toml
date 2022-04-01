@@ -11,23 +11,26 @@ env_logger = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 log = "0.4"
-moka = { version = "0.7", features = ["future"] }
+moka = { version = "0.8", features = ["future"] }
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_storage = { path = "../storage" } 
+risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["fs", "rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "1", features = [
+    "fs",
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 toml = "0.5"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [[bin]]
 name = "ss-bench"
 path = "ss_bench/main.rs"
-
-# TODO: enable s3-bench when it has migrated to aws-sdk-s3
-# [[bin]]
-# name = "s3-bench"
-# path = "s3_bench/main.rs"

@@ -54,11 +54,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
     ) -> HummockResult<HummockVersion>;
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> HummockResult<()>;
+    async fn report_compaction_task(&self, compact_task: CompactTask) -> HummockResult<()>;
     async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
     async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
     async fn subscribe_compact_tasks(
@@ -182,18 +178,13 @@ impl HummockMetaClient for RpcHummockMetaClient {
         Ok(resp.version.unwrap())
     }
 
-    async fn report_compaction_task(
-        &self,
-        compact_task: CompactTask,
-        task_result: bool,
-    ) -> HummockResult<()> {
+    async fn report_compaction_task(&self, compact_task: CompactTask) -> HummockResult<()> {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
         self.meta_client
             .inner
             .report_compaction_tasks(ReportCompactionTasksRequest {
                 compact_task: Some(compact_task),
-                task_result,
             })
             .await
             .map_err(HummockError::meta_error)?;

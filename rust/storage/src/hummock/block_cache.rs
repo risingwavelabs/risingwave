@@ -18,7 +18,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use futures::Future;
 use moka::future::Cache;
 
-use super::{Block, HummockError, HummockResult};
+use super::{Block, HummockError, HummockResult, DEFAULT_ENTRY_SIZE};
 
 pub struct BlockCache {
     inner: Cache<Bytes, Arc<Block>>,
@@ -26,9 +26,12 @@ pub struct BlockCache {
 
 impl BlockCache {
     pub fn new(capacity: usize) -> Self {
-        Self {
-            inner: Cache::new(capacity as u64),
-        }
+        let cache: Cache<Bytes, Arc<Block>> = Cache::builder()
+            .weigher(|_k, v: &Arc<Block>| v.len() as u32)
+            .initial_capacity(capacity / DEFAULT_ENTRY_SIZE)
+            .max_capacity(capacity as u64)
+            .build();
+        Self { inner: cache }
     }
 
     // TODO: Optimize for concurrent get https://github.com/singularity-data/risingwave/pull/627#discussion_r817354730.
@@ -49,16 +52,10 @@ impl BlockCache {
     where
         F: Future<Output = HummockResult<Arc<Block>>>,
     {
-        match self
-            .inner
-            .get_or_try_insert_with(Self::key(sst_id, block_idx), f)
+        self.inner
+            .try_get_with(Self::key(sst_id, block_idx), f)
             .await
-        {
-            Ok(block) => Ok(block),
-            Err(arc_e) => {
-                Err(Arc::try_unwrap(arc_e).map_err(|e| HummockError::Other(e.to_string()))?)
-            }
-        }
+            .map_err(|e| HummockError::Other(e.to_string()).into())
     }
 
     fn key(sst_id: u64, block_idx: u64) -> Bytes {

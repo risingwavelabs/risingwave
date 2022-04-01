@@ -1,0 +1,51 @@
+# Data Model and Encoding
+
+## Data Model
+
+> Source files: `common/src/types`
+
+RisingWave adapts a relational data model with extensive support for semi-structured data. Relational tables, including tables and materialized views, consist of a list of named, strong-typed columns.
+
+Tables created by users have an implicit, auto-generated row-id column as their primary key; while for materialized views, the primary key is derived from queries. For example, the primary key of an aggregation (group-by) materialized view is the specified group keys.
+
+`NULL` values mean missing or unknown fields. Currently, all columns are implicitly nullable.
+
+Primitive data types:
+
+- Integers: `SMALLINT` (16-bit), `INT` (32-bit), `BIGINT` (64-bit)
+- Booleans: `BOOLEAN`
+- Decimals: `NUMERIC`
+- Floating-point numbers: `FLOAT`, `DOUBLE`
+- Date & Time: `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMPZ` (timestamp without timezone)
+- Time Interval: `INTERVAL` 
+- Strings: `VARCHAR`, `CHAR`
+
+Composite data types (WIP):
+
+- `Struct`: A structure with a list of named, strong-typed fields.
+- `List`: A variable-length list of values with same data type
+
+## In-Memory Encoding
+
+> Source files: `common/src/array`
+
+In-memory data is encoded in arrays for vectorized execution. For variable-length data like strings, generally we use another offset array to mark the start of encoded values in a byte buffer. 
+
+A Data Chunk consists of multiple columns and a visibility array to mark each row as visible or not, which helps filtering some rows while keeping other data arrays unchanged.
+
+A Stream Chunk consists of columns, visibility array and an additional `ops` column to mark the operation of row, which can be one of `Delete`, `Insert`, `UpdateDelete` and `UpdateInsert`.
+
+![chunk](./images/data-model-and-encoding/chunk.svg)
+
+## On-Disk Encoding
+
+> Source files: `utils/memcomparable`, `utils/value-encoding`
+
+RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries. Every field of a row aka. cell is encoded as a key-value entry, except `NULL` values are omitted.
+
+![row-format](./images/data-model-and-encoding/row-format.svg)
+
+Considering that ordering matters in some cases like result set of an order-by query, fields of keys must preserve the order of original values after being encoded into bytes. This is what `memcomparable` for. For example, integers must be encoded in big-endien and the sign bit must be flipped to perserve order. In contrast, the encoding of values does not need to preserve order.
+
+
+

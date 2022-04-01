@@ -24,7 +24,7 @@ use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::RwLock;
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
@@ -41,10 +41,10 @@ pub struct FragmentManager<S> {
 
 pub struct ActorInfos {
     /// node_id => actor_ids
-    pub actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable source actors
-    pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -201,7 +201,7 @@ where
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    ) -> Result<HashMap<WorkerId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
@@ -218,7 +218,7 @@ where
     pub async fn table_node_actors(
         &self,
         table_id: &TableId,
-    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
@@ -252,7 +252,7 @@ where
     pub fn blocking_table_node_actors(
         &self,
         table_id: &TableId,
-    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         tokio::task::block_in_place(|| {
             let map = &self.core.blocking_read().table_fragments;
             match map.get(table_id) {

@@ -21,7 +21,7 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use crate::cluster::{ClusterManagerRef, NodeId, NodeLocations};
+use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -36,7 +36,7 @@ pub struct ScheduledLocations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
-    pub node_locations: NodeLocations,
+    pub node_locations: WorkerLocations,
 }
 
 impl ScheduledLocations {
@@ -47,8 +47,8 @@ impl ScheduledLocations {
         }
     }
 
-    /// [`node_actors`] returns all actors for every node.
-    pub fn node_actors(&self) -> HashMap<NodeId, Vec<ActorId>> {
+    /// [`Self::node_actors`] returns all actors for every node.
+    pub fn node_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         let mut node_actors = HashMap::new();
         self.actor_locations
             .iter()
@@ -62,7 +62,7 @@ impl ScheduledLocations {
         node_actors
     }
 
-    /// [`actor_info_map`] returns the `ActorInfo` map for every actor.
+    /// [`Self::actor_info_map`] returns the `ActorInfo` map for every actor.
     pub fn actor_info_map(&self) -> HashMap<ActorId, ActorInfo> {
         self.actor_locations
             .iter()
@@ -80,7 +80,7 @@ impl ScheduledLocations {
             .collect::<HashMap<_, _>>()
     }
 
-    /// [`actor_infos`] returns the `ActorInfo` slice.
+    /// [`Self::actor_infos`] returns the `ActorInfo` slice.
     pub fn actor_infos(&self) -> Vec<ActorInfo> {
         self.actor_locations
             .iter()
@@ -105,7 +105,7 @@ where
         }
     }
 
-    /// [`schedule`] schedules input fragments to different parallel units (workers).
+    /// [`Self::schedule`] schedules input fragments to different parallel units (workers).
     /// The schedule procedure is two-fold:
     /// (1) For normal fragments, we schedule them to all the hash parallel units in the cluster.
     /// (2) For singleton fragments, we apply the round robin strategy. One single parallel unit in

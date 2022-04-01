@@ -21,6 +21,9 @@ use itertools::Itertools;
 use kafka::enumerator::KafkaSplitEnumerator;
 use serde::{Deserialize, Serialize};
 
+use crate::kafka::source::KafkaSplitReader;
+use crate::kinesis::source::reader::KinesisSplitReader;
+
 pub enum SourceOffset {
     Number(i64),
     String(String),
@@ -28,6 +31,10 @@ pub enum SourceOffset {
 
 use crate::pulsar::PulsarSplitEnumerator;
 use crate::{kafka, pulsar};
+
+const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
+const KAFKA_SOURCE: &str = "kafka";
+const KINESIS_SOURCE: &str = "kinesis";
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
@@ -47,10 +54,20 @@ pub trait SourceSplit {
     fn to_string(&self) -> Result<String>;
 }
 
+#[derive(Debug, Clone)]
+pub struct ConnectorState {
+    pub identifier: Bytes,
+    pub start_offset: String,
+    pub end_offset: String,
+}
+
 #[async_trait]
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
+    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
+    async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
+    where
+        Self: Sized;
 }
 
 #[async_trait]
@@ -97,4 +114,25 @@ pub fn extract_split_enumerator(
         "pulsar" => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
         _ => Err(anyhow!("unsupported source type: {}", source_type)),
     }
+}
+
+pub async fn new_connector(
+    config: HashMap<String, String>,
+    state: Option<ConnectorState>,
+) -> Result<Box<dyn SourceReader + Send + Sync>> {
+    let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
+    let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
+        KAFKA_SOURCE => {
+            let kafka = KafkaSplitReader::new(config, state).await?;
+            Box::new(kafka)
+        }
+        KINESIS_SOURCE => {
+            let kinesis = KinesisSplitReader::new(config, state).await?;
+            Box::new(kinesis)
+        }
+        _other => {
+            todo!()
+        }
+    };
+    Ok(connector)
 }

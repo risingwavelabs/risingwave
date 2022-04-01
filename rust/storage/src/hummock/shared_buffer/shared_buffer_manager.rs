@@ -193,10 +193,10 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
-    /// Deletes shared buffers before a given `epoch` inclusively.
+    /// Deletes shared buffers before a given `epoch` exclusively.
     pub fn delete_before(&self, epoch: u64) {
         let mut guard = self.shared_buffer.write();
-        let new = guard.split_off(&(epoch + 1));
+        let new = guard.split_off(&epoch);
         *guard = new;
     }
 
@@ -212,6 +212,11 @@ impl SharedBufferManager {
             .unwrap();
         // Remove items of the given epoch from shared buffer
         self.shared_buffer.write().remove(&epoch);
+    }
+
+    #[cfg(test)]
+    pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
+        self.shared_buffer.read().clone()
     }
 }
 
@@ -230,6 +235,7 @@ mod tests {
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
     use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::storage_value::StorageValue;
 
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
@@ -238,6 +244,8 @@ mod tests {
             obj_client,
             remote_dir.to_string(),
             Arc::new(StateStoreMetrics::unused()),
+            64 << 20,
+            64 << 20,
         ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
@@ -270,7 +278,7 @@ mod tests {
         for key in delete_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Delete,
+                HummockValue::Delete(StorageValue::new_default_delete().encode_to_bytes()),
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
@@ -315,6 +323,8 @@ mod tests {
             &shared_buffer_manager,
         );
 
+        let delete_val = StorageValue::new_default_delete().encode_to_bytes();
+
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {
             assert_eq!(
@@ -346,7 +356,7 @@ mod tests {
             shared_buffer_manager
                 .get(keys[2].as_slice(), ..=epoch2)
                 .unwrap(),
-            HummockValue::Delete
+            HummockValue::Delete(delete_val.to_vec())
         );
         assert_eq!(
             shared_buffer_manager

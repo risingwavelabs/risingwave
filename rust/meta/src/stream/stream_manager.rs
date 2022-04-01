@@ -31,7 +31,7 @@ use uuid::Uuid;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
-use crate::cluster::{ClusterManagerRef, NodeId};
+use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
@@ -39,13 +39,13 @@ use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`Context`] carries one-time infos.
+/// [`CreateMaterializedViewContext`] carries one-time infos.
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
     pub dispatches: HashMap<ActorId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by node id.
-    pub upstream_node_actors: HashMap<NodeId, Vec<ActorId>>,
+    pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
 }
@@ -198,7 +198,7 @@ where
                     info: actor_infos.clone(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
 
             let stream_actors = actors
                 .iter()
@@ -215,7 +215,7 @@ where
                     hanging_channels: node_hanging_channels.remove(node_id).unwrap_or_default(),
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         for (node_id, hanging_channels) in node_hanging_channels {
@@ -232,7 +232,7 @@ where
                     hanging_channels,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
@@ -251,7 +251,7 @@ where
                     actor_id: actors,
                 })
                 .await
-                .to_rw_result_with(format!("failed to connect to {}", node_id))?;
+                .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
         }
 
         // Add table fragments to meta store with state: `State::Creating`.
@@ -324,7 +324,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{CatalogManager, MetaSrvEnv};
+    use crate::manager::MetaSrvEnv;
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -423,6 +423,13 @@ mod tests {
         ) -> std::result::Result<Response<ShutdownResponse>, Status> {
             unimplemented!()
         }
+
+        async fn force_stop_actors(
+            &self,
+            _request: Request<ForceStopActorsRequest>,
+        ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            unimplemented!()
+        }
     }
 
     struct MockServices {
@@ -471,7 +478,6 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let hummock_manager = Arc::new(
                 HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
@@ -480,7 +486,6 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
-                catalog_manager,
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),

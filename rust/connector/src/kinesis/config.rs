@@ -23,8 +23,6 @@ use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use serde::{Deserialize, Serialize};
 
-use crate::ConnectorConfig;
-
 const KINESIS_STREAM_NAME: &str = "kinesis.stream.name";
 const KINESIS_STREAM_REGION: &str = "kinesis.stream.region";
 const KINESIS_ENDPOINT: &str = "kinesis.endpoint";
@@ -57,7 +55,7 @@ pub struct AwsCredentials {
 }
 
 impl AwsConfigInfo {
-    pub async fn load(&self) -> Result<aws_config::Config> {
+    pub async fn load(&self) -> Result<aws_types::SdkConfig> {
         let region = self
             .region
             .as_ref()
@@ -99,9 +97,7 @@ impl AwsConfigInfo {
         Ok(config_loader.load().await)
     }
 
-    pub fn build(
-        properties: &HashMap<String, String>,
-    ) -> risingwave_common::error::Result<ConnectorConfig> {
+    pub fn build(properties: &HashMap<String, String>) -> risingwave_common::error::Result<Self> {
         let stream_name = properties.get(KINESIS_STREAM_NAME).ok_or_else(|| {
             RwError::from(ProtocolError(
                 "Kinesis stream name should be provided.".into(),
@@ -137,12 +133,12 @@ impl AwsConfigInfo {
             })
         }
 
-        Ok(ConnectorConfig::Kinesis(Self {
+        Ok(Self {
             stream_name: stream_name.clone(),
             region: Some(region.clone()),
             endpoint: properties.get(KINESIS_ENDPOINT).cloned(),
             assume_role,
             credentials,
-        }))
+        })
     }
 }

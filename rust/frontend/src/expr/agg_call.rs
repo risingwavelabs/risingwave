@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,
@@ -45,18 +45,29 @@ impl std::fmt::Debug for AggCall {
 }
 
 impl AggCall {
-    pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> DataType {
-        match (&agg_kind, inputs) {
+    pub fn infer_return_type(agg_kind: &AggKind, inputs: &[DataType]) -> Option<DataType> {
+        // The function signatures are aligned with postgres, see
+        // https://www.postgresql.org/docs/current/functions-aggregate.html.
+        let return_type = match (&agg_kind, inputs) {
             (AggKind::Min, [input]) => input.clone(),
             (AggKind::Max, [input]) => input.clone(),
-            (AggKind::Avg, [input]) => input.clone(),
+            (AggKind::Avg, [input]) => match input {
+                DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
+                    DataType::Decimal
+                }
+                DataType::Float32 | DataType::Float64 => DataType::Float64,
+                DataType::Interval => DataType::Interval,
+                _ => return None,
+            },
             (AggKind::Sum, [input]) => match input {
                 DataType::Int16 => DataType::Int64,
                 DataType::Int32 => DataType::Int64,
                 DataType::Int64 => DataType::Decimal,
-                DataType::Float32 => DataType::Float64,
+                DataType::Decimal => DataType::Decimal,
+                DataType::Float32 => DataType::Float32,
                 DataType::Float64 => DataType::Float64,
-                other_type => other_type.clone(),
+                DataType::Interval => DataType::Interval,
+                _ => return None,
             },
             (AggKind::Count, _) => DataType::Int64,
             (other_kind, other_inputs) => {
@@ -66,14 +77,22 @@ impl AggCall {
                     other_inputs.len()
                 )
             }
-        }
+        };
+        Some(return_type)
     }
+
     /// Returns error if the function name matches with an existing function
     /// but with illegal arguments.
     pub fn new(agg_kind: AggKind, inputs: Vec<ExprImpl>) -> Result<Self> {
         // TODO(TaoWu): Add arguments validator.
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
-        let return_type = Self::infer_return_type(&agg_kind, &data_types);
+        let return_type = Self::infer_return_type(&agg_kind, &data_types).ok_or_else(|| {
+            let args = data_types.iter().map(|t| format!("{:?}", t)).join(", ");
+            RwError::from(ErrorCode::NotImplementedError(format!(
+                "No function matches to {}({})",
+                agg_kind, args
+            )))
+        })?;
         Ok(AggCall {
             agg_kind,
             return_type,

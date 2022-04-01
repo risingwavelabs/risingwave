@@ -92,10 +92,10 @@ impl Planner {
     /// [`LogicalApply`] (correlated) or [`LogicalJoin`].
     ///
     /// For other subqueries, we plan it as `LeftOuter` [`LogicalApply`] (correlated) or
-    /// [`LogicalJoin`] using [`substitute_subqueries`].
+    /// [`LogicalJoin`] using [`Self::substitute_subqueries`].
     fn plan_where(&mut self, mut input: PlanRef, where_clause: ExprImpl) -> Result<PlanRef> {
         if !where_clause.has_subquery() {
-            return LogicalFilter::create(input, where_clause);
+            return Ok(LogicalFilter::create_with_expr(input, where_clause));
         }
 
         let (subquery_conjunctions, not_subquery_conjunctions, others) =
@@ -120,7 +120,7 @@ impl Planner {
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftSemi,
-                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )
@@ -139,7 +139,7 @@ impl Planner {
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftAnti,
-                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )
@@ -154,17 +154,16 @@ impl Planner {
             Ok(input)
         } else {
             let (input, others) = self.substitute_subqueries(input, others.conjunctions)?;
-            Ok(LogicalFilter::new(
+            Ok(LogicalFilter::create(
                 input,
                 Condition {
                     conjunctions: others,
                 },
-            )
-            .into())
+            ))
         }
     }
 
-    /// Substitues all [`Subquery`] in `exprs`.
+    /// Substitutes all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
     /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
@@ -209,7 +208,7 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                SubqueryKind::SetComparision => {
+                SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )

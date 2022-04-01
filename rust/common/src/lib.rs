@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]
@@ -23,6 +24,7 @@
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]

@@ -28,7 +28,8 @@ use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
-/// States for [`SimpleAggExecutor`] and [`HashAggExecutor`].
+/// States for [`crate::executor::LocalSimpleAggExecutor`], [`crate::executor::SimpleAggExecutor`]
+/// and [`crate::executor::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
@@ -90,9 +91,9 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`HashAggExecutor`].
+    /// that for [`crate::executor::HashAggExecutor`].
     ///
-    /// Returns how many rows are appended in buidlers.
+    /// Returns how many rows are appended in builders.
     pub async fn build_changes(
         &mut self,
         builders: &mut [ArrayBuilderImpl],
@@ -180,8 +181,9 @@ impl<S: StateStore> AggState<S> {
     }
 }
 
-/// Trait for [`SimpleAggExecutor`] and [`HashAggExecutor`], providing an implementaion of
-/// [`Executor::next`] by [`agg_executor_next`].
+/// Trait for [`crate::executor::LocalSimpleAggExecutor`], and
+/// [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`], providing an
+/// implementation of [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
 pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
@@ -228,7 +230,7 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
-/// An implementaion of [`Executor::next`] for [`AggExecutor`].
+/// An implementation of [`Executor::next`] for [`AggExecutor`].
 pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Message> {
     if let Some(barrier) = std::mem::take(executor.cached_barrier_message_mut()) {
         return Ok(Message::Barrier(barrier));
@@ -263,8 +265,9 @@ pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Messa
     }
 }
 
-/// Generate [`HashAgg`]'s schema from `input`, `agg_calls` and `group_key_indices`. For
-/// [`HashAggExecutor`], the group key indices should be provided.
+/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should be
+/// provided.
 pub fn generate_agg_schema(
     input: &dyn Executor,
     agg_calls: &[AggCall],
@@ -287,8 +290,8 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-/// Generate initial [`AggState`] from `agg_calls`. For [`HashAggExecutor`], the group key should be
-/// provided.
+/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
+/// group key should be provided.
 pub async fn generate_agg_state<S: StateStore>(
     key: Option<&Row>,
     agg_calls: &[AggCall],

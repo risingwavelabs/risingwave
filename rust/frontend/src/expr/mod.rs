@@ -47,7 +47,7 @@ pub trait Expr: Into<ExprImpl> {
     fn to_protobuf(&self) -> ExprNode;
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
@@ -84,6 +84,27 @@ impl ExprImpl {
         let mut visitor = CollectInputRef::with_capacity(input_col_num);
         visitor.visit_expr(self);
         visitor.collect()
+    }
+
+    /// Check whether self is NULL.
+    pub fn is_null(&self) -> bool {
+        matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
+    }
+
+    /// Check if cast needs to be inserted.
+    /// TODO: check castiblility with context.
+    pub fn ensure_type(self, ty: DataType) -> ExprImpl {
+        if self.is_null() {
+            ExprImpl::Literal(Box::new(Literal::new(None, ty)))
+        } else if ty == self.return_type() {
+            self
+        } else {
+            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
+                ExprType::Cast,
+                vec![self],
+                ty,
+            )))
+        }
     }
 }
 

@@ -26,7 +26,7 @@ pub trait ColPrunable {
     /// `required_cols` must be a subset of the range `0..self.schema().len()`.
     ///
     /// After calling `prune_col` on the children, their output schema may change, so
-    /// the caller may need to transform its [`InputRef`] using
+    /// the caller may need to transform its [`InputRef`](crate::expr::InputRef) using
     /// [`ColIndexMapping`](crate::utils::ColIndexMapping).
     ///
     /// When implementing this method for a node, it may require its children to produce additional

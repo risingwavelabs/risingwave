@@ -17,6 +17,8 @@ use std::io::Cursor;
 use bytes::Bytes;
 use itertools::{EitherOrBoth, Itertools};
 use prost::Message;
+use rand::seq::SliceRandom;
+use rand::thread_rng;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, Level, LevelEntry, LevelType, TableSetStatistics,
@@ -79,6 +81,9 @@ impl CompactStatus {
     }
 
     pub fn get_compact_task(&mut self) -> Option<CompactTask> {
+        // When we compact the files, we must make the result of compaction meet the following
+        // conditions, for any user key, the epoch of it in the file existing in the lower
+        // layer must be larger.
         let num_levels = self.level_handlers.len();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
         for (level_handler_idx, level_handler) in
@@ -107,58 +112,77 @@ impl CompactStatus {
         let mut found = SearchResult::NotFound;
         let next_task_id = self.next_compact_task_id;
         let (prior, posterior) = self.level_handlers.split_at_mut(select_level as usize + 1);
+        let target_level = select_level + 1;
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
-        let target_level = select_level + 1;
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
         // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(l_n, compacting_key_ranges)
             | LevelHandler::Nonoverlapping(l_n, compacting_key_ranges) => {
-                let mut sst_idx = 0;
                 let l_n_len = l_n.len();
-                while sst_idx < l_n_len {
-                    let mut next_sst_idx = sst_idx + 1;
-                    let SSTableStat {
-                        key_range: sst_key_range,
-                        table_id,
-                        ..
-                    } = &l_n[sst_idx];
-                    let mut select_level_inputs = vec![*table_id];
-                    let key_range;
-                    let mut tier_key_range;
-                    // Must ensure that there exists no SSTs in `select_level` which have
-                    // overlapping user key with `select_level_inputs`
-                    if !is_select_level_leveling {
-                        tier_key_range = sst_key_range.clone();
+                let mut polysst_candidates = Vec::with_capacity(l_n_len);
+                {
+                    let mut sst_idx = 0;
+                    while sst_idx < l_n_len {
+                        let mut next_sst_idx = sst_idx + 1;
+                        let SSTableStat {
+                            key_range: sst_key_range,
+                            table_id,
+                            ..
+                        } = &l_n[sst_idx];
+                        let mut select_level_inputs = vec![*table_id];
+                        let key_range;
+                        let mut tier_key_range;
+                        // Must ensure that there exists no SSTs in `select_level` which have
+                        // overlapping user key with `select_level_inputs`
+                        if !is_select_level_leveling {
+                            tier_key_range = sst_key_range.clone();
 
-                        next_sst_idx = sst_idx;
-                        for (
-                            delta_idx,
-                            SSTableStat {
-                                key_range: other_key_range,
-                                table_id: other_table_id,
-                                ..
-                            },
-                        ) in l_n[sst_idx + 1..].iter().enumerate()
-                        {
-                            if user_key(&other_key_range.left) <= user_key(&tier_key_range.right) {
-                                select_level_inputs.push(*other_table_id);
-                                tier_key_range.full_key_extend(other_key_range);
-                            } else {
-                                next_sst_idx = sst_idx + 1 + delta_idx;
-                                break;
+                            next_sst_idx = sst_idx;
+                            for (
+                                delta_idx,
+                                SSTableStat {
+                                    key_range: other_key_range,
+                                    table_id: other_table_id,
+                                    ..
+                                },
+                            ) in l_n[sst_idx + 1..].iter().enumerate()
+                            {
+                                if user_key(&other_key_range.left)
+                                    <= user_key(&tier_key_range.right)
+                                {
+                                    select_level_inputs.push(*other_table_id);
+                                    tier_key_range.full_key_extend(other_key_range);
+                                } else {
+                                    next_sst_idx = sst_idx + 1 + delta_idx;
+                                    break;
+                                }
                             }
-                        }
-                        if next_sst_idx == sst_idx {
-                            next_sst_idx = l_n_len;
+                            if next_sst_idx == sst_idx {
+                                next_sst_idx = l_n_len;
+                            }
+
+                            key_range = &tier_key_range;
+                        } else {
+                            key_range = sst_key_range;
                         }
 
-                        key_range = &tier_key_range;
-                    } else {
-                        key_range = sst_key_range;
+                        polysst_candidates.push((
+                            (sst_idx, next_sst_idx),
+                            select_level_inputs,
+                            key_range.clone(),
+                        ));
+
+                        sst_idx = next_sst_idx;
                     }
+                }
 
+                let mut rng = thread_rng();
+                polysst_candidates.shuffle(&mut rng);
+
+                for ((sst_idx, next_sst_idx), select_level_inputs, key_range) in polysst_candidates
+                {
                     let mut is_select_idle = true;
                     for SSTableStat { compact_task, .. } in &l_n[sst_idx..next_sst_idx] {
                         if compact_task.is_some() {
@@ -182,7 +206,6 @@ impl CompactStatus {
                                 LevelHandler::Overlapping(_, _) => unimplemented!(),
                                 LevelHandler::Nonoverlapping(l_n_suc, _) => {
                                     let mut overlap_all_idle = true;
-                                    // TODO: use pointer last time to avoid binary search
                                     let overlap_begin = l_n_suc.partition_point(|table_status| {
                                         user_key(&table_status.key_range.right)
                                             < user_key(&key_range.left)
@@ -204,7 +227,7 @@ impl CompactStatus {
                                         compacting_key_ranges.insert(
                                             insert_point,
                                             (
-                                                key_range.clone(),
+                                                key_range,
                                                 next_task_id,
                                                 select_level_inputs.len() as u64,
                                             ),
@@ -257,7 +280,6 @@ impl CompactStatus {
                             }
                         }
                     }
-                    sst_idx = next_sst_idx;
                 }
                 match &found {
                     SearchResult::Found(select_ln_ids, _, _) => {
@@ -345,6 +367,7 @@ impl CompactStatus {
                             cnt: 0,
                         }),
                     }),
+                    task_status: false,
                 };
                 Some(compact_task)
             }
@@ -359,9 +382,9 @@ impl CompactStatus {
         &mut self,
         output_table_compact_entries: Vec<SSTableStat>,
         compact_task: CompactTask,
-        task_result: bool,
     ) -> Option<Vec<HummockSSTableId>> {
         let mut delete_table_ids = vec![];
+        let task_result = compact_task.task_status;
         match task_result {
             true => {
                 for LevelEntry { level_idx, .. } in compact_task.input_ssts {

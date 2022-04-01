@@ -45,6 +45,8 @@ async fn gen_and_upload_table(
         object_store,
         remote_dir.to_string(),
         Arc::new(StateStoreMetrics::unused()),
+        64 << 20,
+        64 << 20,
     ));
     let sst = gen_test_sstable(
         default_builder_opt_for_test(),
@@ -153,6 +155,8 @@ async fn test_snapshot() {
         object_store.clone(),
         remote_dir.to_string(),
         Arc::new(StateStoreMetrics::unused()),
+        64 << 20,
+        64 << 20,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -193,7 +197,7 @@ async fn test_snapshot() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (1, HummockValue::Delete),
+            (1, HummockValue::Delete(Default::default())),
             (3, HummockValue::Put(b"test".to_vec())),
             (4, HummockValue::Put(b"test".to_vec())),
         ],
@@ -210,9 +214,9 @@ async fn test_snapshot() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (2, HummockValue::Delete),
-            (3, HummockValue::Delete),
-            (4, HummockValue::Delete),
+            (2, HummockValue::Delete(Default::default())),
+            (3, HummockValue::Delete(Default::default())),
+            (4, HummockValue::Delete(Default::default())),
         ],
         epoch3,
     )
@@ -230,6 +234,8 @@ async fn test_snapshot_range_scan() {
         object_store.clone(),
         remote_dir.to_string(),
         Arc::new(StateStoreMetrics::unused()),
+        64 << 20,
+        64 << 20,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
@@ -286,6 +292,8 @@ async fn test_snapshot_reverse_range_scan() {
         object_store.clone(),
         remote_dir.to_string(),
         Arc::new(StateStoreMetrics::unused()),
+        64 << 20,
+        64 << 20,
     ));
     let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

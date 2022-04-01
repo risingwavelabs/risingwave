@@ -23,11 +23,13 @@
 #![warn(clippy::no_effect_underscore_binding)]
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![feature(trait_alias)]
 #![feature(generic_associated_types)]
 #![feature(binary_heap_drain_sorted)]
 #![feature(mutex_unlock)]
 
+use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -38,7 +40,6 @@ pub use parser::*;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_connector::ConnectorConfig;
 pub use table_v2::*;
 
 pub mod parser;
@@ -55,7 +56,7 @@ extern crate maplit;
 #[derive(Clone, Debug)]
 pub enum SourceConfig {
     Kafka(HighLevelKafkaSourceConfig),
-    Connector(ConnectorConfig),
+    Connector(HashMap<String, String>),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

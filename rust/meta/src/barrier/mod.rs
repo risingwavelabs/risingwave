@@ -35,7 +35,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
+use crate::manager::{MetaSrvEnv, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -123,15 +123,15 @@ impl ScheduledBarriers {
     }
 }
 
-/// [`GlobalBarrierManager`] sends barriers to all registered compute nodes and collect them, with
-/// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
-/// requests and dispatch them to source actors.
+/// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
+/// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
+/// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`GlobalBarrierManager`] provides a set of interfaces like a state machine, accepting
-/// [`Command`] that carries info to build [`Mutation`]. To keep the consistency between barrier
-/// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
-/// done in barrier manager transactional using [`Command`].
+/// [`crate::barrier::GlobalBarrierManager`] provides a set of interfaces like a state machine,
+/// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
+/// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
+/// must be done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
@@ -140,8 +140,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     scheduled_barriers: ScheduledBarriers,
 
     cluster_manager: ClusterManagerRef<S>,
-
-    catalog_manager: CatalogManagerRef<S>,
 
     fragment_manager: FragmentManagerRef<S>,
 
@@ -160,11 +158,10 @@ where
 {
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-    /// Create a new [`GlobalBarrierManager`].
+    /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
@@ -183,7 +180,6 @@ where
         Self {
             interval,
             cluster_manager,
-            catalog_manager,
             fragment_manager,
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,
@@ -260,6 +256,9 @@ where
         if command_context.prev_epoch != INVALID_EPOCH {
             match result {
                 Ok(_) => {
+                    // We must ensure all epochs are committed in ascending order, because
+                    // the storage engine will query from new to old in the order in which
+                    // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch)
                         .await?;
