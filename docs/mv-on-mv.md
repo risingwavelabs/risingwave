@@ -7,10 +7,10 @@ RisingWave supports creating a new materialized view (abbreviated as mview) base
 In detail, we will support the creation of a materialized view whose source is some other mviews. **Please note that there should not be a circular dependency on mviews**.
 
 ```sql
-create table t1 (*v1* int, deleted boolean);
+create table t1 (v1 int, deleted boolean);
 create materialized view mv1 as select * from t1 where deleted = false;
-create materialized view mv2 as select sum(*v1*) as sum_v1 from mv1;
-create materialized view mv3 as select count(*v1*) as count_v1 from mv1;
+create materialized view mv2 as select sum(v1) as sum_v1 from mv1;
+create materialized view mv3 as select count(v1) as count_v1 from mv1;
 ```
 
 ## Design
