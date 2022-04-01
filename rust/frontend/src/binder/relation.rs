@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
+use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
@@ -26,7 +27,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use super::bind_context::ColumnBinding;
-use super::{BoundQuery, UNNAMED_SUBQUERY};
+use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
@@ -38,6 +39,7 @@ pub enum Relation {
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
+    WindowTableFunction(Box<BoundWindowTableFunction>),
 }
 
 #[derive(Debug)]
@@ -140,8 +142,21 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias, .. } => {
-                Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
+            TableFactor::Table { name, alias, args } => {
+                if args.is_empty() {
+                    Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
+                } else {
+                    let kind =
+                        WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
+                            ErrorCode::NotImplementedError(format!(
+                                "unknown window function kind: {}",
+                                name.0[0].value
+                            ))
+                        })?;
+                    Ok(Relation::WindowTableFunction(Box::new(
+                        self.bind_window_table_function(kind, args)?,
+                    )))
+                }
             }
             TableFactor::Derived {
                 lateral,

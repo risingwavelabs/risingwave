@@ -103,12 +103,6 @@ impl PlanTreeNodeBinary for BatchHashJoin {
             self.eq_join_predicate.clone(),
         )
     }
-    fn left_dist_required(&self) -> &Distribution {
-        todo!()
-    }
-    fn right_dist_required(&self) -> &Distribution {
-        todo!()
-    }
 }
 
 impl_plan_tree_node_for_binary! { BatchHashJoin }
@@ -116,11 +110,11 @@ impl_plan_tree_node_for_binary! { BatchHashJoin }
 impl ToDistributedBatch for BatchHashJoin {
     fn to_distributed(&self) -> PlanRef {
         let left = self.left().to_distributed_with_required(
-            self.left_order_required(),
+            Order::any(),
             &Distribution::HashShard(self.eq_join_predicate().left_eq_indexes()),
         );
         let right = self.right().to_distributed_with_required(
-            self.right_order_required(),
+            Order::any(),
             &Distribution::HashShard(self.eq_join_predicate().right_eq_indexes()),
         );
 

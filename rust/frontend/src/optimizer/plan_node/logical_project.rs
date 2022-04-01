@@ -231,8 +231,10 @@ impl fmt::Display for LogicalProject {
 
 impl ColPrunable for LogicalProject {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        // Check.
         self.must_contain_columns(required_cols);
 
+        // Record each InputRef's index.
         let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
@@ -241,6 +243,7 @@ impl ColPrunable for LogicalProject {
         let child_required_cols = visitor.collect();
         let mut mapping = ColIndexMapping::with_remaining_columns(&child_required_cols);
 
+        // Rewrite each InputRef with new index.
         let (exprs, expr_alias) = required_cols
             .ones()
             .map(|id| {
@@ -250,6 +253,8 @@ impl ColPrunable for LogicalProject {
                 )
             })
             .unzip();
+
+        // Reconstruct the LogicalProject.
         LogicalProject::new(
             self.input.prune_col(&child_required_cols),
             exprs,
