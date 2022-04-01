@@ -194,10 +194,12 @@ mod tests {
     #[test]
     fn test_slice_decode_encode() {
         let mut result = vec![];
-        HummockValue::put_without_meta(b"233333".to_vec()).encode(&mut result);
-
+        let value_meta = ValueMeta {
+            consistent_hash_value: 63492,
+        };
+        HummockValue::Put(value_meta, b"233333".to_vec()).encode(&mut result);
         assert_eq!(
-            HummockValue::put_without_meta(b"233333".as_slice()),
+            HummockValue::Put(value_meta, b"233333".as_slice()),
             HummockValue::from_slice(&result).unwrap()
         );
     }
