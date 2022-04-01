@@ -84,6 +84,16 @@ impl BuildTable {
     }
 }
 
+/// The numbers about key matched need to
+/// maintain in join with non_equi condition.
+#[derive(Clone, Debug)]
+struct ProbeMatchInfo {
+    /// The number of matched rows in build side.
+    matched: usize,
+    /// The number of rows produces in output result.
+    row_cnt: usize,
+}
+
 struct ProbeData<K> {
     probe_data_chunk: DataChunk,
     probe_keys: Vec<K>,
@@ -125,7 +135,7 @@ pub(super) struct ProbeTable<K> {
     ///
     /// See [`JoinType::need_join_remaining`]
     build_matched: Option<ChunkedData<bool>>,
-    probe_matched_list: Option<LinkedList<Vec<usize>>>,
+    probe_matched_list: Option<LinkedList<Vec<ProbeMatchInfo>>>,
     cur_probe_matched: usize,
     /// When a chunk is full, if true, there are still rows in
     /// the build side that matches the current row in probe
@@ -230,7 +240,7 @@ impl<K: HashKey> ProbeTable<K> {
         if self.params.join_type().need_probe_flag() && self.params.has_non_equi_cond() {
             self.probe_matched_list
                 .as_mut()
-                .map(|list| list.push_back(vec![0; probe_data_chunk.capacity()]));
+                .map(|list| list.push_back(vec![ProbeMatchInfo { matched: 0, row_cnt: 0 }; probe_data_chunk.capacity()]));
         }
         self.cur_probe_row_id = 0;
         self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
@@ -291,29 +301,28 @@ impl<K: HashKey> ProbeTable<K> {
         println!{"filter {:?}", filter};
         while let Some(mut probe_matched) = probe_matched_list.pop_front() {
             while self.cur_probe_matched < probe_matched.len() {
-                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
-                // Probe side does not match any, but will have a row where build side is null
-                if cur_result_row_cnt == 0 {
-                    cur_result_row_cnt = 1;
-                }
-                for _ in 0..cur_result_row_cnt {
+
+                let probe_row_matched = &mut probe_matched[self.cur_probe_matched];
+
+                while probe_row_matched.row_cnt > 0 {
                     println!{"result_row_id: {}", result_row_id};
                     let filter_bit = filter.is_set(result_row_id).unwrap();
 
-                    if probe_matched[self.cur_probe_matched] == 0 {
+                    if probe_row_matched.matched == 0 {
                         new_filter.push(true);
-                    } else if probe_matched[self.cur_probe_matched] == 1
+                    } else if probe_row_matched.matched == 1
                         && !(self.has_pending_matched && result_row_id == chunk_len - 1)
                     {
                         new_filter.push(true);
                     } else {
                         if filter_bit == false {
-                            probe_matched[self.cur_probe_matched] -= 1;
+                            probe_row_matched.matched -= 1;
                         }
                         new_filter.push(filter_bit);
                     }    
 
                     result_row_id += 1;
+                    probe_row_matched.row_cnt -=1;
                 }
                 self.cur_probe_matched += 1;
             }
@@ -336,17 +345,14 @@ impl<K: HashKey> ProbeTable<K> {
         let mut new_filter = Vec::with_capacity(chunk_len);
         while let Some(mut probe_matched) = probe_matched_list.pop_front() {
             while self.cur_probe_matched < probe_matched.len() {
-                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
-                // Probe side does not match any, but will have a row where build side is null
-                if cur_result_row_cnt == 0 {
-                    cur_result_row_cnt = 1;
-                }
-                for _ in 0..cur_result_row_cnt {
+                let probe_row_matched = &mut probe_matched[self.cur_probe_matched];
+
+                while probe_row_matched.row_cnt > 0 {
                     let filter_bit = filter.is_set(result_row_id).unwrap();
 
                     if filter_bit == true {
-                        if probe_matched[self.cur_probe_matched] == 0 {
-                            probe_matched[self.cur_probe_matched] = 1;
+                        if probe_row_matched.matched == 0 {
+                            probe_row_matched.matched = 1;
                             new_filter.push(true);
                         } else {
                             new_filter.push(false);
@@ -356,6 +362,7 @@ impl<K: HashKey> ProbeTable<K> {
                     }
 
                     result_row_id += 1;
+                    probe_row_matched.row_cnt -= 1;
                 }
                 self.cur_probe_matched += 1;
             }
@@ -378,29 +385,27 @@ impl<K: HashKey> ProbeTable<K> {
         let mut new_filter = Vec::with_capacity(chunk_len);
         while let Some(mut probe_matched) = probe_matched_list.pop_front() {
             while self.cur_probe_matched < probe_matched.len() {
-                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
-                // Probe side does not match any, but will have a row where build side is null
-                if cur_result_row_cnt == 0 {
-                    cur_result_row_cnt = 1;
-                }
-                for _ in 0..cur_result_row_cnt {
+                let probe_row_matched = &mut probe_matched[self.cur_probe_matched];
+
+                while probe_row_matched.row_cnt > 0 {
                     let filter_bit = filter.is_set(result_row_id).unwrap();
 
-                    if probe_matched[self.cur_probe_matched] == 0 {
+                    if probe_row_matched.matched == 0 {
                         new_filter.push(true);
-                    } else if probe_matched[self.cur_probe_matched] == 1
+                    } else if probe_row_matched.matched == 1
                         && !(self.has_pending_matched && result_row_id == chunk_len - 1)
                     {
-                        probe_matched[self.cur_probe_matched] -= 1;
+                        probe_row_matched.matched -= 1;
                         new_filter.push(!filter_bit);
                     } else if filter_bit == false {
-                        probe_matched[self.cur_probe_matched] -= 1;
+                        probe_row_matched.matched -= 1;
                         new_filter.push(filter_bit);
                     } else {
                         new_filter.push(false);
                     }
 
                     result_row_id += 1;
+                    probe_row_matched.row_cnt -= 1;
                 }
                 self.cur_probe_matched += 1;
             }
@@ -475,16 +480,13 @@ impl<K: HashKey> ProbeTable<K> {
         let mut new_filter = Vec::with_capacity(chunk_len);
         while let Some(mut probe_matched) = probe_matched_list.pop_front() {
             while self.cur_probe_matched < probe_matched.len() {
-                let mut cur_result_row_cnt = probe_matched[self.cur_probe_matched];
-                // Probe side does not match any, but will have a row where build side is null
-                if cur_result_row_cnt == 0 {
-                    cur_result_row_cnt = 1;
-                }
-                for _ in 0..cur_result_row_cnt {
+                let probe_row_matched = &mut probe_matched[self.cur_probe_matched];
+
+                while probe_row_matched.row_cnt > 0 {
                     let filter_bit = filter.is_set(result_row_id).unwrap();
-                    if probe_matched[self.cur_probe_matched] == 0 {
+                    if probe_row_matched.matched == 0 {
                         new_filter.push(true);
-                    } else if probe_matched[self.cur_probe_matched] == 1
+                    } else if probe_row_matched.matched == 1
                         && !(self.has_pending_matched && result_row_id == chunk_len - 1)
                     {
                         if filter_bit == true {
@@ -497,7 +499,7 @@ impl<K: HashKey> ProbeTable<K> {
                         new_filter.push(true);
                     } else {
                         if filter_bit == false {
-                            probe_matched[self.cur_probe_matched] -= 1;
+                            probe_row_matched.matched -= 1;
                         } else {
                             self.set_build_matched(
                                 self.result_build_index[result_row_id].unwrap(),
@@ -507,6 +509,7 @@ impl<K: HashKey> ProbeTable<K> {
                     }
 
                     result_row_id += 1;
+                    probe_row_matched.row_cnt -= 1;
                 }
                 self.cur_probe_matched += 1;
             }
@@ -800,11 +803,13 @@ impl<K: HashKey> ProbeTable<K> {
         let probe_matched = probe_matched_list.back_mut().unwrap();
         while self.cur_probe_row_id < self.current_probe_data_chunk_size() {
             println!("cur_probe_row_id: {}", self.cur_probe_row_id);
+            let probe_row_matched = &mut probe_matched[self.cur_probe_row_id];
             while let Some(build_row_id) = self.next_joined_build_row_id() {
                 println!("cur_build: {:?}", build_row_id);
 
                 // Only needed for non-equi condition
-                probe_matched[self.cur_probe_row_id] += 1;
+                probe_row_matched.matched += 1;
+                probe_row_matched.row_cnt += 1;
                 // Here we have one full data chunk
                 if let Some(ret_data_chunk) =
                     self.append_one_row(Some(build_row_id), Some(self.cur_probe_row_id))?
@@ -828,6 +833,7 @@ impl<K: HashKey> ProbeTable<K> {
             {
                 println!("cur_build: None");
 
+                probe_row_matched.row_cnt += 1;
                 // Here we have one full data chunk
                 if let Some(ret_data_chunk) =
                     self.append_one_row(None, Some(self.cur_probe_row_id))?

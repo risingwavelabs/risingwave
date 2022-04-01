@@ -699,7 +699,7 @@ mod tests {
                 right_key_types: vec![self.right_types[0].clone()],
                 right_col_len,
                 full_data_types,
-                batch_size: 1000,
+                batch_size: 2,
                 cond,
             };
 
