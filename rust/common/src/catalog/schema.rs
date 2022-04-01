@@ -43,9 +43,9 @@ impl Field {
     }
 }
 
-/// `schema_unamed` builds a `Schema` with the given types, but without names.
+/// `schema_unnamed` builds a `Schema` with the given types, but without names.
 #[macro_export]
-macro_rules! schema_unamed {
+macro_rules! schema_unnamed {
     ($($t:expr),*) => {{
         $crate::catalog::Schema {
             fields: vec![

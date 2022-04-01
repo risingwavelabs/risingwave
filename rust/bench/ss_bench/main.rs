@@ -125,6 +125,8 @@ async fn main() {
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: false,
+        block_cache_capacity: 256 << 20,
+        meta_cache_capacity: 64 << 20,
     });
 
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

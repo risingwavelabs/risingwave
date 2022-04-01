@@ -97,8 +97,6 @@ impl<'a, const DIRECTION: usize> MergeIteratorInner<'a, DIRECTION> {
 #[async_trait]
 impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
-        let timer = self.stats.iter_merge_next_duration.start_timer();
-
         let mut node = self.heap.peek_mut().expect("no inner iter");
 
         // WARNING: within scope of BinaryHeap::PeekMut, we must carefully handle all places of
@@ -124,8 +122,6 @@ impl<const DIRECTION: usize> HummockIterator for MergeIteratorInner<'_, DIRECTIO
             // This will update the heap top.
             drop(node);
         }
-
-        timer.observe_duration();
 
         Ok(())
     }

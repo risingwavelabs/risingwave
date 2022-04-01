@@ -39,7 +39,7 @@ use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`Context`] carries one-time infos.
+/// [`CreateMaterializedViewContext`] carries one-time infos.
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.

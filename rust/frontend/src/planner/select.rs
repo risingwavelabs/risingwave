@@ -120,7 +120,7 @@ impl Planner {
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftSemi,
-                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )
@@ -139,7 +139,7 @@ impl Planner {
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftAnti,
-                SubqueryKind::Scalar | SubqueryKind::SetComparision => {
+                SubqueryKind::Scalar | SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )
@@ -163,7 +163,7 @@ impl Planner {
         }
     }
 
-    /// Substitues all [`Subquery`] in `exprs`.
+    /// Substitutes all [`Subquery`] in `exprs`.
     ///
     /// Each time a [`Subquery`] is found, it is replaced by a new [`InputRef`]. And `root` is
     /// replaced by a new `LeftOuter` [`LogicalApply`] (correlated) or [`LogicalJoin`]
@@ -208,7 +208,7 @@ impl Planner {
                 SubqueryKind::Existential => {
                     right = self.create_exists(right)?;
                 }
-                SubqueryKind::SetComparision => {
+                SubqueryKind::SetComparison => {
                     return Err(
                         ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
                     )

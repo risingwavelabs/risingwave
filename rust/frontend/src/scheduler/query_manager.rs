@@ -1,25 +1,30 @@
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, RwError};
-use risingwave_pb::common::WorkerNode;
+use risingwave_pb::common::HostAddress;
 use risingwave_pb::plan::{PlanNode as BatchPlanProst, TaskId, TaskOutputId};
 use risingwave_rpc_client::{ComputeClient, ExchangeSource};
 use uuid::Uuid;
 
 use crate::meta_client::FrontendMetaClient;
+use crate::scheduler::execution::QueryExecution;
+use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::schedule::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;
 
-struct QueryResultFetcher {
+pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
+
+pub struct QueryResultFetcher {
     // TODO: Remove these after implemented worker node level snapshot pinnning
     epoch: u64,
     meta_client: Arc<dyn FrontendMetaClient>,
 
     task_output_id: TaskOutputId,
-    gather_task_node: WorkerNode,
+    task_host: HostAddress,
 }
 
 /// Manages execution of batch queries.
@@ -54,9 +59,8 @@ impl QueryManager {
         plan: BatchPlanProst,
     ) -> Result<impl Stream<Item = Result<DataChunk>>> {
         let session = context.session();
-        let worker_node = self.worker_node_manager.next_random();
-        let compute_client: ComputeClient =
-            ComputeClient::new(worker_node.host.as_ref().unwrap().into()).await?;
+        let worker_node_addr = self.worker_node_manager.next_random().host.unwrap();
+        let compute_client: ComputeClient = ComputeClient::new((&worker_node_addr).into()).await?;
 
         // Build task id and task sink id
         let task_id = TaskId {
@@ -82,18 +86,56 @@ impl QueryManager {
             epoch,
             meta_client,
             task_output_id,
-            gather_task_node: worker_node,
+            task_host: worker_node_addr,
         };
+
+        Ok(query_result_fetcher.run())
+    }
+
+    pub async fn schedule(
+        &self,
+        context: ExecutionContextRef,
+        _query: Query,
+    ) -> Result<impl DataChunkStream> {
+        // Cheat compiler to resolve type
+        let session = context.session();
+
+        // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
+        // TODO: hummock snapshot should maintain as cache instead of RPC each query.
+        let meta_client = session.env().meta_client_ref();
+        let epoch = meta_client.pin_snapshot().await?;
+
+        let query_execution = QueryExecution::new(
+            _query,
+            epoch,
+            meta_client,
+            session.env().worker_node_manager_ref(),
+        );
+
+        let query_result_fetcher = query_execution.start().await?;
 
         Ok(query_result_fetcher.run())
     }
 }
 
 impl QueryResultFetcher {
+    pub fn new(
+        epoch: u64,
+        meta_client: Arc<dyn FrontendMetaClient>,
+        task_output_id: TaskOutputId,
+        task_host: HostAddress,
+    ) -> Self {
+        Self {
+            epoch,
+            meta_client,
+            task_output_id,
+            task_host,
+        }
+    }
+
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn run(self) {
-        let compute_client: ComputeClient =
-            ComputeClient::new(self.gather_task_node.host.as_ref().unwrap().into()).await?;
+        let compute_client: ComputeClient = ComputeClient::new((&self.task_host).into()).await?;
 
         let mut source = compute_client.get_data(self.task_output_id).await?;
         while let Some(chunk) = source.take_data().await? {
@@ -103,5 +145,15 @@ impl QueryResultFetcher {
         let epoch = self.epoch;
         // Unpin corresponding snapshot.
         self.meta_client.unpin_snapshot(epoch).await?;
+    }
+}
+
+impl Debug for QueryResultFetcher {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryResultFetcher")
+            .field("epoch", &self.epoch)
+            .field("task_output_id", &self.task_output_id)
+            .field("task_host", &self.task_host)
+            .finish()
     }
 }

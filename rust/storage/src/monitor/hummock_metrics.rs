@@ -28,8 +28,8 @@ pub const PIN_SNAPSHOT_LATENCY_SCALE: f64 = 0.1;
 pub const UNPIN_SNAPSHOT_LATENCY_SCALE: f64 = 0.1;
 pub const ADD_TABLE_LATENCT_SCALE: f64 = 0.1;
 pub const GET_NEW_TABLE_ID_LATENCY_SCALE: f64 = 0.1;
-pub const GET_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
-pub const REPORT_COMPATION_TASK_LATENCY_SCALE: f64 = 0.1;
+pub const GET_COMPACTION_TASK_LATENCY_SCALE: f64 = 0.1;
+pub const REPORT_COMPACTION_TASK_LATENCY_SCALE: f64 = 0.1;
 
 /// Defines all metrics.
 #[macro_export]
@@ -189,7 +189,7 @@ impl HummockMetrics {
 
         // --
         let buckets = DEFAULT_BUCKETS
-            .map(|x| x * REPORT_COMPATION_TASK_LATENCY_SCALE)
+            .map(|x| x * REPORT_COMPACTION_TASK_LATENCY_SCALE)
             .to_vec();
         let report_compaction_task_latency_opts = histogram_opts!(
             "state_store_report_compaction_task_latency",

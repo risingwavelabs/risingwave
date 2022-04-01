@@ -109,7 +109,7 @@ mod tests {
     #[tokio::test]
     async fn test_mview_state() {
         // Only assert pk and columns can be successfully put/delete/flush,
-        // and the ammount of rows is expected.
+        // and the amount of rows is expected.
         let state_store = MemoryStateStore::new();
         let _schema = schema_test_utils::ii();
         let keyspace = Keyspace::executor_root(state_store.clone(), 0x42);

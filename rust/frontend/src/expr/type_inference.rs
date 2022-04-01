@@ -319,7 +319,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Int32],
         T::Decimal,
     );
-
+    build_binary_funcs(
+        &mut map,
+        &[E::Extract],
+        &[T::Varchar], // Time field, "YEAR", "DAY", etc
+        &[T::Timestamp, T::Time, T::Date],
+        T::Decimal,
+    );
     map
 }
 lazy_static::lazy_static! {

@@ -137,8 +137,8 @@ subprojects {
                 googleJavaFormat()
 
                 targetExclude(
-                    "src/main/java/com/risingwave/sql/SqlFormatter.java",
-                    "src/main/java/org/apache/calcite/**"
+                    "src/main/legacy/com/risingwave/sql/SqlFormatter.java",
+                    "src/main/legacy/org/apache/calcite/**"
                 )
             }
             kotlin {

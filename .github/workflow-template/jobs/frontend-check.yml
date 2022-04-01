@@ -33,10 +33,10 @@ jobs:
           name: risingwave-fe-runnable.jar
           if-no-files-found: error
           path: |
-            java/pgserver/build/libs/risingwave-fe-runnable.jar
+            legacy/pgserver/build/libs/risingwave-fe-runnable.jar
 
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: java
+          directory: legacy
           flags: java

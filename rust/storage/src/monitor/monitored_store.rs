@@ -52,16 +52,9 @@ where
     where
         I: Future<Output = Result<S::Iter<'a>>>,
     {
-        self.stats.iter_counts.inc();
-
-        let timer = self.stats.iter_seek_latency.start_timer();
         let iter = iter.await?;
-        timer.observe_duration();
 
-        let monitored = MonitoredStateStoreIter {
-            inner: iter,
-            stats: self.stats.clone(),
-        };
+        let monitored = MonitoredStateStoreIter { inner: iter };
         Ok(monitored)
     }
 
@@ -79,8 +72,6 @@ where
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
         async move {
-            self.stats.get_counts.inc();
-
             let timer = self.stats.get_duration.start_timer();
             let value = self.inner.get(key, epoch).await?;
             timer.observe_duration();
@@ -105,8 +96,6 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.stats.range_scan_counts.inc();
-
             let timer = self.stats.range_scan_duration.start_timer();
             let result = self.inner.scan(key_range, limit, epoch).await?;
             timer.observe_duration();
@@ -130,8 +119,6 @@ where
         B: AsRef<[u8]> + Send,
     {
         async move {
-            self.stats.range_reverse_scan_counts.inc();
-
             let timer = self.stats.range_reverse_scan_duration.start_timer();
             let result = self.inner.scan(key_range, limit, epoch).await?;
             timer.observe_duration();
@@ -154,7 +141,6 @@ where
                 return Ok(());
             }
 
-            self.stats.write_batch_counts.inc();
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
@@ -164,7 +150,7 @@ where
                 .map(|(k, v)| k.len() + v.size())
                 .sum::<usize>();
 
-            let timer = self.stats.write_batch_shared_buffer_time.start_timer();
+            let timer = self.stats.write_batch_duration.start_timer();
             self.inner.ingest_batch(kv_pairs, epoch).await?;
             timer.observe_duration();
 
@@ -199,8 +185,7 @@ where
 
     fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
         async move {
-            self.stats.write_shared_buffer_sync_counts.inc();
-            let timer = self.stats.write_shared_buffer_sync_time.start_timer();
+            let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
             self.inner.sync(epoch).await?;
             timer.observe_duration();
             Ok(())
@@ -223,8 +208,6 @@ where
 /// A state store iterator wrapper for monitoring metrics.
 pub struct MonitoredStateStoreIter<I> {
     inner: I,
-
-    stats: Arc<StateStoreMetrics>,
 }
 
 impl<I> StateStoreIter for MonitoredStateStoreIter<I>
@@ -236,12 +219,6 @@ where
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let pair = self.inner.next().await?;
-
-            if let Some((key, value)) = pair.as_ref() {
-                self.stats
-                    .iter_next_size
-                    .observe((key.len() + value.len()) as _);
-            }
 
             Ok(pair)
         }

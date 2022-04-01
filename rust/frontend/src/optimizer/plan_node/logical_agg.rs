@@ -342,7 +342,7 @@ impl LogicalAgg {
             logical_project,
         );
 
-        // This LogicalProject focuse on tranforming the aggregates and grouping columns to
+        // This LogicalProject focus on transforming the aggregates and grouping columns to
         // InputRef.
         Ok(LogicalProject::create(
             logical_agg.into(),
