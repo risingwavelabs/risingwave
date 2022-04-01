@@ -5,7 +5,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use lazy_static::__Deref;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::state;
@@ -21,7 +21,7 @@ use crate::{SourceColumnDesc, SourceParser, StreamSourceReader};
 #[derive(Clone)]
 pub struct ConnectorSource {
     pub parser: Arc<dyn SourceParser + Send + Sync>,
-    pub reader: Arc<Mutex<dyn SourceReader + Send + Sync>>,
+    pub reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
     pub column_descs: Vec<SourceColumnDesc>,
 }
 
@@ -36,7 +36,7 @@ impl Debug for ConnectorSource {
 impl ConnectorSource {
     pub fn new(
         parser: Arc<dyn SourceParser + Send + Sync>,
-        reader: Arc<Mutex<dyn SourceReader + Send + Sync>>,
+        reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
         column_descs: Vec<SourceColumnDesc>,
     ) -> Self {
         Self {
@@ -44,15 +44,6 @@ impl ConnectorSource {
             reader,
             column_descs,
         }
-    }
-
-    pub async fn assign_split<'a>(&mut self, split: &'a [u8]) -> Result<()> {
-        self.reader
-            .lock()
-            .await
-            .assign_split(split)
-            .await
-            .map_err(|e: anyhow::Error| RwError::from(InternalError(e.to_string())))
     }
 
     pub async fn next(&mut self) -> Result<StreamChunk> {

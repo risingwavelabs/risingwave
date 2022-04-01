@@ -25,6 +25,9 @@ pub struct MockSource {
     schema: Schema,
     pk_indices: PkIndices,
     msgs: VecDeque<Message>,
+
+    /// Whether to send a `Stop` barrier on stream finish.
+    stop_on_finish: bool,
 }
 
 impl std::fmt::Debug for MockSource {
@@ -43,15 +46,16 @@ impl MockSource {
             schema,
             pk_indices,
             msgs: VecDeque::default(),
+            stop_on_finish: true,
         }
     }
 
-    #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
         Self {
             schema,
             pk_indices,
             msgs: msgs.into(),
+            stop_on_finish: true,
         }
     }
 
@@ -60,6 +64,15 @@ impl MockSource {
             schema,
             pk_indices,
             msgs: chunks.into_iter().map(Message::Chunk).collect(),
+            stop_on_finish: true,
+        }
+    }
+
+    #[must_use]
+    pub fn stop_on_finish(self, stop_on_finish: bool) -> Self {
+        Self {
+            stop_on_finish,
+            ..self
         }
     }
 
@@ -88,9 +101,11 @@ impl MockSource {
             yield msg
         }
 
-        yield Message::Barrier(
-            Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::default())),
-        );
+        if self.stop_on_finish {
+            yield Message::Barrier(
+                Barrier::new_test_barrier(epoch).with_mutation(Mutation::Stop(HashSet::default())),
+            );
+        }
     }
 }
 

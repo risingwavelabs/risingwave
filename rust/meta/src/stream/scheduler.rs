@@ -21,7 +21,7 @@ use risingwave_pb::common::{ActorInfo, ParallelUnit, ParallelUnitType};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 
-use crate::cluster::{ClusterManagerRef, NodeId, NodeLocations};
+use crate::cluster::{ClusterManagerRef, WorkerId, WorkerLocations};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
@@ -36,7 +36,7 @@ pub struct ScheduledLocations {
     /// actor location map.
     pub actor_locations: BTreeMap<ActorId, ParallelUnit>,
     /// worker location map.
-    pub node_locations: NodeLocations,
+    pub node_locations: WorkerLocations,
 }
 
 impl ScheduledLocations {
@@ -48,7 +48,7 @@ impl ScheduledLocations {
     }
 
     /// [`node_actors`] returns all actors for every node.
-    pub fn node_actors(&self) -> HashMap<NodeId, Vec<ActorId>> {
+    pub fn node_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         let mut node_actors = HashMap::new();
         self.actor_locations
             .iter()

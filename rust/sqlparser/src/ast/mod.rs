@@ -548,7 +548,7 @@ pub struct WindowFrame {
 impl Default for WindowFrame {
     /// returns default value for window frame
     ///
-    /// see https://www.sqlite.org/windowfunctions.html#frame_specifications
+    /// see <https://www.sqlite.org/windowfunctions.html#frame_specifications>
     fn default() -> Self {
         Self {
             units: WindowFrameUnits::Range,

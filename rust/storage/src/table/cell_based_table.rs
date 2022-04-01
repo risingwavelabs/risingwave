@@ -189,7 +189,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            let mut de = value_encoding::Deserializer::new(buf.to_bytes());
+            let mut de = value_encoding::Deserializer::new(buf);
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
             Ok(Some(cell))
         } else {
@@ -219,7 +219,7 @@ fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
 pub struct CellBasedTableRowIter<S: StateStore> {
     keyspace: Keyspace<S>,
     /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, StorageValue)>,
+    buf: Vec<(Bytes, Bytes)>,
     /// The idx into `buf` for the next item
     next_idx: usize,
     /// A bool to indicate whether there are more data to fetch from state store
@@ -358,7 +358,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 target: "events::storage::CellBasedTable::scan",
                 "CellBasedTable scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
-                value.as_bytes()
+                value
             );
 
             // there is no need to deserialize pk in cell-based table
@@ -366,9 +366,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let pk_and_row = self
-                .cell_based_row_deserializer
-                .deserialize(key, value.as_bytes())?;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),

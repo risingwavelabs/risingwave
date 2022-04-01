@@ -23,6 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -294,7 +295,7 @@ where
                 .await?;
 
             for (raw_key, raw_value) in all_data {
-                let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+                let mut deserializer = value_encoding::Deserializer::new(raw_value);
                 let value = deserialize_cell(&mut deserializer, &self.data_type)?;
                 let key = value.clone().map(|x| x.try_into().unwrap());
                 let pks = self.serializer.get_pk(&raw_key[..])?;
@@ -328,7 +329,11 @@ where
 
             match v.into_option() {
                 Some(v) => {
-                    local.put(key_encoded, serialize_cell(&v)?);
+                    // TODO(Yuanxin): Implement value meta
+                    local.put(
+                        key_encoded,
+                        StorageValue::new_default_put(serialize_cell(&v)?),
+                    );
                 }
                 None => {
                     local.delete(key_encoded);
@@ -385,7 +390,7 @@ where
         let mut result = vec![];
 
         for (raw_key, raw_value) in all_data {
-            let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+            let mut deserializer = value_encoding::Deserializer::new(raw_value);
             let value = deserialize_cell(&mut deserializer, &self.data_type)?;
             let key = value.clone().map(|x| x.try_into().unwrap());
             let pks = self.serializer.get_pk(&raw_key[..])?;

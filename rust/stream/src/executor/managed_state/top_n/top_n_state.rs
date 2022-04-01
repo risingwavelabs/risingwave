@@ -21,6 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
@@ -302,7 +303,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             )
             .await?
             .into_iter()
-            .map(|(k, v)| (k, v.to_bytes()))
+            .map(|(k, v)| (k, v))
             .collect_vec();
         deserialize_bytes_to_pk_and_row::<TOP_N_TYPE>(
             pk_row_bytes,
@@ -350,7 +351,8 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
             let bytes = serialize_pk_and_row(&pk_buf, &row, &column_ids)?;
             for (key, value) in bytes {
                 match value {
-                    Some(val) => local.put(key, val),
+                    // TODO(Yuanxin): Implement value meta
+                    Some(val) => local.put(key, StorageValue::new_default_put(val)),
                     None => local.delete(key),
                 }
             }

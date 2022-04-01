@@ -165,7 +165,7 @@ impl Operations {
                     let start = Instant::now();
                     let batch = batch
                         .into_iter()
-                        .map(|(k, v)| (k, v.map(StorageValue::from)))
+                        .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
                         .collect_vec();
                     let epoch = ctx.epoch.load(Ordering::Acquire);
                     store.ingest_batch(batch, epoch).await.unwrap();

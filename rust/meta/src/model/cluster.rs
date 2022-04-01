@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
-use risingwave_pb::common::{HostAddress, WorkerNode};
+use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 
 use crate::model::MetadataModel;
 
@@ -55,6 +55,10 @@ impl MetadataModel for Worker {
 impl Worker {
     pub fn worker_id(&self) -> u32 {
         self.worker_node.id
+    }
+
+    pub fn worker_type(&self) -> WorkerType {
+        WorkerType::from_i32(self.worker_node.r#type).expect("Invalid worker type")
     }
 
     pub fn expire_at(&self) -> u64 {

@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Literal};
+use crate::expr::{Expr as _, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -81,7 +81,7 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .zip_eq(types.iter().cloned())
-                    .map(|(expr, ty)| Self::ensure_type(expr, ty))
+                    .map(|(expr, ty)| expr.ensure_type(ty))
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();
@@ -107,22 +107,6 @@ impl Binder {
                 left, right
             ))
             .into())
-        }
-    }
-
-    /// Check if cast needs to be inserted.
-    /// TODO: check castiblility with context.
-    pub fn ensure_type(expr: ExprImpl, ty: DataType) -> ExprImpl {
-        if expr.is_null() {
-            ExprImpl::Literal(Box::new(Literal::new(None, ty)))
-        } else if ty == expr.return_type() {
-            expr
-        } else {
-            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                ExprType::Cast,
-                vec![expr],
-                ty,
-            )))
         }
     }
 }

@@ -20,7 +20,6 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::kinesis::config::AwsConfigInfo;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
@@ -77,11 +76,6 @@ impl CreateSourceExecutor {
             properties: Default::default(),
         }))
     }
-
-    fn extract_kinesis_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        let config = AwsConfigInfo::build(properties)?;
-        Ok(SourceConfig::Connector(config))
-    }
 }
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {
@@ -117,7 +111,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
         };
 
-        let properties = info.get_properties();
+        let properties: &HashMap<String, String> = info.get_properties();
 
         let schema_location = info.get_row_schema_location();
 
@@ -129,7 +123,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
 
         let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
             KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
-            KINESIS_SOURCE => CreateSourceExecutor::extract_kinesis_config(properties),
+            KINESIS_SOURCE => Ok(SourceConfig::Connector(properties.clone())),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
