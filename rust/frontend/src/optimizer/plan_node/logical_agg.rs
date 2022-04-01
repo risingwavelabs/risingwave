@@ -108,6 +108,8 @@ struct ExprHandler {
 
 impl ExprHandler {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
+        // TODO: support more complicated expression in GROUP BY clause, because we currently
+        // assume the only thing can appear in GROUP BY clause is an input column name.
         let group_key_len = group_exprs.len();
 
         let mut expr_index = HashMap::new();

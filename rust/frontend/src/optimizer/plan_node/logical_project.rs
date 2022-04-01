@@ -235,7 +235,6 @@ impl ColPrunable for LogicalProject {
         self.must_contain_columns(required_cols);
 
         // Record each InputRef's index.
-        // let mut exprs = HashMap::new();
         let mut visitor = CollectInputRef::with_capacity(self.input.schema().fields().len());
         required_cols.ones().for_each(|id| {
             visitor.visit_expr(&self.exprs[id]);
