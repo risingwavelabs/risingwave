@@ -2,7 +2,7 @@
 
 ## Overview
 
-In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, which can be considered as a cloud-native LSM-tree based storage engine. Hummock provides KV API, and stores all data on S3-compatible service. However, it is not a key-value store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
+In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, a cloud-native LSM-tree based storage engine. Hummock provides KV API, and stores all data on S3-compatible service. However, it is not a key-value store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
 
 ## Architecture
 
@@ -26,9 +26,9 @@ This leads to the design of Hummock, the cloud-native KV-based streaming state s
 
 In this part, we will introduce how users can use Hummock as a KV store.
 
-The Hummock itself provides 3 simple APIs: `write_batch`, `get`, and `scan`. Hummock provides MVCC write and read on KV pairs. Every key stored in Hummock has an *epoch* (aka. timestamp). Developers should specify an epoch when calling Hummock APIs.
+The Hummock itself provides 3 simple APIs: `ingest_batch`, `get`, and `scan`. Hummock provides MVCC write and read on KV pairs. Every key stored in Hummock has an *epoch* (aka. timestamp). Developers should specify an epoch when calling Hummock APIs.
 
-Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `write_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
+Hummock doesn’t support writing a single key. To write data into Hummock, users should provide a ***sorted, unique*** list of ***keys*** and the corresponding ***operations*** (put value, delete), with an ***epoch***, and call the `ingest_batch` API. Therefore, within one epoch, users can only have one operation for a key. For example,
 
 ```
 [a => put 1, b => put 2] epoch = 1 is a valid write batch
@@ -83,14 +83,16 @@ The final written key (aka. full key) is encoded by appending the 8-byte epoch a
 
 ### Write Path
 
-Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatiable service. The SST consists of two files: <id>.data and <id>.meta. The data file is composed of ~64KB blocks, where each block contains actual key value pairs; while the meta file contains large metadata like bloom filter. After the SST is uploaded to S3, Hummock client will let the Hummock manager know there’s a new table.
+Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatiable service. The SST consists of two files: 
+- <id>.data: Data file is composed of ~64KB blocks, where each block contains actual key value pairs.
+- <id>.meta: Meta file contains large metadata including min-max index, bloom filter as well as data block metadata.
+
+After the SST is uploaded to S3, Hummock client will let the Hummock manager know there’s a new table.
 The list of all SSTs along with some metadata forms a ***version***. When Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.
 
 ![Write Path](images/state-store-overview/state-store-overview-02.svg)
 
 ### Read Path
-
-[iterators source code](https://github.com/singularity-data/risingwave/tree/main/rust/storage/src/hummock/iterator)
 
 To read from Hummock, we will first need a ***version*** (a consistent state of list of SSTs we can read). To avoid contacting Hummock manager in every user read, the Hummock client will cache a most recent ***version*** locally. Local version will be updated when 1) client initiates a write batch and 2) background refresher triggers.
 
@@ -99,6 +101,15 @@ For every read operation (scan, get), we will first select SSTs that might conta
 For scan, we simply select by overlapping key range. For point get, we will filter SSTs further by bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epoch. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key that have epoch <= read epoch. Therefore, users can perform snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
 
 ![Read Path](images/state-store-overview/state-store-overview-03.svg)
+
+Hummock implements the following iterators:
+- `BlockIterator`: iterates a block of an SSTable.
+- `SSTableIterator`: iterates an SSTable.
+- `ConcatIterator`: iterates SSTables with non-overlapping keyspaces.
+- `MergeIterator`: iterates SSTables with overlapping keyspaces.
+- `UserIterator`: wraps internal iterators and outputs user key-value with epoch <= read epoch
+
+[iterators source code](https://github.com/singularity-data/risingwave/tree/main/rust/storage/src/hummock/iterator)
 
 
 ### Compaction
