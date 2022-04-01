@@ -167,15 +167,8 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         // TODO: make this configurable
-        let interval = Duration::from_millis(if let Ok(x) = std::env::var("RW_CI") && x == "true" {
-            // Use a shorter interval to discovery more bugs on CI.
-            100
-        } else if cfg!(debug_assertions) {
-            // Use a longer interval to better debug with tracing.
-            100
-        } else {
-            100
-        });
+        // TODO: when tracing is on, warn the developer on this short interval.
+        let interval = Duration::from_millis(100);
 
         Self {
             interval,
