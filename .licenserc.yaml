@@ -5,8 +5,8 @@ header:
 
   paths:
     - 'rust/**/*.rs'
-    # - 'java/**/*.java'
-    # - 'java/**/*.kt'
+    # - 'legacy/**/*.java'
+    # - 'legacy/**/*.kt'
     - 'dashboard/**/*.js'
     - 'rust/**/*.html'
 

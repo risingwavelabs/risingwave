@@ -16,7 +16,7 @@
  */
 
 // This file is copied from
-// https://github.com/apache/flink/blob/99c2a415e9eeefafacf70762b6f54070f7911ceb/flink-table/flink-sql-parser/src/main/java/org/apache/flink/sql/parser/ddl/SqlTableOption.java
+// https://github.com/apache/flink/blob/99c2a415e9eeefafacf70762b6f54070f7911ceb/flink-table/flink-sql-parser/src/main/legacy/org/apache/flink/sql/parser/ddl/SqlTableOption.java
 
 package com.risingwave.sql.node;
 

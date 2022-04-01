@@ -188,11 +188,11 @@ jobs:
           name: risingwave-fe-runnable.jar
           if-no-files-found: error
           path: |
-            java/pgserver/build/libs/risingwave-fe-runnable.jar
+            legacy/pgserver/build/libs/risingwave-fe-runnable.jar
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: java
+          directory: legacy
           flags: java
   end-to-end-risedev-dev:
     name: e2e-test-risedev-dev
@@ -723,7 +723,7 @@ jobs:
       - name: Run ShellCheck
         uses: ludeeus/action-shellcheck@master
         with:
-          ignore_paths: java
+          ignore_paths: legacy
       - name: Check protobuf code format
         run: |
           prototool format -d

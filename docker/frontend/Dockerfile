@@ -19,9 +19,9 @@ FROM openjdk:11.0.13-jre-slim-bullseye
 
 RUN mkdir dir -p /risingwave_fe/conf /risingwave_fe/lib
 
-COPY --from=risingwave_fe_builder /risingwave_fe/java/pgserver/build/libs/risingwave-fe-runnable.jar /risingwave_fe/lib
-COPY --from=risingwave_fe_builder /risingwave_fe/java/pgserver/build/resources/main/server.properties /risingwave_fe/conf
-COPY --from=risingwave_fe_builder /risingwave_fe/java/pgserver/build/resources/main/logback.xml  /risingwave_fe/conf
+COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/libs/risingwave-fe-runnable.jar /risingwave_fe/lib
+COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/resources/main/server.properties /risingwave_fe/conf
+COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/resources/main/logback.xml  /risingwave_fe/conf
 
 WORKDIR /risingwave_fe
 
