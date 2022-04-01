@@ -47,7 +47,7 @@ pub trait Expr: Into<ExprImpl> {
     fn to_protobuf(&self) -> ExprNode;
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),

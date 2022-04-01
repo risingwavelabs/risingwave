@@ -12,16 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
-use futures::future::try_join_all;
 use log::debug;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
-use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{ActorInfo, WorkerType};
+use risingwave_pb::common::ActorInfo;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, CreateSourceRequest,
-    ForceStopActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -50,18 +45,10 @@ where
 
             let info = self.resolve_actor_info(None).await;
 
-            // reset all compute nodes and wait for online, and create sources on failed nodes.
-            match self.reset_and_wait_compute_nodes(&info).await {
-                Ok(failed_node_ids) => {
-                    if let Err(e) = self.create_sources(&info, failed_node_ids).await {
-                        debug!("create_sources failed: {:?}", e);
-                        continue;
-                    }
-                }
-                Err(e) => {
-                    debug!("reset_and_wait_compute_nodes failed: {:?}", e);
-                    continue;
-                }
+            // Reset all compute nodes and wait for online.
+            if self.reset_and_wait_compute_nodes(&info).await.is_err() {
+                debug!("reset_and_wait_compute_nodes failed");
+                continue;
             }
 
             // update and build all actors.
@@ -106,40 +93,6 @@ where
                 tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
             }
         }
-    }
-
-    /// Create all sources in compute nodes.
-    async fn create_sources(
-        &self,
-        info: &BarrierActorInfo,
-        failed_node_ids: HashSet<u32>,
-    ) -> Result<()> {
-        // Attention, using catalog v2 here, it's not compatible with Java frontend.
-        let sources = self.catalog_manager.list_sources().await?;
-
-        for worker_node in info
-            .node_map
-            .values()
-            .filter(|n| failed_node_ids.contains(&n.id))
-        {
-            let client = &self.env.stream_clients().get(worker_node).await?;
-            let futures = sources.iter().map(|source| {
-                let request = CreateSourceRequest {
-                    source: Some(source.to_owned()),
-                };
-                async move {
-                    client
-                        .to_owned()
-                        .create_source(request)
-                        .await
-                        .to_rw_result()
-                }
-            });
-
-            let _response = try_join_all(futures).await?;
-        }
-
-        Ok(())
     }
 
     /// Update all actors in compute nodes.
@@ -213,55 +166,32 @@ where
     }
 
     /// Reset all compute nodes and wait for them to be online again.
-    async fn reset_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<HashSet<u32>> {
-        let mut failed_worker_id = HashSet::<u32>::new();
+    /// While we are waiting, the `NotificationManager` will send a `BeSnapshot` to rebooted nodes
+    /// and build sources.
+    async fn reset_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<()> {
         for worker_node in info.node_map.values() {
-            // force shutdown actors on running compute nodes
-            match self.env.stream_clients().get(worker_node).await {
-                Ok(client) => {
-                    match client
-                        .to_owned()
-                        .force_stop_actors(ForceStopActorsRequest {
-                            request_id: String::new(),
-                        })
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(err) => {
-                            // this node has down, remove it from cluster manager.
-                            debug!("failed to stop actors on {:?}: {}", worker_node, err);
-                            self.cluster_manager
-                                .deactivate_worker_node(worker_node.host.clone().unwrap())
-                                .await?;
-                            failed_worker_id.insert(worker_node.id);
+            loop {
+                // force shutdown actors on running compute nodes
+                match self.env.stream_clients().get(worker_node).await {
+                    Ok(client) => {
+                        if client
+                            .to_owned()
+                            .force_stop_actors(ForceStopActorsRequest {
+                                request_id: String::new(),
+                            })
+                            .await
+                            .is_ok()
+                        {
+                            break;
                         }
                     }
-                }
-                Err(err) => {
-                    debug!("failed to get client: {}", err);
+                    Err(err) => {
+                        debug!("failed to get client: {}", err);
+                    }
                 }
             }
         }
-        debug!("currently stopped compute nodes: {:?}", failed_worker_id);
-        loop {
-            tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
-            let all_nodes = self
-                .cluster_manager
-                .list_worker_node(WorkerType::ComputeNode, Some(Running))
-                .await
-                .iter()
-                .map(|worker_node| worker_node.id)
-                .collect::<HashSet<_>>();
-            if info
-                .node_map
-                .keys()
-                .all(|node_id| all_nodes.contains(node_id))
-            {
-                break;
-            }
-        }
-
         debug!("all compute nodes have been restarted.");
-        Ok(failed_worker_id)
+        Ok(())
     }
 }
