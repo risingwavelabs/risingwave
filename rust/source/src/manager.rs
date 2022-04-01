@@ -26,6 +26,8 @@ use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::new_connector;
+use risingwave_pb::catalog::source::Info;
+use risingwave_pb::meta::SourceSnapshot;
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
