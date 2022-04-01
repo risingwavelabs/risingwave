@@ -23,6 +23,7 @@ use rocksdb::{DBIterator, ReadOptions, SeekKey, Writable, WriteBatch, WriteOptio
 use tokio::sync::OnceCell;
 use tokio::task;
 
+use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
@@ -51,7 +52,7 @@ impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
     define_state_store_associated_type!();
 
-    fn get(&self, key: &[u8], _epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
         async move { self.storage().await.get(key).await }
     }
 
@@ -82,9 +83,9 @@ impl StateStore for RocksDBStateStore {
 
     fn reverse_scan<R, B>(
         &self,
-        key_range: R,
-        limit: Option<usize>,
-        epoch: u64,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
     ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -95,7 +96,7 @@ impl StateStore for RocksDBStateStore {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move { self.storage().await.write_batch(kv_pairs).await }
@@ -103,7 +104,7 @@ impl StateStore for RocksDBStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
@@ -277,9 +278,10 @@ impl RocksDBStorage {
         .await?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>) -> Result<()> {
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
+            let value = value.user_value();
             if let Some(value) = value {
                 if let Err(e) = wb.put(key.as_ref(), value.as_ref()) {
                     return Err(InternalError(e).into());
@@ -335,10 +337,10 @@ mod tests {
         let result = rocksdb_state_store.get("key3".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
 
-        let kv_pairs: Vec<(Bytes, Option<Bytes>)> = vec![
-            ("key1".into(), Some("val1".into())),
-            ("key2".into(), Some("val2".into())),
-            ("key3".into(), Some("val3".into())),
+        let kv_pairs: Vec<(Bytes, StorageValue)> = vec![
+            ("key1".into(), StorageValue::new_default_put("val1")),
+            ("key2".into(), StorageValue::new_default_put("val2")),
+            ("key3".into(), StorageValue::new_default_put("val3")),
         ];
         rocksdb_state_store.ingest_batch(kv_pairs, 0).await.unwrap();
         let result = rocksdb_state_store

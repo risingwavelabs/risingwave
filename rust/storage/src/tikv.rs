@@ -23,6 +23,7 @@ use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
+use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStoreIter};
 
@@ -55,7 +56,7 @@ impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
     define_state_store_associated_type!();
 
-    fn get(&self, key: &[u8], _epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
         async move {
             let mut txn = self.client().await.begin_optimistic().await.unwrap();
             let res = txn.get(key.to_owned()).await.expect("key not found");
@@ -115,9 +116,9 @@ impl StateStore for TikvStateStore {
 
     fn reverse_scan<R, B>(
         &self,
-        key_range: R,
-        limit: Option<usize>,
-        epoch: u64,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
     ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -128,12 +129,13 @@ impl StateStore for TikvStateStore {
 
     fn ingest_batch(
         &self,
-        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let mut txn = self.client().await.begin_optimistic().await.unwrap();
             for (key, value) in kv_pairs {
+                let value = value.user_value();
                 match value {
                     Some(value) => {
                         txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
@@ -156,7 +158,7 @@ impl StateStore for TikvStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
@@ -246,7 +248,7 @@ impl StateStoreIter for TikvStateStoreIter {
             txn.commit().await.unwrap();
             self.index += 1;
 
-            return Ok(Some((key.clone(), value.clone())));
+            Ok(Some((key.clone(), value.clone())))
         }
     }
 }
@@ -259,10 +261,11 @@ mod tests {
     use super::TikvStateStore;
     use crate::hummock::key::next_key;
     use crate::StateStore;
+    use super::*;
 
     #[tokio::test]
     #[ignore]
-    async fn test_basic() -> Result<(), hyper::Error> {
+    async fn test_basic() {
         let tikv_storage = TikvStateStore::new(vec!["127.0.0.1:2379".to_string()]);
 
         let anchor = Bytes::from("aa");
@@ -271,15 +274,15 @@ mod tests {
 
         // First batch inserts the anchor and others.
         let batch1 = vec![
-            (anchor.clone(), Some(Bytes::from("000"))),
-            (Bytes::from("aa1"), Some(Bytes::from("111"))),
-            (Bytes::from("aa2"), Some(Bytes::from("222"))),
+            (anchor.clone(), StorageValue::new_default_put("000")),
+            (Bytes::from("aa1"), StorageValue::new_default_put("111")),
+            (Bytes::from("aa2"), StorageValue::new_default_put("222")),
         ];
 
         // Second batch modifies the anchor.
         let mut batch2 = vec![
-            (Bytes::from("cc"), Some(Bytes::from("333"))),
-            (anchor.clone(), Some(Bytes::from("111111"))),
+            (Bytes::from("cc"), StorageValue::new_default_put("333")),
+            (anchor.clone(), StorageValue::new_default_put("111111")),
         ];
 
         // Make sure the batch is sorted.
@@ -287,9 +290,9 @@ mod tests {
 
         // Third batch deletes the anchor
         let mut batch3 = vec![
-            (Bytes::from("dd"), Some(Bytes::from("444"))),
-            (Bytes::from("ee"), Some(Bytes::from("555"))),
-            (anchor.clone(), None),
+            (Bytes::from("dd"), StorageValue::new_default_put("444")),
+            (Bytes::from("ee"), StorageValue::new_default_put("555")),
+            (anchor.clone(), StorageValue::new_default_put("")),
         ];
 
         // Make sure the batch is sorted.
@@ -334,6 +337,5 @@ mod tests {
         let value = tikv_storage.get(&anchor, epoch3).await.unwrap();
         assert_eq!(value, None);
 
-        Ok(())
     }
 }
