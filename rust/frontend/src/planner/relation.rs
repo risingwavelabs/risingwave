@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Expr};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject, LogicalScan, PlanRef};
 use crate::planner::Planner;
 

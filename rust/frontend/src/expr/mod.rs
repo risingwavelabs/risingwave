@@ -15,6 +15,8 @@
 use fixedbitset::FixedBitSet;
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Scalar};
+
+use crate::binder::BoundSetExpr;
 mod input_ref;
 pub use input_ref::*;
 mod correlated_input_ref;
@@ -134,6 +136,8 @@ impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, Correlated
 
 /// Implement helper functions which recursively checks whether an variant is included in the
 /// expression. e.g., `has_subquery(&self) -> bool`
+///
+/// It will not traverse inside subqueries.
 macro_rules! impl_has_variant {
     ( $($variant:ident),* ) => {
         paste! {
@@ -162,7 +166,38 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, CorrelatedInputRef}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+
+impl ExprImpl {
+    // We need to traverse inside subqueries.
+    pub fn has_correlated_input_ref(&self) -> bool {
+        struct Has {
+            has: bool,
+        }
+
+        impl ExprVisitor for Has {
+            fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {
+                self.has = true;
+            }
+
+            fn visit_subquery(&mut self, subquery: &Subquery) {
+                match &subquery.query.body {
+                    BoundSetExpr::Select(select) => select
+                        .select_items
+                        .iter()
+                        .chain(select.group_by.iter())
+                        .chain(select.where_clause.iter())
+                        .for_each(|expr| self.visit_expr(expr)),
+                    BoundSetExpr::Values(_) => {}
+                }
+            }
+        }
+
+        let mut visitor = Has { has: false };
+        visitor.visit_expr(self);
+        visitor.has
+    }
+}
 
 impl Expr for ExprImpl {
     fn return_type(&self) -> DataType {

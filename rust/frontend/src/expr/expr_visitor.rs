@@ -13,8 +13,15 @@
 // limitations under the License.
 
 use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
-use crate::binder::BoundSetExpr;
 
+/// Traverse an expression tree.
+///
+/// Each method of the trait is a hook that can be overridden to customize the behavior when
+/// traversing the corresponding type of node. By default, every method recursively visits the
+/// subtree.
+///
+/// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
+/// subqueries are not traversed.
 pub trait ExprVisitor {
     fn visit_expr(&mut self, expr: &ExprImpl) {
         match expr {
@@ -40,16 +47,6 @@ pub trait ExprVisitor {
     }
     fn visit_literal(&mut self, _: &Literal) {}
     fn visit_input_ref(&mut self, _: &InputRef) {}
-    fn visit_subquery(&mut self, subquery: &Subquery) {
-        match &subquery.query.body {
-            BoundSetExpr::Select(select) => select
-                .select_items
-                .iter()
-                .chain(select.group_by.iter())
-                .chain(select.where_clause.iter())
-                .for_each(|expr| self.visit_expr(expr)),
-            BoundSetExpr::Values(_) => {}
-        }
-    }
+    fn visit_subquery(&mut self, _: &Subquery) {}
     fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
 }
