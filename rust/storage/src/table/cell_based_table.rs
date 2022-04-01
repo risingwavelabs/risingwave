@@ -182,13 +182,13 @@ impl<S: StateStore> CellBasedTable<S> {
     ) -> Result<()> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
-        let column_ids = generate_column_id(&self.column_descs);
         for (pk, cell_values) in rows {
             let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())?;
-            let bytes = self
-                .cell_based_row_serializer
-                .serialize(&arrange_key_buf, cell_values, &column_ids)
-                .unwrap();
+            let bytes = self.cell_based_row_serializer.serialize(
+                &arrange_key_buf,
+                cell_values,
+                &self.column_ids,
+            )?;
             for (key, value) in bytes {
                 match value {
                     Some(val) => local.put(key, StorageValue::new_default_put(val)),
