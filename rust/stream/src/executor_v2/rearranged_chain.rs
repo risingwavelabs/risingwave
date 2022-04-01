@@ -109,7 +109,6 @@ impl RearrangedChainExecutor {
             .map(move |result| result.map(|msg| mapping(&upstream_indices, msg)));
 
         // 1. Poll the upstream to get the first barrier.
-        //
         let first_msg = upstream.next().await.unwrap()?;
         let barrier = first_msg
             .as_barrier()
@@ -145,13 +144,11 @@ impl RearrangedChainExecutor {
             let (stop_rearrange_tx, mut stop_rearrange_rx) = oneshot::channel();
 
             // 2. Actually, the `first_msg` is rearranged too. So we need to put a phantom barrier.
-            //
             upstream_tx
                 .unbounded_send(RearrangedMessage::PhantomBarrier(create_epoch))
                 .unwrap();
 
             // 3. Spawn the background task.
-            //
             let upstream_poll_handle = tokio::spawn(async move {
                 #[for_await]
                 for msg in &mut upstream {
@@ -192,7 +189,6 @@ impl RearrangedChainExecutor {
             });
 
             // 4. Init the snapshot with reading epoch.
-            //
             let snapshot = self.snapshot.execute_with_epoch(create_epoch.prev);
 
             // Chain the `snapshot` and `upstream_rx` to get a unified `rearranged_chunks` stream.
@@ -201,7 +197,6 @@ impl RearrangedChainExecutor {
                 .chain(upstream_rx.map(Ok));
 
             // 5. Merge the rearranged barriers with chunks, with the priority of barrier.
-            //
             let rearranged = select_with_strategy(
                 rearranged_barrier_rx.map(Ok),
                 rearranged_chunks,
@@ -215,7 +210,6 @@ impl RearrangedChainExecutor {
             let mut rearrange_finish_tx = Some((stop_rearrange_tx, self.notifier));
 
             // 6. Consume the merged `rearranged` stream.
-            //
             #[for_await]
             for rearranged_msg in rearranged {
                 info!("recv rearranged: {:?}", rearranged_msg);
@@ -249,7 +243,6 @@ impl RearrangedChainExecutor {
             }
 
             // 7. Rearranged stream finished. Now we take back the remaining upstream.
-            //
             let remaining_upstream = upstream_poll_handle
                 .await
                 .unwrap()
@@ -258,7 +251,6 @@ impl RearrangedChainExecutor {
             info!("begin to consume remaining upstream");
 
             // 8. Begin to consume remaining upstream.
-            //
             #[for_await]
             for msg in remaining_upstream {
                 let msg = msg?;

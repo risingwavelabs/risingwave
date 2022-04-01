@@ -80,7 +80,6 @@ impl ChainExecutor {
         let mut upstream = self.upstream.execute();
 
         // 1. Poll the upstream to get the first barrier.
-        //
         let first_msg = upstream.next().await.unwrap()?;
         let barrier = first_msg
             .as_barrier()
@@ -105,7 +104,6 @@ impl ChainExecutor {
 
         // 2. Consume the snapshot if needed. Note that the snapshot is alreay projected, so there's
         // no mapping required.
-        //
         if to_consume_snapshot {
             // Init the snapshot with reading epoch.
             let snapshot = self.snapshot.execute_with_epoch(epoch.prev);
@@ -118,11 +116,9 @@ impl ChainExecutor {
         }
 
         // 3. Report that we've finished the creation (for a workaround).
-        //
         self.notifier.notify(epoch.curr);
 
         // 4. Continuously consume the upstream.
-        //
         #[for_await]
         for msg in upstream {
             let msg = msg?;
