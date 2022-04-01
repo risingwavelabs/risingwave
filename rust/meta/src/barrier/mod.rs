@@ -35,7 +35,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
+use crate::manager::{MetaSrvEnv, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -141,8 +141,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     cluster_manager: ClusterManagerRef<S>,
 
-    catalog_manager: CatalogManagerRef<S>,
-
     fragment_manager: FragmentManagerRef<S>,
 
     hummock_manager: HummockManagerRef<S>,
@@ -164,7 +162,6 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
@@ -183,7 +180,6 @@ where
         Self {
             interval,
             cluster_manager,
-            catalog_manager,
             fragment_manager,
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,

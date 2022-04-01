@@ -35,8 +35,7 @@ use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
-use risingwave_stream::task::ObserverManager;
+use risingwave_stream::task::{LocalStreamManager, ObserverManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tower::make::Shared;
@@ -46,7 +45,6 @@ use tower_http::add_extension::AddExtensionLayer;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
-
 
 fn load_config(opts: &ComputeNodeOpts) -> ComputeNodeConfig {
     if opts.config_path.is_empty() {
@@ -137,11 +135,8 @@ pub async fn compute_node_serve(
     let source_mgr = Arc::new(MemSourceManager::new());
 
     // Initialize observer manager and subscribe to notification service in meta.
-    let observer_mgr = ObserverManager::new(
-        meta_client.clone(),
-        client_addr.clone(),
-        source_mgr.clone(),
-    ).await;
+    let observer_mgr =
+        ObserverManager::new(meta_client.clone(), client_addr.clone(), source_mgr.clone()).await;
     sub_tasks.push(observer_mgr.start().await.unwrap());
 
     // Initialize batch environment.

@@ -149,7 +149,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
-        catalog_manager_v2.clone(),
         fragment_manager.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
