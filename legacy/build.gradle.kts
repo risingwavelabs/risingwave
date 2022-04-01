@@ -132,9 +132,9 @@ subprojects {
                 ratchetFrom = "origin/main"
             }
             java {
-                // importOrder() // standard import order
-                // removeUnusedImports()
-                // googleJavaFormat()
+                importOrder() // standard import order
+                removeUnusedImports()
+                googleJavaFormat()
 
                 targetExclude(
                     "src/main/legacy/com/risingwave/sql/SqlFormatter.java",
@@ -142,7 +142,7 @@ subprojects {
                 )
             }
             kotlin {
-                // ktlint("0.37.2").userData(mapOf("indent_size" to "2", "disabled_rules" to "no-wildcard-imports"))
+                ktlint("0.37.2").userData(mapOf("indent_size" to "2", "disabled_rules" to "no-wildcard-imports"))
             }
         }
 

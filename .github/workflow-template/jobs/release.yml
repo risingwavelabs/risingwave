@@ -37,7 +37,7 @@ jobs:
       - name: package as tar
         run: |
           chmod +x risingwave
-          tar -czvf risingwave-${GITHUB_REF_NAME}-unknown-linux.tar.gz risingwave
+          tar -czvf risingwave-${GITHUB_REF_NAME}-x86_64-unknown-linux.tar.gz risingwave
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
 
@@ -47,6 +47,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: risingwave-${{ github.ref_name }}-unknown-linux.tar.gz
-          asset_name: risingwave-${{ github.ref_name }}-unknown-linux.tar.gz
+          asset_path: risingwave-${{ github.ref_name }}-x86_64-unknown-linux.tar.gz
+          asset_name: risingwave-${{ github.ref_name }}-x86_64-unknown-linux.tar.gz
           asset_content_type: application/tar+gzip
