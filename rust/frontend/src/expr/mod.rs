@@ -17,6 +17,8 @@ use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Scalar};
 mod input_ref;
 pub use input_ref::*;
+mod correlated_input_ref;
+pub use correlated_input_ref::*;
 mod literal;
 pub use literal::*;
 mod function_call;
@@ -51,6 +53,7 @@ pub trait Expr: Into<ExprImpl> {
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
+    CorrelatedInputRef(Box<CorrelatedInputRef>),
     Literal(Box<Literal>),
     FunctionCall(Box<FunctionCall>),
     AggCall(Box<AggCall>),
@@ -127,7 +130,7 @@ macro_rules! impl_as_variant {
     };
 }
 
-impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, CorrelatedInputRef}
 
 /// Implement helper functions which recursively checks whether an variant is included in the
 /// expression. e.g., `has_subquery(&self) -> bool`
@@ -159,7 +162,7 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery}
+impl_has_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, CorrelatedInputRef}
 
 impl Expr for ExprImpl {
     fn return_type(&self) -> DataType {
@@ -169,6 +172,7 @@ impl Expr for ExprImpl {
             ExprImpl::FunctionCall(expr) => expr.return_type(),
             ExprImpl::AggCall(expr) => expr.return_type(),
             ExprImpl::Subquery(expr) => expr.return_type(),
+            ExprImpl::CorrelatedInputRef(expr) => expr.return_type(),
         }
     }
 
@@ -179,6 +183,7 @@ impl Expr for ExprImpl {
             ExprImpl::FunctionCall(e) => e.to_protobuf(),
             ExprImpl::AggCall(e) => e.to_protobuf(),
             ExprImpl::Subquery(e) => e.to_protobuf(),
+            ExprImpl::CorrelatedInputRef(e) => e.to_protobuf(),
         }
     }
 }
@@ -213,6 +218,12 @@ impl From<Subquery> for ExprImpl {
     }
 }
 
+impl From<CorrelatedInputRef> for ExprImpl {
+    fn from(correlated_input_ref: CorrelatedInputRef) -> Self {
+        ExprImpl::CorrelatedInputRef(Box::new(correlated_input_ref))
+    }
+}
+
 /// A custom Debug implementation that is more concise and suitable to use with
 /// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
 /// still available via `{:#?}`.
@@ -225,6 +236,9 @@ impl std::fmt::Debug for ExprImpl {
                 Self::FunctionCall(arg0) => f.debug_tuple("FunctionCall").field(arg0).finish(),
                 Self::AggCall(arg0) => f.debug_tuple("AggCall").field(arg0).finish(),
                 Self::Subquery(arg0) => f.debug_tuple("Subquery").field(arg0).finish(),
+                Self::CorrelatedInputRef(arg0) => {
+                    f.debug_tuple("CorrelatedInputRef").field(arg0).finish()
+                }
             };
         }
         match self {
@@ -233,6 +247,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::FunctionCall(x) => write!(f, "{:?}", x),
             Self::AggCall(x) => write!(f, "{:?}", x),
             Self::Subquery(x) => write!(f, "{:?}", x),
+            Self::CorrelatedInputRef(x) => write!(f, "{:?}", x),
         }
     }
 }

@@ -38,9 +38,8 @@ impl Subquery {
         Self { query, kind }
     }
 
-    // TODO: add correlated subquery support
     pub fn is_correlated(&self) -> bool {
-        false
+        self.query.is_correlated()
     }
 }
 
