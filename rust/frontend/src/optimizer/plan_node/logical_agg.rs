@@ -101,6 +101,11 @@ struct ExprHandler {
     // followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
     pub project: Vec<ExprImpl>,
     group_key_len: usize,
+    // When dedup (rewriting AggCall inputs), it is the index into projects.
+    // When rewriting InputRef outside AggCall, where it is required to refer to a group column,
+    // this is the index into LogicalAgg::schema.
+    // This 2 indices happen to be the same because we always put group exprs at the beginning of
+    // schema, and they are at the beginning of projects.
     expr_index: HashMap<ExprImpl, usize>,
     pub agg_calls: Vec<PlanAggCall>,
     pub error: Option<ErrorCode>,
@@ -112,21 +117,21 @@ impl ExprHandler {
         // assume the only thing can appear in GROUP BY clause is an input column name.
         let group_key_len = group_exprs.len();
 
+        // Please note that we currently don't dedup columns in GROUP BY clause.
         let mut expr_index = HashMap::new();
-        let group_exprs = group_exprs
-            .into_iter()
+        group_exprs
+            .iter()
             .enumerate()
-            .map(|(index, expr)| {
+            .try_for_each(|(index, expr)| {
                 if matches!(expr, ExprImpl::InputRef(_)) {
                     expr_index.insert(expr.clone(), index);
-                    Ok(expr)
+                    Ok(())
                 } else {
                     Err(ErrorCode::NotImplementedError(
                         "GROUP BY only supported on input column names!".into(),
                     ))
                 }
-            })
-            .try_collect()?;
+            })?;
 
         Ok(ExprHandler {
             project: group_exprs,

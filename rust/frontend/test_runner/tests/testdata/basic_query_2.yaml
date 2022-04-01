@@ -126,6 +126,10 @@
     select v1 from t group by v2;
   planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
 - sql: |
+    create table t(v1 int, v2 int);
+    select sum(v1), v1 from t group by v2, v2;
+  planner_error: 'Invalid input syntax: column must appear in the GROUP BY clause or be used in an aggregate function'
+- sql: |
     create table t(v1 int, v2 int, v3 int);
     select v3, min(v1) * avg(v1+v2) from t group by v3;
   batch_plan: |
