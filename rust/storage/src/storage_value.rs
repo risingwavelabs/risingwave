@@ -93,7 +93,7 @@ impl StorageValue {
         }
     }
 
-    /// Returns the length of the sum of value meta and user value in storage (not struct)
+    /// Returns the length of the sum of value meta and user value in storage
     pub fn size(&self) -> usize {
         VALUE_META_SIZE
             + self
