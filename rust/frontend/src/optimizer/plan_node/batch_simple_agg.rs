@@ -68,7 +68,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
             .input()
-            .to_distributed_with_required(self.input_order_required(), &Distribution::Single);
+            .to_distributed_with_required(Order::any(), &Distribution::Single);
         self.clone_with_input(new_input).into()
     }
 }

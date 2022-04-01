@@ -20,7 +20,6 @@ use risingwave_pb::plan::FilterNode;
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
@@ -68,9 +67,7 @@ impl_plan_tree_node_for_unary! { BatchFilter }
 
 impl ToDistributedBatch for BatchFilter {
     fn to_distributed(&self) -> PlanRef {
-        let new_input = self
-            .input()
-            .to_distributed_with_required(self.input_order_required(), Distribution::any());
+        let new_input = self.input().to_distributed();
         self.clone_with_input(new_input).into()
     }
 }
