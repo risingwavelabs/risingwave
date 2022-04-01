@@ -56,8 +56,7 @@
     BatchValues { rows: [[RoundDigit(Normalized(42.4382):Decimal, 2:Int32)]] }
 - sql: |
     values(round('abc'));
-  binder_error: |
-    Feature is not yet implemented: function round(Varchar) doesn't exist
+  binder_error: 'Feature is not yet implemented: function round(Varchar) doesn''t exist'
 - sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
