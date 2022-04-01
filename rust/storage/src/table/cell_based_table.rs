@@ -120,7 +120,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // cell-based interface
     pub async fn get_row(&self, _pk: &Row, _epoch: u64) -> Result<Option<Row>> {
-        // get row by state_store muti get
+        // get row by state_store multi get
         todo!()
     }
 

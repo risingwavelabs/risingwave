@@ -191,7 +191,7 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Try produce one stream message from [`LookupExecutor`]. If there's no message to produce, it
-    /// will return `None`, and the `next` function of [`LookupExecutor`] will continously polling
+    /// will return `None`, and the `next` function of [`LookupExecutor`] will continuously polling
     /// messages until there's one.
     ///
     /// If we can use `async_stream` to write this part, things could be easier.

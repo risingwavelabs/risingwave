@@ -132,7 +132,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
     hummock_manager.commit_epoch(epoch).await.unwrap();
 
-    // check safe epoch in hummock verison
+    // check safe epoch in hummock version
     let version_id1 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();
@@ -176,7 +176,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .await
         .unwrap());
 
-    // check safe epoch in hummock verison
+    // check safe epoch in hummock version
     let version_id2 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();
@@ -213,7 +213,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
         .await
         .unwrap());
 
-    // check safe epoch in hummock verison after success compaction
+    // check safe epoch in hummock version after success compaction
     let version_id3 = CurrentHummockVersionId::get(env.meta_store())
         .await?
         .unwrap();

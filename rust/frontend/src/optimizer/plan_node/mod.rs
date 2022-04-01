@@ -42,7 +42,7 @@ use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
 
 use super::property::{Distribution, Order};
 
-/// The common trait over all plan nodes. Used by optimizer framework which will treate all node as
+/// The common trait over all plan nodes. Used by optimizer framework which will treat all node as
 /// `dyn PlanNode`
 ///
 /// We split the trait into lots of sub-trait so that we can easily use macro to impl them.
