@@ -291,3 +291,5 @@ impl Executor for ChainExecutor {
         &self.info.identity
     }
 }
+
+// TODO: add new unit tests for rearranged chain
