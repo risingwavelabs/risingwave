@@ -174,7 +174,7 @@ pub fn create_streaming_agg_state(
                         Sum,
                         int16,
                         decimal,
-                        StreamingSumAgg::<DecimalArray, I32Array>
+                        StreamingSumAgg::<DecimalArray, I16Array>
                     ),
                     (
                         Sum,

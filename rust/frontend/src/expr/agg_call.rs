@@ -52,12 +52,12 @@ impl AggCall {
             (AggKind::Min, [input]) => input.clone(),
             (AggKind::Max, [input]) => input.clone(),
             (AggKind::Avg, [input]) => match input {
-                DataType::Int16 => DataType::Decimal,
-                DataType::Int32 => DataType::Decimal,
-                DataType::Int64 => DataType::Decimal,
-                DataType::Float32 => DataType::Float64,
-                DataType::Float64 => DataType::Float64,
-                other_type => other_type.clone(),
+                DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal => {
+                    DataType::Decimal
+                }
+                DataType::Float32 | DataType::Float64 => DataType::Float64,
+                DataType::Interval => DataType::Interval,
+                _ => return None,
             },
             (AggKind::Sum, [input]) => match input {
                 DataType::Int16 => DataType::Int64,
