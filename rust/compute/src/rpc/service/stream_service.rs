@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;

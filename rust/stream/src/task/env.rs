@@ -19,7 +19,6 @@ use risingwave_common::util::addr::HostAddr;
 use risingwave_source::{SourceManager, SourceManagerRef};
 use risingwave_storage::StateStoreImpl;
 
-
 pub(crate) type WorkerNodeId = u32;
 
 /// The global environment for task execution.

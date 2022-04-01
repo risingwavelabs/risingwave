@@ -17,7 +17,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
@@ -26,8 +25,6 @@ use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::new_connector;
-
-
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
