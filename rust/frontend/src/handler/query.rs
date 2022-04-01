@@ -27,8 +27,9 @@ lazy_static::lazy_static! {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
+    /// TODO: Use session config to set this.
     static ref IMPLICIT_FLUSH: bool =
-     std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "true".to_string() }).parse().unwrap();
+        std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "1".to_string() }) == "1";
 }
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
