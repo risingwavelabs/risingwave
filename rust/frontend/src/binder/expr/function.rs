@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
 use crate::binder::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall};
+use crate::expr::{AggCall, Expr, ExprImpl, ExprType, FunctionCall, Literal};
 
 impl Binder {
     pub(super) fn bind_function(&mut self, f: Function) -> Result<ExprImpl> {
@@ -75,7 +75,10 @@ impl Binder {
                     .into())
                 }
             };
-            Ok(FunctionCall::try_new(function_name, function_type, inputs)?.into())
+            Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
+                Self::err_unsupported_func(function_name, args)
+            })?
+            .into())
         } else {
             Err(
                 ErrorCode::NotImplementedError(format!("unsupported function: {:?}", f.name))
@@ -84,10 +87,31 @@ impl Binder {
         }
     }
 
+    fn err_unsupported_func(function_name: &str, inputs: &Vec<ExprImpl>) -> RwError {
+        let args = inputs
+            .iter()
+            .map(|i| format!("{:?}", i.return_type()))
+            .join(",");
+        ErrorCode::NotImplementedError(format!(
+            "function {}({}) doesn't exist",
+            function_name, args
+        ))
+        .into()
+    }
+
     /// Rewrite the arguments to be consistent with the `round` signature:
     /// - round(Decimal, Int32) -> Decimal
+    /// - round(Decimal) -> Decimal
     fn rewrite_round_args(mut inputs: Vec<ExprImpl>) -> Vec<ExprImpl> {
-        if inputs.len() == 2 {
+        if inputs.len() == 1 {
+            // Rewrite round(Decimal) to round(Decimal, 0).
+            let input = inputs.pop().unwrap();
+            if input.return_type() == DataType::Decimal {
+                vec![input, Literal::new(Some(0.into()), DataType::Int32).into()]
+            } else {
+                vec![input]
+            }
+        } else if inputs.len() == 2 {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();
             vec![

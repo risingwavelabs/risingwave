@@ -16,7 +16,7 @@ use itertools::zip_eq;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
-    BinaryOperator, DataType as AstDataType, Expr, TrimWhereField, UnaryOperator,
+    BinaryOperator, DataType as AstDataType, DateTimeField, Expr, TrimWhereField, UnaryOperator,
 };
 
 use crate::binder::Binder;
@@ -92,10 +92,30 @@ impl Binder {
             } => Ok(ExprImpl::FunctionCall(Box::new(
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
+            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
             _ => Err(
                 ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
             ),
         }
+    }
+
+    pub(super) fn bind_extract(&mut self, field: DateTimeField, expr: Expr) -> Result<ExprImpl> {
+        Ok(FunctionCall::new_or_else(
+            ExprType::Extract,
+            vec![
+                self.bind_string(field.to_string())?.into(),
+                self.bind_expr(expr)?,
+            ],
+            |inputs| {
+                ErrorCode::NotImplementedError(format!(
+                    "function extract({} from {:?}) doesn't exist",
+                    field.to_string(),
+                    inputs[1].return_type()
+                ))
+                .into()
+            },
+        )?
+        .into())
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {

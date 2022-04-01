@@ -55,8 +55,24 @@
   batch_plan: |
     BatchValues { rows: [[RoundDigit(42.4382:Decimal, 2:Int32)]] }
 - sql: |
+    values(round(42.4382));
+  batch_plan: |
+    BatchValues { rows: [[RoundDigit(42.4382:Decimal, 0:Int32)]] }
+- sql: |
     values(round('abc'));
   binder_error: 'Feature is not yet implemented: function round(Varchar) doesn''t exist'
+- sql: |
+    values('Postgres' not like 'Post%');
+  batch_plan: |
+    BatchValues { rows: [[Not(Like('Postgres':Varchar, 'Post%':Varchar))]] }
+- sql: |
+    values(1 not like 1.23);
+  binder_error: |
+    Feature is not yet implemented: Int32 NotLike Decimal
+- sql: |
+    values(extract(hour from timestamp '2001-02-16 20:38:40'));
+  batch_plan: |
+    BatchValues { rows: [[Extract('HOUR':Varchar, '2001-02-16 20:38:40':Varchar::Timestamp)]] }
 - sql: |
     create table t (v1 int);
     select (case when v1=1 then 1 when v1=2 then 2 else 0.0 end) from t;
