@@ -112,7 +112,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     Message::Chunk(chunk)
                 }
                 Message::Barrier(b) => {
-                    // FIXME: use a better error type
+                    // FIXME(ZBW): use a better error type
                     self.local_state
                         .flush(b.epoch.prev)
                         .await
@@ -236,7 +236,7 @@ mod tests {
                     6
                 );
 
-                // FIXME: restore this test by using new `RowTable` interface
+                // FIXME(Bugen): restore this test by using new `RowTable` interface
                 // let datum = table
                 //     .get(Row(vec![Some(3_i32.into())]), 1, u64::MAX)
                 //     .await
@@ -262,7 +262,7 @@ mod tests {
                     6
                 );
 
-                // FIXME: restore this test by using new `RowTable` interface
+                // FIXME(Bugen): restore this test by using new `RowTable` interface
                 // let datum = table
                 //     .get(Row(vec![Some(7_i32.into())]), 1, u64::MAX)
                 //     .await
