@@ -21,9 +21,10 @@ use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 /// A reference to a column outside the subquery.
-/// 
-/// `depth` is the number of of nesting levels of the subquery relative to the refered relation, and should be non-zero. 
-/// 
+///
+/// `depth` is the number of of nesting levels of the subquery relative to the refered relation, and
+/// should be non-zero.
+///
 /// `index` is the index in the refered relation.
 pub struct CorrelatedInputRef {
     index: usize,
@@ -80,8 +81,8 @@ impl Expr for CorrelatedInputRef {
 impl fmt::Debug for CorrelatedInputRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("CorrelatedInputRef")
-                .field("index", &self.index)
-                .field("depth", &self.depth)
-                .finish()
+            .field("index", &self.index)
+            .field("depth", &self.depth)
+            .finish()
     }
 }
