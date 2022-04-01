@@ -282,7 +282,7 @@ impl<S: StateStore> LookupExecutor<S> {
             if let Some((_, row)) = self
                 .arrangement
                 .deserializer
-                .deserialize(&pk_with_cell_id, cell.as_bytes())?
+                .deserialize(&pk_with_cell_id, &cell)?
             {
                 all_rows.push(row);
             }

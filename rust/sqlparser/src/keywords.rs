@@ -12,7 +12,7 @@
 
 //! This module defines
 //! 1) a list of constants for every keyword that
-//! can appear in [Word::keyword]:
+//! can appear in [crate::tokenizer::Word::keyword]:
 //!    pub const KEYWORD = "KEYWORD"
 //! 2) an `ALL_KEYWORDS` array with every keyword in it
 //!     This is not a list of *reserved* keywords: some of these can be

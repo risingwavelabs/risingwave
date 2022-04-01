@@ -2,20 +2,20 @@
   binder_error: 'Feature is not yet implemented: unsupported data type: Decimal(Some(20), None)'
 - sql: values (''::float);
   logical_plan: |
-    LogicalValues { rows: [["":Varchar::Float64]], schema: Schema { fields: [:Float64] } }
+    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [:Float64] } }
 - sql: values (''::float(24));
   logical_plan: |
-    LogicalValues { rows: [["":Varchar::Float32]], schema: Schema { fields: [:Float32] } }
+    LogicalValues { rows: [['':Varchar::Float32]], schema: Schema { fields: [:Float32] } }
 - sql: values (''::float(25));
   logical_plan: |
-    LogicalValues { rows: [["":Varchar::Float64]], schema: Schema { fields: [:Float64] } }
+    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [:Float64] } }
 - sql: values (''::float(53));
   logical_plan: |
-    LogicalValues { rows: [["":Varchar::Float64]], schema: Schema { fields: [:Float64] } }
+    LogicalValues { rows: [['':Varchar::Float64]], schema: Schema { fields: [:Float64] } }
 - sql: values (''::float(54));
   binder_error: 'Feature is not yet implemented: unsupported data type: Float(Some(54))'
 - sql: values (''::timestamp with time zone);
   logical_plan: |
-    LogicalValues { rows: [["":Varchar::Timestampz]], schema: Schema { fields: [:Timestampz] } }
+    LogicalValues { rows: [['':Varchar::Timestampz]], schema: Schema { fields: [:Timestampz] } }
 - sql: values (''::time with time zone);
   binder_error: 'Feature is not yet implemented: unsupported data type: Time(true)'

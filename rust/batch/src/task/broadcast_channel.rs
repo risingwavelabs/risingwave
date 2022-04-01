@@ -36,7 +36,7 @@ impl ChanSender for BroadcastSender {
             self.senders.iter().try_for_each(|sender| {
                 sender
                     .send(chunk.clone())
-                    .to_rw_result_with("BroadcastSender::send")
+                    .to_rw_result_with(|| "BroadcastSender::send".into())
             })
         }
     }

@@ -31,17 +31,13 @@ impl std::fmt::Debug for Literal {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            use risingwave_common::for_all_scalar_variants;
-            use risingwave_common::types::ScalarImpl::*;
-            macro_rules! scalar_write_inner {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match &self.data {
-                    None => write!(f, "null"),
-                    $( Some($variant_name(v)) => write!(f, "{:?}", v) ),*
-                }?;
-            };
-        }
-            for_all_scalar_variants! { scalar_write_inner }
+            match &self.data {
+                None => write!(f, "null"),
+                // Add single quotation marks for string and interval literals
+                Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
+                Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
+                Some(v) => write!(f, "{}", v),
+            }?;
             write!(f, ":{:?}", self.data_type)
         }
     }

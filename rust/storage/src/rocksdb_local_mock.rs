@@ -70,7 +70,7 @@ impl StateStore for RocksDBStateStore {
 
     fn ingest_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::IngestBatchFuture<'_> {
         async move { unimplemented!() }
@@ -78,7 +78,7 @@ impl StateStore for RocksDBStateStore {
 
     fn replicate_batch(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
@@ -118,7 +118,7 @@ impl RocksDBStateStoreIter {
 }
 
 impl StateStoreIter for RocksDBStateStoreIter {
-    type Item = (Bytes, StorageValue);
+    type Item = (Bytes, Bytes);
     type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { unimplemented!() }

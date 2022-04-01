@@ -235,6 +235,7 @@ mod tests {
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
     use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::storage_value::StorageValue;
 
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
@@ -275,7 +276,7 @@ mod tests {
         for key in delete_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Delete,
+                HummockValue::Delete(StorageValue::new_default_delete().to_bytes()),
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
@@ -320,6 +321,8 @@ mod tests {
             &shared_buffer_manager,
         );
 
+        let delete_val = StorageValue::new_default_delete().to_bytes();
+
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {
             assert_eq!(
@@ -351,7 +354,7 @@ mod tests {
             shared_buffer_manager
                 .get(keys[2].as_slice(), ..=epoch2)
                 .unwrap(),
-            HummockValue::Delete
+            HummockValue::Delete(delete_val.to_vec())
         );
         assert_eq!(
             shared_buffer_manager

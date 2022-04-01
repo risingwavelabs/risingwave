@@ -6,9 +6,6 @@ create table t (v1 real not null, v2 int not null);
 statement ok
 insert into t values (114, 10), (514, 20);
 
-statement ok
-flush;
-
 query RI
 select v1, v2 from t order by v2;
 ----
@@ -17,9 +14,6 @@ select v1, v2 from t order by v2;
 
 statement ok
 insert into t values (810, 40), (1919, 30);
-
-statement ok
-flush;
 
 query RI
 select v1, v2 from t order by v2;
@@ -33,9 +27,6 @@ select v1, v2 from t order by v2;
 
 statement ok
 delete from t where v1 = 1919;
-
-statement ok
-flush;
 
 query RI
 select v1, v2 from t order by v2;
@@ -56,12 +47,8 @@ select count(*), v1 from t group by v1;
 1 514
 1 114
 
-
 statement ok
 delete from t;
-
-statement ok
-flush;
 
 query RI
 select v1, v2 from t order by v2;
@@ -71,7 +58,6 @@ query I
 select count(*) from t;
 ----
 0
-
 
 statement ok
 drop table t;

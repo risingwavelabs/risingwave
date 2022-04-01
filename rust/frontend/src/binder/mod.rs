@@ -46,7 +46,7 @@ pub struct Binder {
     context: BindContext,
     /// A stack holding contexts of outer queries when binding a subquery.
     ///
-    /// See [`Binder::bind_subquery`] for details.
+    /// See [`Binder::bind_subquery_expr`] for details.
     upper_contexts: Vec<BindContext>,
 
     next_subquery_id: usize,

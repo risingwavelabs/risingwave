@@ -14,3 +14,5 @@
 
 mod message;
 mod reader;
+
+pub use reader::*;

@@ -236,7 +236,7 @@ async fn test_lookup_this_epoch() {
     next_msg(&mut msgs, &mut lookup_executor).await;
 
     for (k, v) in store.scan::<_, Vec<u8>>(.., None, u64::MAX).await.unwrap() {
-        let mut deserializer = memcomparable::Deserializer::new(v.to_bytes());
+        let mut deserializer = memcomparable::Deserializer::new(v);
         println!(
             "{:?} => {:?}",
             k,

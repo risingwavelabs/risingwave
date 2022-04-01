@@ -21,14 +21,11 @@ use itertools::Itertools;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::{ensure, gen_error};
 use risingwave_connector::base::SourceReader;
-use risingwave_connector::kinesis::source::reader::KinesisSplitReader;
-use risingwave_connector::ConnectorConfig;
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::meta::SourceSnapshot;
+use risingwave_connector::new_connector;
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
@@ -111,12 +108,12 @@ impl SourceManager for MemSourceManager {
                 parser.clone(),
             )),
             SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<dyn SourceReader + Send + Sync>> =
-                    match config {
-                        ConnectorConfig::Kinesis(kc) => Arc::new(tokio::sync::Mutex::new(
-                            KinesisSplitReader::new(kc.clone()).await,
-                        )),
-                    };
+                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+                    Arc::new(tokio::sync::Mutex::new(
+                        new_connector(config.clone(), None)
+                            .await
+                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                    ));
                 SourceImpl::Connector(ConnectorSource {
                     parser: parser.clone(),
                     reader: split_reader,

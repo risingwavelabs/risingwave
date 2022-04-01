@@ -256,6 +256,9 @@ where
         if command_context.prev_epoch != INVALID_EPOCH {
             match result {
                 Ok(_) => {
+                    // We must ensure all epochs are committed in ascending order, because
+                    // the storage engine will query from new to old in the order in which
+                    // the L0 layer files are generated. see https://github.com/singularity-data/risingwave/issues/1251
                     self.hummock_manager
                         .commit_epoch(command_context.prev_epoch)
                         .await?;

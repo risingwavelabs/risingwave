@@ -101,7 +101,7 @@ pub enum Mutation {
     AddOutput(HashMap<ActorId, Vec<ActorInfo>>),
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Epoch {
     pub curr: u64,
     pub prev: u64,
@@ -352,6 +352,13 @@ impl Message {
     pub fn as_chunk(&self) -> Option<&StreamChunk> {
         match self {
             Self::Chunk(chunk) => Some(chunk),
+            _ => None,
+        }
+    }
+
+    pub fn as_barrier(&self) -> Option<&Barrier> {
+        match self {
+            Self::Barrier(barrier) => Some(barrier),
             _ => None,
         }
     }
