@@ -26,10 +26,10 @@ use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
 use crate::executor::Epoch;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
-/// [`ChainExecutor`] is an executor that enables synchronization between the existing
-/// stream and newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV
-/// on MV feature. It pipes new data of existing MVs to newly created MV only all of the old data in
-/// the existing MVs are dispatched.
+/// `ChainExecutor` is an executor that enables synchronization between the existing stream and
+/// newly appended executors. Currently, `ChainExecutor` is mainly used to implement MV on MV
+/// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
+/// existing MVs are dispatched.
 ///
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
