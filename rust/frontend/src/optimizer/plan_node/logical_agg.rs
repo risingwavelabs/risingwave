@@ -197,7 +197,7 @@ impl ExprRewriter for ExprHandler {
     // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         if let Some(index) = self.group_column_index.get(&input_ref) {
-            InputRef::new(*index, input_ref.data_type()).into()
+            InputRef::new(*index, input_ref.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
