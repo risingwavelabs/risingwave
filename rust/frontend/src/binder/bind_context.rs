@@ -18,7 +18,7 @@ use std::fmt::Display;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
     pub column_name: String,
@@ -60,7 +60,7 @@ impl Display for Clause {
     }
 }
 
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Debug)]
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,
