@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
+use crate::binder::BoundSetExpr;
 
 pub trait ExprVisitor {
     fn visit_expr(&mut self, expr: &ExprImpl) {
@@ -39,6 +40,16 @@ pub trait ExprVisitor {
     }
     fn visit_literal(&mut self, _: &Literal) {}
     fn visit_input_ref(&mut self, _: &InputRef) {}
-    fn visit_subquery(&mut self, _: &Subquery) {}
+    fn visit_subquery(&mut self, subquery: &Subquery) {
+        match &subquery.query.body {
+            BoundSetExpr::Select(select) => select
+                .select_items
+                .iter()
+                .chain(select.group_by.iter())
+                .chain(select.where_clause.iter())
+                .for_each(|expr| self.visit_expr(expr)),
+            BoundSetExpr::Values(_) => {}
+        }
+    }
     fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
 }
