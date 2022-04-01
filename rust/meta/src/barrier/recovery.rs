@@ -174,21 +174,15 @@ where
                 // force shutdown actors on running compute nodes
                 match self.env.stream_clients().get(worker_node).await {
                     Ok(client) => {
-                        match client
+                        if client
                             .to_owned()
                             .force_stop_actors(ForceStopActorsRequest {
                                 request_id: String::new(),
                             })
                             .await
+                            .is_ok()
                         {
-                            Ok(_) => {
-                                // if we succeeded, the current node is up and running.
-                                break;
-                            }
-                            Err(_) => {
-                                // some node failed, retry
-                                continue;
-                            }
+                            break;
                         }
                     }
                     Err(err) => {
