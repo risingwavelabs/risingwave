@@ -12,19 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code)]
-#![allow(unused)]
-
 use std::collections::HashMap;
-use std::ops::Index;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, OrderedColumnDesc, Schema};
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -123,7 +119,7 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
+    pub async fn get_row(&self, _pk: &Row, _epoch: u64) -> Result<Option<Row>> {
         // get row by state_store muti get
         todo!()
     }
@@ -131,7 +127,6 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
         // get row by state_store scan
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let mut row = vec![None; self.column_ids.len()];
         let start_key = self
             .keyspace
             .prefixed_key(&serialize_pk(pk, pk_serializer)?);
@@ -149,16 +144,12 @@ impl<S: StateStore> CellBasedTable<S> {
         }
         let pk_and_row = cell_based_row_deserializer.take();
         match pk_and_row {
-            Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
-            None => {
-                return Ok(None);
-            }
+            Some(_) => Ok(pk_and_row.map(|(_pk, row)| row)),
+            None => Ok(None),
         }
-
-        Ok(Some(Row::new(row)))
     }
 
-    pub async fn delete_row(&mut self, pk: &Row, old_value: &Row, epoch: u64) -> Result<()> {
+    pub async fn delete_row(&mut self, _pk: &Row, _old_value: &Row, _epoch: u64) -> Result<()> {
         // TODO(wcy-fdu): TODO: support only serialize key mode. We only need keys in this case to
         // delete.
         todo!()
@@ -166,10 +157,10 @@ impl<S: StateStore> CellBasedTable<S> {
 
     pub async fn update_row(
         &mut self,
-        pk: &Row,
-        old_value: Option<Row>,
-        new_value: Option<Row>,
-        epoch: u64,
+        _pk: &Row,
+        _old_value: Option<Row>,
+        _new_value: Option<Row>,
+        _epoch: u64,
     ) -> Result<()> {
         todo!()
     }
@@ -289,7 +280,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         epoch: u64,
         stats: Arc<StateStoreMetrics>,
     ) -> Result<Self> {
-        keyspace.state_store().wait_epoch(epoch).await;
+        keyspace.state_store().wait_epoch(epoch).await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 
@@ -381,7 +372,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
         }
 
         loop {
-            let pack_cell_timer = self
+            let _pack_cell_timer = self
                 .stats
                 .cell_table_next_pack_cell_duration
                 .local()
