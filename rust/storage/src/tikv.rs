@@ -12,18 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::Bound::Excluded;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::{Result, ToRwResult};
 use tikv_client::{BoundRange, KvPair, TransactionClient};
 use tokio::sync::OnceCell;
 
 use super::StateStore;
-use crate::StateStoreIter;
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStoreIter};
 
 const SCAN_LIMIT: usize = 100;
 #[derive(Clone)]
@@ -50,120 +51,145 @@ impl TikvStateStore {
     }
 }
 
-#[async_trait]
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
+    define_state_store_associated_type!();
 
-    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        let mut txn = self.client().await.begin_optimistic().await.unwrap();
-        let res = txn.get(key.to_owned()).await.expect("key not found");
-        txn.commit().await.unwrap();
-        Ok(res.map(Bytes::from))
+    fn get(&self, key: &[u8], _epoch: u64) -> Self::GetFuture<'_> {
+        async move {
+            let mut txn = self.client().await.begin_optimistic().await.unwrap();
+            let res = txn.get(key.to_owned()).await.expect("key not found");
+            txn.commit().await.unwrap();
+            Ok(res.map(Bytes::from))
+        }
     }
 
-    async fn scan<R, B>(
+    fn scan<R, B>(
         &self,
         key_range: R,
         limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<Vec<(Bytes, Bytes)>>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        let mut data = vec![];
+        async move {
+            let mut data = vec![];
 
-        if limit == Some(0) {
-            return Ok(vec![]);
-        }
-        let scan_limit = match limit {
-            Some(x) => x as u32,
-            None => u32::MAX,
-        };
+            if limit == Some(0) {
+                return Ok(vec![]);
+            }
+            let scan_limit = match limit {
+                Some(x) => x as u32,
+                None => u32::MAX,
+            };
 
-        let range = (
-            key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            key_range.end_bound().map(|b| b.as_ref().to_owned()),
-        );
+            let range = (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            );
 
-        let mut txn = self.client().await.begin_optimistic().await.unwrap();
-        let res: Vec<KvPair> = txn
-            .scan(BoundRange::from(range), scan_limit)
-            .await
-            .unwrap()
-            .collect();
-        txn.commit().await.unwrap();
+            let mut txn = self.client().await.begin_optimistic().await.unwrap();
+            let res: Vec<KvPair> = txn
+                .scan(BoundRange::from(range), scan_limit)
+                .await
+                .unwrap()
+                .collect();
+            txn.commit().await.unwrap();
 
-        for tikv_client::KvPair(key, value) in res {
-            let key = Bytes::copy_from_slice(key.as_ref().into());
-            let value = Bytes::from(value);
-            data.push((key.clone(), value.clone()));
-            if let Some(limit) = limit {
-                if data.len() >= limit {
-                    break;
+            for tikv_client::KvPair(key, value) in res {
+                let key = Bytes::copy_from_slice(key.as_ref().into());
+                let value = Bytes::from(value);
+                data.push((key.clone(), value.clone()));
+                if let Some(limit) = limit {
+                    if data.len() >= limit {
+                        break;
+                    }
                 }
             }
-        }
 
-        Ok(data)
+            Ok(data)
+        }
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
-        let mut txn = self.client().await.begin_optimistic().await.unwrap();
-        for (key, value) in kv_pairs {
-            match value {
-                Some(value) => {
-                    txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
-                        .await
-                        .map_err(anyhow::Error::new)
-                        .to_rw_result()?;
-                }
-                None => {
-                    txn.delete(tikv_client::Key::from(key.to_vec()))
-                        .await
-                        .map_err(anyhow::Error::new)
-                        .to_rw_result()?;
-                }
-            }
-        }
-        txn.commit().await.unwrap();
-        Ok(())
-    }
-
-    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    fn reverse_scan<R, B>(
+        &self,
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        let range = (
-            key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            key_range.end_bound().map(|b| b.as_ref().to_owned()),
-        );
-        Ok(TikvStateStoreIter::new(self.clone(), range).await)
+        async move { unimplemented!() }
     }
 
-    async fn replicate_batch(
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, Option<Bytes>)>,
+        _epoch: u64,
+    ) -> Self::IngestBatchFuture<'_> {
+        async move {
+            let mut txn = self.client().await.begin_optimistic().await.unwrap();
+            for (key, value) in kv_pairs {
+                match value {
+                    Some(value) => {
+                        txn.put(tikv_client::Key::from(key.to_vec()), value.to_vec())
+                            .await
+                            .map_err(anyhow::Error::new)
+                            .to_rw_result()?;
+                    }
+                    None => {
+                        txn.delete(tikv_client::Key::from(key.to_vec()))
+                            .await
+                            .map_err(anyhow::Error::new)
+                            .to_rw_result()?;
+                    }
+                }
+            }
+            txn.commit().await.unwrap();
+            Ok(())
+        }
+    }
+
+    fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
         _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
+        async move {
+            let range = (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            );
+            Ok(TikvStateStoreIter::new(self.clone(), range).await)
+        }
     }
 
-    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
-        unimplemented!()
+    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
     }
 
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        unimplemented!()
+    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move { unimplemented!() }
     }
 }
 
@@ -185,41 +211,43 @@ impl TikvStateStoreIter {
     }
 }
 
-#[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
-        if self.index == self.kv_pair_buffer.len() {
-            let range = if self.kv_pair_buffer.is_empty() {
-                self.key_range.clone()
-            } else {
-                (
-                    Excluded(
-                        Bytes::copy_from_slice(
-                            self.kv_pair_buffer.last().unwrap().0.as_ref().into(),
-                        )
-                        .to_vec(),
-                    ),
-                    self.key_range.1.clone(),
-                )
-            };
-            self.kv_pair_buffer = txn.scan(range, SCAN_LIMIT as u32).await.unwrap().collect();
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            let mut txn = self.store.client().await.begin_optimistic().await.unwrap();
+            if self.index == self.kv_pair_buffer.len() {
+                let range = if self.kv_pair_buffer.is_empty() {
+                    self.key_range.clone()
+                } else {
+                    (
+                        Excluded(
+                            Bytes::copy_from_slice(
+                                self.kv_pair_buffer.last().unwrap().0.as_ref().into(),
+                            )
+                            .to_vec(),
+                        ),
+                        self.key_range.1.clone(),
+                    )
+                };
+                self.kv_pair_buffer = txn.scan(range, SCAN_LIMIT as u32).await.unwrap().collect();
 
-            self.index = 0;
+                self.index = 0;
+            }
+            if self.kv_pair_buffer.is_empty() {
+                return Ok(None);
+            }
+            let key = self.kv_pair_buffer[self.index].0.clone();
+            let value = self.kv_pair_buffer[self.index].1.clone();
+            let key = &Bytes::copy_from_slice(key.as_ref().into());
+            let value = &Bytes::from(value);
+            txn.commit().await.unwrap();
+            self.index += 1;
+
+            return Ok(Some((key.clone(), value.clone())));
         }
-        if self.kv_pair_buffer.is_empty() {
-            return Ok(None);
-        }
-        let key = self.kv_pair_buffer[self.index].0.clone();
-        let value = self.kv_pair_buffer[self.index].1.clone();
-        let key = &Bytes::copy_from_slice(key.as_ref().into());
-        let value = &Bytes::from(value);
-        txn.commit().await.unwrap();
-        self.index += 1;
-
-        return Ok(Some((key.clone(), value.clone())));
     }
 }
 
