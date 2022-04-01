@@ -24,6 +24,7 @@ use risingwave_common::catalog::Schema;
 use super::error::{StreamExecutorResult, TracedStreamExecutorError};
 use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
 use crate::executor::Epoch;
+use crate::executor_v2::error::StreamExecutorError;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -187,7 +188,9 @@ impl RearrangedChainExecutor {
                         if epoch.curr >= last_rearranged_epoch.curr {
                             if let Some((stop_tx, create_notifier)) = rearrange_finish_tx.take() {
                                 // Stop the background rearrangement task.
-                                stop_tx.send(()).unwrap();
+                                stop_tx.send(()).map_err(|_| {
+                                    StreamExecutorError::channel_closed("stop_rearrange")
+                                })?;
                                 // Notify about the finish.
                                 create_notifier.notify(create_epoch.curr);
                             }
@@ -206,17 +209,14 @@ impl RearrangedChainExecutor {
             // The rearrangement must have finished because we told it to stop.
             if rearrange_finish_tx.is_some() {
                 // Log the error. It will panic on the joining below.
-                tracing::error!(actor = self.actor_id, "rearrangement finished passively",);
+                tracing::error!(actor = self.actor_id, "rearrangement finished passively");
             }
 
             // 7. Rearranged stream finished. Now we take back the remaining upstream.
-            let remaining_upstream = upstream_poll_handle
-                .await
-                .expect("failed to join the rearrangment task")
-                .expect("rearranging failed");
+            let remaining_upstream = upstream_poll_handle.await.unwrap()?;
 
             // 8. Begin to consume remaining upstream.
-            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream",);
+            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
 
             #[for_await]
             for msg in remaining_upstream {
@@ -250,7 +250,7 @@ impl RearrangedChainExecutor {
                 Message::Chunk(chunk) => {
                     upstream_tx
                         .unbounded_send(RearrangedMessage::Chunk(chunk))
-                        .expect("failed to put chunk");
+                        .map_err(|_| StreamExecutorError::channel_closed("upstream"))?;
                 }
 
                 // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
@@ -258,15 +258,19 @@ impl RearrangedChainExecutor {
                 Message::Barrier(barrier) => {
                     upstream_tx
                         .unbounded_send(RearrangedMessage::PhantomBarrier(barrier.epoch))
-                        .expect("failed to put phantom barrier");
+                        .map_err(|_| StreamExecutorError::channel_closed("upstream"))?;
                     rearranged_barrier_tx
                         .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier))
-                        .expect("failed to rearrange barrier");
+                        .map_err(|_| StreamExecutorError::channel_closed("rearranged barrier"))?;
                 }
             };
 
             // Check that whether we should stop.
-            if stop_rearrange_rx.try_recv().unwrap().is_some() {
+            if stop_rearrange_rx
+                .try_recv()
+                .map_err(|_| StreamExecutorError::channel_closed("stop rearrange"))?
+                .is_some()
+            {
                 break;
             }
         }
