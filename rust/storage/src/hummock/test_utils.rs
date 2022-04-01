@@ -39,6 +39,8 @@ pub fn default_config_for_test() -> StorageConfig {
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
+        block_cache_capacity: 64 << 20,
+        meta_cache_capacity: 64 << 20,
     }
 }
 
