@@ -44,9 +44,6 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
-        // Since table and source both have source info, use show_source handler can get column info
-        // Statement::DescribeTable { name } => show_source::handle_show_source(context,
-        // name).await,
         Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
         Statement::ShowCommand(show_object) => {
             show_command::handle_show_command(context, show_object).await

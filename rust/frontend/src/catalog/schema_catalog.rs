@@ -60,11 +60,19 @@ impl SchemaCatalog {
     }
 
     pub fn get_all_table_names(&self) -> Vec<String> {
-        self.table_by_name.keys().into_iter().cloned().collect_vec()
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_some())
+            .map(|(k, _)| k.clone())
+            .collect_vec()
     }
 
-    pub fn get_all_source_names(&self) -> Vec<String> {
-        self.source_by_name.keys().into_iter().cloned().collect_vec()
+    pub fn get_all_mv_names(&self) -> Vec<String> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_none())
+            .map(|(k, _)| k.clone())
+            .collect_vec()
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {

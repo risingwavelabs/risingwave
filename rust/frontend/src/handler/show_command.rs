@@ -50,7 +50,7 @@ pub async fn handle_show_command(
             .map(|n| Row::new(vec![Some(n.clone())]))
             .collect_vec(),
         ShowCommandObject::View => catalog_reader
-            .get_all_table_names(database_name, schema_name)?
+            .get_all_mv_names(database_name, schema_name)?
             .iter()
             .map(|n| Row::new(vec![Some(n.clone())]))
             .collect_vec(),
@@ -58,10 +58,7 @@ pub async fn handle_show_command(
             let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
             let table =
                 catalog_reader.get_table_by_name(session.database(), &schema_name, &table_name)?;
-            row_descs.push(PgFieldDescriptor::new(
-                "type".to_owned(),
-                TypeOid::Varchar,
-            ));
+            row_descs.push(PgFieldDescriptor::new("type".to_owned(), TypeOid::Varchar));
             col_descs_to_rows(table.table_desc().columns)
         }
     };
