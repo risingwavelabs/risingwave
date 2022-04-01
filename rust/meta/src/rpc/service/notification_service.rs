@@ -70,11 +70,8 @@ where
         match worker_type {
             WorkerType::ComputeNode => {
                 // send source snapshot to new workers.
-                let sources = self
-                    .catalog_manager
-                    .list_sources()
-                    .await
-                    .map_err(|e| e.to_grpc_status())?;
+                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+                let sources = catalog_guard.list_sources().await.map_err(tonic_err)?;
                 let source_snapshot = SourceSnapshot { sources };
 
                 tx.send(Ok(SubscribeResponse {
