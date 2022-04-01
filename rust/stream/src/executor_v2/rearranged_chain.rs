@@ -26,11 +26,14 @@ use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
 use crate::executor::Epoch;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
-/// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
-/// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
-/// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
-/// existing MVs are dispatched.
-pub struct ChainExecutor {
+/// [`ChainExecutor`] is an executor that enables synchronization between the existing
+/// stream and newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV
+/// on MV feature. It pipes new data of existing MVs to newly created MV only all of the old data in
+/// the existing MVs are dispatched.
+///
+/// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
+/// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
+pub struct RearrangedChainExecutor {
     snapshot: BoxedExecutor,
 
     upstream: BoxedExecutor,
@@ -77,7 +80,7 @@ impl From<Message> for RearrangedMessage {
     }
 }
 
-impl ChainExecutor {
+impl RearrangedChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
@@ -136,7 +139,7 @@ impl ChainExecutor {
 
             // The barriers polled from upstream to rearrange.
             let (rearranged_barrier_tx, rearranged_barrier_rx) = mpsc::unbounded();
-            // The upstream after transforming the barriers to phajtom barriers.
+            // The upstream after transforming the barriers to phantom barriers.
             let (upstream_tx, upstream_rx) = mpsc::unbounded();
             // When we catch-up the progress, notify the task to stop.
             let (stop_rearrange_tx, mut stop_rearrange_rx) = oneshot::channel();
@@ -254,7 +257,7 @@ impl ChainExecutor {
 
             info!("begin to consume remaining upstream");
 
-            // 8. Begin to consume remainig upstream.
+            // 8. Begin to consume remaining upstream.
             //
             #[for_await]
             for msg in remaining_upstream {
@@ -274,7 +277,7 @@ impl ChainExecutor {
     }
 }
 
-impl Executor for ChainExecutor {
+impl Executor for RearrangedChainExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
         self.execute_inner().boxed()
     }

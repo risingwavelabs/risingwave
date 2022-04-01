@@ -22,16 +22,17 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
-#[path = "rearranged_chain.rs"]
+#[allow(dead_code)]
 mod chain;
 mod filter;
+mod rearranged_chain;
 mod simple;
 #[cfg(test)]
 mod test_utils;
 mod v1_compat;
 
-pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
+pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 
