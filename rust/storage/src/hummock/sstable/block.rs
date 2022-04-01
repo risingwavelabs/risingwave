@@ -189,7 +189,7 @@ impl Default for BlockBuilderOptions {
     }
 }
 
-/// [`BlockV2Writer`] encode and append block to a buffer.
+/// [`BlockBuilder`] encodes and appends block to a buffer.
 pub struct BlockBuilder {
     /// Write buffer.
     buf: BytesMut,

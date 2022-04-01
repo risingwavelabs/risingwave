@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{HashKey, MAX_FIXED_SIZE_KEY_ELEMENTS};
+use super::HashKey;
 use crate::hash;
 use crate::types::{DataSize, DataType};
 
@@ -60,15 +60,16 @@ pub trait HashKeyDispatcher {
     }
 }
 
+pub const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// Calculate what kind of hash key should be used given the key data types.
 ///
-/// When any of following conditions is met, we choose [`SerializedKey`]:
+/// When any of following conditions is met, we choose [`crate::hash::SerializedKey`]:
 /// 1. Has variable size column.
 /// 2. Number of columns exceeds [`MAX_FIXED_SIZE_KEY_ELEMENTS`]
 /// 3. Sizes of data types exceed `256` bytes.
 /// 4. Any column's serialized format can't be used for equality check.
 ///
-/// Otherwise we choose smallest [`FixedSizeKey`] whose size can hold all data types.
+/// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
 pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;

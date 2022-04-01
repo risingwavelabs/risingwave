@@ -29,7 +29,7 @@ use crate::vector_op::extract::{extract_from_date, extract_from_timestamp};
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
 use crate::vector_op::round::round_digits;
-use crate::vector_op::tumble::tumble_start;
+use crate::vector_op::tumble::{tumble_start_date, tumble_start_date_time};
 
 /// A placeholder function that return bool in [`gen_binary_expr_atm`]
 pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
@@ -373,21 +373,45 @@ pub fn new_binary_expr(
                 round_digits,
             ),
         ),
-        Type::TumbleStart => Box::new(BinaryExpression::<
-            NaiveDateTimeArray,
-            IntervalArray,
-            NaiveDateTimeArray,
-            _,
-        >::new(l, r, ret, tumble_start)),
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
+        Type::TumbleStart => new_tumble_start(l, r, ret),
         tp => {
             unimplemented!(
                 "The expression {:?} using vectorized expression framework is not supported yet!",
                 tp
             )
         }
+    }
+}
+
+fn new_tumble_start(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    match expr_ia1.return_type() {
+        DataType::Date => Box::new(BinaryExpression::<
+            NaiveDateArray,
+            IntervalArray,
+            NaiveDateArray,
+            _,
+        >::new(
+            expr_ia1, expr_ia2, return_type, tumble_start_date
+        )),
+        DataType::Timestamp => Box::new(BinaryExpression::<
+            NaiveDateTimeArray,
+            IntervalArray,
+            NaiveDateTimeArray,
+            _,
+        >::new(
+            expr_ia1, expr_ia2, return_type, tumble_start_date_time
+        )),
+        _ => unimplemented!(
+            "tumble_start is not supported for {:?}",
+            expr_ia1.return_type()
+        ),
     }
 }
 
