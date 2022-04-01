@@ -16,7 +16,6 @@ use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
 
 use super::{BlockLocation, ObjectMetadata};
@@ -65,15 +64,6 @@ impl ObjectStore for S3ObjectStore {
 
         let val = resp.body.collect().await.map_err(err)?.into_bytes();
 
-        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-            return Err(RwError::from(InternalError(format!(
-                "mismatched size: expected {}, found {} when reading {} at {:?}",
-                block_loc.as_ref().unwrap().size,
-                val.len(),
-                path,
-                block_loc.as_ref().unwrap()
-            ))));
-        }
         Ok(val)
     }
 
