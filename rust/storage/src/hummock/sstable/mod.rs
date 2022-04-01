@@ -41,7 +41,7 @@ const MAGIC: u32 = 0x5785ab73;
 const VERSION: u32 = 1;
 
 #[derive(Clone)]
-/// [`SSTable`] is a handle for accessing SST in [`TableManager`].
+/// [`Sstable`] is a handle for accessing SST.
 pub struct Sstable {
     pub id: u64,
     pub meta: SstableMeta,
@@ -68,6 +68,11 @@ impl Sstable {
 
     pub fn block_count(&self) -> usize {
         self.meta.block_metas.len()
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        8 /* id */ + self.meta.encoded_size()
     }
 }
 
@@ -99,6 +104,11 @@ impl BlockMeta {
             offset,
             len,
         }
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        12 /* offset + len + key len */ + self.smallest_key.len()
     }
 }
 
@@ -188,6 +198,27 @@ impl SstableMeta {
             largest_key,
             version,
         })
+    }
+
+    #[inline]
+    pub fn encoded_size(&self) -> usize {
+        4 // block meta count
+            + self
+            .block_metas
+            .iter()
+            .map(|block_meta| block_meta.encoded_size())
+            .sum::<usize>()
+            + 4 // bloom filter len
+            + self.bloom_filter.len()
+            + 4 // estimated size
+            + 4 // key count
+            + 4 // key len
+            + self.smallest_key.len()
+            + 4 // key len
+            + self.largest_key.len()
+            + 8 // checksum
+            + 4 // version
+            + 4 // magic
     }
 }
 

@@ -115,12 +115,6 @@ impl PlanTreeNodeBinary for StreamHashJoin {
             self.eq_join_predicate.clone(),
         )
     }
-    fn left_dist_required(&self) -> &Distribution {
-        todo!()
-    }
-    fn right_dist_required(&self) -> &Distribution {
-        todo!()
-    }
 }
 
 impl_plan_tree_node_for_binary! { StreamHashJoin }

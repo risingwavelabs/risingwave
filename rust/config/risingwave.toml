@@ -13,3 +13,5 @@ block_size = 4096
 bloom_false_positive = 0.1
 data_directory = "hummock_001"
 async_checkpoint_enabled = true
+block_cache_capacity = 268435456
+meta_cache_capacity = 67108864

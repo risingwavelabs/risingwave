@@ -1,3 +1,6 @@
+State Store Benchmark (ss-bench)
+===============
+
 `ss_bench` is used to directly benchmark the state store of the system.
 
 # Usage Example

@@ -39,7 +39,7 @@ use crate::stream::{FragmentManagerRef, Scheduler};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
-/// [`Context`] carries one-time infos.
+/// [`CreateMaterializedViewContext`] carries one-time infos.
 #[derive(Default)]
 pub struct CreateMaterializedViewContext {
     /// New dispatches to add from upstream actors to downstream actors.
@@ -324,7 +324,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::{CatalogManager, MetaSrvEnv};
+    use crate::manager::MetaSrvEnv;
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -478,7 +478,6 @@ mod tests {
             cluster_manager.activate_worker_node(host).await?;
 
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
-            let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let hummock_manager = Arc::new(
                 HummockManager::new(env.clone(), cluster_manager.clone(), meta_metrics.clone())
@@ -487,7 +486,6 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
-                catalog_manager,
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),

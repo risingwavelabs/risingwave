@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(rustdoc::private_intra_doc_links)]
 #![feature(backtrace)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
@@ -24,6 +25,7 @@
 #![warn(clippy::await_holding_lock)]
 #![deny(unused_must_use)]
 #![feature(trait_alias)]
+#![feature(type_alias_impl_trait)]
 #![feature(generic_associated_types)]
 #![feature(more_qualified_paths)]
 #![feature(binary_heap_drain_sorted)]

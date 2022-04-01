@@ -100,29 +100,43 @@ struct ExprHandler {
     // `project` contains all the ExprImpl inside GROUP BY clause (e.g. v1 for group by v1)
     // followed by those inside aggregates (e.g. v1 + v2 for min(v1 + v2)).
     pub project: Vec<ExprImpl>,
-    group_column_index: HashMap<InputRef, usize>,
+    group_key_len: usize,
+    // When dedup (rewriting AggCall inputs), it is the index into projects.
+    // When rewriting InputRef outside AggCall, where it is required to refer to a group column,
+    // this is the index into LogicalAgg::schema.
+    // This 2 indices happen to be the same because we always put group exprs at the beginning of
+    // schema, and they are at the beginning of projects.
+    expr_index: HashMap<ExprImpl, usize>,
     pub agg_calls: Vec<PlanAggCall>,
     pub error: Option<ErrorCode>,
 }
 
 impl ExprHandler {
     fn new(group_exprs: Vec<ExprImpl>) -> Result<Self> {
-        let mut group_column_index = HashMap::new();
-        for (index, expr) in group_exprs.iter().enumerate() {
-            // TODO: support more complicated expression in GROUP BY clause, because we currently
-            // assume the only thing can appear in GROUP BY clause is an input column name.
-            if let ExprImpl::InputRef(input_ref) = expr {
-                group_column_index.insert(*input_ref.clone(), index);
-            } else {
-                return Err(ErrorCode::NotImplementedError(
-                    "GROUP BY only supported on input column names!".into(),
-                )
-                .into());
-            }
-        }
+        // TODO: support more complicated expression in GROUP BY clause, because we currently
+        // assume the only thing can appear in GROUP BY clause is an input column name.
+        let group_key_len = group_exprs.len();
+
+        // Please note that we currently don't dedup columns in GROUP BY clause.
+        let mut expr_index = HashMap::new();
+        group_exprs
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, expr)| {
+                if matches!(expr, ExprImpl::InputRef(_)) {
+                    expr_index.insert(expr.clone(), index);
+                    Ok(())
+                } else {
+                    Err(ErrorCode::NotImplementedError(
+                        "GROUP BY only supported on input column names!".into(),
+                    ))
+                }
+            })?;
+
         Ok(ExprHandler {
             project: group_exprs,
-            group_column_index,
+            group_key_len,
+            expr_index,
             agg_calls: vec![],
             error: None,
         })
@@ -140,44 +154,50 @@ impl ExprRewriter for ExprHandler {
         let return_type = agg_call.return_type();
         let (agg_kind, inputs) = agg_call.decompose();
 
-        let begin = self.project.len();
-        self.project.extend(inputs);
-        let end = self.project.len();
-
-        let inputs = (begin..end)
-            .zip_eq(self.project.iter().skip(begin).take(end - begin))
-            .map(|(idx, expr)| InputRef::new(idx, expr.return_type()))
-            .collect_vec();
+        let mut index = self.project.len();
+        let mut input_refs = vec![];
+        self.project.extend(inputs.into_iter().filter(|expr| {
+            if let Some(idx) = self.expr_index.get(expr) {
+                input_refs.push(InputRef::new(*idx, expr.return_type()));
+                false
+            } else {
+                self.expr_index.insert(expr.clone(), index);
+                input_refs.push(InputRef::new(index, expr.return_type()));
+                index += 1;
+                true
+            }
+        }));
 
         if agg_kind == AggKind::Avg {
-            assert_eq!(inputs.len(), 1);
+            assert_eq!(input_refs.len(), 1);
 
             let left_return_type =
-                AggCall::infer_return_type(&AggKind::Sum, &[inputs[0].return_type()]).unwrap();
+                AggCall::infer_return_type(&AggKind::Sum, &[input_refs[0].return_type()]).unwrap();
 
             // Rewrite avg to cast(sum as avg_return_type) / count.
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Sum,
                 return_type: left_return_type.clone(),
-                inputs: inputs.clone(),
+                inputs: input_refs.clone(),
             });
             let left = ExprImpl::from(InputRef::new(
-                self.group_column_index.len() + self.agg_calls.len() - 1,
+                self.group_key_len + self.agg_calls.len() - 1,
                 left_return_type,
             ))
             .ensure_type(return_type);
 
             let right_return_type =
-                AggCall::infer_return_type(&AggKind::Count, &[inputs[0].return_type()]).unwrap();
+                AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
+                    .unwrap();
 
             self.agg_calls.push(PlanAggCall {
                 agg_kind: AggKind::Count,
                 return_type: right_return_type.clone(),
-                inputs,
+                inputs: input_refs,
             });
 
             let right = InputRef::new(
-                self.group_column_index.len() + self.agg_calls.len() - 1,
+                self.group_key_len + self.agg_calls.len() - 1,
                 right_return_type,
             );
 
@@ -186,24 +206,25 @@ impl ExprRewriter for ExprHandler {
             self.agg_calls.push(PlanAggCall {
                 agg_kind,
                 return_type: return_type.clone(),
-                inputs,
+                inputs: input_refs,
             });
             ExprImpl::from(InputRef::new(
-                self.group_column_index.len() + self.agg_calls.len() - 1,
+                self.group_key_len + self.agg_calls.len() - 1,
                 return_type,
             ))
         }
     }
     // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        if let Some(index) = self.group_column_index.get(&input_ref) {
-            InputRef::new(*index, input_ref.return_type()).into()
+        let expr = input_ref.into();
+        if let Some(index) = self.expr_index.get(&expr) && *index < self.group_key_len {
+            InputRef::new(*index, expr.return_type()).into()
         } else {
             self.error = Some(ErrorCode::InvalidInputSyntax(
                 "column must appear in the GROUP BY clause or be used in an aggregate function"
                     .into(),
             ));
-            input_ref.into()
+            expr
         }
     }
 }

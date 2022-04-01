@@ -53,7 +53,7 @@ pub struct ReverseUserIterator<'a> {
 }
 
 impl<'a> ReverseUserIterator<'a> {
-    /// Creates [`UserIterator`] with maximum epoch.
+    /// Creates [`ReverseUserIterator`] with maximum epoch.
     #[cfg(test)]
     pub(crate) fn new(
         iterator: ReverseMergeIterator<'a>,
@@ -62,7 +62,7 @@ impl<'a> ReverseUserIterator<'a> {
         Self::new_with_epoch(iterator, key_range, Epoch::MAX, None)
     }
 
-    /// Creates [`UserIterator`] with given `read_epoch`.
+    /// Creates [`ReverseUserIterator`] with given `read_epoch`.
     pub(crate) fn new_with_epoch(
         iterator: ReverseMergeIterator<'a>,
         key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
@@ -172,9 +172,7 @@ impl<'a> ReverseUserIterator<'a> {
                         self.last_val.clear();
                         assert!(val.len() >= VALUE_META_SIZE);
                         // Currently, upper layer does not need value meta, so we simply exclude it.
-                        if val.len() > VALUE_META_SIZE {
-                            self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
-                        }
+                        self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
                         self.last_delete = false;
                     }
                     HummockValue::Delete(_) => {
