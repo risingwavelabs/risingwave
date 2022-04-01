@@ -729,9 +729,10 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::hash::VIRTUAL_KEY_COUNT;
     use risingwave_pb::common::{ActorInfo, HostAddress};
+    use crate::executor_v2::Executor;
 
     use super::*;
-    use crate::executor::ReceiverExecutor;
+    use crate::executor_v2::receiver::ReceiverExecutor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -901,14 +902,14 @@ mod tests {
             vec![],
             rx,
             "ReceiverExecutor".to_string(),
-        ));
+        )).v1();
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
         let mut executor = Box::new(DispatchExecutor::new(
-            input,
+            Box::new(input),
             DispatcherImpl::Simple(SimpleDispatcher::new(output)),
             actor_id,
             ctx.clone(),

@@ -26,6 +26,7 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
 use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor};
+use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::task::{ActorHandle, SharedContext};
 
 pub struct MockConsumer {
@@ -67,7 +68,7 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx, "ReceiverExecutor".to_string());
+        let input = Box::new(ReceiverExecutor::new(schema, vec![], input_rx, "ReceiverExecutor".to_string())).v1();
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             Box::new(input),
@@ -124,7 +125,7 @@ async fn test_merger_sum_aggr() {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
     let receiver_op =
-        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
+        Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string())).v1();
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),

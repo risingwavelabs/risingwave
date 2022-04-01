@@ -80,26 +80,6 @@ impl RemoteInput {
     }
 }
 
-/// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
-/// there should be a `ReceiverExecutor` running in the background, so as to push
-/// messages down to the executors.
-pub struct ReceiverExecutor {
-    schema: Schema,
-    pk_indices: PkIndices,
-    receiver: Receiver<Message>,
-    /// Logical Operator Info
-    op_info: String,
-}
-
-impl std::fmt::Debug for ReceiverExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReceiverExecutor")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .finish()
-    }
-}
-
 pub struct MergeExecutorBuilder {}
 
 impl ExecutorBuilder for MergeExecutorBuilder {
@@ -114,50 +94,3 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     }
 }
 
-impl ReceiverExecutor {
-    pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
-        receiver: Receiver<Message>,
-        op_info: String,
-    ) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            receiver,
-            op_info,
-        }
-    }
-}
-
-#[async_trait]
-impl Executor for ReceiverExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        let msg = self
-            .receiver
-            .next()
-            .instrument(tracing::trace_span!("idle"))
-            .await
-            .expect(
-                "upstream channel closed unexpectedly, please check error in upstream executors",
-            ); // TODO: remove unwrap
-
-        Ok(msg)
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        "ReceiverExecutor"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        &self.op_info
-    }
-}
