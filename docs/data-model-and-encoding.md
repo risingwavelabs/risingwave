@@ -41,7 +41,7 @@ A Stream Chunk consists of columns, visibility array and an additional `ops` col
 
 > Source files: `utils/memcomparable`, `utils/value-encoding`
 
-RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries.
+RisingWave stores user data in shared key-value storage called 'Hummock'. Tables, materialized views and checkpoints of internal streaming operators are encoded into key-value entries. Every field of a row aka. cell is encoded as a key-value entry, except `NULL` values are omitted.
 
 ![row-format](./images/data-model-and-encoding/row-format.svg)
 
