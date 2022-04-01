@@ -146,14 +146,14 @@ impl StageGraphBuilder {
         // If the parent id does not exist, create a new set containing the child ids. Otherwise
         // just insert.
         match child_ids {
-            Some(childs) => {
-                childs.insert(child_id);
+            Some(children) => {
+                children.insert(child_id);
             }
 
             None => {
-                let mut childs = HashSet::new();
-                childs.insert(child_id);
-                self.child_edges.insert(parent_id, childs);
+                let mut children = HashSet::new();
+                children.insert(child_id);
+                self.child_edges.insert(parent_id, children);
             }
         };
 

@@ -112,7 +112,7 @@ impl From<ProstTable> for TableCatalog {
             for col_desc in catalog.column_desc.get_column_descs() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
-                    panic!("duplicated column name {} in talbe {} ", col_name, tb.name)
+                    panic!("duplicated column name {} in table {} ", col_name, tb.name)
                 }
                 let col_id = col_desc.column_id.get_id();
                 col_descs.insert(col_id, col_desc);

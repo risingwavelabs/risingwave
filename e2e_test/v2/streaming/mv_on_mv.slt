@@ -149,7 +149,7 @@ statement ok
 create materialized view m11 as select v1, v2, v3 from t3;
 
 statement ok
-create materialized view m12 as select avg(v1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from m11;
+create materialized view m12 as select round(avg(v1), 1) as avg_v1, sum(v2) as sum_v2, count(v3) as count_v3 from m11;
 
 query III
 select v1, v2, v3 from m11;
@@ -158,11 +158,10 @@ select v1, v2, v3 from m11;
 1 5 6
 3 2 6
 
-# TODO: enable avg_v1
 query III
-select sum_v2, count_v3 from m12;
+select avg_v1, sum_v2, count_v3 from m12;
 ----
-9 3
+1.7 9 3
 
 statement ok
 create table t4(v1 real not null);

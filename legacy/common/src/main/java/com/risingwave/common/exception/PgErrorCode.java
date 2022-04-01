@@ -20,7 +20,7 @@
  */
 
 // Copied from https://github.com/crate/crate df77bd0
-// crate/server/src/main/java/io/crate/protocols/postgres/PGErrorStatus.java
+// crate/server/src/main/legacy/io/crate/protocols/postgres/PGErrorStatus.java
 
 package com.risingwave.common.exception;
 

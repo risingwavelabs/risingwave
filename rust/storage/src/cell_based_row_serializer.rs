@@ -34,8 +34,8 @@ impl CellBasedRowSerializer {
         &mut self,
         pk: &[u8],
         row: Option<Row>,
-        column_ids: Vec<ColumnId>,
+        column_ids: &[ColumnId],
     ) -> Result<Vec<(KeyBytes, Option<ValueBytes>)>> {
-        serialize_pk_and_row(pk, &row, &column_ids)
+        serialize_pk_and_row(pk, &row, column_ids)
     }
 }

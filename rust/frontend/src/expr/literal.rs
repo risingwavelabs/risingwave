@@ -17,7 +17,7 @@ use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
 use crate::expr::ExprType;
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct Literal {
     data: Datum,
     data_type: DataType,

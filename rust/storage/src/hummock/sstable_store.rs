@@ -22,6 +22,8 @@ use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
 
+const DEFAULT_META_CACHE_INIT_CAPACITY: usize = 1024;
+
 // TODO: Define policy based on use cases (read / compaction / ...).
 pub enum CachePolicy {
     Disable,
@@ -33,18 +35,30 @@ pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
     block_cache: BlockCache,
-    sstable_cache: Cache<u64, Arc<Sstable>>,
+    meta_cache: Cache<u64, Arc<Sstable>>,
     /// Statistics.
     stats: Arc<StateStoreMetrics>,
 }
 
 impl SstableStore {
-    pub fn new(store: ObjectStoreRef, path: String, stats: Arc<StateStoreMetrics>) -> Self {
+    pub fn new(
+        store: ObjectStoreRef,
+        path: String,
+        stats: Arc<StateStoreMetrics>,
+        block_cache_capacity: usize,
+        meta_cache_capacity: usize,
+    ) -> Self {
+        let meta_cache: Cache<u64, Arc<Sstable>> = Cache::builder()
+            .weigher(|_k, v: &Arc<Sstable>| v.encoded_size() as u32)
+            .initial_capacity(DEFAULT_META_CACHE_INIT_CAPACITY)
+            .max_capacity(meta_cache_capacity as u64)
+            .build();
+
         Self {
             path,
             store,
-            block_cache: BlockCache::new(65536),
-            sstable_cache: Cache::new(1024),
+            block_cache: BlockCache::new(block_cache_capacity),
+            meta_cache,
             stats,
         }
     }
@@ -152,7 +166,7 @@ impl SstableStore {
             Ok::<_, TracedHummockError>(sst)
         };
 
-        self.sstable_cache
+        self.meta_cache
             .try_get_with(sst_id, fetch)
             .await
             .map_err(|e| HummockError::Other(e.to_string()).into())

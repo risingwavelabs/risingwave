@@ -124,7 +124,7 @@ mod tests {
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
-        let schema = schema_unamed! { DataType::Int32, DataType::Int32 };
+        let schema = schema_unnamed! { DataType::Int32, DataType::Int32 };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(chunk);
 
@@ -175,7 +175,7 @@ mod tests {
         let mut proj_executor = ProjectionExecutor {
             expr: vec![Box::new(literal)],
             child: Box::new(values_executor),
-            schema: schema_unamed!(DataType::Int32),
+            schema: schema_unnamed!(DataType::Int32),
             identity: "ProjectionExecutor".to_string(),
         };
 

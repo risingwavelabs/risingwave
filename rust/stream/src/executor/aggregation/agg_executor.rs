@@ -93,7 +93,7 @@ impl<S: StateStore> AggState<S> {
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
     /// that for [`crate::executor::HashAggExecutor`].
     ///
-    /// Returns how many rows are appended in buidlers.
+    /// Returns how many rows are appended in builders.
     pub async fn build_changes(
         &mut self,
         builders: &mut [ArrayBuilderImpl],
@@ -183,7 +183,7 @@ impl<S: StateStore> AggState<S> {
 
 /// Trait for [`crate::executor::LocalSimpleAggExecutor`], and
 /// [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`], providing an
-/// implementaion of [`Executor::next`] by [`agg_executor_next`].
+/// implementation of [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
 pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
@@ -230,7 +230,7 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
-/// An implementaion of [`Executor::next`] for [`AggExecutor`].
+/// An implementation of [`Executor::next`] for [`AggExecutor`].
 pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Message> {
     if let Some(barrier) = std::mem::take(executor.cached_barrier_message_mut()) {
         return Ok(Message::Barrier(barrier));

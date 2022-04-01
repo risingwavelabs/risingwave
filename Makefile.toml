@@ -229,7 +229,7 @@ script = '''
 #!@shell
 
 set -e
-cd java && ./gradlew build -x test
+cd legacy && ./gradlew build -x test
 '''
 
 [tasks.post-build-frontend]
@@ -241,7 +241,7 @@ script = '''
 
 set -e
 rm -f "${PREFIX_BIN}/risingwave-fe-runnable.jar"
-ln -s "$(pwd)/java/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
+ln -s "$(pwd)/legacy/pgserver/build/libs/risingwave-fe-runnable.jar" "${PREFIX_BIN}/risingwave-fe-runnable.jar"
 '''
 
 [tasks.prepare-config]
@@ -252,7 +252,7 @@ script = '''
 
 set -e
 
-cp "java/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
+cp "legacy/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
 cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
 cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
@@ -518,3 +518,14 @@ dependencies = [
   "check-logs",
 ]
 description = "Kill cluster, dump logs and check logs"
+
+[tasks.slt]
+category = "RiseDev - SQLLogitTest"
+dependencies = ["warn-on-missing-tools"]
+script = """
+#!/bin/bash
+set -e
+
+sqllogictest "$@"
+"""
+description = "Run SQLLogicTest"

@@ -110,6 +110,14 @@ pub struct StorageConfig {
     /// Whether to enable write conflict detection
     #[serde(default = "default::write_conflict_detection_enabled")]
     pub write_conflict_detection_enabled: bool,
+
+    /// Capacity of sstable block cache.
+    #[serde(default = "default::block_cache_capacity")]
+    pub block_cache_capacity: usize,
+
+    /// Capacity of sstable meta cache.
+    #[serde(default = "default::meta_cache_capacity")]
+    pub meta_cache_capacity: usize,
 }
 
 impl Default for StorageConfig {
@@ -180,6 +188,16 @@ mod default {
 
     pub fn write_conflict_detection_enabled() -> bool {
         cfg!(debug_assertions)
+    }
+
+    pub fn block_cache_capacity() -> usize {
+        // 256 MB
+        268435456
+    }
+
+    pub fn meta_cache_capacity() -> usize {
+        // 64 MB
+        67108864
     }
 }
 

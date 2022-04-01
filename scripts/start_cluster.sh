@@ -34,7 +34,7 @@ start_compute_node() {
 
 start_frontend() {
     log_dir="../log/frontend.out"
-    pgserver_build_dir="${SCRIPT_PATH}/../java/pgserver/build/"
+    pgserver_build_dir="${SCRIPT_PATH}/../legacy/pgserver/build/"
     conf_file=$1
     echo "Starting frontend with config file $conf_file ... logging to $log_dir"
     run_cmd="nohup java -cp ${pgserver_build_dir}libs/risingwave-fe-runnable.jar \
