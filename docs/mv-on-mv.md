@@ -4,7 +4,7 @@
 
 RisingWave supports creating a new materialized view (abbreviated as mview) based on the source and another mview, so users can split their data into multiple layers and use mviews' chains to connect them.
 
-In detail, we will support the creation of a materialized view whose source is some other mviews. Please note that there should not be a circular dependency on mviews.
+In detail, we will support the creation of a materialized view whose source is some other mviews. **Please note that there should not be a circular dependency on mviews**.
 
 ```sql
 create table t1 (*v1* int, deleted boolean);
@@ -41,7 +41,7 @@ The full process of creation is:
 
 ## Drop mview online
 
-Assume that we already have three materialized views mv1, mv2, and mv3. mv2 and mv3 are on top of mv1, so mv1 is not allowed to be dropped.
+Assume that we already have three materialized views mv1, mv2, and mv3. mv2 and mv3 are on top of mv1, so **mv1 is not allowed to be dropped**.
 
 The full process of drop mv3 is:
 
