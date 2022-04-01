@@ -21,9 +21,9 @@ pub const VALUE_META_SIZE: usize = 2;
 /// Value meta stores some metadata for a kv pair. When writing to storage, it is located right
 /// after user key and before user value. Currently, value meta consists of a 2-byte consistent hash
 /// value.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ValueMeta {
-    consistent_hash_value: u16,
+    pub consistent_hash_value: u16,
 }
 
 impl From<ValueMeta> for Vec<u8> {
@@ -39,7 +39,7 @@ impl From<ValueMeta> for Bytes {
 }
 
 impl ValueMeta {
-    pub fn encode(&self, buf: &mut Vec<u8>) {
+    pub fn encode(&self, buf: &mut impl BufMut) {
         buf.put_u16_le(self.consistent_hash_value);
     }
 
@@ -53,8 +53,8 @@ impl ValueMeta {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageValue {
-    value_meta: ValueMeta,
-    user_value: Option<Bytes>,
+    pub value_meta: ValueMeta,
+    pub user_value: Option<Bytes>,
 }
 
 impl StorageValue {
@@ -103,21 +103,6 @@ impl StorageValue {
                 .unwrap_or_default()
     }
 
-    /// Encode `StorageValue` into little-endian bytes
-    pub fn encode_to_bytes(&self) -> Bytes {
-        let mut buf = Vec::with_capacity(self.size());
-        self.value_meta.encode(&mut buf);
-        if let Some(user_value) = &self.user_value {
-            buf.put_slice(&user_value[..]);
-        }
-        Bytes::from(buf)
-    }
-
-    /// Consumes `StorageValue` and returns user value
-    pub fn user_value(self) -> Option<Bytes> {
-        self.user_value
-    }
-
     pub fn is_some(&self) -> bool {
         self.user_value.is_some()
     }
@@ -127,7 +112,17 @@ impl StorageValue {
     }
 }
 
-/// Consumes `value`, returns user value and discards value meta.
-pub fn value_to_user_value(value: impl Into<Bytes>) -> Bytes {
-    value.into().split_off(VALUE_META_SIZE)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_meta_decode_encode() {
+        let mut result = vec![];
+        let value_meta = ValueMeta {
+            consistent_hash_value: 5678,
+        };
+        value_meta.encode(&mut result);
+        assert_eq!(ValueMeta::decode(&mut &result[..]), value_meta);
+    }
 }

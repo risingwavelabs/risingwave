@@ -25,7 +25,6 @@ use crate::hummock::test_utils::gen_test_sstable;
 use crate::hummock::{sstable_store, HummockValue, SSTableBuilderOptions, Sstable};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreRef};
-use crate::storage_value::ValueMeta;
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -67,15 +66,8 @@ pub fn iterator_test_key_of_epoch(idx: usize, epoch: Epoch) -> Vec<u8> {
     key_with_epoch(format!("key_test_{:05}", idx).as_bytes().to_vec(), epoch)
 }
 
-/// The value of an index, like `value_test_00002` with value meta in the front
-pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
-    let mut value: Vec<u8> = ValueMeta::default().into();
-    value.extend(format!("value_test_{:05}", idx).as_bytes());
-    value
-}
-
 /// The value of an index, like `value_test_00002` without value meta
-pub fn iterator_test_user_value_of(idx: usize) -> Vec<u8> {
+pub fn iterator_test_value_of(idx: usize) -> Vec<u8> {
     format!("value_test_{:05}", idx).as_bytes().to_vec()
 }
 
@@ -95,7 +87,7 @@ pub async fn gen_iterator_test_sstable_base(
         (0..total).map(|i| {
             (
                 iterator_test_key_of(idx_mapping(i)),
-                HummockValue::Put(iterator_test_value_of(idx_mapping(i))),
+                HummockValue::put_without_meta(iterator_test_value_of(idx_mapping(i))),
             )
         }),
         sstable_store,

@@ -140,7 +140,6 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use itertools::Itertools;
-    use HummockValue::Put;
 
     use super::*;
     use crate::hummock::sstable::utils::CompressionAlgorithm;
@@ -191,7 +190,11 @@ mod tests {
 
         for i in 0..table_capacity {
             builder
-                .add_user_key(b"key".to_vec(), Put(b"value"), (table_capacity - i) as u64)
+                .add_user_key(
+                    b"key".to_vec(),
+                    HummockValue::put_without_meta(b"value"),
+                    (table_capacity - i) as u64,
+                )
                 .await
                 .unwrap();
         }
@@ -216,7 +219,7 @@ mod tests {
             () => {
                 epoch -= 1;
                 builder
-                    .add_user_key(b"k".to_vec(), Put(b"v"), epoch)
+                    .add_user_key(b"k".to_vec(), HummockValue::put_without_meta(b"v"), epoch)
                     .await
                     .unwrap();
             };
@@ -255,7 +258,7 @@ mod tests {
         builder
             .add_full_key(
                 FullKey::from_user_key_slice(b"k", 233).as_slice(),
-                HummockValue::Put(b"v"),
+                HummockValue::put_without_meta(b"v"),
                 false,
             )
             .await

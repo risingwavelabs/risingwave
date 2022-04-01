@@ -175,15 +175,15 @@ mod tests {
         let shared_buffer_items = vec![
             (
                 iterator_test_key_of_epoch(0, epoch),
-                HummockValue::Put(b"value1".to_vec()),
+                HummockValue::put_without_meta(b"value1".to_vec()),
             ),
             (
                 iterator_test_key_of_epoch(1, epoch),
-                HummockValue::Put(b"value2".to_vec()),
+                HummockValue::put_without_meta(b"value2".to_vec()),
             ),
             (
                 iterator_test_key_of_epoch(2, epoch),
-                HummockValue::Put(b"value3".to_vec()),
+                HummockValue::put_without_meta(b"value3".to_vec()),
             ),
         ];
         let shared_buffer_batch =
@@ -248,15 +248,15 @@ mod tests {
         let shared_buffer_items = vec![
             (
                 iterator_test_key_of_epoch(0, epoch),
-                HummockValue::Put(b"value1".to_vec()),
+                HummockValue::put_without_meta(b"value1".to_vec()),
             ),
             (
                 iterator_test_key_of_epoch(1, epoch),
-                HummockValue::Put(b"value2".to_vec()),
+                HummockValue::put_without_meta(b"value2".to_vec()),
             ),
             (
                 iterator_test_key_of_epoch(2, epoch),
-                HummockValue::Put(b"value3".to_vec()),
+                HummockValue::put_without_meta(b"value3".to_vec()),
             ),
         ];
         let shared_buffer_batch =

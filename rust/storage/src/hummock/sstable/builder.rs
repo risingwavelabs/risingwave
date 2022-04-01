@@ -219,7 +219,10 @@ pub(super) mod tests {
         let mut b = SSTableBuilder::new(default_builder_opt_for_test());
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::Put(&test_value_of(i)));
+            b.add(
+                &test_key_of(i),
+                HummockValue::put_without_meta(&test_value_of(i)),
+            );
         }
 
         let (_, meta) = b.finish();

@@ -392,7 +392,7 @@ mod tests {
     fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, HummockValue<Bytes>)> {
         vec![(
             iterator_test_key_of_epoch(0, epoch).into(),
-            HummockValue::Put(b"value1".to_vec()).into(),
+            HummockValue::put_without_meta(b"value1".to_vec()).into(),
         )]
     }
 

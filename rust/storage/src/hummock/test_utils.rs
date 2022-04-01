@@ -128,7 +128,12 @@ pub async fn gen_default_test_sstable(
     gen_test_sstable(
         opts,
         sst_id,
-        (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::Put(test_value_of(i)))),
+        (0..TEST_KEYS_COUNT).map(|i| {
+            (
+                test_key_of(i),
+                HummockValue::put_without_meta(test_value_of(i)),
+            )
+        }),
         sstable_store,
     )
     .await
