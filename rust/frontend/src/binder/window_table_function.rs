@@ -5,7 +5,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, BoundBaseTable, Result};
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{ExprImpl, InputRef, Expr as _};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {
@@ -76,7 +76,7 @@ impl Binder {
             .into());
         };
 
-        let time_col_data_type = time_col.data_type();
+        let time_col_data_type = time_col.return_type();
 
         self.pop_context();
 
