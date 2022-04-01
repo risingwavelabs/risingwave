@@ -179,13 +179,13 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
         let mut build_matched = None;
         let mut remaining_build_row_id = None;
         let mut probe_matched_list = None;
-        if build_table.params.join_type().need_build_flag() {
+        if build_table.params.join_type().need_build() {
             build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
                 build_table.build_data.iter().map(|c| c.cardinality()),
             )?);
             remaining_build_row_id = Some(RowId::default());
         }
-        if build_table.params.join_type().need_probe_flag()
+        if build_table.params.join_type().need_probe()
             && build_table.params.has_non_equi_cond()
         {
             probe_matched_list = Some(LinkedList::new());
@@ -236,7 +236,7 @@ impl<K: HashKey> ProbeTable<K> {
         let probe_data_chunk = probe_data_chunk.compact()?;
         ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
-        if self.params.join_type().need_probe_flag() && self.params.has_non_equi_cond() {
+        if self.params.join_type().need_probe() && self.params.has_non_equi_cond() {
             if let Some(list) = self.probe_matched_list.as_mut() {
                 list.push_back(vec![
                     ProbeMatchInfo {
