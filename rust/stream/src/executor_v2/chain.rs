@@ -79,7 +79,7 @@ impl ChainExecutor {
     async fn execute_inner(self) {
         let mut upstream = self.upstream.execute();
 
-        // 1. Consume the upstream to get the first barrier.
+        // 1. Poll the upstream to get the first barrier.
         //
         let first_msg = upstream.next().await.unwrap()?;
         let barrier = first_msg

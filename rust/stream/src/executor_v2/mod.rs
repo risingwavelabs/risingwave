@@ -22,6 +22,7 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
+#[path = "rearranged_chain.rs"]
 mod chain;
 mod filter;
 mod simple;
