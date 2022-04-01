@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+#![allow(rustdoc::private_intra_doc_links)]
 #![warn(clippy::dbg_macro)]
 #![warn(clippy::disallowed_methods)]
 #![warn(clippy::doc_markdown)]

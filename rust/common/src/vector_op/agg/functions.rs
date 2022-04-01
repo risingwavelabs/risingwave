@@ -17,7 +17,7 @@ use crate::error::{ErrorCode, Result};
 
 /// Essentially `RTFn` is an alias of the specific Fn. It was aliased not to
 /// shorten the `where` clause of `GeneralAgg`, but to workaround an compiler
-/// error[E0582]: binding for associated type `Output` references lifetime `'a`,
+/// error`[E0582`]: binding for associated type `Output` references lifetime `'a`,
 /// which does not appear in the trait input types.
 pub trait RTFn<'a, T, R>: Send + 'static
 where
