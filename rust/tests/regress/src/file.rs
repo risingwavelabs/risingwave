@@ -46,7 +46,7 @@ impl FileManager {
         Ok(())
     }
 
-    /// Try to find the input file of [`test_name`].
+    /// Try to find the input file of `test_name`.
     pub(crate) fn source_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         let mut path = self
             .opts
@@ -71,7 +71,7 @@ impl FileManager {
         bail!("Can't find source of test case: {}", test_name)
     }
 
-    /// Try to find the output file of [`test_name`].
+    /// Try to find the output file of `test_name`.
     pub(crate) fn output_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         Ok(self
             .opts
@@ -80,7 +80,7 @@ impl FileManager {
             .join(format!("{}.out", test_name)))
     }
 
-    /// Try to find the expected output file of [`test_name`].
+    /// Try to find the expected output file of `test_name`.
     pub(crate) fn expected_output_of(&self, test_name: &str) -> anyhow::Result<PathBuf> {
         let mut path = self
             .opts
@@ -105,18 +105,18 @@ impl FileManager {
         bail!("Can't find expected output of test case: {}", test_name)
     }
 
-    /// Convert source files in input dir, use [`replace_placeholder`].
+    /// Convert source files in input dir, use [`Self::replace_placeholder`].
     pub(crate) fn convert_source_files(&self) -> anyhow::Result<()> {
         self.convert_source_files_internal("input", "sql", "sql")?;
         self.convert_source_files_internal("output", "expected", "out")?;
         Ok(())
     }
 
-    /// Converts files ends with ".source" suffix in [`input_subdir`] and output them to
-    /// [`dest_subdir`] with filename ends with [`suffix`]
+    /// Converts files ends with ".source" suffix in `input_subdir` and output them to
+    /// `dest_subdir` with filename ends with `suffix`
     ///
-    /// The [`input_subdir`] is relative to [`Opts::input_dir`], and [`output_subdir`] is relative
-    /// to [`Opts::output_dir`].
+    /// The `input_subdir` is relative to [`crate::Opts::input_dir`], and `output_subdir` is
+    /// relative to [`crate::Opts::output_dir`].
     fn convert_source_files_internal(
         &self,
         input_subdir: &str,
@@ -149,8 +149,8 @@ impl FileManager {
         Ok(())
     }
 
-    /// Replace predefined placeholders in [`input`] with correct values and output them to
-    /// [`output`].
+    /// Replace predefined placeholders in `input` with correct values and output them to
+    /// `output`.
     ///
     /// ## Placeholders
     /// * `@abs_srcdir@`: Absolute path of input directory.
@@ -199,12 +199,12 @@ impl FileManager {
     }
 }
 
-/// Check [`dir`] not exists or is empty.
+/// Check `dir` not exists or is empty.
 ///
 /// # Return
 ///
-/// * If [`dir`] doesn't exist, create it and all its parents.
-/// * If [`dir`] exits, return error if not empty.
+/// * If `dir` doesn't exist, create it and all its parents.
+/// * If `dir` exits, return error if not empty.
 fn ensure_dir<P: AsRef<Path>>(dir: P) -> anyhow::Result<()> {
     let dir = dir.as_ref();
     if !dir.exists() {

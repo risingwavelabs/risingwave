@@ -217,11 +217,11 @@ where
     }
 
     /// Build stream actor inside, two works will be done:
-    /// 1. replace node's input with [`MergeNode`] if it is [`ExchangeNode`], and swallow
+    /// 1. replace node's input with [`MergeNode`] if it is `ExchangeNode`, and swallow
     /// mergeNode's input.
-    /// 2. ignore root node when it's [`ExchangeNode`].
-    /// 3. replace node's [`ExchangeNode`] input with [`MergeNode`] and resolve its upstream actor
-    /// ids if it is a [`ChainNode`].
+    /// 2. ignore root node when it's `ExchangeNode`.
+    /// 3. replace node's `ExchangeNode` input with [`MergeNode`] and resolve its upstream actor
+    /// ids if it is a `ChainNode`.
     pub fn build_inner(
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,

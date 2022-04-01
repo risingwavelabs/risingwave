@@ -123,15 +123,15 @@ impl ScheduledBarriers {
     }
 }
 
-/// [`GlobalBarrierManager`] sends barriers to all registered compute nodes and collect them, with
-/// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
-/// requests and dispatch them to source actors.
+/// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
+/// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
+/// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`GlobalBarrierManager`] provides a set of interfaces like a state machine, accepting
-/// [`Command`] that carries info to build [`Mutation`]. To keep the consistency between barrier
-/// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
-/// done in barrier manager transactional using [`Command`].
+/// [`crate::barrier::GlobalBarrierManager`] provides a set of interfaces like a state machine,
+/// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
+/// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
+/// must be done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
@@ -158,7 +158,7 @@ where
 {
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-    /// Create a new [`GlobalBarrierManager`].
+    /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
