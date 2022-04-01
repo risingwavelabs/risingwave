@@ -290,7 +290,7 @@ impl Binder {
                     .or_default()
                     .push(self.context.columns.len() - 1);
             });
-        if let Some(_) = alias_iter.next() {
+        if alias_iter.next().is_some() {
             return Err(ErrorCode::BindError(format!(
                 "table \"{table_name}\" has less columns available but more aliases specified",
             ))
