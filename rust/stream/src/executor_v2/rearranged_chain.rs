@@ -156,30 +156,25 @@ impl RearrangedChainExecutor {
                     match msg {
                         // If we polled a chunk, simply put it to the `upstream_tx`.
                         Message::Chunk(chunk) => {
-                            info!("polled chunk");
-
                             upstream_tx
                                 .unbounded_send(RearrangedMessage::Chunk(chunk))
-                                .unwrap();
+                                .expect("failed to put chunk");
                         }
 
                         // If we polled a barrier, rearrange it to `rearranged_barrier_tx` and leave
                         // a phantom barrier in-place.
                         Message::Barrier(barrier) => {
-                            info!("polled barrier, rearrange");
-
                             upstream_tx
                                 .unbounded_send(RearrangedMessage::PhantomBarrier(barrier.epoch))
-                                .unwrap();
+                                .expect("failed to put phantom barrier");
                             rearranged_barrier_tx
                                 .unbounded_send(RearrangedMessage::RearrangedBarrier(barrier))
-                                .unwrap();
+                                .expect("failed to rearrange barrier");
                         }
                     };
 
                     // Check that whether we should stop.
                     if stop_rearrange_rx.try_recv().unwrap().is_some() {
-                        info!("rearrange stop");
                         break;
                     }
                 }
@@ -212,8 +207,6 @@ impl RearrangedChainExecutor {
             // 6. Consume the merged `rearranged` stream.
             #[for_await]
             for rearranged_msg in rearranged {
-                info!("recv rearranged: {:?}", rearranged_msg);
-
                 match rearranged_msg? {
                     // If we received a phantom barrier, check whether we catches up with the
                     // progress of upstream MV.
@@ -227,8 +220,6 @@ impl RearrangedChainExecutor {
                                 stop_tx.send(()).unwrap();
                                 // Notify about the finish.
                                 create_notifier.notify(create_epoch.curr);
-
-                                info!("notified");
                             }
                         }
                     }
@@ -242,15 +233,21 @@ impl RearrangedChainExecutor {
                 }
             }
 
+            // The rearrangement must have finished because we told it to stop.
+            if rearrange_finish_tx.is_some() {
+                // Log the error. It will panic on the joining below.
+                tracing::error!(actor = self.actor_id, "rearrangement finished passively",);
+            }
+
             // 7. Rearranged stream finished. Now we take back the remaining upstream.
             let remaining_upstream = upstream_poll_handle
                 .await
-                .unwrap()
+                .expect("failed to join the rearrangment task")
                 .expect("rearranging failed");
 
-            info!("begin to consume remaining upstream");
-
             // 8. Begin to consume remaining upstream.
+            tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream",);
+
             #[for_await]
             for msg in remaining_upstream {
                 let msg = msg?;
