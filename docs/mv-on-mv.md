@@ -34,7 +34,7 @@ The full process of creation is:
 1. The frontend parses the query and sends the plan to StreamManager.
 2. StreamManager creates the new actors.
 3. StreamManager chooses a change epoch e1, pins a snapshot of mv1 at e1, and sends a barrier with e1 and change info.
-4. The broadcast operator receives the barrier, then creates a SnapshotStream of mv1 with e1, and creates a Chain operator, then connect all. (only changes in the memory).
+4. The broadcast operator receives the barrier, then creates a SnapshotStream of mv1 with e1, and creates a Chain operator, then connects them all. (only changes in the memory).
 5. The broadcast operator sends a normal barrier e1 to all downstreams, and continue.
 6. The chain operator consumes all messages from snapshot and receives EOF, then consumes buffered messages from upstream.
 7. StreamManager discovered that mv2 has almost the same epoch as mv1, and the creation success.
