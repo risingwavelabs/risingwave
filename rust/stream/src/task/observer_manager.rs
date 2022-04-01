@@ -54,7 +54,7 @@ impl ObserverManager {
     }
 
     pub fn handle_notification(&mut self, _resp: SubscribeResponse) {
-        // TODO: handle more notifications
+        todo!("handle more notifications");
     }
 
     pub async fn start(mut self) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
