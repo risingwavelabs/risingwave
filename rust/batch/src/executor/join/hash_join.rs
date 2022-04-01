@@ -72,8 +72,8 @@ enum HashJoinState<K> {
     Build(BuildTable),
     /// First state after finishing build state.
     ///
-    /// It's different from [`Probe`] in that we need to [`crate::executor::Executor::open`] probe
-    /// side input.
+    /// It's different from [`HashJoinState::Probe`] in that we need to
+    /// [`crate::executor::Executor::open`] probe side input.
     FirstProbe(ProbeTable<K>),
     /// State for executing join.
     ///
