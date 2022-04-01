@@ -15,7 +15,6 @@
 use std::fmt;
 
 use async_trait::async_trait;
-use futures::channel::mpsc::Receiver;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 pub use risingwave_common::catalog::Schema;
@@ -26,7 +25,6 @@ use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use super::{ChainExecutor, Executor, ExecutorInfo, FilterExecutor};
-use crate::executor_v2::merge::MergeExecutor;
 use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
@@ -155,17 +153,5 @@ impl ChainExecutor {
             actor_id,
             info,
         )
-    }
-}
-
-impl MergeExecutor {
-    pub fn new_from_v1(
-        schema: Schema,
-        pk_indices: PkIndices,
-        actor_id: u32,
-        inputs: Vec<Receiver<Message>>,
-        _op_info: String,
-    ) -> Self {
-        Self::new(schema, pk_indices, actor_id, inputs)
     }
 }

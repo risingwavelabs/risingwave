@@ -107,6 +107,7 @@ impl MergeExecutor {
     async fn execute_inner(mut self) {
         loop {
             // Convert channel receivers to futures here to do `select_all`
+            // TODO: Get rid of future array and rewirte it as more async stream-based.
             let mut futures = vec![];
             for ch in self.active.drain(..) {
                 futures.push(ch.into_future());

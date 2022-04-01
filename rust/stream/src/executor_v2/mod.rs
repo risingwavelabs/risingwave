@@ -24,9 +24,9 @@ pub use super::executor::{
 
 mod chain;
 mod filter;
+mod merge;
 #[allow(dead_code)]
 mod rearranged_chain;
-mod merge;
 mod simple;
 #[cfg(test)]
 mod test_utils;

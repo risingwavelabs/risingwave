@@ -649,12 +649,11 @@ impl LocalStreamManagerCore {
             )))
         } else {
             Ok(Box::new(
-                Box::new(MergeExecutorV2::new_from_v1(
+                Box::new(MergeExecutorV2::new(
                     schema,
                     params.pk_indices,
                     params.actor_id,
                     rxs,
-                    params.op_info,
                 ))
                 .v1(),
             ))
