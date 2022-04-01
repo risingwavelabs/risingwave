@@ -173,7 +173,7 @@ impl RearrangedChainExecutor {
             let mut last_rearranged_epoch = create_epoch;
             // When we stop the rearrangement task, we should also tell the barrier manager that
             // we've finish the creation.
-            let mut rearrange_finish_tx = Some((stop_rearrange_tx, self.notifier));
+            let mut stop_rearrange_tx = Some(stop_rearrange_tx);
 
             // 6. Consume the merged `rearranged` stream.
             #[for_await]
@@ -186,13 +186,11 @@ impl RearrangedChainExecutor {
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(epoch) => {
                         if epoch.curr >= last_rearranged_epoch.curr {
-                            if let Some((stop_tx, create_notifier)) = rearrange_finish_tx.take() {
+                            if let Some(stop_tx) = stop_rearrange_tx.take() {
                                 // Stop the background rearrangement task.
                                 stop_tx.send(()).map_err(|_| {
                                     StreamExecutorError::channel_closed("stop_rearrange")
                                 })?;
-                                // Notify about the finish.
-                                create_notifier.notify(create_epoch.curr);
                             }
                         }
                     }
@@ -207,13 +205,15 @@ impl RearrangedChainExecutor {
             }
 
             // The rearrangement must have finished because we told it to stop.
-            if rearrange_finish_tx.is_some() {
-                // Log the error. It will panic on the joining below.
+            if stop_rearrange_tx.is_some() {
+                // Log the error. We will throw the error on the joining below.
                 tracing::error!(actor = self.actor_id, "rearrangement finished passively");
             }
 
             // 7. Rearranged stream finished. Now we take back the remaining upstream.
             let remaining_upstream = upstream_poll_handle.await.unwrap()?;
+            // Then notify about the finish.
+            self.notifier.notify(create_epoch.curr);
 
             // 8. Begin to consume remaining upstream.
             tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
