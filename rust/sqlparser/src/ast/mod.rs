@@ -642,6 +642,28 @@ impl fmt::Display for ShowCreateObject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCommandObject {
+    Table,
+    Database,
+    Schema,
+    View,
+    Column(ObjectName),
+}
+
+impl fmt::Display for ShowCommandObject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ShowCommandObject::Database => f.write_str("DATABASES"),
+            ShowCommandObject::Schema => f.write_str("SCHEMAS"),
+            ShowCommandObject::View => f.write_str("VIEWS"),
+            ShowCommandObject::Table => f.write_str("TABLES"),
+            ShowCommandObject::Column(names) => write!(f, "COLUMNS FROM {}", names),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -742,16 +764,13 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
-    /// SHOW TABLE
-    ShowTable {
-        /// Table name
-        name: ObjectName,
-    },
     /// SHOW SOURCE
     ShowSource {
         /// Table name
         name: ObjectName,
     },
+    /// SHOW COMMAND
+    ShowCommand(ShowCommandObject),
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -886,12 +905,12 @@ impl fmt::Display for Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::ShowTable { name } => {
-                write!(f, "SHOW TABLE {}", name)?;
-                Ok(())
-            }
             Statement::ShowSource { name } => {
                 write!(f, "SHOW SOURCE {}", name)?;
+                Ok(())
+            }
+            Statement::ShowCommand(show_object) => {
+                write!(f, "SHOW {}", show_object)?;
                 Ok(())
             }
             Statement::Insert {

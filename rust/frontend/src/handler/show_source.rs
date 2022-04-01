@@ -42,16 +42,7 @@ pub async fn handle_show_source(
         .collect_vec();
 
     // Convert all column_descs to rows
-    let mut rows = vec![];
-    for col in columns {
-        rows.append(
-            &mut col
-                .get_column_descs()
-                .into_iter()
-                .map(col_desc_to_row)
-                .collect_vec(),
-        );
-    }
+    let rows = col_descs_to_rows(columns);
 
     Ok(PgResponse::new(
         StatementType::SHOW_SOURCE,
@@ -65,16 +56,28 @@ pub async fn handle_show_source(
 }
 
 /// Convert column desc to row which conclude column name and column datatype
-fn col_desc_to_row(col: ColumnDesc) -> Row {
-    let type_name = {
-        // if datatype is struct, use type name as struct name
-        if let DataType::Struct { fields: _f } = col.data_type {
-            col.type_name.clone()
-        } else {
-            format!("{:?}", &col.data_type)
-        }
-    };
-    Row::new(vec![Some(col.name), Some(type_name)])
+pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
+    let mut rows = vec![];
+    for col in columns {
+        rows.append(
+            &mut col
+                .get_column_descs()
+                .into_iter()
+                .map(|c| {
+                    let type_name = {
+                        // if datatype is struct, use type name as struct name
+                        if let DataType::Struct { fields: _f } = c.data_type {
+                            c.type_name.clone()
+                        } else {
+                            format!("{:?}", &c.data_type)
+                        }
+                    };
+                    Row::new(vec![Some(c.name), Some(type_name)])
+                })
+                .collect_vec(),
+        );
+    }
+    rows
 }
 
 #[cfg(test)]

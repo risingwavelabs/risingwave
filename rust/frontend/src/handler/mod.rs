@@ -30,6 +30,7 @@ mod flush;
 #[allow(dead_code)]
 mod query;
 mod query_single;
+mod show_command;
 mod show_source;
 pub mod util;
 
@@ -44,8 +45,12 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             create_table::handle_create_table(context, name, columns).await
         }
         // Since table and source both have source info, use show_source handler can get column info
-        Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
+        // Statement::DescribeTable { name } => show_source::handle_show_source(context,
+        // name).await,
         Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
+        Statement::ShowCommand(show_object) => {
+            show_command::handle_show_command(context, show_object).await
+        }
         Statement::Drop(DropStatement {
             object_type: ObjectType::Table,
             name,

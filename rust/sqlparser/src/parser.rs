@@ -170,6 +170,7 @@ impl Parser {
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
                 Keyword::SHOW => Ok(self.parse_show()?),
+                Keyword::DESCRIBE => Ok(self.parse_show()?),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -2485,10 +2486,29 @@ impl Parser {
         let index = self.index;
         if let Token::Word(w) = self.next_token() {
             match w.keyword {
+                Keyword::TABLES => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Table));
+                }
+                Keyword::DATABASES => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Database));
+                }
+                Keyword::SCHEMAS => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Schema));
+                }
+                Keyword::MATERIALIZED => {
+                    if self.parse_keyword(Keyword::VIEWS) {
+                        return Ok(Statement::ShowCommand(ShowCommandObject::View));
+                    } else {
+                        return self.expected("views after materialized", self.peek_token());
+                    }
+                }
+                Keyword::VIEWS => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::View));
+                }
                 Keyword::TABLE => {
-                    return Ok(Statement::ShowTable {
-                        name: self.parse_object_name()?,
-                    });
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Column(
+                        self.parse_object_name()?,
+                    )));
                 }
                 Keyword::SOURCE => {
                     return Ok(Statement::ShowSource {
