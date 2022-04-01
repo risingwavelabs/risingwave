@@ -103,8 +103,8 @@ impl ChainExecutor {
         // The first barrier message should be propagated.
         yield first_msg;
 
-        // 2. Consume the snapshot if needed. Note that the snapshot is alreay projected, so there's
-        // no mapping required.
+        // 2. Consume the snapshot if needed. Note that the snapshot is already projected, so
+        // there's no mapping required.
         //
         if to_consume_snapshot {
             // Init the snapshot with reading epoch.

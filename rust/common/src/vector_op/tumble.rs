@@ -44,7 +44,7 @@ pub fn tumble_start_date_time(
     let diff = time.0.timestamp();
     if window.get_months() != 0 {
         return Err(RwError::from(InternalError(
-            "unimplemented: tumble_start only support days or miliseconds".to_string(),
+            "unimplemented: tumble_start only support days or milliseconds".to_string(),
         )));
     }
     let window = window.get_days() as i64 * 24 * 60 * 60 + window.get_ms() / 1000;

@@ -32,7 +32,7 @@ pub struct BatchHashJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
 
-    /// The join condition must be equivalent to `logical.on`, but seperated into equal and
+    /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
 }

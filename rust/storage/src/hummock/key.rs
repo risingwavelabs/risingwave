@@ -49,7 +49,7 @@ pub fn split_key_epoch(full_key: &[u8]) -> (&[u8], &[u8]) {
     let pos = full_key
         .len()
         .checked_sub(EPOCH_LEN)
-        .unwrap_or_else(|| panic!("bad full key foramt: {:?}", full_key));
+        .unwrap_or_else(|| panic!("bad full key format: {:?}", full_key));
     full_key.split_at(pos)
 }
 

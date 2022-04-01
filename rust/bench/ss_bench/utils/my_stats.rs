@@ -103,7 +103,7 @@ impl MyHistogram {
         for (&upper_bound, &count) in self.upper_bound_list.iter().zip_eq(self.count_list.iter()) {
             if count >= threshold {
                 // assume scale linearly within this bucket,
-                // return a value bwtween last_upper_bound and upper_bound
+                // return a value between last_upper_bound and upper_bound
                 let right_left_diff = upper_bound - last_upper_bound;
                 return last_upper_bound
                     + right_left_diff * (threshold - last_count) as f64

@@ -177,7 +177,7 @@ impl BlockIterator {
         KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
-    /// Searchs the restart point index that the given `key` belongs to.
+    /// Searches the restart point index that the given `key` belongs to.
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block

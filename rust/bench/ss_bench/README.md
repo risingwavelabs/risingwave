@@ -47,12 +47,12 @@ We use a mock meta-service for ss_becnh, and it may not be fully functional.
 
 - `TiKV`
   
-  - Foramt: `tikv://pd_address:port`
+  - Format: `tikv://pd_address:port`
   - Example: `tikv://127.0.0.1:2379`
 
 - `RocksDB`
   
-  - Foramt: TBD
+  - Format: TBD
 
 ### Hummock Configurations
 
