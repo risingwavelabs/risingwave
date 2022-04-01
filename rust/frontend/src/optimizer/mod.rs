@@ -25,17 +25,18 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
-use self::plan_node::LogicalProject;
+use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
 use crate::expr::InputRef;
 
-/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with [`LogicalNode`]
+/// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
 /// and required distribution and order. And `PlanRoot` can generate corresponding streaming or
-/// batch Plan with optimization. the required Order and Distribution columns might be more than the
+/// batch plan with optimization. the required Order and Distribution columns might be more than the
 /// output columns. for example:
-/// ```SQL
+/// ```sql
 ///    select v1 from t order by id;
 /// ```
 /// the plan will return two columns (id, v1), and the required order column is id. the id
@@ -43,7 +44,7 @@ use crate::expr::InputRef;
 /// column in the result.
 #[derive(Debug, Clone)]
 pub struct PlanRoot {
-    logical_plan: PlanRef,
+    plan: PlanRef,
     required_dist: Distribution,
     required_order: Order,
     out_fields: FixedBitSet,
@@ -67,7 +68,7 @@ impl PlanRoot {
                 .collect(),
         };
         Self {
-            logical_plan: plan,
+            plan,
             required_dist,
             required_order,
             out_fields,
@@ -94,7 +95,7 @@ impl PlanRoot {
     /// (`out_fields`).
     pub fn as_subplan(self) -> PlanRef {
         if self.out_fields.count_ones(..) == self.out_fields.len() {
-            return self.logical_plan;
+            return self.plan;
         }
         let (exprs, expr_aliases) = self
             .out_fields
@@ -107,12 +108,12 @@ impl PlanRoot {
                 )
             })
             .unzip();
-        LogicalProject::create(self.logical_plan, exprs, expr_aliases)
+        LogicalProject::create(self.plan, exprs, expr_aliases)
     }
 
     /// Apply logical optimization to the plan.
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
-        let mut plan = self.logical_plan.clone();
+        let mut plan = self.plan.clone();
 
         // Predicate Push-down
         plan = {
@@ -169,22 +170,43 @@ impl PlanRoot {
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self) -> PlanRef {
-        let mut plan = self.gen_optimized_logical_plan();
-        plan = {
-            let (plan, mut out_col_change) = plan.logical_rewrite_for_stream();
-            self.required_dist = out_col_change.rewrite_distribution(self.required_dist.clone());
-            self.required_order = out_col_change.rewrite_order(self.required_order.clone());
-            self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
-            self.schema = plan.schema().clone();
-            plan
+    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+        let stream_plan = match self.plan.convention() {
+            Convention::Logical => {
+                let plan = self.gen_optimized_logical_plan();
+                let (plan, out_col_change) = plan.logical_rewrite_for_stream();
+                self.required_dist = out_col_change
+                    .rewrite_required_distribution(&self.required_dist)
+                    .unwrap();
+                self.required_order = out_col_change
+                    .rewrite_required_order(&self.required_order)
+                    .unwrap();
+                self.out_fields = out_col_change.rewrite_bitset(&self.out_fields);
+                self.schema = plan.schema().clone();
+                plan.to_stream_with_dist_required(&self.required_dist)
+            }
+            Convention::Stream => self
+                .required_dist
+                .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
+            _ => panic!(),
         };
         // Ignore the required_dist and required_order, as they are provided by user now.
         // TODO: need more thinking and refactor.
 
         // Convert to physical plan node, using distribution of the input node
         // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
-        plan.to_stream_with_dist_required(plan.distribution())
+
+        StreamMaterialize::create(
+            stream_plan,
+            mv_name,
+            self.required_order.clone(),
+            self.out_fields.clone(),
+        )
+    }
+
+    /// Set the plan root's required dist.
+    pub fn set_required_dist(&mut self, required_dist: Distribution) {
+        self.required_dist = required_dist;
     }
 }
 
@@ -196,11 +218,11 @@ mod tests {
 
     use super::*;
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     async fn test_as_subplan() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let values = LogicalValues::new(
             vec![],
             Schema::new(vec![

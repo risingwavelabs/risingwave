@@ -26,8 +26,8 @@ use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
 
 use crate::binder::expr::bind_data_type;
-use crate::handler::create_table::ROWID_NAME;
-use crate::session::QueryContext;
+use crate::catalog::gen_row_id_column_name;
+use crate::session::OptimizerContext;
 
 fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
@@ -43,7 +43,7 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCa
 }
 
 pub(super) async fn handle_create_source(
-    context: QueryContext,
+    context: OptimizerContext,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
@@ -55,7 +55,7 @@ pub(super) async fn handle_create_source(
     let mut column_catalogs = vec![ColumnCatalog {
         column_desc: Some(ColumnDesc {
             column_id: 0,
-            name: ROWID_NAME.to_string(),
+            name: gen_row_id_column_name(0),
             column_type: Some(DataType::Int32.to_protobuf()),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -131,7 +131,7 @@ pub(super) async fn handle_create_source(
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
@@ -142,11 +142,12 @@ mod tests {
 
     use super::*;
     use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
     /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
-    fn create_proto_file() -> NamedTempFile {
+    pub fn create_proto_file() -> NamedTempFile {
         static PROTO_FILE_DATA: &str = r#"
     syntax = "proto3";
     package test;
@@ -220,8 +221,9 @@ mod tests {
             let city_type = DataType::Struct {
                 fields: vec![DataType::Varchar, DataType::Varchar].into(),
             };
+            let row_id_col_name = gen_row_id_column_name(0);
             let expected_columns = maplit::hashmap! {
-                ROWID_NAME => DataType::Int32,
+                row_id_col_name.as_str() => DataType::Int32,
                 "id" => DataType::Int32,
                 "country.zipcode" => DataType::Varchar,
                 "zipcode" => DataType::Int64,

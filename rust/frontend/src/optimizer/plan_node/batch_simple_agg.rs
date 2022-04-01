@@ -14,11 +14,12 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
+use risingwave_pb::plan::plan_node::NodeBody;
+use risingwave_pb::plan::SortAggNode;
 
 use super::logical_agg::PlanAggCall;
 use super::{LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
-use crate::optimizer::property::{Distribution, Order, WithSchema};
+use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone)]
 pub struct BatchSimpleAgg {
@@ -29,12 +30,14 @@ pub struct BatchSimpleAgg {
 impl BatchSimpleAgg {
     pub fn new(logical: LogicalAgg) -> Self {
         let ctx = logical.base.ctx.clone();
-        let base = PlanBase::new_batch(
-            ctx,
-            logical.schema().clone(),
-            Distribution::any().clone(),
-            Order::any().clone(),
-        );
+        let input = logical.input();
+        let input_dist = input.distribution();
+        let dist = match input_dist {
+            Distribution::Any => Distribution::Any,
+            Distribution::Single => Distribution::Single,
+            _ => panic!(),
+        };
+        let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchSimpleAgg { base, logical }
     }
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -61,12 +64,6 @@ impl PlanTreeNodeUnary for BatchSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { BatchSimpleAgg }
 
-impl WithSchema for BatchSimpleAgg {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
-
 impl ToDistributedBatch for BatchSimpleAgg {
     fn to_distributed(&self) -> PlanRef {
         let new_input = self
@@ -76,4 +73,16 @@ impl ToDistributedBatch for BatchSimpleAgg {
     }
 }
 
-impl ToBatchProst for BatchSimpleAgg {}
+impl ToBatchProst for BatchSimpleAgg {
+    fn to_batch_prost_body(&self) -> NodeBody {
+        NodeBody::SortAgg(SortAggNode {
+            agg_calls: self
+                .agg_calls()
+                .iter()
+                .map(PlanAggCall::to_protobuf)
+                .collect(),
+            // We treat simple agg as a special sort agg without group keys.
+            group_keys: vec![],
+        })
+    }
+}

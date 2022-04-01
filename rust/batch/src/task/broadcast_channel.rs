@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
@@ -19,7 +21,7 @@ use risingwave_pb::plan::exchange_info::BroadcastInfo;
 use risingwave_pb::plan::*;
 use tokio::sync::mpsc;
 
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
+use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 
 /// `BroadcastSender` sends the same chunk to a number of `BroadcastReceiver`s.
 pub struct BroadcastSender {
@@ -27,14 +29,16 @@ pub struct BroadcastSender {
     broadcast_info: BroadcastInfo,
 }
 
-#[async_trait::async_trait]
 impl ChanSender for BroadcastSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
-        self.senders.iter().try_for_each(|sender| {
-            sender
-                .send(chunk.clone())
-                .to_rw_result_with("BroadcastSender::send")
-        })
+    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
+        async move {
+            self.senders.iter().try_for_each(|sender| {
+                sender
+                    .send(chunk.clone())
+                    .to_rw_result_with(|| "BroadcastSender::send".into())
+            })
+        }
     }
 }
 
@@ -43,18 +47,20 @@ pub struct BroadcastReceiver {
     receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
 }
 
-#[async_trait::async_trait]
 impl ChanReceiver for BroadcastReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunk>> {
-        match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
-            // Early close should be treated as an error.
-            None => Err(InternalError("broken broadcast_channel".to_string()).into()),
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            match self.receiver.recv().await {
+                Some(data_chunk) => Ok(data_chunk),
+                // Early close should be treated as an error.
+                None => Err(InternalError("broken broadcast_channel".to_string()).into()),
+            }
         }
     }
 }
 
-pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxChanReceiver>) {
+pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
     let broadcast_info = match shuffle.distribution {
         Some(exchange_info::Distribution::BroadcastInfo(ref v)) => v.clone(),
         _ => exchange_info::BroadcastInfo::default(),
@@ -68,13 +74,13 @@ pub fn new_broadcast_channel(shuffle: &ExchangeInfo) -> (BoxChanSender, Vec<BoxC
         senders.push(s);
         receivers.push(r);
     }
-    let channel_sender = Box::new(BroadcastSender {
+    let channel_sender = ChanSenderImpl::Broadcast(BroadcastSender {
         senders,
         broadcast_info,
-    }) as BoxChanSender;
+    });
     let channel_receivers = receivers
         .into_iter()
-        .map(|receiver| Box::new(BroadcastReceiver { receiver }) as BoxChanReceiver)
+        .map(|receiver| ChanReceiverImpl::Broadcast(BroadcastReceiver { receiver }))
         .collect::<Vec<_>>();
     (channel_sender, channel_receivers)
 }

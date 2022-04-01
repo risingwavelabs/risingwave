@@ -73,7 +73,7 @@ impl InsertExecutor {
 impl Executor for InsertExecutor {
     async fn open(&mut self) -> Result<()> {
         self.child.open().await?;
-        info!("Insert executor");
+        trace!("Insert executor");
         Ok(())
     }
 
@@ -147,7 +147,7 @@ impl Executor for InsertExecutor {
 
     async fn close(&mut self) -> Result<()> {
         self.child.close().await?;
-        info!("Cleaning insert executor.");
+        trace!("Cleaning insert executor.");
         Ok(())
     }
 

@@ -230,6 +230,9 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
             arithmetic_type_derive(t1, t2),
         );
     }
+    for t in num_types.clone() {
+        map.insert(FuncSign::new_unary(E::Neg, t), t);
+    }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
     build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
     build_binary_funcs(
@@ -239,6 +242,25 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Boolean],
         T::Boolean,
     );
+
+    // Date comparisons
+    build_binary_funcs(
+        &mut map,
+        &cmp_exprs,
+        &[T::Date, T::Timestamp],
+        &[T::Date, T::Timestamp],
+        T::Boolean,
+    );
+    // Date minus and plus
+    map.insert(
+        FuncSign::new_binary(E::Add, T::Date, T::Interval),
+        T::Timestamp,
+    );
+    map.insert(
+        FuncSign::new_binary(E::Subtract, T::Date, T::Interval),
+        T::Timestamp,
+    );
+
     build_binary_funcs(
         &mut map,
         &[E::And, E::Or],
@@ -289,6 +311,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &str_types,
         &str_types,
         T::Varchar,
+    );
+    build_binary_funcs(
+        &mut map,
+        &[E::RoundDigit],
+        &[T::Decimal],
+        &[T::Int32],
+        T::Decimal,
     );
 
     map

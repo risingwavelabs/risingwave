@@ -14,13 +14,15 @@
 
 use std::collections::hash_map::Entry;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
-    JoinConstraint, JoinOperator, ObjectName, Query, TableFactor, TableWithJoins,
+    JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
 };
 
 use super::bind_context::ColumnBinding;
@@ -40,6 +42,7 @@ pub enum Relation {
 
 #[derive(Debug)]
 pub struct BoundJoin {
+    pub join_type: JoinType,
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
@@ -78,6 +81,7 @@ impl Binder {
         for t in from_iter {
             let right = self.bind_table_with_joins(t)?;
             root = Relation::Join(Box::new(BoundJoin {
+                join_type: JoinType::Inner,
                 left: root,
                 right,
                 cond: ExprImpl::literal_bool(true),
@@ -90,18 +94,22 @@ impl Binder {
         let mut root = self.bind_table_factor(table.relation)?;
         for join in table.joins {
             let right = self.bind_table_factor(join.relation)?;
-            match join.join_operator {
-                JoinOperator::Inner(constraint) => {
-                    let cond = self.bind_join_constraint(constraint)?;
-                    let join = BoundJoin {
-                        left: root,
-                        right,
-                        cond,
-                    };
-                    root = Relation::Join(Box::new(join));
-                }
-                _ => return Err(ErrorCode::NotImplementedError("Non inner-join".into()).into()),
-            }
+            let (constraint, join_type) = match join.join_operator {
+                JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
+                JoinOperator::LeftOuter(constraint) => (constraint, JoinType::LeftOuter),
+                JoinOperator::RightOuter(constraint) => (constraint, JoinType::RightOuter),
+                JoinOperator::FullOuter(constraint) => (constraint, JoinType::FullOuter),
+                // Cross join equals to inner join with with no constraint.
+                JoinOperator::CrossJoin => (JoinConstraint::None, JoinType::Inner),
+            };
+            let cond = self.bind_join_constraint(constraint)?;
+            let join = BoundJoin {
+                join_type,
+                left: root,
+                right,
+                cond,
+            };
+            root = Relation::Join(Box::new(join));
         }
 
         Ok(root)
@@ -132,16 +140,20 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, .. } => {
-                Ok(Relation::BaseTable(Box::new(self.bind_table(name)?)))
+            TableFactor::Table { name, alias, .. } => {
+                Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
             }
             TableFactor::Derived {
-                lateral, subquery, ..
+                lateral,
+                subquery,
+                alias,
             } => {
                 if lateral {
                     Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
                 } else {
-                    Ok(Relation::Subquery(Box::new(self.bind_subquery(*subquery)?)))
+                    Ok(Relation::Subquery(Box::new(
+                        self.bind_subquery_relation(*subquery, alias)?,
+                    )))
                 }
             }
             _ => Err(ErrorCode::NotImplementedError(format!(
@@ -168,7 +180,11 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    pub(super) fn bind_table(&mut self, name: ObjectName) -> Result<BoundBaseTable> {
+    pub(super) fn bind_table(
+        &mut self,
+        name: ObjectName,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
         let (schema_name, table_name) = Self::resolve_table_name(name)?;
         let table_catalog =
             self.catalog
@@ -178,13 +194,16 @@ impl Binder {
         let table_desc = table_catalog.table_desc();
         let columns = table_catalog.columns().to_vec();
 
-        let columns = columns
-            .into_iter()
-            .map(|c| c.column_desc)
-            .collect::<Vec<ColumnDesc>>();
         self.bind_context(
-            columns.iter().cloned().map(|c| (c.name, c.data_type)),
+            columns.iter().map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            }),
             table_name.clone(),
+            alias,
         )?;
 
         Ok(BoundBaseTable {
@@ -220,28 +239,47 @@ impl Binder {
     }
 
     /// Fill the [`BindContext`](super::BindContext) for table.
-    fn bind_context(
+    pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType)>,
+        columns: impl IntoIterator<Item = (String, DataType, bool)>,
         table_name: String,
+        alias: Option<TableAlias>,
     ) -> Result<()> {
+        let (table_name, column_aliases) = match alias {
+            None => (table_name, vec![]),
+            Some(TableAlias { name, columns }) => (name.value, columns),
+        };
+
         let begin = self.context.columns.len();
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type))| {
+            .zip_longest(column_aliases)
+            .try_for_each(|pair| {
+                // Column aliases can be less than columns, but not more.
+                let (index, (name, data_type, is_hidden)) = match pair {
+                    itertools::EitherOrBoth::Both((index, (_name, data_type, is_hidden)), alias) => (
+                        index, (alias.value, data_type, is_hidden)
+                    ),
+                    itertools::EitherOrBoth::Left(t) => t,
+                    itertools::EitherOrBoth::Right(_) => return Err(ErrorCode::BindError(format!(
+                        "table \"{table_name}\" has less columns available but more aliases specified",
+                    ))),
+                };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
                     begin + index,
                     data_type,
+                    is_hidden,
                 ));
                 self.context
                     .indexs_of
                     .entry(name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
-            });
+                Ok(())
+            })?;
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(
@@ -256,18 +294,25 @@ impl Binder {
         }
     }
 
-    /// Before binding a subquery, we push the current context to the stack and create a new
-    /// context.
+    /// Binds a subquery using [`bind_query`](Self::bind_query), which will use a new empty
+    /// [`BindContext`](super::BindContext) for it.
     ///
-    /// After finishing binding, we pop the previous context from the stack. And
-    /// update it with the output of the subquery.
-    pub(super) fn bind_subquery(&mut self, query: Query) -> Result<BoundSubquery> {
-        self.push_context();
+    /// After finishing binding, we update the current context with the output of the subquery.
+    pub(super) fn bind_subquery_relation(
+        &mut self,
+        query: Query,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
-        self.pop_context();
+        let sub_query_id = self.next_subquery_id();
         self.bind_context(
-            itertools::zip_eq(query.names().into_iter(), query.data_types().into_iter()),
-            UNNAMED_SUBQUERY.to_string(),
+            query
+                .names()
+                .into_iter()
+                .zip_eq(query.data_types().into_iter())
+                .map(|(x, y)| (x, y, false)),
+            format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
+            alias,
         )?;
         Ok(BoundSubquery { query })
     }

@@ -169,6 +169,9 @@ pub enum Expr {
     Identifier(Ident),
     /// Multi-part identifier, e.g. `table_alias.column` or `schema.table.col`
     CompoundIdentifier(Vec<Ident>),
+    /// Struct-field identifier, expr is a table or a column struct, ident is field.
+    /// e.g. `(table.v1).v2` or `(table).v1.v2`
+    FieldIdentifier(Box<Expr>, Vec<Ident>),
     /// `IS NULL` operator
     IsNull(Box<Expr>),
     /// `IS NOT NULL` operator
@@ -313,6 +316,7 @@ impl fmt::Display for Expr {
                 Ok(())
             }
             Expr::CompoundIdentifier(s) => write!(f, "{}", display_separated(s, ".")),
+            Expr::FieldIdentifier(ast, s) => write!(f, "{}.{}", ast, display_separated(s, ".")),
             Expr::IsNull(ast) => write!(f, "{} IS NULL", ast),
             Expr::IsNotNull(ast) => write!(f, "{} IS NOT NULL", ast),
             Expr::IsTrue(ast) => write!(f, "{} IS TRUE", ast),
@@ -544,7 +548,7 @@ pub struct WindowFrame {
 impl Default for WindowFrame {
     /// returns default value for window frame
     ///
-    /// see https://www.sqlite.org/windowfunctions.html#frame_specifications
+    /// see <https://www.sqlite.org/windowfunctions.html#frame_specifications>
     fn default() -> Self {
         Self {
             units: WindowFrameUnits::Range,
@@ -738,6 +742,16 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
+    /// SHOW TABLE
+    ShowTable {
+        /// Table name
+        name: ObjectName,
+    },
+    /// SHOW SOURCE
+    ShowSource {
+        /// Table name
+        name: ObjectName,
+    },
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -870,6 +884,14 @@ impl fmt::Display for Statement {
             }
             Statement::Analyze { table_name } => {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
+                Ok(())
+            }
+            Statement::ShowTable { name } => {
+                write!(f, "SHOW TABLE {}", name)?;
+                Ok(())
+            }
+            Statement::ShowSource { name } => {
+                write!(f, "SHOW SOURCE {}", name)?;
                 Ok(())
             }
             Statement::Insert {
@@ -1352,6 +1374,9 @@ impl fmt::Display for Assignment {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FunctionArgExpr {
     Expr(Expr),
+    /// expr is a table or a column struct, object_name is field.
+    /// e.g. `(table.v1).*` or `(table).v1.*`
+    ExprQualifiedWildcard(Expr, ObjectName),
     /// Qualified wildcard, e.g. `alias.*` or `schema.table.*`.
     QualifiedWildcard(ObjectName),
     /// An unqualified `*`
@@ -1362,6 +1387,9 @@ impl fmt::Display for FunctionArgExpr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             FunctionArgExpr::Expr(expr) => write!(f, "{}", expr),
+            FunctionArgExpr::ExprQualifiedWildcard(expr, prefix) => {
+                write!(f, "{}.{}.*", expr, prefix)
+            }
             FunctionArgExpr::QualifiedWildcard(prefix) => write!(f, "{}.*", prefix),
             FunctionArgExpr::Wildcard => f.write_str("*"),
         }
@@ -1416,6 +1444,7 @@ impl fmt::Display for Function {
 pub enum ObjectType {
     Table,
     View,
+    MaterializedView,
     Index,
     Schema,
 }
@@ -1425,6 +1454,7 @@ impl fmt::Display for ObjectType {
         f.write_str(match self {
             ObjectType::Table => "TABLE",
             ObjectType::View => "VIEW",
+            ObjectType::MaterializedView => "MATERIALIZED VIEW",
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
         })
@@ -1437,6 +1467,8 @@ impl ParseTo for ObjectType {
             ObjectType::Table
         } else if parser.parse_keyword(Keyword::VIEW) {
             ObjectType::View
+        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            ObjectType::MaterializedView
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {

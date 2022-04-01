@@ -12,163 +12,51 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering::*;
+use std::cmp::Ordering;
+use std::ops::Range;
 use std::sync::Arc;
 
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 
-use super::{Block, Header};
+use super::{Block, KeyPrefix};
 use crate::hummock::version_cmp::VersionedComparator;
 
-pub enum SeekPos {
-    Origin,
-    Current,
-}
-
-/// Block iterator iterates on an SST block
-// TODO: support custom comparator
+/// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
-    /// current index of iterator
-    idx: isize,
-    /// key of current entry
-    key: BytesMut,
-    /// raw value of current entry
-    val: Bytes,
-    /// block struct
+    /// Block that iterates on.
     block: Arc<Block>,
-    /// previous overlap key, used to construct key of current entry from
-    /// previous one faster
-    perv_overlap: u16,
+    /// Current restart point index.
+    restart_point_index: usize,
+    /// Current offset.
+    offset: usize,
+    /// Current key.
+    key: BytesMut,
+    /// Current value.
+    value_range: Range<usize>,
+    /// Current entry len.
+    entry_len: usize,
 }
 
 impl BlockIterator {
     pub fn new(block: Arc<Block>) -> Self {
         Self {
             block,
-            key: BytesMut::new(),
-            val: Bytes::new(),
-            perv_overlap: 0,
-            idx: 0,
+            offset: usize::MAX,
+            restart_point_index: usize::MAX,
+            key: BytesMut::default(),
+            value_range: 0..0,
+            entry_len: 0,
         }
     }
 
-    /// Replace block inside iterator and reset the iterator
-    pub fn set_block(&mut self, block: Arc<Block>) {
-        self.idx = 0;
-        self.perv_overlap = 0;
-        self.key.clear();
-        self.val.clear();
-        self.block = block;
+    pub fn next(&mut self) {
+        assert!(self.is_valid());
+        self.next_inner();
     }
 
-    /// Update the internal state of the iterator to use the value and key of a given index.
-    ///
-    /// If the index is not inside the entries, the function will not fetch the value, and will
-    /// return false.
-    fn set_idx(&mut self, i: isize) -> bool {
-        self.idx = i;
-
-        if self.idx < 0 || self.idx >= self.block.len() as isize {
-            return false;
-        }
-
-        let mut entry_data = self.block.raw_entry(i as usize);
-
-        let header = Header::decode(&mut entry_data);
-        let diff_key = &entry_data[..header.diff as usize];
-
-        if header.overlap > self.perv_overlap {
-            self.key.truncate(self.perv_overlap as usize);
-            self.key.extend_from_slice(
-                &self.block.base_key()[self.perv_overlap as usize..header.overlap as usize],
-            );
-        } else {
-            self.key.truncate(header.overlap as usize);
-        }
-        self.key.extend_from_slice(diff_key);
-        self.val = entry_data.slice(header.diff as usize..);
-        self.perv_overlap = header.overlap;
-        true
-    }
-
-    fn partition_point<F: FnMut(&mut BlockIterator, usize) -> bool>(
-        &mut self,
-        start: usize,
-        end: usize,
-        mut f: F,
-    ) -> usize {
-        let mut lo = start;
-        let mut hi = end;
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let ret = f(self, mid);
-            if ret {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        lo
-    }
-
-    /// Seek to the first entry that is equal or greater than key.
-    pub fn seek(&mut self, key: &[u8]) {
-        self.seek_from(key, SeekPos::Origin);
-    }
-
-    /// Seek to the first entry that is equal or greater than key.
-    pub fn seek_from(&mut self, key: &[u8], whence: SeekPos) {
-        let start_index = match whence {
-            SeekPos::Origin => 0,
-            SeekPos::Current => self.idx as usize,
-        };
-        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
-            iter.set_idx(idx as isize);
-            VersionedComparator::compare_key(&iter.key, key) == Less
-        };
-        let found_entry_idx =
-            self.partition_point(start_index, self.block.len(), is_in_first_partition);
-        self.set_idx(found_entry_idx as isize);
-    }
-
-    /// Seek to the first entry that is equal or less than key.
-    pub fn seek_le(&mut self, key: &[u8]) {
-        self.seek_le_from(key, SeekPos::Origin);
-    }
-
-    /// Seek to the first entry that is equal or less than key.
-    pub fn seek_le_from(&mut self, key: &[u8], whence: SeekPos) {
-        let end_index = match whence {
-            SeekPos::Origin => self.block.len(),
-            SeekPos::Current => self.idx as usize + 1,
-        };
-        let is_in_first_partition = |iter: &mut BlockIterator, idx: usize| -> bool {
-            iter.set_idx(idx as isize);
-
-            let ord = VersionedComparator::compare_key(&iter.key, key);
-            ord == Less || ord == Equal
-        };
-        let found_entry_idx =
-            self.partition_point(0, end_index, is_in_first_partition) as isize - 1;
-        self.set_idx(found_entry_idx);
-    }
-
-    pub fn seek_to_first(&mut self) {
-        self.set_idx(0);
-    }
-
-    pub fn seek_to_last(&mut self) {
-        assert!(self.block.len() > 0);
-        self.set_idx(self.block.len() as isize - 1);
-    }
-
-    /// Return the key and value of the previous operation
-    pub fn data(&self) -> Option<(&[u8], &[u8])> {
-        if self.is_valid() {
-            Some((&self.key[..], &self.val[..]))
-        } else {
-            None
-        }
+    pub fn prev(&mut self) {
+        assert!(self.is_valid());
+        self.prev_inner();
     }
 
     pub fn key(&self) -> &[u8] {
@@ -178,158 +66,297 @@ impl BlockIterator {
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.val[..]
+        &self.block.data()[self.value_range.clone()]
     }
 
-    /// Check whether the iterator is at the last position
-    pub fn is_last(&self) -> bool {
-        self.idx >= 0 && self.idx == (self.block.len() - 1) as isize
-    }
-    /// Check whether the iterator is at a valid position
     pub fn is_valid(&self) -> bool {
-        self.idx >= 0 && self.idx < self.block.len() as isize
+        self.offset < self.block.len()
     }
 
-    /// Move to the next position
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> bool {
-        self.set_idx(self.idx + 1)
+    pub fn seek_to_first(&mut self) {
+        self.seek_restart_point_by_index(0);
     }
 
-    /// Move to the previous position
-    pub fn prev(&mut self) -> bool {
-        self.set_idx(self.idx - 1)
+    pub fn seek_to_last(&mut self) {
+        self.seek_restart_point_by_index(self.block.restart_point_len() - 1);
+        self.next_until_prev_offset(self.block.len());
+    }
+
+    pub fn seek(&mut self, key: &[u8]) {
+        self.seek_restart_point_by_key(key);
+        self.next_until_key(key);
+    }
+
+    pub fn seek_le(&mut self, key: &[u8]) {
+        self.seek_restart_point_by_key(key);
+        self.next_until_key(key);
+        if !self.is_valid() {
+            self.seek_to_last();
+        }
+        self.prev_until_key(key);
+    }
+}
+
+impl BlockIterator {
+    /// Invalidates current state after reaching a invalid state.
+    fn invalidate(&mut self) {
+        self.offset = self.block.len();
+        self.restart_point_index = self.block.restart_point_len();
+        self.key.clear();
+        self.value_range = 0..0;
+        self.entry_len = 0;
+    }
+
+    /// Moves to the next entry.
+    ///
+    /// Note: Ensures that the current state is valid.
+    fn next_inner(&mut self) {
+        let offset = self.offset + self.entry_len;
+        if offset >= self.block.len() {
+            self.invalidate();
+            return;
+        }
+        let prefix = self.decode_prefix_at(offset);
+        self.key.truncate(prefix.overlap_len());
+        self.key
+            .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
+        self.value_range = prefix.value_range();
+        self.offset = offset;
+        self.entry_len = prefix.entry_len();
+        if self.restart_point_index + 1 < self.block.restart_point_len()
+            && self.offset >= self.block.restart_point(self.restart_point_index + 1) as usize
+        {
+            self.restart_point_index += 1;
+        }
+    }
+
+    /// Moves forward until reaching the first that equals or larger than the given `key`.
+    fn next_until_key(&mut self, key: &[u8]) {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Less
+        {
+            self.next_inner();
+        }
+    }
+
+    /// Moves backward until reaching the first key that equals or smaller than the given `key`.
+    fn prev_until_key(&mut self, key: &[u8]) {
+        while self.is_valid()
+            && VersionedComparator::compare_key(&self.key[..], key) == Ordering::Greater
+        {
+            self.prev_inner();
+        }
+    }
+
+    /// Moves forward until the position reaches the previous position of the given `next_offset` or
+    /// the last valid position if exists.
+    fn next_until_prev_offset(&mut self, offset: usize) {
+        while self.offset + self.entry_len < std::cmp::min(self.block.len(), offset) {
+            self.next_inner();
+        }
+    }
+
+    /// Moves to the previous entry.
+    ///
+    /// Note: Ensure that the current state is valid.
+    fn prev_inner(&mut self) {
+        if self.offset == 0 {
+            self.invalidate();
+            return;
+        }
+        if self.block.restart_point(self.restart_point_index) as usize == self.offset {
+            self.restart_point_index -= 1;
+        }
+        let origin_offset = self.offset;
+        self.seek_restart_point_by_index(self.restart_point_index);
+        self.next_until_prev_offset(origin_offset);
+    }
+
+    /// Decodes [`KeyPrefix`] at given offset.
+    fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
+        KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
+    }
+
+    /// Searchs the restart point index that the given `key` belongs to.
+    fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
+        // Find the largest restart point that restart key equals or less than the given key.
+        self.block
+            .search_restart_partition_point(|&probe| {
+                let prefix = self.decode_prefix_at(probe as usize);
+                let probe_key = &self.block.data()[prefix.diff_key_range()];
+                match VersionedComparator::compare_key(probe_key, key) {
+                    Ordering::Less | Ordering::Equal => true,
+                    Ordering::Greater => false,
+                }
+            })
+            .saturating_sub(1) // Prevent from underflowing when given is smaller than ther first.
+    }
+
+    /// Seeks to the restart point that the given `key` belongs to.
+    fn seek_restart_point_by_key(&mut self, key: &[u8]) {
+        let index = self.search_restart_point_index_by_key(key);
+        self.seek_restart_point_by_index(index)
+    }
+
+    /// Seeks to the restart point by given restart point index.
+    fn seek_restart_point_by_index(&mut self, index: usize) {
+        let offset = self.block.restart_point(index) as usize;
+        let prefix = self.decode_prefix_at(offset);
+        self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
+        self.value_range = prefix.value_range();
+        self.offset = offset;
+        self.entry_len = prefix.entry_len();
+        self.restart_point_index = index;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::{Bytes, BytesMut};
-    use itertools::Itertools;
+    use bytes::{BufMut, Bytes};
 
-    use super::super::SSTableBuilderOptions;
     use super::*;
-    use crate::hummock::test_utils::gen_test_sstable;
-    use crate::hummock::{CachePolicy, HummockValue, SstableStore};
-    use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
 
-    #[tokio::test]
-    async fn basic_test() {
-        const REMOTE_DIR: &str = "test";
-        let opt = SSTableBuilderOptions {
-            bloom_false_positive: 0.0,
-            block_size: 16384,
-            table_capacity: 0,
-            checksum_algo: risingwave_pb::hummock::checksum::Algorithm::XxHash64,
-        };
+    fn build_iterator_for_test() -> BlockIterator {
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
+        builder.add(&full_key(b"k01", 1), b"v01");
+        builder.add(&full_key(b"k02", 2), b"v02");
+        builder.add(&full_key(b"k04", 4), b"v04");
+        builder.add(&full_key(b"k05", 5), b"v05");
+        let buf = builder.build();
+        BlockIterator::new(Arc::new(Block::decode(buf).unwrap()))
+    }
 
-        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
-        let sstable_store = Arc::new(SstableStore::new(
-            obj_client,
-            REMOTE_DIR.to_string(),
-            Arc::new(StateStoreMetrics::unused()),
-        ));
+    #[test]
+    fn test_seek_first() {
+        let mut it = build_iterator_for_test();
+        it.seek_to_first();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
+    }
 
-        let sst = gen_test_sstable(
-            opt,
-            0,
-            (0..10).map(|i| {
-                let string_to_byte_vec =
-                    |s: String| s.as_str().as_bytes().iter().cloned().collect_vec();
-                let key = string_to_byte_vec(format!("key_test_{}", i));
-                let value_buffer = string_to_byte_vec(format!("val_{}", i));
-                (key, HummockValue::Put(value_buffer))
-            }),
-            sstable_store.clone(),
-        )
-        .await;
-        let block = sstable_store.get(&sst, 0, CachePolicy::Fill).await.unwrap();
+    #[test]
+    fn test_seek_last() {
+        let mut it = build_iterator_for_test();
+        it.seek_to_last();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
+    }
 
-        let mut blk_iter = BlockIterator::new(block);
-        let mut idx = 0;
-        blk_iter.seek_to_first();
-        loop {
-            assert_eq!(blk_iter.idx, idx);
-            assert_eq!(
-                BytesMut::from(format!("key_test_{}", idx).as_str()),
-                blk_iter.key
-            );
+    #[test]
+    fn test_seek_none_front() {
+        let mut it = build_iterator_for_test();
+        it.seek(&full_key(b"k00", 0)[..]);
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
 
-            let expected = HummockValue::Put(
-                format!("val_{}", idx)
-                    .as_str()
-                    .as_bytes()
-                    .iter()
-                    .cloned()
-                    .collect_vec(),
-            );
-            let scanned = HummockValue::decode(&mut blk_iter.val).unwrap();
+        let mut it = build_iterator_for_test();
 
-            assert_eq!(scanned, expected);
+        it.seek_le(&full_key(b"k00", 0)[..]);
+        assert!(!it.is_valid());
+    }
 
-            blk_iter.next();
-            if blk_iter.data().is_none() {
-                break;
-            } else {
-                idx += 1;
-            }
-        }
-        assert_eq!(idx, 9);
+    #[test]
+    fn test_seek_none_back() {
+        let mut it = build_iterator_for_test();
+        it.seek(&full_key(b"k06", 6)[..]);
+        assert!(!it.is_valid());
 
-        blk_iter.seek_to_first();
-        assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
+        let mut it = build_iterator_for_test();
+        it.seek_le(&full_key(b"k06", 6)[..]);
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
+    }
 
-        blk_iter.seek_to_last();
-        assert_eq!(BytesMut::from("key_test_9"), blk_iter.key);
+    #[test]
+    fn bi_direction_seek() {
+        let mut it = build_iterator_for_test();
+        it.seek(&full_key(b"k03", 3)[..]);
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
 
-        idx = 9;
-        loop {
-            assert_eq!(blk_iter.idx, idx);
-            assert_eq!(
-                BytesMut::from(format!("key_test_{}", idx).as_str()),
-                blk_iter.key
-            );
+        it.seek_le(&full_key(b"k03", 3)[..]);
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+    }
 
-            let expected = HummockValue::Put(
-                format!("val_{}", idx)
-                    .as_str()
-                    .as_bytes()
-                    .iter()
-                    .cloned()
-                    .collect_vec(),
-            );
-            let scanned = HummockValue::decode(&mut blk_iter.val).unwrap();
+    #[test]
+    fn test_forward_iterate() {
+        let mut it = build_iterator_for_test();
 
-            assert_eq!(scanned, expected);
+        it.seek_to_first();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
 
-            blk_iter.prev();
-            if blk_iter.data().is_none() {
-                break;
-            } else {
-                idx -= 1;
-            }
-        }
-        assert_eq!(idx, 0);
+        it.next();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(b"v02", it.value());
 
-        blk_iter.seek_from(&Bytes::from("key_test_4"), SeekPos::Origin);
-        assert_eq!(BytesMut::from("key_test_4"), blk_iter.key);
+        it.next();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(b"v04", it.value());
 
-        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Origin);
-        assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
+        it.next();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
 
-        blk_iter.seek_from(&Bytes::from("key_test"), SeekPos::Origin);
-        assert_eq!(BytesMut::from("key_test_0"), blk_iter.key);
+        it.next();
+        assert!(!it.is_valid());
+    }
 
-        blk_iter.seek_from(&Bytes::from("key_test_9"), SeekPos::Origin);
-        assert_eq!(BytesMut::from("key_test_9"), blk_iter.key);
+    #[test]
+    fn test_backward_iterate() {
+        let mut it = build_iterator_for_test();
 
-        blk_iter.seek_from(&Bytes::from("key_test_99"), SeekPos::Origin);
-        assert!(blk_iter.data().is_none());
+        it.seek_to_last();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(b"v05", it.value());
 
-        blk_iter.set_idx(3);
-        blk_iter.seek_from(&Bytes::from("key_test_0"), SeekPos::Current);
+        it.prev();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(b"v04", it.value());
 
-        assert_eq!(BytesMut::from("key_test_3"), blk_iter.key);
+        it.prev();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(b"v02", it.value());
+
+        it.prev();
+        assert!(it.is_valid());
+        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(b"v01", it.value());
+
+        it.prev();
+        assert!(!it.is_valid());
+    }
+
+    #[test]
+    fn test_seek_forward_backward_iterate() {
+        let mut it = build_iterator_for_test();
+
+        it.seek(&full_key(b"k03", 3)[..]);
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+
+        it.prev();
+        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+
+        it.next();
+        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+    }
+
+    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+        buf.put_slice(user_key);
+        buf.put_u64(!epoch);
+        buf.freeze()
     }
 }

@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use risingwave_common::catalog::Schema;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::FilterNode;
 
 use super::{LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch};
+use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanBase;
-use crate::optimizer::property::{Distribution, WithSchema};
+use crate::optimizer::property::Distribution;
 use crate::utils::Condition;
 
 /// `BatchFilter` implements [`super::LogicalFilter`]
@@ -65,12 +65,6 @@ impl PlanTreeNodeUnary for BatchFilter {
 }
 
 impl_plan_tree_node_for_unary! { BatchFilter }
-
-impl WithSchema for BatchFilter {
-    fn schema(&self) -> &Schema {
-        self.logical.schema()
-    }
-}
 
 impl ToDistributedBatch for BatchFilter {
     fn to_distributed(&self) -> PlanRef {

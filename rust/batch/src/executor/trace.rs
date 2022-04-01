@@ -20,6 +20,8 @@ use tracing_futures::Instrument;
 
 use crate::executor::{BoxedExecutor, Executor};
 
+/// If tracing is enabled, we build a [`TraceExecutor`] on top of the underlying executor.
+/// So the duration of performance-critical operations will be traced, such as open/next/close.
 pub(super) struct TraceExecutor {
     child: BoxedExecutor,
     /// Description of input executor

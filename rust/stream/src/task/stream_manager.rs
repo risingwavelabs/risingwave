@@ -18,6 +18,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
+use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
@@ -34,7 +35,7 @@ use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreI
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
-use super::ComputeClientPool;
+use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -45,10 +46,14 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
+/// `ActorHandle` contains the join handle of actor's future, and a sender used to force stop
+/// the actor.
+pub struct ActorHandle {
+    pub handle: JoinHandle<()>,
+    pub stop_tx: oneshot::Sender<()>,
+}
 
-pub type ActorHandle = JoinHandle<()>;
-
-pub struct StreamManagerCore {
+pub struct LocalStreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
     /// `handles` store join handles of these futures, and therefore we could wait their
     /// termination.
@@ -79,9 +84,9 @@ pub struct StreamManagerCore {
     compute_client_pool: ComputeClientPool,
 }
 
-/// `StreamManager` manages all stream executors in this project.
-pub struct StreamManager {
-    core: Mutex<StreamManagerCore>,
+/// `LocalStreamManager` manages all stream executors in this project.
+pub struct LocalStreamManager {
+    core: Mutex<LocalStreamManagerCore>,
 }
 
 pub struct ExecutorParams {
@@ -121,8 +126,8 @@ impl Debug for ExecutorParams {
     }
 }
 
-impl StreamManager {
-    fn with_core(core: StreamManagerCore) -> Self {
+impl LocalStreamManager {
+    fn with_core(core: LocalStreamManagerCore) -> Self {
         Self {
             core: Mutex::new(core),
         }
@@ -133,12 +138,16 @@ impl StreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        Self::with_core(StreamManagerCore::new(addr, state_store, streaming_metrics))
+        Self::with_core(LocalStreamManagerCore::new(
+            addr,
+            state_store,
+            streaming_metrics,
+        ))
     }
 
     #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::with_core(StreamManagerCore::for_test())
+        Self::with_core(LocalStreamManagerCore::for_test())
     }
 
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
@@ -148,7 +157,7 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<oneshot::Receiver<()>> {
+    ) -> Result<oneshot::Receiver<CollectResult>> {
         let core = self.core.lock();
         let mut barrier_manager = core.context.lock_barrier_manager();
         let rx = barrier_manager
@@ -163,11 +172,11 @@ impl StreamManager {
         barrier: &Barrier,
         actor_ids_to_send: impl IntoIterator<Item = ActorId>,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
-    ) -> Result<()> {
+    ) -> Result<CollectResult> {
         let rx = self.send_barrier(barrier, actor_ids_to_send, actor_ids_to_collect)?;
 
         // Wait for all actors finishing this barrier.
-        rx.await.unwrap();
+        let collect_result = rx.await.unwrap();
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
@@ -182,7 +191,7 @@ impl StreamManager {
             }
         });
 
-        Ok(())
+        Ok(collect_result)
     }
 
     /// Broadcast a barrier to all senders. Returns immediately, and caller won't be notified when
@@ -203,7 +212,7 @@ impl StreamManager {
         for id in actors {
             core.drop_actor(*id);
         }
-        debug!("drop actors: {:?}", actors);
+        tracing::debug!(actors = ?actors, "drop actors");
         Ok(())
     }
 
@@ -214,6 +223,20 @@ impl StreamManager {
     ) -> Result<()> {
         // TODO(august): the data in StateStore should also be dropped directly/through unpin or
         // some other way.
+        Ok(())
+    }
+
+    /// Force stop all actors on this worker.
+    pub async fn stop_all_actors(&self) -> Result<()> {
+        let futures = {
+            let mut core = self.core.lock();
+            let futures = core.stop_all_actors()?;
+            // Reset barrier manager to a clean state.
+            core.context.reset_barrier_manager();
+            futures
+        };
+        join_all(futures).await;
+
         Ok(())
     }
 
@@ -231,11 +254,11 @@ impl StreamManager {
         core.update_actors(actors, hanging_channels)
     }
 
-    /// This function was called while [`StreamManager`] exited.
+    /// This function was called while [`LocalStreamManager`] exited.
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.await?;
+            handle.handle.await?;
         }
         Ok(())
     }
@@ -244,12 +267,13 @@ impl StreamManager {
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.await.unwrap();
+            handle.handle.await.unwrap();
         }
         Ok(())
     }
 
-    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn update_actor_info(
         &self,
         req: stream_service::BroadcastActorInfoTableRequest,
@@ -258,7 +282,8 @@ impl StreamManager {
         core.update_actor_info(req)
     }
 
-    /// This function could only be called once during the lifecycle of `StreamManager` for now.
+    /// This function could only be called once during the lifecycle of `LocalStreamManager` for
+    /// now.
     pub fn build_actors(&self, actors: &[ActorId], env: StreamEnvironment) -> Result<()> {
         let mut core = self.core.lock();
         core.build_actors(actors, env)
@@ -313,7 +338,7 @@ fn update_upstreams(context: &SharedContext, ids: &[UpDownActorIds]) {
         .count();
 }
 
-impl StreamManagerCore {
+impl LocalStreamManagerCore {
     fn new(
         addr: HostAddr,
         state_store: StateStoreImpl,
@@ -562,6 +587,12 @@ impl StreamManagerCore {
         };
         trace!("Join non-equi condition: {:?}", condition);
 
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
         macro_rules! impl_create_hash_join_executor {
             ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
                 |typ| match typ {
@@ -575,6 +606,7 @@ impl StreamManagerCore {
                         params.executor_id,
                         condition,
                         params.op_info,
+                        key_indices,
                     )) as Box<dyn Executor>, )*
                     _ => todo!("Join type {:?} not implemented", typ),
                 }
@@ -701,12 +733,17 @@ impl StreamManagerCore {
 
             trace!("build actor: {:#?}", &dispatcher);
 
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
+            let (stop_tx, stop_rx) = oneshot::channel();
+
+            let actor = Actor::new(dispatcher, actor_id, self.context.clone(), stop_rx);
             self.handles.insert(
                 actor_id,
-                tokio::spawn(async move {
-                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
-                }),
+                ActorHandle {
+                    handle: tokio::spawn(async move {
+                        actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                    }),
+                    stop_tx,
+                },
             );
         }
 
@@ -757,7 +794,7 @@ impl StreamManagerCore {
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.abort();
+        handle.handle.abort();
     }
 
     fn build_channel_for_chain_node(
@@ -876,5 +913,23 @@ impl StreamManagerCore {
             }
         }
         Ok(())
+    }
+
+    fn stop_all_actors(&mut self) -> Result<Vec<JoinHandle<()>>> {
+        let futures = self
+            .handles
+            .drain()
+            .map(|(actor_id, handle)| {
+                self.context.retain(|&(up_id, _)| up_id != actor_id);
+                self.actors.remove(&actor_id);
+                handle.stop_tx.send(()).ok();
+                handle.handle
+            })
+            .collect_vec();
+
+        // meta will rebuild this soon
+        self.actor_infos.clear();
+
+        Ok(futures)
     }
 }

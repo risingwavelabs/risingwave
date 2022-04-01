@@ -7,12 +7,12 @@ edition = "2021"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = "0.8"
-aws-endpoint = "0.8"
-aws-sdk-s3 = "0.8"
-aws-smithy-http = "0.38"
-aws-smithy-types = "0.38"
-aws-types = { version = "0.8", features = ["hardcoded-credentials"] }
+aws-config = "0.9"
+aws-endpoint = "0.9"
+aws-sdk-s3 = "0.9"
+aws-smithy-http = "0.39"
+aws-smithy-types = "0.39"
+aws-types = { version = "0.9", features = ["hardcoded-credentials"] }
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -28,7 +28,7 @@ lazy_static = "1"
 log = "0.4"
 lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
-moka = { version = "0.7", features = ["future"] }
+moka = { version = "0.8", features = ["future"] }
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = "0.12"
@@ -65,10 +65,15 @@ value-encoding = { path = "../utils/value-encoding" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
+criterion = "0.3"
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
-default = ["blockv2"]
 rocksdb-local = ["rocksdb"]
 tikv = ["tikv-client"]
-blockv2 = []
+
+[[bench]]
+name = "bench_block_iter"
+harness = false
+# Enable debug if you want to generate flamegraph.
+# debug = true

@@ -85,6 +85,9 @@ macro_rules! for_all_metrics {
             sst_block_put_remote_duration: Histogram,
 
             cell_table_next_pack_cell_duration: Histogram,
+
+            addtable_upload_sst_counts: GenericCounter<AtomicU64>,
+            compaction_upload_sst_counts: GenericCounter<AtomicU64>,
         }
     };
 }
@@ -93,9 +96,9 @@ macro_rules! define_state_store_metrics {
     ($( $name:ident: $type:ty ),* ,) => {
         /// [`StateStoreMetrics`] stores the performance and IO metrics of `XXXStore` such as
         /// `RocksDBStateStore` and `TikvStateStore`.
-        /// In practice, keep in mind that this represents the whole Hummock utilizations of
-        /// a `RisingWave` instance. More granular utilizations of per `materialization view`
-        /// job or a executor should be collected by views like `StateStats` and `JobStats`.
+        /// In practice, keep in mind that this represents the whole Hummock utilization of
+        /// a `RisingWave` instance. More granular utilization of per `materialization view`
+        /// job or an executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug)]
         pub struct StateStoreMetrics {
             $( pub $name: $type, )*
@@ -125,7 +128,7 @@ impl StateStoreMetrics {
         let get_value_size = register_histogram_with_registry!(opts, registry).unwrap();
 
         let buckets = DEFAULT_BUCKETS.map(|x| x * GET_LATENCY_SCALE).to_vec();
-        // let get_duration_buckets = vec![1.0];
+
         let get_duration_opts = histogram_opts!(
             "state_store_get_duration",
             "Total latency of get that have been issued to state store",
@@ -393,6 +396,22 @@ impl StateStoreMetrics {
         let cell_table_next_pack_cell_duration =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        // --
+        let addtable_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_addtable_upload_sst_counts",
+            "Total number of sst uploads when shared buffer adds tables",
+            registry
+        )
+        .unwrap();
+
+        // --
+        let compaction_upload_sst_counts = register_int_counter_with_registry!(
+            "state_store_compaction_upload_sst_counts",
+            "Total number of sst uploads during compaction",
+            registry
+        )
+        .unwrap();
+
         Self {
             get_duration,
             get_key_size,
@@ -432,12 +451,14 @@ impl StateStoreMetrics {
             sst_block_request_miss_counts,
             sst_block_fetch_remote_duration,
             sst_block_put_remote_duration,
-
             cell_table_next_pack_cell_duration,
+
+            addtable_upload_sst_counts,
+            compaction_upload_sst_counts,
         }
     }
 
-    /// Create a new `StateStoreMetrics` instance used in tests or other places.
+    /// Creates a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(Registry::new())
     }

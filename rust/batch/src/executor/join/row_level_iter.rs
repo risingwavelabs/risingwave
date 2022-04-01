@@ -34,7 +34,7 @@ pub(crate) struct RowLevelIter {
     row_idx: usize,
 
     /// Used only when join remaining is required after probing (build side).
-    /// See [`JoinType::need_join_remaining`]
+    /// See [`super::JoinType::need_join_remaining`]
     build_matched: Option<ChunkedData<bool>>,
     /// Whether current row has found matched tuples. Used in outer join (probe side).
     cur_row_matched: bool,

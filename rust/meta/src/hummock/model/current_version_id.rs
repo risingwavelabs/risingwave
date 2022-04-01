@@ -17,7 +17,7 @@ use risingwave_pb::hummock::HummockVersionRefId;
 use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
-use crate::model::{MetadataModel, Transactional};
+use crate::model::MetadataModel;
 use crate::storage::MetaStore;
 
 /// Hummock current version id key.
@@ -51,8 +51,6 @@ impl MetadataModel for CurrentHummockVersionId {
     }
 }
 
-impl Transactional for CurrentHummockVersionId {}
-
 impl CurrentHummockVersionId {
     pub fn new() -> CurrentHummockVersionId {
         CurrentHummockVersionId {
@@ -60,8 +58,8 @@ impl CurrentHummockVersionId {
         }
     }
 
-    pub async fn get<S: MetaStore>(meta_store_ref: &S) -> Result<Option<CurrentHummockVersionId>> {
-        CurrentHummockVersionId::select(meta_store_ref, &HUMMOCK_VERSION_ID_KEY.to_string()).await
+    pub async fn get<S: MetaStore>(meta_store: &S) -> Result<Option<CurrentHummockVersionId>> {
+        CurrentHummockVersionId::select(meta_store, &HUMMOCK_VERSION_ID_KEY.to_string()).await
     }
 
     /// Increase version id, return previous one

@@ -49,10 +49,10 @@ pub struct CellBasedTable<S: StateStore> {
     /// The schema of this table viewed by some source executor, e.g. RowSeqScanExecutor.
     schema: Schema,
 
-    /// ColumnDesc contains strictly more info than `schema`.
+    /// `ColumnDesc` contains strictly more info than `schema`.
     column_descs: Vec<ColumnDesc>,
 
-    /// Mapping from column Id to column index
+    /// Mapping from column id to column index
     column_id_to_column_index: HashMap<ColumnId, usize>,
 
     pk_serializer: Option<OrderedRowSerializer>,
@@ -113,7 +113,7 @@ impl<S: StateStore> CellBasedTable<S> {
         )
     }
 
-    /// Create an "adhoc" [`CellBasedTable`] with specified columns.
+    /// Creates an "adhoc" [`CellBasedTable`] with specified columns.
     pub fn new_adhoc(
         keyspace: Keyspace<S>,
         column_descs: Vec<ColumnDesc>,
@@ -236,7 +236,7 @@ impl<S: StateStore> CellBasedTable<S> {
             .map_err(|err| ErrorCode::InternalError(err.to_string()))?;
 
         if let Some(buf) = buf {
-            let mut de = value_encoding::Deserializer::new(buf.to_bytes());
+            let mut de = value_encoding::Deserializer::new(buf);
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
             Ok(Some(cell))
         } else {
@@ -261,19 +261,19 @@ fn generate_column_id_to_column_index_mapping(
 fn generate_column_id(column_descs: &[ColumnDesc]) -> Vec<ColumnId> {
     column_descs.iter().map(|d| d.column_id).collect()
 }
-// (st1page): May be we will have a "ChunkIter" trait which returns a chunk each time, so the name
+// (st1page): Maybe we will have a "ChunkIter" trait which returns a chunk each time, so the name
 // "RowTableIter" is reserved now
 pub struct CellBasedTableRowIter<S: StateStore> {
     keyspace: Keyspace<S>,
     /// A buffer to store prefetched kv pairs from state store
-    buf: Vec<(Bytes, StorageValue)>,
+    buf: Vec<(Bytes, Bytes)>,
     /// The idx into `buf` for the next item
     next_idx: usize,
     /// A bool to indicate whether there are more data to fetch from state store
     done: bool,
     /// Cached error messages after the iteration completes or fails
     err_msg: Option<String>,
-    /// A epoch representing the read snapshot
+    /// An epoch representing the read snapshot
     epoch: u64,
     /// Cell-based row deserializer
     cell_based_row_deserializer: CellBasedRowDeserializer,
@@ -405,7 +405,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 target: "events::storage::CellBasedTable::scan",
                 "CellBasedTable scanned key = {:?}, value = {:?}",
                 bytes::Bytes::copy_from_slice(key),
-                value.as_bytes()
+                value
             );
 
             // there is no need to deserialize pk in cell-based table
@@ -413,9 +413,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
                 return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
             }
 
-            let pk_and_row = self
-                .cell_based_row_deserializer
-                .deserialize(key, value.as_bytes())?;
+            let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),

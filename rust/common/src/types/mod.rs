@@ -23,7 +23,7 @@ use crate::error::{ErrorCode, Result, RwError};
 mod native_type;
 
 mod scalar_impl;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display, Formatter};
 
 pub use native_type::*;
 use risingwave_pb::data::data_type::TypeName;
@@ -577,35 +577,34 @@ impl std::hash::Hash for ScalarImpl {
     }
 }
 
-impl ToString for ScalarImpl {
-    fn to_string(&self) -> String {
-        macro_rules! impl_to_string {
+impl Display for ScalarImpl {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        macro_rules! impl_display_fmt {
             ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
                 match self {
                     $( Self::$variant_name(ref inner) => {
-                        inner.to_string()
+                        Display::fmt(inner, f)
                     }, )*
                 }
             }
         }
 
-        for_all_scalar_variants! { impl_to_string }
+        for_all_scalar_variants! { impl_display_fmt }
     }
 }
 
-impl ToString for ScalarRefImpl<'_> {
-    fn to_string(&self) -> String {
-        macro_rules! impl_to_string {
+impl Display for ScalarRefImpl<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        macro_rules! impl_display_fmt {
             ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
                 match self {
                     $( Self::$variant_name(inner) => {
-                        inner.to_string()
+                        Display::fmt(inner, f)
                     }, )*
                 }
             }
         }
-
-        for_all_scalar_variants! { impl_to_string }
+        for_all_scalar_variants! { impl_display_fmt }
     }
 }
 

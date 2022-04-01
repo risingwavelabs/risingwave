@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 
@@ -45,9 +46,9 @@ macro_rules! impl_chrono_wrapper {
                 }
             }
 
-            impl ToString for $variant_name {
-                fn to_string(&self) -> String {
-                    self.0.to_string()
+            impl Display for $variant_name {
+                fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                    Display::fmt(&self.0, f)
                 }
             }
         )*
@@ -159,5 +160,13 @@ impl NaiveDateTimeWrapper {
         let nsecs = (timestamp_micro % 1_000_000) as u32 * 1000;
         Self::new_with_secs_nsecs(secs, nsecs)
             .map_err(|e| RwError::from(InternalError(e.to_string())))
+    }
+}
+
+impl TryFrom<NaiveDateWrapper> for NaiveDateTimeWrapper {
+    type Error = RwError;
+
+    fn try_from(date: NaiveDateWrapper) -> Result<Self> {
+        Ok(NaiveDateTimeWrapper::new(date.0.and_hms(0, 0, 0)))
     }
 }

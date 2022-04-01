@@ -292,6 +292,9 @@ set -e
 
 cd rust
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
+
+set -ex
+
 RUST_BACKTRACE=1 RW_NODE=playground cargo run --bin risingwave --features=all-in-one --profile "${RISINGWAVE_BUILD_PROFILE}"
 '''
 
@@ -313,9 +316,9 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!@shell
 
-set -e
 tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
 tmux kill-session -t risedev
+test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
 
 [tasks.kill]
@@ -326,44 +329,6 @@ alias = "kill-risedev"
 
 [tasks.fill-kafka]
 command = "scripts/source/prepare_source.sh"
-
-
-[tasks.ci-v2]
-script = """
-echo \"directly calling ./risedev ci-v2 has been deprecated. Use ./risedev dev ci-v2 instead.\"
-exit 1
-"""
-
-[tasks.ci-3node]
-script = """
-echo \"directly calling ./risedev ci-3node has been deprecated. Use ./risedev dev ci-3node instead.\"
-exit 1
-"""
-
-[tasks.ci-1node]
-script = """
-echo \"directly calling ./risedev ci-1node has been deprecated. Use ./risedev dev ci-1node instead.\"
-exit 1
-"""
-
-
-[tasks.dev-compute-node]
-script = """
-echo \"directly calling ./risedev dev-compute-node has been deprecated. Use ./risedev dev dev-compute-node instead.\"
-exit 1
-"""
-
-[tasks.dev-frontend]
-script = """
-echo \"directly calling ./risedev dev-frontend has been deprecated. Use ./risedev dev dev-frontend instead.\"
-exit 1
-"""
-
-[tasks.dev-meta-node]
-script = """
-echo \"directly calling ./risedev dev-meta-node has been deprecated. Use ./risedev dev dev-meta-node instead.\"
-exit 1
-"""
 
 [tasks.install-tools]
 category = "RiseDev - Check"
@@ -511,8 +476,17 @@ script = """
 #!/bin/bash
 set -e
 
+
 DIR="$(pwd)"
-INSTALL_PATH="$CARGO_HOME/bin/risedev"
+NAME="${1:-risedev}"
+INSTALL_PATH="$CARGO_HOME/bin/${NAME}"
+
+read -p "Install to ${INSTALL_PATH}? [y/N] " -r
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]
+then
+    exit 1
+fi
 
 cat <<EOF > "${INSTALL_PATH}"
 #!/bin/bash

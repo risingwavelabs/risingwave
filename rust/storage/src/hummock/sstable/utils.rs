@@ -18,10 +18,6 @@ use std::cmp::{self};
 use std::hash::Hasher;
 use std::ptr;
 
-#[cfg(not(feature = "blockv2"))]
-use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-#[cfg(not(feature = "blockv2"))]
-use risingwave_pb::hummock::Checksum;
 use serde::Deserialize;
 
 use super::{HummockError, HummockResult};
@@ -58,23 +54,15 @@ pub fn bytes_diff<'a, 'b>(base: &'a [u8], target: &'b [u8]) -> &'b [u8] {
     }
 }
 
-/// Calculate the CRC32 of the given data.
-#[cfg(not(feature = "blockv2"))]
-fn crc32_checksum(data: &[u8]) -> u64 {
-    let mut hasher = crc32fast::Hasher::new();
-    hasher.update(data);
-    hasher.finalize() as u64
-}
-
-/// Calculate the ``XxHash`` of the given data.
+/// Calculates the ``XxHash`` of the given data.
 pub fn xxhash64_checksum(data: &[u8]) -> u64 {
     let mut hasher = twox_hash::XxHash64::with_seed(0);
     hasher.write(data);
     hasher.finish() as u64
 }
 
-/// Verify the checksum of the data equals the given checksum with xxhash64.
-#[cfg(feature = "blockv2")]
+/// Verifies the checksum of the data equals the given checksum with xxhash64.
+
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     let data_checksum = xxhash64_checksum(data);
     if data_checksum != checksum {
@@ -83,42 +71,10 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     Ok(())
 }
 
-/// Calculate the checksum of the given `data` using `algo`.
-#[cfg(not(feature = "blockv2"))]
-pub fn checksum(algo: ChecksumAlg, data: &[u8]) -> Checksum {
-    let sum = match algo {
-        ChecksumAlg::Crc32c => crc32_checksum(data),
-        ChecksumAlg::XxHash64 => xxhash64_checksum(data),
-    };
-    Checksum {
-        sum,
-        algo: algo as i32,
-    }
-}
-
-/// Verify the checksum of the data equals the given checksum.
-#[cfg(not(feature = "blockv2"))]
-pub fn verify_checksum(chksum: &Checksum, data: &[u8]) -> HummockResult<()> {
-    let data_chksum = match chksum.algo() {
-        ChecksumAlg::Crc32c => crc32_checksum(data),
-        ChecksumAlg::XxHash64 => xxhash64_checksum(data),
-    };
-    let expected_result = chksum.get_sum();
-    if expected_result != data_chksum {
-        return Err(HummockError::checksum_mismatch(
-            expected_result,
-            data_chksum,
-        ));
-    }
-    Ok(())
-}
-
 use bytes::{Buf, BufMut};
 
-#[cfg(feature = "blockv2")]
 const MASK: u32 = 128;
 
-#[cfg(feature = "blockv2")]
 pub fn var_u32_len(n: u32) -> usize {
     if n < (1 << 7) {
         1
@@ -133,7 +89,6 @@ pub fn var_u32_len(n: u32) -> usize {
     }
 }
 
-#[cfg(feature = "blockv2")]
 pub trait BufMutExt: BufMut {
     fn put_var_u32(&mut self, n: u32) {
         if n < (1 << 7) {
@@ -160,7 +115,6 @@ pub trait BufMutExt: BufMut {
     }
 }
 
-#[cfg(feature = "blockv2")]
 pub trait BufExt: Buf {
     fn get_var_u32(&mut self) -> u32 {
         let mut n = 0u32;
@@ -179,11 +133,22 @@ pub trait BufExt: Buf {
     }
 }
 
-#[cfg(feature = "blockv2")]
 impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
 
-#[cfg(feature = "blockv2")]
 impl<T: Buf + ?Sized> BufExt for &mut T {}
+
+pub fn put_length_prefixed_slice(buf: &mut Vec<u8>, slice: &[u8]) {
+    let len = slice.len() as u32;
+    buf.put_u32_le(len);
+    buf.put_slice(slice);
+}
+
+pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
+    let len = buf.get_u32_le() as usize;
+    let v = (&buf[..len]).to_vec();
+    buf.advance(len);
+    v
+}
 
 #[derive(Deserialize, Clone, Copy, Debug)]
 pub enum CompressionAlgorithm {

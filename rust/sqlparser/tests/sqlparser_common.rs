@@ -1892,7 +1892,7 @@ fn parse_literal_time() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TypedString {
-            data_type: DataType::Time,
+            data_type: DataType::Time(false),
             value: "01:23:34".into()
         },
         expr_from_projection(only(&select.projection)),
@@ -1905,7 +1905,7 @@ fn parse_literal_timestamp() {
     let select = verified_only_select(sql);
     assert_eq!(
         &Expr::TypedString {
-            data_type: DataType::Timestamp,
+            data_type: DataType::Timestamp(false),
             value: "1999-01-01 01:23:34".into()
         },
         expr_from_projection(only(&select.projection)),
@@ -2941,6 +2941,18 @@ fn parse_drop_view() {
         Statement::Drop(stmt) => {
             assert_eq!(Ident::new("myview"), stmt.name);
             assert_eq!(ObjectType::View, stmt.object_type);
+        }
+        _ => unreachable!(),
+    }
+}
+
+#[test]
+fn parse_materialized_drop_view() {
+    let sql = "DROP MATERIALIZED VIEW mymview";
+    match verified_stmt(sql) {
+        Statement::Drop(stmt) => {
+            assert_eq!(Ident::new("mymview"), stmt.name);
+            assert_eq!(ObjectType::MaterializedView, stmt.object_type);
         }
         _ => unreachable!(),
     }

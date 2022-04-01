@@ -16,8 +16,9 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 
-use super::{BatchLimit, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::optimizer::property::WithSchema;
+use super::{
+    BatchLimit, ColPrunable, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream,
+};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalLimit` fetches up to `limit` rows from `offset`
@@ -75,8 +76,12 @@ impl PlanTreeNodeUnary for LogicalLimit {
 }
 impl_plan_tree_node_for_unary! {LogicalLimit}
 impl fmt::Display for LogicalLimit {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
-        todo!()
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "LogicalLimit {{ limit: {}, offset: {} }}",
+            self.limit, self.offset
+        )
     }
 }
 

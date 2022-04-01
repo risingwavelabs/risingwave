@@ -56,6 +56,8 @@ pub enum ErrorCode {
     ),
     #[error("Parse string error: {0}")]
     ParseError(BoxedError),
+    #[error("Bind error: {0}")]
+    BindError(String),
     #[error("Catalog error: {0}")]
     CatalogError(BoxedError),
     #[error("Out of range")]
@@ -75,7 +77,7 @@ pub enum ErrorCode {
     MetaError(String),
 
     /// `Eof` represents an upstream node will not generate new data. This error is rare in our
-    /// system, currently only used in the [`BatchQueryExecutor`] as an ephemeral solution.
+    /// system, currently only used in the `BatchQueryExecutor` as an ephemeral solution.
     #[error("End of the stream")]
     Eof,
 
@@ -223,6 +225,7 @@ impl ErrorCode {
             ErrorCode::MetaError(_) => 18,
             ErrorCode::CatalogError(..) => 21,
             ErrorCode::Eof => 22,
+            ErrorCode::BindError(_) => 23,
             ErrorCode::UnknownError(_) => 101,
         }
     }
@@ -275,7 +278,7 @@ pub trait ToErrorStr {
 pub trait ToRwResult<T, E> {
     fn to_rw_result(self) -> Result<T>;
 
-    fn to_rw_result_with(self, context: impl Into<String>) -> Result<T>;
+    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T>;
 }
 
 impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
@@ -283,9 +286,9 @@ impl<T, E: ToErrorStr> ToRwResult<T, E> for std::result::Result<T, E> {
         self.map_err(|e| ErrorCode::InternalError(e.to_error_str()).into())
     }
 
-    fn to_rw_result_with(self, context: impl Into<String>) -> Result<T> {
+    fn to_rw_result_with(self, func: impl FnOnce() -> String) -> Result<T> {
         self.map_err(|e| {
-            ErrorCode::InternalError(format!("{}: {}", context.into(), e.to_error_str())).into()
+            ErrorCode::InternalError(format!("{}: {}", func(), e.to_error_str())).into()
         })
     }
 }

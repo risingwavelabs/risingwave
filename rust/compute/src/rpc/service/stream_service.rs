@@ -20,17 +20,17 @@ use risingwave_common::error::tonic_err;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
 use risingwave_stream::executor::Barrier;
-use risingwave_stream::task::{StreamEnvironment, StreamManager};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
-    mgr: Arc<StreamManager>,
+    mgr: Arc<LocalStreamManager>,
     env: StreamEnvironment,
 }
 
 impl StreamServiceImpl {
-    pub fn new(mgr: Arc<StreamManager>, env: StreamEnvironment) -> Self {
+    pub fn new(mgr: Arc<LocalStreamManager>, env: StreamEnvironment) -> Self {
         StreamServiceImpl { mgr, env }
     }
 }
@@ -114,6 +114,22 @@ impl StreamService for StreamServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
+    async fn force_stop_actors(
+        &self,
+        request: Request<ForceStopActorsRequest>,
+    ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+        let req = request.into_inner();
+        self.mgr
+            .stop_all_actors()
+            .await
+            .map_err(|e| e.to_grpc_status())?;
+        Ok(Response::new(ForceStopActorsResponse {
+            request_id: req.request_id,
+            status: None,
+        }))
+    }
+
+    #[cfg_attr(coverage, no_coverage)]
     async fn inject_barrier(
         &self,
         request: Request<InjectBarrierRequest>,
@@ -122,13 +138,21 @@ impl StreamService for StreamServiceImpl {
         let barrier =
             Barrier::from_protobuf(req.get_barrier().map_err(tonic_err)?).map_err(tonic_err)?;
 
-        self.mgr
+        let collect_result = self
+            .mgr
             .send_and_collect_barrier(&barrier, req.actor_ids_to_send, req.actor_ids_to_collect)
             .await
             .map_err(|e| e.to_grpc_status())?;
 
+        let finished_create_mviews = collect_result
+            .finished_create_mviews
+            .into_iter()
+            .map(Into::into)
+            .collect();
+
         Ok(Response::new(InjectBarrierResponse {
             request_id: req.request_id,
+            finished_create_mviews,
             status: None,
         }))
     }
@@ -158,7 +182,7 @@ impl StreamService for StreamServiceImpl {
                     .create_table_source_v2(&id, columns)
                     .map_err(tonic_err)?;
 
-                info!("create table source, id: {}", id);
+                tracing::debug!(id = %id, "create table source");
             }
         };
 
@@ -178,7 +202,7 @@ impl StreamService for StreamServiceImpl {
             .drop_source(&id)
             .map_err(tonic_err)?;
 
-        info!("drop source, id: {}", id);
+        tracing::debug!(id = %id, "drop source");
 
         Ok(Response::new(DropSourceResponse { status: None }))
     }

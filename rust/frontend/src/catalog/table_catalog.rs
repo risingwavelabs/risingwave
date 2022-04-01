@@ -17,24 +17,33 @@ use std::collections::{HashMap, HashSet};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableDesc};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::plan::OrderType as ProstOrderType;
 
 use super::column_catalog::ColumnCatalog;
+use super::{DatabaseId, SchemaId};
 use crate::catalog::TableId;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TableCatalog {
-    id: TableId,
-    name: String,
-    columns: Vec<ColumnCatalog>,
-    pk_desc: Vec<OrderedColumnDesc>,
+    pub id: TableId,
+    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub name: String,
+    pub columns: Vec<ColumnCatalog>,
+    pub pk_desc: Vec<OrderedColumnDesc>,
 }
 
 impl TableCatalog {
     /// Get a reference to the table catalog's table id.
     pub fn id(&self) -> TableId {
         self.id
+    }
+
+    /// Get the table catalog's associated source id.
+    #[must_use]
+    pub fn associated_source_id(&self) -> Option<TableId> {
+        self.associated_source_id
     }
 
     /// Get a reference to the table catalog's columns.
@@ -60,11 +69,41 @@ impl TableCatalog {
     pub fn name(&self) -> &str {
         self.name.as_ref()
     }
+
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
+        let (pk_column_ids, pk_orders) = self
+            .pk_desc()
+            .iter()
+            .map(|col| {
+                (
+                    col.column_desc.column_id.get_id(),
+                    col.order.to_prost() as i32,
+                )
+            })
+            .unzip();
+
+        ProstTable {
+            id: self.id.table_id as u32,
+            schema_id,
+            database_id,
+            name: self.name.clone(),
+            columns: self.columns().iter().map(|c| c.to_protobuf()).collect(),
+            pk_column_ids,
+            pk_orders,
+            dependent_relations: vec![],
+            optional_associated_source_id: self
+                .associated_source_id
+                .map(|source_id| OptionalAssociatedSourceId::AssociatedSourceId(source_id.into())),
+        }
+    }
 }
 
 impl From<ProstTable> for TableCatalog {
     fn from(tb: ProstTable) -> Self {
         let id = tb.id;
+        let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
+            OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
+        });
         let name = tb.name.clone();
         let mut col_names = HashSet::new();
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
@@ -93,14 +132,17 @@ impl From<ProstTable> for TableCatalog {
                 order,
             })
             .collect();
+
         Self {
             id: id.into(),
+            associated_source_id: associated_source_id.map(Into::into),
             name,
             pk_desc,
             columns,
         }
     }
 }
+
 impl From<&ProstTable> for TableCatalog {
     fn from(tb: &ProstTable) -> Self {
         tb.clone().into()
@@ -112,12 +154,13 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
     use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::gen_row_id_column_name;
     use crate::catalog::table_catalog::TableCatalog;
-    use crate::handler::create_table::ROWID_NAME;
 
     #[test]
     fn test_into_table_catalog() {
@@ -130,7 +173,7 @@ mod tests {
                 ProstColumnCatalog {
                     column_desc: Some(ProstColumnDesc {
                         column_id: 0,
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(0),
                         field_descs: vec![],
                         column_type: Some(DataType::Int32.to_protobuf()),
                         type_name: String::new(),
@@ -161,7 +204,8 @@ mod tests {
             pk_column_ids: vec![0],
             pk_orders: vec![OrderType::Ascending.to_prost() as i32],
             dependent_relations: vec![],
-            optional_associated_source_id: None,
+            optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
+                .into(),
         }
         .into();
 
@@ -169,13 +213,14 @@ mod tests {
             table,
             TableCatalog {
                 id: TableId::new(0),
+                associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::Int32,
                             column_id: ColumnId::new(0),
-                            name: ROWID_NAME.to_string(),
+                            name: gen_row_id_column_name(0),
                             field_descs: vec![],
                             type_name: String::new()
                         },
@@ -213,7 +258,7 @@ mod tests {
                     column_desc: ColumnDesc {
                         data_type: DataType::Int32,
                         column_id: ColumnId::new(0),
-                        name: ROWID_NAME.to_string(),
+                        name: gen_row_id_column_name(0),
                         field_descs: vec![],
                         type_name: String::new()
                     },

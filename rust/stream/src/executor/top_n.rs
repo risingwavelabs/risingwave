@@ -24,7 +24,7 @@ use risingwave_pb::plan::OrderType as ProstOrderType;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::{Keyspace, Segment, StateStore};
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::{ExecutorState, StatefulExecutor};
 use crate::executor::managed_state::top_n::variants::*;
@@ -33,7 +33,7 @@ use crate::executor::{
     generate_output, top_n_executor_next, Executor, ExecutorBuilder, Message, PkIndices,
     PkIndicesRef, TopNExecutorBase,
 };
-use crate::task::{ExecutorParams, StreamManagerCore};
+use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
@@ -68,6 +68,10 @@ pub struct TopNExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for TopNExecutor<S> {
@@ -89,7 +93,7 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::TopNNode)?;
         let order_types: Vec<_> = node
@@ -107,6 +111,11 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         let cache_size = Some(1024);
         let total_count = (0, 0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(TopNExecutor::new(
             params.input.remove(0),
             order_types,
@@ -117,6 +126,7 @@ impl ExecutorBuilder for TopNExecutorBuilder {
             total_count,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -133,6 +143,7 @@ impl<S: StateStore> TopNExecutor<S> {
         total_count: (usize, usize, usize),
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         let pk_data_types = pk_indices
             .iter()
@@ -154,9 +165,9 @@ impl<S: StateStore> TopNExecutor<S> {
             })
             .collect::<Vec<_>>();
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_column_descs);
-        let lower_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"l".to_vec()));
-        let middle_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"m".to_vec()));
-        let higher_sub_keyspace = keyspace.with_segment(Segment::FixedLength(b"h".to_vec()));
+        let lower_sub_keyspace = keyspace.append_u8(b'l');
+        let middle_sub_keyspace = keyspace.append_u8(b'm');
+        let higher_sub_keyspace = keyspace.append_u8(b'h');
         let managed_lowest_state = ManagedTopNState::<S, TOP_N_MAX>::new(
             cache_size,
             total_count.0,
@@ -194,6 +205,7 @@ impl<S: StateStore> TopNExecutor<S> {
             identity: format!("TopNExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -555,6 +567,7 @@ mod tests {
             (0, 0, 0),
             1,
             "TopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init barrier
@@ -653,6 +666,7 @@ mod tests {
             (0, 0, 0),
             1,
             "TopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init barrier
@@ -789,6 +803,7 @@ mod tests {
             (0, 0, 0),
             1,
             "TopNExecutor".to_string(),
+            vec![],
         );
 
         // consume the init barrier

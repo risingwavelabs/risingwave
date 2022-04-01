@@ -50,7 +50,7 @@ impl SharedBufferManager {
         options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
-        // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+        // TODO: separate `HummockStats` from `StateStoreMetrics`.
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
@@ -71,7 +71,7 @@ impl SharedBufferManager {
         }
     }
 
-    /// Put a write batch into shared buffer. The batch will be synced to S3 asynchronously.
+    /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
     pub fn write_batch(&self, batch: Vec<SharedBufferItem>, epoch: u64) -> HummockResult<()> {
         let batch = SharedBufferBatch::new(batch, epoch);
         self.shared_buffer
@@ -84,7 +84,7 @@ impl SharedBufferManager {
             .map_err(HummockError::shared_buffer_error)
     }
 
-    /// Put a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
+    /// Puts a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
     pub fn replicate_remote_batch(
         &self,
         batch: Vec<SharedBufferItem>,
@@ -111,10 +111,10 @@ impl SharedBufferManager {
         rx.await.unwrap()
     }
 
-    /// Search shared buffers within the `epoch_range` for the given key.
+    /// Searches shared buffers within the `epoch_range` for the given key.
     /// Return:
     /// - None: the key doesn't exist in the shared buffer.
-    /// - Some(HummockValue): the `HummockValue` corresponding to the key.
+    /// - Some(`HummockValue`): the `HummockValue` corresponding to the key.
     pub fn get(
         &self,
         user_key: &[u8],
@@ -135,7 +135,7 @@ impl SharedBufferManager {
         None
     }
 
-    /// Get a collection of forward `SharedBufferBatchIterator` to iterate data of shared buffer
+    /// Gets a collection of forward `SharedBufferBatchIterator` to iterate data of shared buffer
     /// batches within the given `key_range` and `epoch_range`
     pub fn iters<R, B>(
         &self,
@@ -164,7 +164,7 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
-    /// Get a collection of backward `SharedBufferBatchIterator` to iterate data of shared buffer
+    /// Gets a collection of backward `SharedBufferBatchIterator` to iterate data of shared buffer
     /// batches within the given `key_range` and `epoch_range`
     pub fn reverse_iters<R, B>(
         &self,
@@ -193,10 +193,10 @@ impl SharedBufferManager {
             .collect_vec()
     }
 
-    /// Delete shared buffers before a given `epoch` inclusively.
+    /// Deletes shared buffers before a given `epoch` exclusively.
     pub fn delete_before(&self, epoch: u64) {
         let mut guard = self.shared_buffer.write();
-        let new = guard.split_off(&(epoch + 1));
+        let new = guard.split_off(&epoch);
         *guard = new;
     }
 
@@ -212,6 +212,11 @@ impl SharedBufferManager {
             .unwrap();
         // Remove items of the given epoch from shared buffer
         self.shared_buffer.write().remove(&epoch);
+    }
+
+    #[cfg(test)]
+    pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
+        self.shared_buffer.read().clone()
     }
 }
 
@@ -230,6 +235,7 @@ mod tests {
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
     use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::storage_value::StorageValue;
 
     fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
@@ -270,7 +276,7 @@ mod tests {
         for key in delete_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Delete,
+                HummockValue::Delete(StorageValue::new_default_delete().to_bytes()),
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
@@ -293,7 +299,7 @@ mod tests {
         }
         let mut idx = 0;
 
-        // Write batch in epoch1
+        // Write a batch in epoch1
         let epoch1 = 1;
         let put_keys_in_epoch1 = &keys[..3];
         let shared_buffer_items1 = generate_and_write_batch(
@@ -304,7 +310,7 @@ mod tests {
             &shared_buffer_manager,
         );
 
-        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
         let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
         let shared_buffer_items2 = generate_and_write_batch(
@@ -314,6 +320,8 @@ mod tests {
             &mut idx,
             &shared_buffer_manager,
         );
+
+        let delete_val = StorageValue::new_default_delete().to_bytes();
 
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {
@@ -346,7 +354,7 @@ mod tests {
             shared_buffer_manager
                 .get(keys[2].as_slice(), ..=epoch2)
                 .unwrap(),
-            HummockValue::Delete
+            HummockValue::Delete(delete_val.to_vec())
         );
         assert_eq!(
             shared_buffer_manager
@@ -380,7 +388,7 @@ mod tests {
         }
         let mut idx = 0;
 
-        // Write batch in epoch1
+        // Write a batch in epoch1
         let epoch1 = 1;
         let put_keys_in_epoch1 = &keys[..3];
         let shared_buffer_items1 = generate_and_write_batch(
@@ -391,7 +399,7 @@ mod tests {
             &shared_buffer_manager,
         );
 
-        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
         let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
         let shared_buffer_items2 = generate_and_write_batch(
@@ -515,7 +523,7 @@ mod tests {
         }
         let mut idx = 0;
 
-        // Write batch in epoch1
+        // Write a batch in epoch1
         let epoch1 = 1;
         let put_keys_in_epoch1 = &keys[..3];
         let shared_buffer_items1 = generate_and_write_batch(
@@ -526,7 +534,7 @@ mod tests {
             &shared_buffer_manager,
         );
 
-        // Write batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
+        // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
         let put_keys_in_epoch2 = &[&keys[1..2], &keys[3..4]].concat();
         let shared_buffer_items2 = generate_and_write_batch(
@@ -652,7 +660,7 @@ mod tests {
         }
         let mut idx = 0;
 
-        // Write batches
+        // Write a batch
         let epoch = 1;
         let shared_buffer_items =
             generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);

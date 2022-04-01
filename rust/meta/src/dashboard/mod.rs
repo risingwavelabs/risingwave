@@ -28,21 +28,18 @@ use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
 use tower_http::services::ServeDir;
 
-use crate::cluster::StoredClusterManager;
+use crate::cluster::ClusterManagerRef;
 use crate::storage::MetaStore;
-use crate::stream::FragmentManager;
+use crate::stream::FragmentManagerRef;
 
 #[derive(Clone)]
-pub struct DashboardService<S>
-where
-    S: MetaStore,
-{
+pub struct DashboardService<S: MetaStore> {
     pub dashboard_addr: SocketAddr,
-    pub cluster_manager: Arc<StoredClusterManager<S>>,
-    pub fragment_manager: Arc<FragmentManager<S>>,
+    pub cluster_manager: ClusterManagerRef<S>,
+    pub fragment_manager: FragmentManagerRef<S>,
 
     // TODO: replace with catalog manager.
-    pub meta_store_ref: Arc<S>,
+    pub meta_store: Arc<S>,
     pub has_test_data: Arc<AtomicBool>,
 }
 
@@ -50,8 +47,9 @@ pub type Service<S> = Arc<DashboardService<S>>;
 
 mod handlers {
     use axum::Json;
+    use risingwave_pb::catalog::Table;
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::{ActorLocation, Table};
+    use risingwave_pb::meta::ActorLocation;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
@@ -99,16 +97,10 @@ mod handlers {
 
     pub async fn list_materialized_views<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<(TableId, Table)>>> {
+    ) -> Result<Json<Vec<Table>>> {
         use crate::model::MetadataModel;
 
-        let materialized_views = Table::list(&*srv.meta_store_ref)
-            .await
-            .map_err(err)?
-            .iter()
-            .filter(|t| t.is_materialized_view())
-            .map(|mv| (mv.table_ref_id.as_ref().unwrap().table_id, mv.clone()))
-            .collect::<Vec<_>>();
+        let materialized_views = Table::list(&*srv.meta_store).await.map_err(err)?;
         Ok(Json(materialized_views))
     }
 

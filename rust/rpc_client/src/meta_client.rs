@@ -31,6 +31,7 @@ use risingwave_pb::ddl_service::{
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
     CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
+    DropMaterializedViewRequest, DropMaterializedViewResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -63,7 +64,7 @@ type SchemaId = u32;
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone)]
 pub struct MetaClient {
-    worker_id_ref: Option<u32>,
+    worker_id: Option<u32>,
     pub inner: GrpcMetaClient,
 }
 
@@ -72,16 +73,16 @@ impl MetaClient {
     pub async fn new(meta_addr: &str) -> Result<Self> {
         Ok(Self {
             inner: GrpcMetaClient::new(meta_addr).await?,
-            worker_id_ref: None,
+            worker_id: None,
         })
     }
 
     pub fn set_worker_id(&mut self, worker_id: u32) {
-        self.worker_id_ref = Some(worker_id);
+        self.worker_id = Some(worker_id);
     }
 
     pub fn worker_id(&self) -> u32 {
-        self.worker_id_ref.expect("worker node id is not set.")
+        self.worker_id.expect("worker node id is not set.")
     }
 
     /// Subscribe to notification from meta.
@@ -157,6 +158,15 @@ impl MetaClient {
         let resp = self.inner.create_materialized_view(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.table_id.into(), resp.version))
+    }
+
+    pub async fn drop_materialized_view(&self, table_id: TableId) -> Result<CatalogVersion> {
+        let request = DropMaterializedViewRequest {
+            table_id: table_id.table_id(),
+        };
+
+        let resp = self.inner.drop_materialized_view(request).await?;
+        Ok(resp.version)
     }
 
     pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
@@ -289,7 +299,7 @@ impl GrpcMetaClient {
             .connect_timeout(Duration::from_secs(5))
             .connect()
             .await
-            .to_rw_result_with(format!("failed to connect to {}", addr))?;
+            .to_rw_result_with(|| format!("failed to connect to {}", addr))?;
         let cluster_client = ClusterServiceClient::new(channel.clone());
         let heartbeat_client = HeartbeatServiceClient::new(channel.clone());
         let catalog_client = CatalogServiceClient::new(channel.clone());
@@ -343,6 +353,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_schema, CreateSchemaRequest, CreateSchemaResponse }
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
+            ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
         }
     };
 }

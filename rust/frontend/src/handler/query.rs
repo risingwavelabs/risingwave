@@ -12,23 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures_async_stream::for_await;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::plan::{TaskId, TaskOutputId};
-use risingwave_rpc_client::{ComputeClient, ExchangeSource};
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
-use uuid::Uuid;
 
 use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
-use crate::session::QueryContext;
+use crate::scheduler::{ExecutionContext, ExecutionContextRef};
+use crate::session::{OptimizerContext, SessionImpl};
 
-pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgResponse> {
+lazy_static::lazy_static! {
+    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+    /// until the entire dataflow is refreshed. In other words, every related table & MV will
+    /// be able to see the write.
+    static ref IMPLICIT_FLUSH: bool =
+     std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "true".to_string() }).parse().unwrap();
+}
+
+pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
-
     let session = context.session_ctx.clone();
+
     let bound = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
@@ -48,48 +54,17 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         (plan.to_batch_prost(), pg_descs)
     };
 
-    // Choose the first node by WorkerNodeManager.
-    let manager = session.env().worker_node_manager();
-    let address = manager
-        .list_worker_nodes()
-        .get(0)
-        .ok_or_else(|| RwError::from(InternalError("No working node available".to_string())))?
-        .host
-        .as_ref()
-        .ok_or_else(|| RwError::from(InternalError("host address not found".to_string())))?
-        .into();
-    let compute_client: ComputeClient = ComputeClient::new(address).await?;
+    let execution_context: ExecutionContextRef = ExecutionContext::new(session.clone()).into();
+    let query_manager = execution_context.session().env().query_manager().clone();
 
-    // Build task id and task sink id
-    let task_id = TaskId {
-        query_id: Uuid::new_v4().to_string(),
-        stage_id: 0,
-        task_id: 0,
-    };
-    let task_sink_id = TaskOutputId {
-        task_id: Some(task_id.clone()),
-        output_id: 0,
-    };
-
-    // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
-    // TODO: hummock snapshot should maintain as cache instead of RPC each query.
-    let meta_client = session.env().meta_client();
-    let epoch = meta_client.pin_snapshot().await?;
-
-    // Create task.
-    compute_client
-        .create_task(task_id.clone(), plan, epoch)
-        .await?;
-
-    // Receive data.
-    let mut source = compute_client.get_data(task_sink_id.clone()).await?;
     let mut rows = vec![];
-    while let Some(chunk) = source.take_data().await? {
-        rows.extend(to_pg_rows(chunk));
+    #[for_await]
+    for chunk in query_manager
+        .schedule_single(execution_context, plan)
+        .await?
+    {
+        rows.extend(to_pg_rows(chunk?));
     }
-
-    // Unpin corresponding snapshot.
-    meta_client.unpin_snapshot(epoch).await?;
 
     let rows_count = match stmt_type {
         StatementType::SELECT => rows.len() as i32,
@@ -106,7 +81,22 @@ pub async fn handle_query(context: QueryContext, stmt: Statement) -> Result<PgRe
         _ => unreachable!(),
     };
 
+    // Implicitly flush the writes.
+    if *IMPLICIT_FLUSH {
+        flush_for_write(&session, stmt_type).await?;
+    }
+
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))
+}
+
+async fn flush_for_write(session: &SessionImpl, stmt_type: StatementType) -> Result<()> {
+    match stmt_type {
+        StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
+            let client = session.env().meta_client();
+            client.flush().await
+        }
+        _ => Ok(()),
+    }
 }
 
 fn to_statement_type(stmt: &Statement) -> StatementType {

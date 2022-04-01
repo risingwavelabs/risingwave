@@ -40,7 +40,7 @@ async fn gen_and_upload_table(
     }
     let table_id = hummock_meta_client.get_new_table_id().await.unwrap();
 
-    // get remote table
+    // Get remote table
     let sstable_store = Arc::new(SstableStore::new(
         object_store,
         remote_dir.to_string(),
@@ -116,15 +116,13 @@ async fn gen_and_upload_table_with_sstable_store(
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        let mut it = $storage
-            .range_scan::<_, Vec<u8>>($range, $epoch)
-            .await
-            .unwrap();
-        it.rewind().await.unwrap();
+        let mut it = $storage.iter::<_, Vec<u8>>($range, $epoch).await.unwrap();
         let mut count = 0;
-        while it.is_valid() {
-            count += 1;
-            it.next().await.unwrap();
+        loop {
+            match it.next().await.unwrap() {
+                Some(_) => count += 1,
+                None => break,
+            }
         }
         assert_eq!(count, $expect_count);
     }};
@@ -133,14 +131,15 @@ macro_rules! assert_count_range_scan {
 macro_rules! assert_count_reverse_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         let mut it = $storage
-            .reverse_range_scan::<_, Vec<u8>>($range, $epoch)
+            .reverse_iter::<_, Vec<u8>>($range, $epoch)
             .await
             .unwrap();
-        it.rewind().await.unwrap();
         let mut count = 0;
-        while it.is_valid() {
-            count += 1;
-            it.next().await.unwrap();
+        loop {
+            match it.next().await.unwrap() {
+                Some(_) => count += 1,
+                None => break,
+            }
         }
         assert_eq!(count, $expect_count);
     }};
@@ -194,7 +193,7 @@ async fn test_snapshot() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (1, HummockValue::Delete),
+            (1, HummockValue::Delete(Default::default())),
             (3, HummockValue::Put(b"test".to_vec())),
             (4, HummockValue::Put(b"test".to_vec())),
         ],
@@ -211,9 +210,9 @@ async fn test_snapshot() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (2, HummockValue::Delete),
-            (3, HummockValue::Delete),
-            (4, HummockValue::Delete),
+            (2, HummockValue::Delete(Default::default())),
+            (3, HummockValue::Delete(Default::default())),
+            (4, HummockValue::Delete(Default::default())),
         ],
         epoch3,
     )

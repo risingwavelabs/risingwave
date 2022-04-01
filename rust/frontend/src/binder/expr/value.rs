@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Decimal, ScalarImpl};
-use risingwave_sqlparser::ast::Value;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::{DataType, Decimal, IntervalUnit, ScalarImpl};
+use risingwave_sqlparser::ast::{DateTimeField, Value};
 
 use crate::binder::Binder;
 use crate::expr::Literal;
@@ -23,16 +23,25 @@ impl Binder {
     pub(super) fn bind_value(&mut self, value: Value) -> Result<Literal> {
         match value {
             Value::Number(s, b) => self.bind_number(s, b),
-            Value::SingleQuotedString(s) => {
-                Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
-            }
+            Value::SingleQuotedString(s) => self.bind_string(s),
             Value::Boolean(b) => self.bind_bool(b),
-            // FIXME: For now we just use a dummy type (Boolean) for null. We should
-            // bind the actual type according to the table schema if it's an
-            // `INSERT INTO ... VALUES` statement.
+            // We just bind a dummy type (Boolean) for null here, and its type will be changed
+            // according to its context later.
             Value::Null => Ok(Literal::new(None, DataType::Boolean)),
+            Value::Interval {
+                value,
+                leading_field,
+                // TODO: support more interval types.
+                leading_precision: None,
+                last_field: None,
+                fractional_seconds_precision: None,
+            } => self.bind_interval(value, leading_field),
             _ => Err(ErrorCode::NotImplementedError(format!("{:?}", value)).into()),
         }
+    }
+
+    pub(super) fn bind_string(&mut self, s: String) -> Result<Literal> {
+        Ok(Literal::new(Some(ScalarImpl::Utf8(s)), DataType::Varchar))
     }
 
     fn bind_bool(&mut self, b: bool) -> Result<Literal> {
@@ -52,6 +61,58 @@ impl Binder {
             (Some(ScalarImpl::Decimal(decimal)), DataType::Decimal)
         };
         Ok(Literal::new(data, data_type))
+    }
+
+    fn bind_interval(
+        &mut self,
+        s: String,
+        leading_field: Option<DateTimeField>,
+    ) -> Result<Literal> {
+        // > INTERVAL '1' means 1 second.
+        // https://www.postgresql.org/docs/current/datatype-datetime.html#DATATYPE-INTERVAL-INPUT
+        let unit = leading_field.unwrap_or(DateTimeField::Second);
+        use DateTimeField::*;
+        let interval = (|| match unit {
+            Year => {
+                let years = s.parse::<i32>().ok()?;
+                let months = years.checked_mul(12)?;
+                Some(IntervalUnit::from_month(months))
+            }
+            Month => {
+                let months = s.parse::<i32>().ok()?;
+                Some(IntervalUnit::from_month(months))
+            }
+            Day => {
+                let days = s.parse::<i32>().ok()?;
+                Some(IntervalUnit::from_days(days))
+            }
+            Hour => {
+                let hours = s.parse::<i64>().ok()?;
+                let ms = hours.checked_mul(3600 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Minute => {
+                let minutes = s.parse::<i64>().ok()?;
+                let ms = minutes.checked_mul(60 * 1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+            Second => {
+                let seconds = s.parse::<i64>().ok()?;
+                let ms = seconds.checked_mul(1000)?;
+                Some(IntervalUnit::from_millis(ms))
+            }
+        })()
+        .ok_or_else(|| {
+            RwError::from(ErrorCode::InvalidInputSyntax(format!(
+                "Invalid interval {}.",
+                s
+            )))
+        })?;
+
+        let datum = Some(ScalarImpl::Interval(interval));
+        let literal = Literal::new(datum, DataType::Interval);
+
+        Ok(literal)
     }
 }
 

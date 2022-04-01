@@ -33,7 +33,7 @@ use super::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
 pub type BoxedArrangeStream = Pin<Box<dyn Stream<Item = Result<ArrangeMessage>> + Send>>;
 
 /// `LookupExecutor` takes one input stream and one arrangement. It joins the input stream with the
-/// arrangement. Currently, it only supports inner join. See [`LookupExecutorParams`] for more
+/// arrangement. Currently, it only supports inner join. See `LookupExecutorParams` for more
 /// information.
 ///
 /// The output schema is `| stream columns | arrangement columns |`.

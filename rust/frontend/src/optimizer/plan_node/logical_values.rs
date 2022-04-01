@@ -18,10 +18,9 @@ use std::{fmt, vec};
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::Schema;
 
-use super::{BatchValues, ColPrunable, PlanBase, PlanRef, ToBatch, ToStream};
+use super::{BatchValues, ColPrunable, PlanBase, PlanNode, PlanRef, ToBatch, ToStream};
 use crate::expr::{Expr, ExprImpl};
-use crate::optimizer::property::WithSchema;
-use crate::session::QueryContextRef;
+use crate::session::OptimizerContextRef;
 
 /// `LogicalValues` builds rows according to a list of expressions
 #[derive(Debug, Clone)]
@@ -32,7 +31,7 @@ pub struct LogicalValues {
 
 impl LogicalValues {
     /// Create a [`LogicalValues`] node. Used internally by optimizer.
-    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> Self {
+    pub fn new(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: OptimizerContextRef) -> Self {
         for exprs in &rows {
             for (i, expr) in exprs.iter().enumerate() {
                 assert_eq!(schema.fields()[i].data_type(), expr.return_type())
@@ -46,7 +45,7 @@ impl LogicalValues {
     }
 
     /// Create a [`LogicalValues`] node. Used by planner.
-    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: QueryContextRef) -> PlanRef {
+    pub fn create(rows: Vec<Vec<ExprImpl>>, schema: Schema, ctx: OptimizerContextRef) -> PlanRef {
         // No additional checks after binder.
         Self::new(rows, schema, ctx).into()
     }
@@ -109,7 +108,7 @@ mod tests {
 
     use super::*;
     use crate::expr::Literal;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     fn literal(val: i32) -> ExprImpl {
         Literal::new(Datum::Some(val.into()), DataType::Int32).into()
@@ -125,7 +124,7 @@ mod tests {
     /// ```
     #[tokio::test]
     async fn test_prune_filter() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let schema = Schema::new(vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),

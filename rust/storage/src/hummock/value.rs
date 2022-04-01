@@ -15,18 +15,19 @@
 use bytes::{Buf, BufMut, Bytes};
 
 use super::{HummockError, HummockResult};
-use crate::storage_value::StorageValue;
+use crate::storage_value::{StorageValue, ValueMeta};
 
 pub const VALUE_DELETE: u8 = 1 << 0;
 pub const VALUE_PUT: u8 = 0;
 
 /// [`HummockValue`] can be created on either a `Vec<u8>` or a `&[u8]`.
 ///
-/// Its encoding is a 1-byte flag + user value.
+/// Its encoding is a 1-byte flag + storage value. For `Put`, storage value contains both value meta
+/// and user value. For `Delete`, storage value contains only value meta.
 #[derive(Debug, Clone)]
 pub enum HummockValue<T> {
     Put(T),
-    Delete,
+    Delete(T),
 }
 
 impl<T> Copy for HummockValue<T> where T: Copy {}
@@ -35,7 +36,7 @@ impl<T: PartialEq> PartialEq for HummockValue<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Put(l0), Self::Put(r0)) => l0.eq(r0),
-            (Self::Delete, Self::Delete) => true,
+            (Self::Delete(_), Self::Delete(_)) => true,
             _ => false,
         }
     }
@@ -50,11 +51,11 @@ where
     pub fn encoded_len(&self) -> usize {
         match self {
             HummockValue::Put(val) => 1 + val.as_ref().len(),
-            HummockValue::Delete => 1,
+            HummockValue::Delete(val) => 1 + val.as_ref().len(),
         }
     }
 
-    /// Encode the object
+    /// Encodes the object
     pub fn encode(&self, buffer: &mut impl BufMut) {
         match self {
             HummockValue::Put(val) => {
@@ -62,32 +63,44 @@ where
                 buffer.put_u8(VALUE_PUT);
                 buffer.put_slice(val.as_ref());
             }
-            HummockValue::Delete => {
+            HummockValue::Delete(val) => {
                 // set flag
                 buffer.put_u8(VALUE_DELETE);
+                buffer.put_slice(val.as_ref());
             }
         }
     }
 
-    /// Get the put value out of the `HummockValue`. If the current value is `Delete`, `None` will
+    /// Gets the put value out of the `HummockValue`. If the current value is `Delete`, `None` will
     /// be returned.
     pub fn into_put_value(self) -> Option<T> {
         match self {
             Self::Put(val) => Some(val),
-            Self::Delete => None,
+            Self::Delete(_) => None,
         }
+    }
+
+    pub fn is_delete(&self) -> bool {
+        matches!(self, Self::Delete(_))
     }
 }
 
+pub fn delete_without_meta<T>() -> HummockValue<T>
+where
+    T: From<ValueMeta>,
+{
+    HummockValue::Delete(ValueMeta::default().into())
+}
+
 impl HummockValue<Vec<u8>> {
-    /// Decode the object from `Vec<u8>`.
+    /// Decodes the object from `Vec<u8>`.
     pub fn decode(buffer: &mut impl Buf) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
             return Err(HummockError::DecodeError("empty value".to_string()).into());
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(Vec::from(buffer.chunk()))),
-            VALUE_DELETE => Ok(Self::Delete),
+            VALUE_DELETE => Ok(Self::Delete(Vec::from(buffer.chunk()))),
             _ => Err(HummockError::DecodeError("non-empty but format error".to_string()).into()),
         }
     }
@@ -95,20 +108,20 @@ impl HummockValue<Vec<u8>> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
             HummockValue::Put(x) => HummockValue::Put(x),
-            HummockValue::Delete => HummockValue::Delete,
+            HummockValue::Delete(x) => HummockValue::Delete(x),
         }
     }
 }
 
 impl<'a> HummockValue<&'a [u8]> {
-    /// Decode the object from `&[u8]`.
+    /// Decodes the object from `&[u8]`.
     pub fn from_slice(mut buffer: &'a [u8]) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
             return Err(HummockError::DecodeError("empty value".to_string()).into());
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(buffer)),
-            VALUE_DELETE => Ok(Self::Delete),
+            VALUE_DELETE => Ok(Self::Delete(buffer)),
             _ => Err(HummockError::DecodeError("non-empty but format error".to_string()).into()),
         }
     }
@@ -117,7 +130,7 @@ impl<'a> HummockValue<&'a [u8]> {
     pub fn to_owned_value(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(value) => HummockValue::Put(value.to_vec()),
-            HummockValue::Delete => HummockValue::Delete,
+            HummockValue::Delete(value_meta) => HummockValue::Delete(value_meta.to_vec()),
         }
     }
 }
@@ -126,41 +139,14 @@ impl HummockValue<Bytes> {
     pub fn as_slice(&self) -> HummockValue<&[u8]> {
         match self {
             HummockValue::Put(x) => HummockValue::Put(&x[..]),
-            HummockValue::Delete => HummockValue::Delete,
+            HummockValue::Delete(x) => HummockValue::Delete(&x[..]),
         }
     }
 
     pub fn to_vec(&self) -> HummockValue<Vec<u8>> {
         match self {
             HummockValue::Put(x) => HummockValue::Put(x.to_vec()),
-            HummockValue::Delete => HummockValue::Delete,
-        }
-    }
-}
-
-impl From<Option<Vec<u8>>> for HummockValue<Vec<u8>> {
-    fn from(data: Option<Vec<u8>>) -> Self {
-        match data {
-            Some(data) => Self::Put(data),
-            None => Self::Delete,
-        }
-    }
-}
-
-impl From<Option<Bytes>> for HummockValue<Bytes> {
-    fn from(data: Option<Bytes>) -> Self {
-        match data {
-            Some(data) => Self::Put(data),
-            None => Self::Delete,
-        }
-    }
-}
-
-impl<'a> From<Option<&'a [u8]>> for HummockValue<&'a [u8]> {
-    fn from(data: Option<&'a [u8]>) -> Self {
-        match data {
-            Some(data) => Self::Put(data),
-            None => Self::Delete,
+            HummockValue::Delete(x) => HummockValue::Delete(x.to_vec()),
         }
     }
 }
@@ -169,16 +155,17 @@ impl From<HummockValue<Vec<u8>>> for HummockValue<Bytes> {
     fn from(data: HummockValue<Vec<u8>>) -> Self {
         match data {
             HummockValue::Put(x) => HummockValue::Put(x.into()),
-            HummockValue::Delete => HummockValue::Delete,
+            HummockValue::Delete(x) => HummockValue::Delete(x.into()),
         }
     }
 }
 
-impl From<Option<StorageValue>> for HummockValue<Bytes> {
-    fn from(data: Option<StorageValue>) -> Self {
-        match data {
-            Some(data) => HummockValue::Put(data.to_bytes()),
-            None => HummockValue::Delete,
+impl From<StorageValue> for HummockValue<Bytes> {
+    fn from(data: StorageValue) -> Self {
+        if data.is_some() {
+            HummockValue::Put(data.to_bytes())
+        } else {
+            HummockValue::Delete(data.to_bytes())
         }
     }
 }

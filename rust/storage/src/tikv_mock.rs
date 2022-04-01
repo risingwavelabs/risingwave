@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::RangeBounds;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::Result;
 
 use super::StateStore;
 use crate::storage_value::StorageValue;
-use crate::StateStoreIter;
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStoreIter};
 
 #[derive(Clone)]
 pub struct TikvStateStore {}
@@ -30,65 +31,79 @@ impl TikvStateStore {
         unimplemented!()
     }
 }
-#[async_trait]
+
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
+    define_state_store_associated_type!();
 
-    async fn get(&self, _key: &[u8], _epoch: u64) -> Result<Option<StorageValue>> {
-        unimplemented!()
+    fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
+        async move { unimplemented!() }
     }
 
-    async fn scan<R, B>(
+    fn ingest_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _epoch: u64,
+    ) -> Self::IngestBatchFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn replicate_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _epoch: u64,
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn scan<R, B>(
         &self,
         _key_range: R,
         _limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<Vec<(Bytes, StorageValue)>>
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
+        async move { unimplemented!() }
     }
 
-    async fn ingest_batch(
+    fn reverse_scan<R, B>(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
+        _key_range: R,
+        _limit: Option<usize>,
         _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+    ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
-    }
-
-    async fn replicate_batch(
-        &self,
-        _kv_pairs: Vec<(Bytes, Option<StorageValue>)>,
-        _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        unimplemented!()
-    }
-
-    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        unimplemented!()
+        async move { unimplemented!() }
     }
 }
 
@@ -100,11 +115,11 @@ impl TikvStateStoreIter {
     }
 }
 
-#[async_trait]
 impl StateStoreIter for TikvStateStoreIter {
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        unimplemented!()
-    }
+    type Item = (Bytes, Bytes);
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
 
-    type Item = (Bytes, StorageValue);
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move { unimplemented!() }
+    }
 }

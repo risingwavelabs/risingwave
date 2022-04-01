@@ -54,6 +54,15 @@ message DropActorsResponse {
   common.Status status = 2;
 }
 
+message ForceStopActorsRequest {
+  string request_id = 1;
+}
+
+message ForceStopActorsResponse {
+  string request_id = 1;
+  common.Status status = 2;
+}
+
 message InjectBarrierRequest {
   string request_id = 1;
   data.Barrier barrier = 2;
@@ -62,8 +71,13 @@ message InjectBarrierRequest {
 }
 
 message InjectBarrierResponse {
+  message FinishedCreateMview {
+    uint64 epoch = 1;
+    uint32 actor_id = 2;
+  }
   string request_id = 1;
   common.Status status = 2;
+  repeated FinishedCreateMview finished_create_mviews = 3;
 }
 
 // Before starting streaming, the leader node broadcast the actor-host table to needed workers.
@@ -98,6 +112,7 @@ service StreamService {
   rpc BuildActors(BuildActorsRequest) returns (BuildActorsResponse);
   rpc BroadcastActorInfoTable(BroadcastActorInfoTableRequest) returns (BroadcastActorInfoTableResponse);
   rpc DropActors(DropActorsRequest) returns (DropActorsResponse);
+  rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);

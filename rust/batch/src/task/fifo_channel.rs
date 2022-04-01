@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use tokio::sync::mpsc;
 
-use crate::task::channel::{BoxChanReceiver, BoxChanSender, ChanReceiver, ChanSender};
+use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 
 pub struct FifoSender {
     sender: mpsc::UnboundedSender<Option<DataChunk>>,
@@ -27,31 +29,35 @@ pub struct FifoReceiver {
     receiver: mpsc::UnboundedReceiver<Option<DataChunk>>,
 }
 
-#[async_trait::async_trait]
 impl ChanSender for FifoSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> Result<()> {
-        self.sender
-            .send(chunk)
-            .to_rw_result_with("FifoSender::send")
-    }
-}
-
-#[async_trait::async_trait]
-impl ChanReceiver for FifoReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunk>> {
-        match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
-            // Early close should be treated as error.
-            None => Err(InternalError("broken fifo_channel".to_string()).into()),
+    type SendFuture<'a> = impl Future<Output = Result<()>>;
+    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
+        async move {
+            self.sender
+                .send(chunk)
+                .to_rw_result_with(|| "FifoSender::send".into())
         }
     }
 }
 
-pub fn new_fifo_channel() -> (BoxChanSender, Vec<BoxChanReceiver>) {
+impl ChanReceiver for FifoReceiver {
+    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            match self.receiver.recv().await {
+                Some(data_chunk) => Ok(data_chunk),
+                // Early close should be treated as error.
+                None => Err(InternalError("broken fifo_channel".to_string()).into()),
+            }
+        }
+    }
+}
+
+pub fn new_fifo_channel() -> (ChanSenderImpl, Vec<ChanReceiverImpl>) {
     let (s, r) = mpsc::unbounded_channel();
     (
-        Box::new(FifoSender { sender: s }),
-        vec![Box::new(FifoReceiver { receiver: r })],
+        ChanSenderImpl::Fifo(FifoSender { sender: s }),
+        vec![ChanReceiverImpl::Fifo(FifoReceiver { receiver: r })],
     )
 }
 

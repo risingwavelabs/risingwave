@@ -28,7 +28,7 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBui
 
 /// `ValuesExecutor` implements Values executor.
 pub(super) struct ValuesExecutor {
-    rows: Vec<Vec<BoxedExpression>>,
+    rows: vec::IntoIter<Vec<BoxedExpression>>,
     schema: Schema,
     identity: String,
     chunk_size: usize,
@@ -42,7 +42,7 @@ impl ValuesExecutor {
         chunk_size: usize,
     ) -> Self {
         Self {
-            rows,
+            rows: rows.into_iter(),
             schema,
             identity,
             chunk_size,
@@ -53,7 +53,7 @@ impl ValuesExecutor {
 #[async_trait::async_trait]
 impl Executor for ValuesExecutor {
     async fn open(&mut self) -> Result<()> {
-        info!("Values executor init");
+        trace!("Values executor init");
         Ok(())
     }
 
@@ -67,7 +67,7 @@ impl Executor for ValuesExecutor {
 
         if self.schema.fields.is_empty() {
             let cardinality = self.rows.len();
-            self.rows.clear();
+            self.rows = vec![].into_iter();
             return Ok(Some(DataChunk::new_dummy(cardinality)));
         }
 
@@ -80,7 +80,7 @@ impl Executor for ValuesExecutor {
 
         let chunk_size = self.chunk_size.min(self.rows.len());
         let mut array_builders = self.schema.create_array_builders(chunk_size)?;
-        for row in self.rows.drain(..chunk_size) {
+        for row in self.rows.by_ref().take(chunk_size) {
             for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
                 let out = expr.eval(&one_row_chunk)?;
                 builder.append_array(&out)?;

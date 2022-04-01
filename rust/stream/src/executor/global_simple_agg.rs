@@ -30,7 +30,7 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::aggregation::*;
 use super::{Barrier, Executor, ExecutorState, Message, PkIndices, PkIndicesRef, StatefulExecutor};
 use crate::executor::{pk_input_array_refs, ExecutorBuilder};
-use crate::task::{build_agg_call_from_prost, ExecutorParams, StreamManagerCore};
+use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -78,6 +78,10 @@ pub struct SimpleAggExecutor<S: StateStore> {
 
     /// Executor state
     executor_state: ExecutorState,
+
+    #[allow(dead_code)]
+    /// Indices of the columns on which key distribution depends.
+    key_indices: Vec<usize>,
 }
 
 impl<S: StateStore> std::fmt::Debug for SimpleAggExecutor<S> {
@@ -98,7 +102,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
         mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        _stream: &mut StreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::GlobalSimpleAggNode)?;
         let agg_calls: Vec<AggCall> = node
@@ -107,6 +111,11 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             .map(build_agg_call_from_prost)
             .try_collect()?;
         let keyspace = Keyspace::executor_root(store, params.executor_id);
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
         Ok(Box::new(SimpleAggExecutor::new(
             params.input.remove(0),
             agg_calls,
@@ -114,6 +123,7 @@ impl ExecutorBuilder for SimpleAggExecutorBuilder {
             params.pk_indices,
             params.executor_id,
             params.op_info,
+            key_indices,
         )))
     }
 }
@@ -126,6 +136,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         pk_indices: PkIndices,
         executor_id: u64,
         op_info: String,
+        key_indices: Vec<usize>,
     ) -> Self {
         // simple agg does not have group key
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
@@ -141,6 +152,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             identity: format!("GlobalSimpleAggExecutor {:X}", executor_id),
             op_info,
             executor_state: ExecutorState::Init,
+            key_indices,
         }
     }
 
@@ -372,6 +384,7 @@ mod tests {
             vec![],
             1,
             "SimpleAggExecutor".to_string(),
+            vec![],
         );
 
         // Consume the init barrier

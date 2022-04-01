@@ -20,11 +20,10 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 
-use crate::hummock::compactor::{Compactor, SubCompactContext};
+use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
-use crate::hummock::key_range::KeyRange;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -52,7 +51,7 @@ pub struct SharedBufferUploader {
     options: Arc<StorageConfig>,
 
     /// Statistics.
-    // TODO: should be separated `HummockStats` instead of `StateStoreMetrics`.
+    // TODO: separate `HummockStats` from `StateStoreMetrics`.
     stats: Arc<StateStoreMetrics>,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
@@ -90,7 +89,7 @@ impl SharedBufferUploader {
         }
     }
 
-    /// Upload buffer batches to S3.
+    /// Uploads buffer batches to S3.
     async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
@@ -108,7 +107,7 @@ impl SharedBufferUploader {
                 .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
             MergeIterator::new(iters, self.stats.clone())
         };
-        let sub_compact_context = SubCompactContext {
+        let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
@@ -116,20 +115,9 @@ impl SharedBufferUploader {
             stats: self.stats.clone(),
             is_share_buffer_compact: true,
         };
-        let mut tables = Vec::new();
-        Compactor::sub_compact(
-            sub_compact_context,
-            KeyRange::inf(),
-            merge_iters,
-            &mut tables,
-            false,
-            u64::MAX,
-        )
-        .await?;
 
-        if tables.is_empty() {
-            return Ok(());
-        }
+        let tables =
+            Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), merge_iters).await?;
 
         // Add all tables at once.
         let version = self
@@ -141,8 +129,8 @@ impl SharedBufferUploader {
                     .map(|sst| SstableInfo {
                         id: sst.id,
                         key_range: Some(risingwave_pb::hummock::KeyRange {
-                            left: sst.meta.get_smallest_key().to_vec(),
-                            right: sst.meta.get_largest_key().to_vec(),
+                            left: sst.meta.smallest_key.clone(),
+                            right: sst.meta.largest_key.clone(),
                             inf: false,
                         }),
                     })

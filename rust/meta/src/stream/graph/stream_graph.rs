@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::{
     ActorMapping, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
 };
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, FragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
@@ -42,7 +42,7 @@ pub struct StreamActorBuilder {
     dispatcher: Option<Dispatcher>,
     /// downstream actor set.
     downstream_actors: BTreeSet<ActorId>,
-    /// upstream actor array.
+    /// upstream actor array, here we build and set upstream actors in exactly the same order.
     upstream_actors: Vec<Vec<ActorId>>,
 }
 
@@ -126,17 +126,17 @@ impl StreamActorBuilder {
 pub struct StreamGraphBuilder<S> {
     actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
     /// (ctx) fragment manager.
-    fragment_manager_ref: FragmentManagerRef<S>,
+    fragment_manager: FragmentManagerRef<S>,
 }
 
 impl<S> StreamGraphBuilder<S>
 where
     S: MetaStore,
 {
-    pub fn new(fragment_manager_ref: FragmentManagerRef<S>) -> Self {
+    pub fn new(fragment_manager: FragmentManagerRef<S>) -> Self {
         Self {
             actor_builders: BTreeMap::new(),
-            fragment_manager_ref,
+            fragment_manager,
         }
     }
 
@@ -177,16 +177,17 @@ where
             let mut actor = builder.build();
             let actor_id = actor.actor_id;
 
-            let upstream_actors = builder.get_upstream_actors();
             let mut dispatch_upstreams = vec![];
+            let mut upstream_actors = builder.get_upstream_actors();
+            // reverse the vector so we can pop from the back.
+            upstream_actors.reverse();
 
             actor.nodes = Some(self.build_inner(
                 &mut table_sink_map,
                 &mut dispatch_upstreams,
                 &mut upstream_node_actors,
                 actor.get_nodes()?,
-                &upstream_actors,
-                0,
+                &mut upstream_actors,
             )?);
 
             graph
@@ -225,10 +226,9 @@ where
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
-        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
-        upstream_actor_id: &[Vec<ActorId>],
-        next_idx: usize,
+        upstream_actor_id: &mut Vec<Vec<ActorId>>,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => self.build_inner(
@@ -237,7 +237,6 @@ where
                 upstream_node_actors,
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
-                next_idx,
             ),
             Node::ChainNode(_) => self.resolve_chain_node(
                 table_sink_map,
@@ -247,25 +246,21 @@ where
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
-                let mut next_idx_new = next_idx;
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
                         Node::ExchangeNode(exchange_node) => {
-                            assert!(next_idx_new < upstream_actor_id.len());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
                                 pk_indices: input.pk_indices.clone(),
                                 node: Some(Node::MergeNode(MergeNode {
                                     upstream_actor_id: upstream_actor_id
-                                        .get(next_idx_new)
-                                        .cloned()
-                                        .unwrap(),
+                                        .pop()
+                                        .expect("failed to pop upstream actor id"),
                                     fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
                             };
-                            next_idx_new += 1;
                         }
                         Node::ChainNode(_) => {
                             new_stream_node.input[idx] = self.resolve_chain_node(
@@ -282,7 +277,6 @@ where
                                 upstream_node_actors,
                                 input,
                                 upstream_actor_id,
-                                next_idx_new,
                             )?;
                         }
                     }
@@ -296,7 +290,7 @@ where
         &self,
         table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
         dispatch_upstreams: &mut Vec<ActorId>,
-        upstream_node_actors: &mut HashMap<NodeId, Vec<ActorId>>,
+        upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
@@ -307,7 +301,7 @@ where
                 match table_sink_map.entry(table_id) {
                     Entry::Vacant(v) => {
                         let actor_ids = self
-                            .fragment_manager_ref
+                            .fragment_manager
                             .blocking_get_table_sink_actor_ids(&table_id)?;
                         v.insert(actor_ids).clone()
                     }
@@ -318,7 +312,7 @@ where
 
             dispatch_upstreams.extend(upstream_actor_ids.iter());
             let chain_upstream_table_node_actors = self
-                .fragment_manager_ref
+                .fragment_manager
                 .blocking_table_node_actors(&table_id)?;
             let chain_upstream_node_actors = chain_upstream_table_node_actors
                 .iter()

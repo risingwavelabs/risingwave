@@ -12,17 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Deref;
 use std::sync::Arc;
 
 use super::{StreamClients, StreamClientsRef};
 #[cfg(test)]
 use crate::manager::MemEpochGenerator;
-use crate::manager::{EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef};
+use crate::manager::{
+    EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
+    NotificationManager, NotificationManagerRef,
+};
 #[cfg(test)]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
 
-/// [`MetaSrcEnv`] is the global environment in Meta service. The instance will be shared by all
+/// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
 #[derive(Clone)]
 pub struct MetaSrvEnv<S>
@@ -31,10 +35,16 @@ where
 {
     /// id generator manager.
     id_gen_manager: IdGeneratorManagerRef<S>,
+
     /// meta store.
     meta_store: Arc<S>,
+
     /// epoch generator.
     epoch_generator: EpochGeneratorRef,
+
+    /// notification manager.
+    notification_manager: NotificationManagerRef,
+
     /// stream clients memoization.
     stream_clients: StreamClientsRef,
 }
@@ -47,11 +57,13 @@ where
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
+        let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
 
         Self {
             id_gen_manager,
             meta_store,
             epoch_generator,
+            notification_manager,
             stream_clients,
         }
     }
@@ -60,16 +72,40 @@ where
         self.meta_store.clone()
     }
 
+    pub fn meta_store(&self) -> &S {
+        self.meta_store.deref()
+    }
+
     pub fn id_gen_manager_ref(&self) -> IdGeneratorManagerRef<S> {
         self.id_gen_manager.clone()
+    }
+
+    pub fn id_gen_manager(&self) -> &IdGeneratorManager<S> {
+        self.id_gen_manager.deref()
     }
 
     pub fn epoch_generator_ref(&self) -> EpochGeneratorRef {
         self.epoch_generator.clone()
     }
 
+    pub fn epoch_generator(&self) -> &dyn EpochGenerator {
+        self.epoch_generator.deref()
+    }
+
+    pub fn notification_manager_ref(&self) -> NotificationManagerRef {
+        self.notification_manager.clone()
+    }
+
+    pub fn notification_manager(&self) -> &NotificationManager {
+        self.notification_manager.deref()
+    }
+
     pub fn stream_clients_ref(&self) -> StreamClientsRef {
         self.stream_clients.clone()
+    }
+
+    pub fn stream_clients(&self) -> &StreamClients {
+        self.stream_clients.deref()
     }
 }
 
@@ -81,12 +117,14 @@ impl MetaSrvEnv<MemStore> {
         let meta_store = Arc::new(MemStore::default());
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let epoch_generator = Arc::new(MemEpochGenerator::new());
+        let notification_manager = Arc::new(NotificationManager::new(epoch_generator.clone()));
         let stream_clients = Arc::new(StreamClients::default());
 
         Self {
             id_gen_manager,
             meta_store,
             epoch_generator,
+            notification_manager,
             stream_clients,
         }
     }

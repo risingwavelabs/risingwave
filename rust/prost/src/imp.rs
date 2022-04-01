@@ -22,6 +22,14 @@ impl<'a> TryInto<SocketAddr> for &'a HostAddress {
     }
 }
 
+impl TryInto<SocketAddr> for HostAddress {
+    type Error = AddrParseError;
+
+    fn try_into(self) -> Result<SocketAddr, AddrParseError> {
+        self.to_socket_addr()
+    }
+}
+
 impl crate::meta::Table {
     pub fn is_materialized_view(&self) -> bool {
         matches!(
@@ -58,6 +66,19 @@ impl crate::catalog::Source {
             self.get_info().unwrap(),
             crate::catalog::source::Info::TableSource(_)
         )
+    }
+
+    /// Return column_descs from source info
+    pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
+        let catalogs = match self.get_info().unwrap() {
+            crate::catalog::source::Info::StreamSource(info) => &info.columns,
+            crate::catalog::source::Info::TableSource(info) => &info.columns,
+        };
+        catalogs
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.as_ref().cloned().unwrap())
+            .collect()
     }
 }
 

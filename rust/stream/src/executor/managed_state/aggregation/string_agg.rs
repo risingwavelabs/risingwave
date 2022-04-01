@@ -24,10 +24,11 @@ use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedArraysSerializer;
 use risingwave_common::util::value_encoding::{deserialize_cell_not_null, serialize_cell_not_null};
+use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::managed_state::aggregation::ManagedExtremeState;
+use crate::executor::managed_state::aggregation::ManagedTableState;
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 
 pub struct ManagedStringAggState<S: StateStore> {
@@ -117,7 +118,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
         let all_data = self.keyspace.scan_strip_prefix(None, epoch).await?;
         for (raw_key, raw_value) in all_data {
             // We only need to deserialize the value, and keep the key as bytes.
-            let mut deserializer = value_encoding::Deserializer::new(raw_value.to_bytes());
+            let mut deserializer = value_encoding::Deserializer::new(raw_value);
             let value = deserialize_cell_not_null(&mut deserializer, DataType::Char)?.unwrap();
             let value_string: String = value.into_utf8();
             self.cache.insert(
@@ -153,7 +154,7 @@ impl<S: StateStore> ManagedStringAggState<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
+impl<S: StateStore> ManagedTableState<S> for ManagedStringAggState<S> {
     async fn apply_batch(
         &mut self,
         ops: Ops<'_>,
@@ -251,7 +252,11 @@ impl<S: StateStore> ManagedExtremeState<S> for ManagedStringAggState<S> {
             let value = value.into_option();
             match value {
                 Some(val) => {
-                    local.put(key, serialize_cell_not_null(&Some(val))?);
+                    // TODO(Yuanxin): Implement value meta
+                    local.put(
+                        key,
+                        StorageValue::new_default_put(serialize_cell_not_null(&Some(val))?),
+                    );
                 }
                 None => {
                     local.delete(key);
@@ -272,7 +277,7 @@ mod tests {
 
     use super::*;
     use crate::executor::managed_state::aggregation::string_agg::ManagedStringAggState;
-    use crate::executor::managed_state::aggregation::ManagedExtremeState;
+    use crate::executor::managed_state::aggregation::ManagedTableState;
     use crate::executor::test_utils::create_in_memory_keyspace;
 
     async fn create_managed_state<S: StateStore>(

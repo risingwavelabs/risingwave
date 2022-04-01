@@ -31,17 +31,13 @@ impl std::fmt::Debug for Literal {
                 .field("data_type", &self.data_type)
                 .finish()
         } else {
-            use risingwave_common::for_all_scalar_variants;
-            use risingwave_common::types::ScalarImpl::*;
-            macro_rules! scalar_write_inner {
-            ([], $( { $variant_name:ident, $suffix_name:ident, $scalar:ty, $scalar_ref:ty } ),*) => {
-                match &self.data {
-                    None => write!(f, "null"),
-                    $( Some($variant_name(v)) => write!(f, "{:?}", v) ),*
-                }?;
-            };
-        }
-            for_all_scalar_variants! { scalar_write_inner }
+            match &self.data {
+                None => write!(f, "null"),
+                // Add single quotation marks for string and interval literals
+                Some(ScalarImpl::Utf8(v)) => write!(f, "'{}'", v),
+                Some(ScalarImpl::Interval(v)) => write!(f, "'{}'", v),
+                Some(v) => write!(f, "{}", v),
+            }?;
             write!(f, ":{:?}", self.data_type)
         }
     }
@@ -75,12 +71,13 @@ impl Expr for Literal {
 
 /// Convert a literal value (datum) into protobuf.
 fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
+    let Some(d) = d.as_ref() else {
+        return None;
+    };
+
     use risingwave_pb::expr::*;
 
-    if d.is_none() {
-        return None;
-    }
-    let body = match d.as_ref().unwrap() {
+    let body = match d {
         ScalarImpl::Int16(v) => v.to_be_bytes().to_vec(),
         ScalarImpl::Int32(v) => v.to_be_bytes().to_vec(),
         ScalarImpl::Int64(v) => v.to_be_bytes().to_vec(),
@@ -89,7 +86,7 @@ fn literal_to_protobuf(d: &Datum) -> Option<RexNode> {
         ScalarImpl::Utf8(s) => s.as_bytes().to_vec(),
         ScalarImpl::Bool(v) => (*v as i8).to_be_bytes().to_vec(),
         ScalarImpl::Decimal(v) => v.to_string().as_bytes().to_vec(),
-        ScalarImpl::Interval(_) => todo!(),
+        ScalarImpl::Interval(v) => v.to_protobuf_owned(),
         ScalarImpl::NaiveDate(_) => todo!(),
         ScalarImpl::NaiveDateTime(_) => todo!(),
         ScalarImpl::NaiveTime(_) => todo!(),

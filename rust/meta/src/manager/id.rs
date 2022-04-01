@@ -24,6 +24,7 @@ pub const ID_PREALLOCATE_INTERVAL: i32 = 1000;
 
 pub type Id = i32;
 
+// TODO: remove unnecessary async trait.
 #[async_trait::async_trait]
 pub trait IdGenerator: Sync + Send + 'static {
     /// Generate a batch of identities.
@@ -38,7 +39,7 @@ pub trait IdGenerator: Sync + Send + 'static {
 
 /// [`StoredIdGenerator`] implements id generator using metastore.
 pub struct StoredIdGenerator<S> {
-    meta_store_ref: Arc<S>,
+    meta_store: Arc<S>,
     category_gen_key: String,
     current_id: AtomicI32,
     next_allocate_id: RwLock<Id>,
@@ -48,9 +49,9 @@ impl<S> StoredIdGenerator<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>, category: &str, start: Option<Id>) -> Self {
+    pub async fn new(meta_store: Arc<S>, category: &str, start: Option<Id>) -> Self {
         let category_gen_key = format!("{}_id_next_generator", category);
-        let res = meta_store_ref
+        let res = meta_store
             .get_cf(DEFAULT_COLUMN_FAMILY, category_gen_key.as_bytes())
             .await;
         let current_id = match res {
@@ -60,7 +61,7 @@ where
         };
 
         let next_allocate_id = current_id + ID_PREALLOCATE_INTERVAL;
-        if let Err(err) = meta_store_ref
+        if let Err(err) = meta_store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
                 category_gen_key.clone().into_bytes(),
@@ -72,7 +73,7 @@ where
         }
 
         StoredIdGenerator {
-            meta_store_ref,
+            meta_store,
             category_gen_key,
             current_id: AtomicI32::new(current_id),
             next_allocate_id: RwLock::new(next_allocate_id),
@@ -96,7 +97,7 @@ where
                     &ID_PREALLOCATE_INTERVAL,
                 );
                 let next_allocate_id = *next + ID_PREALLOCATE_INTERVAL * weight;
-                self.meta_store_ref
+                self.meta_store
                     .put_cf(
                         DEFAULT_COLUMN_FAMILY,
                         self.category_gen_key.clone().into_bytes(),
@@ -154,29 +155,26 @@ impl<S> IdGeneratorManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>) -> Self {
+    pub async fn new(meta_store: Arc<S>) -> Self {
         Self {
             #[cfg(test)]
-            test: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "test", None).await),
-            database: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "database", None).await,
-            ),
-            schema: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "schema", None).await),
-            table: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await),
-            worker: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "worker", None).await),
+            test: Arc::new(StoredIdGenerator::new(meta_store.clone(), "test", None).await),
+            database: Arc::new(StoredIdGenerator::new(meta_store.clone(), "database", None).await),
+            schema: Arc::new(StoredIdGenerator::new(meta_store.clone(), "schema", None).await),
+            table: Arc::new(StoredIdGenerator::new(meta_store.clone(), "table", None).await),
+            worker: Arc::new(StoredIdGenerator::new(meta_store.clone(), "worker", None).await),
             fragment: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "fragment", Some(1)).await,
+                StoredIdGenerator::new(meta_store.clone(), "fragment", Some(1)).await,
             ),
-            actor: Arc::new(StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await),
+            actor: Arc::new(StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await),
             hummock_snapshot: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_snapshot", Some(1)).await,
+                StoredIdGenerator::new(meta_store.clone(), "hummock_snapshot", Some(1)).await,
             ),
             hummock_ss_table_id: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "hummock_ss_table_id", Some(1))
-                    .await,
+                StoredIdGenerator::new(meta_store.clone(), "hummock_ss_table_id", Some(1)).await,
             ),
             parallel_unit: Arc::new(
-                StoredIdGenerator::new(meta_store_ref.clone(), "parallel_unit", None).await,
+                StoredIdGenerator::new(meta_store.clone(), "parallel_unit", None).await,
             ),
         }
     }
@@ -198,13 +196,13 @@ where
         }
     }
 
-    /// [`generate`] function generates id as `current_id`.
+    /// [`Self::generate`] function generates id as `current_id`.
     pub async fn generate<const C: IdCategoryType>(&self) -> Result<Id> {
         self.get::<C>().generate().await
     }
 
-    /// [`generate_interval`] function generates ids as [`current_id`, `current_id` + interval), the
-    /// next id will be `current_id` + interval.
+    /// [`Self::generate_interval`] function generates ids as [`current_id`, `current_id` +
+    /// interval), the next id will be `current_id` + interval.
     pub async fn generate_interval<const C: IdCategoryType>(&self, interval: i32) -> Result<Id> {
         self.get::<C>().generate_interval(interval).await
     }
@@ -221,8 +219,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::default());
-        let id_generator = StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
+        let meta_store = Arc::new(MemStore::default());
+        let id_generator = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator;
             async move { id_generator.generate().await }
@@ -232,8 +230,7 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
-        let id_generator_two =
-            StoredIdGenerator::new(meta_store_ref.clone(), "default", None).await;
+        let id_generator_two = StoredIdGenerator::new(meta_store.clone(), "default", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator_two;
             async move { id_generator.generate().await }
@@ -243,8 +240,7 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (10000..20000).collect::<Vec<_>>());
 
-        let id_generator_three =
-            StoredIdGenerator::new(meta_store_ref.clone(), "table", None).await;
+        let id_generator_three = StoredIdGenerator::new(meta_store.clone(), "table", None).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let id_generator = &id_generator_three;
             async move { id_generator.generate().await }
@@ -254,8 +250,7 @@ mod tests {
         .collect::<Result<Vec<_>>>()?;
         assert_eq!(ids, (0..10000).collect::<Vec<_>>());
 
-        let actor_id_generator =
-            StoredIdGenerator::new(meta_store_ref.clone(), "actor", Some(1)).await;
+        let actor_id_generator = StoredIdGenerator::new(meta_store.clone(), "actor", Some(1)).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &actor_id_generator;
             async move { id_generator.generate_interval(100).await }
@@ -267,7 +262,7 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 100 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let actor_id_generator_two = StoredIdGenerator::new(meta_store_ref, "actor", None).await;
+        let actor_id_generator_two = StoredIdGenerator::new(meta_store, "actor", None).await;
         let ids = future::join_all((0..100).map(|_i| {
             let id_generator = &actor_id_generator_two;
             async move { id_generator.generate_interval(10).await }
@@ -284,8 +279,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_id_generator_manager() -> Result<()> {
-        let meta_store_ref = Arc::new(MemStore::default());
-        let manager = IdGeneratorManager::new(meta_store_ref.clone()).await;
+        let meta_store = Arc::new(MemStore::default());
+        let manager = IdGeneratorManager::new(meta_store.clone()).await;
         let ids = future::join_all((0..10000).map(|_i| {
             let manager = &manager;
             async move { manager.generate::<{ IdCategory::Test }>().await }
@@ -318,7 +313,7 @@ mod tests {
         let vec_expect = (0..100).map(|e| e * 9999 + 1).collect::<Vec<_>>();
         assert_eq!(ids, vec_expect);
 
-        let manager = IdGeneratorManager::new(meta_store_ref).await;
+        let manager = IdGeneratorManager::new(meta_store).await;
         let id = manager
             .generate_interval::<{ IdCategory::Actor }>(10)
             .await?;

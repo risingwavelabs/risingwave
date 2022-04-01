@@ -24,7 +24,7 @@ use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::RwLock;
 
-use crate::cluster::NodeId;
+use crate::cluster::WorkerId;
 use crate::model::{ActorId, MetadataModel, TableFragments};
 use crate::storage::MetaStore;
 
@@ -34,17 +34,17 @@ struct FragmentManagerCore {
 
 /// `FragmentManager` stores definition and status of fragment as well as the actors inside.
 pub struct FragmentManager<S> {
-    meta_store_ref: Arc<S>,
+    meta_store: Arc<S>,
 
     core: RwLock<FragmentManagerCore>,
 }
 
 pub struct ActorInfos {
     /// node_id => actor_ids
-    pub actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 
     /// all reachable source actors
-    pub source_actor_maps: HashMap<NodeId, Vec<ActorId>>,
+    pub source_actor_maps: HashMap<WorkerId, Vec<ActorId>>,
 }
 
 pub type FragmentManagerRef<S> = Arc<FragmentManager<S>>;
@@ -53,9 +53,9 @@ impl<S> FragmentManager<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store_ref: Arc<S>) -> Result<Self> {
+    pub async fn new(meta_store: Arc<S>) -> Result<Self> {
         let table_fragments = try_match_expand!(
-            TableFragments::list(&*meta_store_ref).await,
+            TableFragments::list(&*meta_store).await,
             Ok,
             "TableFragments::list fail"
         )?;
@@ -66,7 +66,7 @@ where
             .collect();
 
         Ok(Self {
-            meta_store_ref,
+            meta_store,
             core: RwLock::new(FragmentManagerCore { table_fragments }),
         })
     }
@@ -79,7 +79,7 @@ where
                 "table_fragment already exist!".to_string(),
             ))),
             Entry::Vacant(v) => {
-                table_fragment.insert(&*self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
                 Ok(())
             }
@@ -97,7 +97,7 @@ where
 
         match map.entry(table_fragment.table_id()) {
             Entry::Occupied(mut entry) => {
-                table_fragment.insert(&*self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store).await?;
                 entry.insert(table_fragment);
 
                 Ok(())
@@ -130,7 +130,7 @@ where
                         }
                     }
                 }
-                table_fragment.insert(&*self.meta_store_ref).await?;
+                table_fragment.insert(&*self.meta_store).await?;
 
                 Ok(())
             }
@@ -145,7 +145,7 @@ where
 
         match map.entry(*table_id) {
             Entry::Occupied(entry) => {
-                TableFragments::delete(&*self.meta_store_ref, &TableRefId::from(table_id)).await?;
+                TableFragments::delete(&*self.meta_store, &TableRefId::from(table_id)).await?;
                 entry.remove();
             }
             Entry::Vacant(_) => {
@@ -156,7 +156,7 @@ where
         Ok(())
     }
 
-    /// Used in [`crate::barrier::BarrierManager`]
+    /// Used in [`crate::barrier::GlobalBarrierManager`]
     pub async fn load_all_actors(&self, with_creating_table: Option<TableId>) -> ActorInfos {
         let mut actor_maps = HashMap::new();
         let mut source_actor_ids = HashMap::new();
@@ -201,7 +201,7 @@ where
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> Result<HashMap<NodeId, Vec<StreamActor>>> {
+    ) -> Result<HashMap<WorkerId, Vec<StreamActor>>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
@@ -218,7 +218,7 @@ where
     pub async fn table_node_actors(
         &self,
         table_id: &TableId,
-    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
@@ -252,7 +252,7 @@ where
     pub fn blocking_table_node_actors(
         &self,
         table_id: &TableId,
-    ) -> Result<BTreeMap<NodeId, Vec<ActorId>>> {
+    ) -> Result<BTreeMap<WorkerId, Vec<ActorId>>> {
         tokio::task::block_in_place(|| {
             let map = &self.core.blocking_read().table_fragments;
             match map.get(table_id) {

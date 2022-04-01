@@ -13,18 +13,68 @@
 // limitations under the License.
 
 use std::mem::size_of_val;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
+use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
+use risingwave_storage::hummock::mock::MockHummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
 use crate::utils::latency_stat::LatencyStat;
-use crate::utils::workload::{get_epoch, Workload};
+use crate::utils::workload::Workload;
 use crate::Opts;
+
+pub struct BatchTaskContext {
+    task_count: AtomicUsize,
+    epoch: AtomicU64,
+    meta_client: Arc<MockHummockMetaClient>,
+}
+
+impl BatchTaskContext {
+    fn new(meta_client: Arc<MockHummockMetaClient>, origin_task_count: usize) -> Self {
+        assert!(origin_task_count < (1 << 8));
+        Self {
+            meta_client,
+            epoch: AtomicU64::new(0),
+            task_count: AtomicUsize::new(origin_task_count << 8),
+        }
+    }
+
+    pub fn epoch_barrier_finish(&self, exit: bool) -> bool {
+        loop {
+            let task_count = self.task_count.load(Ordering::Acquire);
+            let mut origin_task_count = task_count >> 8;
+            let mut finish_count = task_count & 255;
+            if exit {
+                origin_task_count -= 1;
+            } else {
+                finish_count += 1;
+            }
+            let finished = finish_count == origin_task_count;
+            if finish_count == origin_task_count {
+                finish_count = 0;
+            }
+            if self
+                .task_count
+                .compare_exchange_weak(
+                    task_count,
+                    origin_task_count << 8 | finish_count,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+            {
+                return finished;
+            }
+        }
+    }
+}
 
 impl Operations {
     pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
@@ -36,6 +86,7 @@ impl Operations {
         self.track_keys(keys.clone());
 
         let batches = Workload::make_batches(opts, keys, values);
+        println!("batch size: {}", batches.len());
 
         let perf = self.run_batches(store, opts, batches).await;
 
@@ -96,22 +147,35 @@ impl Operations {
             grouped_batches[i % opts.concurrency_num as usize].push(batch);
         }
 
+        let ctx = Arc::new(BatchTaskContext::new(
+            self.meta_client.clone(),
+            grouped_batches.len(),
+        ));
         let mut args = grouped_batches
             .into_iter()
-            .map(|batches| (batches, store.clone()))
+            .map(|batches| (batches, store.clone(), ctx.clone()))
             .collect_vec();
 
         let futures = args
             .drain(..)
-            .map(|(batches, store)| async move {
+            .map(|(batches, store, ctx)| async move {
                 let mut latencies: Vec<u128> = vec![];
-                for batch in batches {
+                let l = batches.len();
+                for (i, batch) in batches.into_iter().enumerate() {
                     let start = Instant::now();
                     let batch = batch
                         .into_iter()
-                        .map(|(k, v)| (k, v.map(StorageValue::from)))
+                        .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
                         .collect_vec();
-                    store.ingest_batch(batch, get_epoch()).await.unwrap();
+                    let epoch = ctx.epoch.load(Ordering::Acquire);
+                    store.ingest_batch(batch, epoch).await.unwrap();
+                    let last_batch = i + 1 == l;
+                    if ctx.epoch_barrier_finish(last_batch) {
+                        store.sync(Some(epoch)).await.unwrap();
+                        ctx.meta_client.commit_epoch(epoch).await.unwrap();
+                        ctx.epoch.fetch_add(1, Ordering::SeqCst);
+                    }
+                    store.wait_epoch(epoch).await.unwrap();
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
                 }

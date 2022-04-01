@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::from_utf8;
 use std::{thread, time};
 
 use anyhow::{anyhow, Result};
@@ -23,7 +22,7 @@ use aws_sdk_kinesis::output::GetRecordsOutput;
 use aws_sdk_kinesis::types::SdkError;
 use aws_sdk_kinesis::Client as kinesis_client;
 use aws_smithy_types::DateTime;
-use http::uri::Uri;
+use http::Uri;
 
 use crate::base::{InnerMessage, SourceReader};
 use crate::kinesis::config::AwsConfigInfo;
@@ -110,41 +109,16 @@ impl SourceReader for KinesisSplitReader {
         }
     }
 
-    async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()> {
-        let split: KinesisSplit = serde_json::from_str(from_utf8(split)?)?;
-        self.shard_id = split.shard_id.clone();
-        match &split.start_position.clone() {
-            KinesisOffset::Earliest | KinesisOffset::None => {
-                self.get_kinesis_iterator(ShardIteratorType::TrimHorizon, None, None)
-                    .await?;
-            }
-            KinesisOffset::Latest => {
-                self.get_kinesis_iterator(ShardIteratorType::Latest, None, None)
-                    .await?;
-            }
-            KinesisOffset::SequenceNumber(seq_num) => {
-                self.get_kinesis_iterator(
-                    ShardIteratorType::AtSequenceNumber,
-                    None,
-                    Some(seq_num.clone()),
-                )
-                .await?;
-            }
-            KinesisOffset::Timestamp(ts) => {
-                self.get_kinesis_iterator(ShardIteratorType::AtTimestamp, Some(*ts), None)
-                    .await?;
-            }
-        }
-        self.assigned_split = Some(split);
-        Ok(())
-    }
-}
-
-impl KinesisSplitReader {
-    /// This method is only used to initialize the [`KinesisSplitReader`], which is needed to
-    /// allocate the [`KinesisSplit`] and then fetch the data.
-    pub async fn new(config: AwsConfigInfo) -> Self {
-        let aws_config = config.load().await.unwrap();
+    /// For Kinesis, state identifier is split_id, stream_name is never changed
+    async fn new(
+        config: std::collections::HashMap<String, String>,
+        state: Option<crate::ConnectorState>,
+    ) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let config = AwsConfigInfo::build(&config)?;
+        let aws_config = config.load().await?;
         let mut builder = aws_sdk_kinesis::config::Builder::from(&aws_config);
         if let Some(endpoint) = &config.endpoint {
             let uri = endpoint.clone().parse::<Uri>().unwrap();
@@ -153,16 +127,69 @@ impl KinesisSplitReader {
         }
         let client = kinesis_client::from_conf(builder.build());
 
-        KinesisSplitReader {
+        let mut split_reader = KinesisSplitReader {
             client,
             stream_name: config.stream_name.clone(),
-            shard_id: "".to_string(),
+            shard_id: String::from(""),
             latest_sequence_num: "".to_string(),
             shard_iter: None,
             assigned_split: None,
-        }
-    }
+        };
 
+        if let Some(state) = state {
+            let split_id = String::from_utf8(state.identifier.to_vec())?;
+
+            let mut start_offset = KinesisOffset::Earliest;
+            if !state.start_offset.is_empty() {
+                start_offset = KinesisOffset::SequenceNumber(state.start_offset);
+            }
+            let mut end_offset = KinesisOffset::None;
+            if !state.end_offset.is_empty() {
+                end_offset = KinesisOffset::SequenceNumber(state.end_offset);
+            }
+            let split = KinesisSplit {
+                shard_id: split_id.clone(),
+                start_position: start_offset.clone(),
+                end_position: end_offset.clone(),
+            };
+
+            let shard_iter: Option<String> = match &start_offset {
+                KinesisOffset::Earliest => {
+                    Self::get_kinesis_iterator(
+                        &split_reader.client,
+                        &split_reader.stream_name,
+                        &split_id,
+                        ShardIteratorType::TrimHorizon,
+                        None,
+                        None,
+                    )
+                    .await?
+                }
+                KinesisOffset::SequenceNumber(seq_number) => {
+                    Self::get_kinesis_iterator(
+                        &split_reader.client,
+                        &split_reader.stream_name,
+                        &split_id,
+                        ShardIteratorType::AfterSequenceNumber,
+                        None,
+                        Some(seq_number.clone()),
+                    )
+                    .await?
+                }
+                other => {
+                    return Err(anyhow::Error::msg(format!("invalid KinesisOffset, expect either KinesisOffset::Earliest or KinesisOffset::SequenceNumber, got {:?}", other)));
+                }
+            };
+
+            split_reader.assigned_split = Some(split);
+            split_reader.shard_iter = shard_iter;
+        }
+
+        Ok(split_reader)
+    }
+}
+
+impl KinesisSplitReader {
     async fn get_records(
         &self,
         shard_iter: String,
@@ -196,16 +223,17 @@ impl KinesisSplitReader {
     }
 
     async fn get_kinesis_iterator(
-        &mut self,
+        client: &kinesis_client,
+        stream_name: &String,
+        shard_id: &String,
         shard_iterator_type: aws_sdk_kinesis::model::ShardIteratorType,
         timestamp: Option<i64>,
         seq_num: Option<String>,
-    ) -> Result<()> {
-        let mut get_shard_iter_req = self
-            .client
+    ) -> Result<Option<String>> {
+        let mut get_shard_iter_req = client
             .get_shard_iterator()
-            .stream_name(&self.stream_name)
-            .shard_id(&self.shard_id)
+            .stream_name(stream_name)
+            .shard_id(shard_id)
             .shard_iterator_type(shard_iterator_type);
 
         if let Some(ts) = timestamp {
@@ -216,14 +244,12 @@ impl KinesisSplitReader {
         }
 
         let get_shard_iter_resp = get_shard_iter_req.send().await;
-        self.shard_iter = match get_shard_iter_resp {
-            Ok(resp) => resp.shard_iterator().map(String::from),
+        match get_shard_iter_resp {
+            Ok(resp) => return Ok(resp.shard_iterator().map(String::from)),
             Err(e) => {
                 return Err(anyhow!("{}", e));
             }
         };
-
-        Ok(())
     }
 
     fn get_state(&self) -> KinesisSplitReaderState {

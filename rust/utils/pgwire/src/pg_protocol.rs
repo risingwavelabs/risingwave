@@ -120,7 +120,7 @@ where
     }
 
     async fn process_query_msg(&mut self, query: FeQueryMessage) -> Result<()> {
-        info!("receive query: {}", query.get_sql());
+        tracing::trace!("receive query: {}", query.get_sql());
         let session = self.session.clone().unwrap();
 
         // execute query

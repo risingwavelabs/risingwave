@@ -172,6 +172,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node = StreamNode {
         node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            distribution_keys: Default::default(),
         })),
         input: vec![filter_node],
         pk_indices: vec![0, 1],
@@ -198,6 +199,7 @@ fn make_stream_node() -> StreamNode {
     let simple_agg_node_1 = StreamNode {
         node: Some(Node::GlobalSimpleAggNode(SimpleAggNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
+            distribution_keys: Default::default(),
         })),
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
@@ -239,6 +241,7 @@ fn make_stream_node() -> StreamNode {
             associated_table_ref_id: None,
             column_ids: vec![0_i32, 1_i32],
             column_orders: vec![make_column_order(1), make_column_order(2)],
+            distribution_keys: Default::default(),
         })),
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
@@ -249,10 +252,10 @@ fn make_stream_node() -> StreamNode {
 async fn test_fragmenter() -> Result<()> {
     let env = MetaSrvEnv::for_test().await;
     let stream_node = make_stream_node();
-    let fragment_manager_ref = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
+    let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
     let mut fragmenter =
-        StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager_ref, hash_mapping);
+        StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager, hash_mapping);
 
     let mut ctx = CreateMaterializedViewContext::default();
     let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;

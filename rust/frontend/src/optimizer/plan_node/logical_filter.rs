@@ -15,15 +15,13 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
 
 use super::{
-    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch,
-    ToStream,
+    ColPrunable, CollectInputRef, LogicalProject, PlanBase, PlanNode, PlanRef, PlanTreeNodeUnary,
+    ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl};
 use crate::optimizer::plan_node::{BatchFilter, StreamFilter};
-use crate::optimizer::property::WithSchema;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalFilter` iterates over its input and returns elements for which `predicate` evaluates to
@@ -41,7 +39,7 @@ impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
         let ctx = input.ctx();
         for cond in &predicate.conjunctions {
-            assert_input_ref(cond, input.schema().fields().len());
+            assert_input_ref!(cond, input.schema().fields().len());
         }
         let schema = input.schema().clone();
         let pk_indices = input.pk_indices().to_vec();
@@ -53,10 +51,19 @@ impl LogicalFilter {
         }
     }
 
+    /// Create a `LogicalFilter` unless the predicate is always true
+    pub fn create(input: PlanRef, predicate: Condition) -> PlanRef {
+        if predicate.always_true() {
+            input
+        } else {
+            LogicalFilter::new(input, predicate).into()
+        }
+    }
+
     /// the function will check if the predicate is bool expression
-    pub fn create(input: PlanRef, predicate: ExprImpl) -> Result<PlanRef> {
+    pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
         let predicate = Condition::with_expr(predicate);
-        Ok(Self::new(input, predicate).into())
+        Self::new(input, predicate).into()
     }
 
     /// Get the predicate of the logical join.
@@ -93,18 +100,17 @@ impl ColPrunable for LogicalFilter {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
 
-        let mut visitor = CollectInputRef {
-            input_bits: required_cols.clone(),
-        };
+        let mut visitor = CollectInputRef::new(required_cols.clone());
         self.predicate.visit_expr(&mut visitor);
+        let input_required_cols = visitor.collect();
 
         let mut predicate = self.predicate.clone();
-        let mut mapping = ColIndexMapping::with_remaining_columns(&visitor.input_bits);
+        let mut mapping = ColIndexMapping::with_remaining_columns(&input_required_cols);
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let filter = LogicalFilter::new(self.input.prune_col(&visitor.input_bits), predicate);
+        let filter = LogicalFilter::new(self.input.prune_col(&input_required_cols), predicate);
 
-        if required_cols == &visitor.input_bits {
+        if required_cols == &input_required_cols {
             filter.into()
         } else {
             let mut remaining_columns = FixedBitSet::with_capacity(filter.schema().fields().len());
@@ -149,8 +155,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::plan_node::LogicalValues;
-    use crate::optimizer::property::ctx::WithId;
-    use crate::session::QueryContext;
+    use crate::session::OptimizerContext;
 
     #[tokio::test]
     /// Pruning
@@ -165,7 +170,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"),
@@ -230,7 +235,7 @@ mod tests {
     ///     TableScan(v2, v3)
     /// ```
     async fn test_prune_filter_no_project() {
-        let ctx = QueryContext::mock().await;
+        let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
             Field {

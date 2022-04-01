@@ -20,7 +20,7 @@ use bytes::Bytes;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::checksum::Algorithm as ChecksumAlg;
-use risingwave_storage::hummock::compactor::{Compactor, SubCompactContext};
+use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{HummockStorage, SstableStore};
@@ -73,7 +73,6 @@ async fn get_hummock_storage() -> (HummockStorage, Arc<HummockManager<MemStore>>
         block_size: 1 << 10,
         bloom_false_positive: 0.1,
         data_directory: remote_dir.clone(),
-        checksum_algo: ChecksumAlg::XxHash64,
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,
     });
@@ -108,7 +107,7 @@ async fn test_compaction_basic() {
 // TODO(soundOfDestiny): re-enable the test case
 async fn test_compaction_same_key_not_split() {
     let (storage, hummock_storage_ref) = get_hummock_storage().await;
-    let sub_compact_context = SubCompactContext {
+    let compact_ctx = CompactorContext {
         options: storage.options().clone(),
         local_version_manager: storage.local_version_manager().clone(),
         sstable_store: storage.sstable_store(),
@@ -131,11 +130,7 @@ async fn test_compaction_same_key_not_split() {
             )
             .await
             .unwrap();
-        storage
-            .shared_buffer_manager()
-            .sync(Some(epoch))
-            .await
-            .unwrap();
+        storage.shared_buffer_manager().sync(Some(2)).await.unwrap();
     }
 
     // 2. commit epoch
@@ -146,7 +141,7 @@ async fn test_compaction_same_key_not_split() {
         .unwrap();
 
     // 3. get compact task
-    let mut compact_task = hummock_storage_ref
+    let compact_task = hummock_storage_ref
         .get_compact_task()
         .await
         .unwrap()
@@ -167,13 +162,11 @@ async fn test_compaction_same_key_not_split() {
     );
 
     // 4. compact
-    Compactor::run_compact(&sub_compact_context, &mut compact_task)
+    Compactor::compact(Arc::new(compact_ctx), compact_task)
         .await
         .unwrap();
 
-    let output_table_count = compact_task.sorted_output_ssts.len();
-    // should not split into multiple tables
-    assert_eq!(output_table_count, 1);
+    assert!(compact_task.task_status);
 
     let table = compact_task.sorted_output_ssts.get(0).unwrap();
     let table = storage

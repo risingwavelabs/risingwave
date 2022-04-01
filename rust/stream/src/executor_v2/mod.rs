@@ -12,27 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod error;
+use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
+mod chain;
 mod filter;
 mod simple;
 #[cfg(test)]
 mod test_utils;
-mod v1_compact;
+mod v1_compat;
 
+pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
-pub use v1_compact::StreamExecutorV1;
+pub use v1_compat::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
-pub type BoxedMessageStream = BoxStream<'static, Result<Message>>;
+pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 
 /// Static information of an executor.
 #[derive(Debug)]
@@ -61,6 +64,10 @@ pub trait Executor: Send + 'static {
 
     /// Identity of the executor.
     fn identity(&self) -> &str;
+
+    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
+        self.execute()
+    }
 
     #[inline(always)]
     fn info(&self) -> ExecutorInfo {
