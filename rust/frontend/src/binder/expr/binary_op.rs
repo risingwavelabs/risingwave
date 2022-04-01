@@ -64,7 +64,7 @@ impl Binder {
         .unwrap())
     }
 
-    fn err_unsupported_binary_op(op: BinaryOperator, inputs: &Vec<ExprImpl>) -> RwError {
+    fn err_unsupported_binary_op(op: BinaryOperator, inputs: &[ExprImpl]) -> RwError {
         let bound_left = inputs.get(0).unwrap();
         let bound_right = inputs.get(1).unwrap();
         let desc = format!(

@@ -109,7 +109,7 @@ impl Binder {
             |inputs| {
                 ErrorCode::NotImplementedError(format!(
                     "function extract({} from {:?}) doesn't exist",
-                    field.to_string(),
+                    field,
                     inputs[1].return_type()
                 ))
                 .into()

@@ -87,7 +87,7 @@ impl Binder {
         }
     }
 
-    fn err_unsupported_func(function_name: &str, inputs: &Vec<ExprImpl>) -> RwError {
+    fn err_unsupported_func(function_name: &str, inputs: &[ExprImpl]) -> RwError {
         let args = inputs
             .iter()
             .map(|i| format!("{:?}", i.return_type()))
