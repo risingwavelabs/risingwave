@@ -59,7 +59,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
             arrange_columns: arrange_columns.clone(),
             info: ExecutorInfo {
                 schema,
-                pk_indices: arrange_columns.clone(),
+                pk_indices: arrange_columns,
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             key_indices,
@@ -138,7 +138,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 
     fn identity(&self) -> &str {
-        &self.info.identity.as_str()
+        self.info.identity.as_str()
     }
 }
 

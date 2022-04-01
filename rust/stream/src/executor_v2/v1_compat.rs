@@ -169,7 +169,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         _op_info: String,
         key_indices: Vec<usize>,
     ) -> Self {
-
         Self::new(
             Box::new(ExecutorV1AsV2(input)),
             keyspace,
