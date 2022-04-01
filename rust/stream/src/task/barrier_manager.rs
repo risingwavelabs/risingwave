@@ -209,6 +209,11 @@ impl LocalBarrierManager {
     /// This will be piggybacked by the collection of current/next barrier and then be reported
     /// to the meta service.
     pub fn finish_create_mview(&mut self, ddl_epoch: u64, actor_id: ActorId) {
+        info!(
+            "create mview finish on actor {} with ddl epoch {}",
+            actor_id, ddl_epoch
+        );
+
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}
