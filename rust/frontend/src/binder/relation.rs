@@ -266,20 +266,16 @@ impl Binder {
         };
 
         let begin = self.context.columns.len();
+        // Column aliases can be less than columns, but not more.
+        // It also needs to skip hidden columns.
+        let mut alias_iter = column_aliases.into_iter().fuse();
         columns
             .into_iter()
             .enumerate()
-            .zip_longest(column_aliases)
-            .try_for_each(|pair| {
-                // Column aliases can be less than columns, but not more.
-                let (index, (name, data_type, is_hidden)) = match pair {
-                    itertools::EitherOrBoth::Both((index, (_name, data_type, is_hidden)), alias) => (
-                        index, (alias.value, data_type, is_hidden)
-                    ),
-                    itertools::EitherOrBoth::Left(t) => t,
-                    itertools::EitherOrBoth::Right(_) => return Err(ErrorCode::BindError(format!(
-                        "table \"{table_name}\" has less columns available but more aliases specified",
-                    ))),
+            .for_each(|(index, (name, data_type, is_hidden))| {
+                let name = match is_hidden {
+                    true => name,
+                    false => alias_iter.next().map(|t| t.value).unwrap_or(name),
                 };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
@@ -293,8 +289,13 @@ impl Binder {
                     .entry(name)
                     .or_default()
                     .push(self.context.columns.len() - 1);
-                Ok(())
-            })?;
+            });
+        if let Some(_) = alias_iter.next() {
+            return Err(ErrorCode::BindError(format!(
+                "table \"{table_name}\" has less columns available but more aliases specified",
+            ))
+            .into());
+        }
 
         match self.context.range_of.entry(table_name.clone()) {
             Entry::Occupied(_) => Err(ErrorCode::InternalError(format!(

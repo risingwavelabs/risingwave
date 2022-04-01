@@ -17,6 +17,13 @@
     select t2.* from t;
   binder_error: 'Item not found: relation "t2"'
 - sql: |
+    create table t (v1 bigint, v2 double precision);
+    select a from t as t2(a);
+  batch_plan: |
+    BatchExchange { order: [], dist: Single }
+      BatchProject { exprs: [$0], expr_alias: [a] }
+        BatchScan { table: t, columns: [v1] }
+- sql: |
     create table t ();
     select * from t where 1>2 and 1=1 and 3<1 and 4<>1 or 1=1 and 2>=1 and 1<=2;
   batch_plan: |
@@ -67,8 +74,7 @@
     BatchValues { rows: [[Not(Like('Postgres':Varchar, 'Post%':Varchar))]] }
 - sql: |
     values(1 not like 1.23);
-  binder_error: |
-    Feature is not yet implemented: Int32 NotLike Decimal
+  binder_error: 'Feature is not yet implemented: Int32 NotLike Decimal'
 - sql: |
     values(extract(hour from timestamp '2001-02-16 20:38:40'));
   batch_plan: |
