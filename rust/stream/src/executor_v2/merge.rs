@@ -23,17 +23,11 @@ use tracing_futures::Instrument;
 use super::{Barrier, Executor, Message, PkIndicesRef};
 use crate::executor::{Mutation, PkIndices};
 use crate::executor_v2::error::TracedStreamExecutorError;
-use crate::executor_v2::BoxedMessageStream;
+use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
 pub struct MergeExecutor {
-    /// Schema of inputs
-    schema: Schema,
-
-    /// Primary key indices of inputs
-    pk_indices: PkIndices,
-
     /// Number of inputs
     num_inputs: usize,
 
@@ -52,13 +46,15 @@ pub struct MergeExecutor {
 
     /// Belonged actor id.
     actor_id: u32,
+
+    info: ExecutorInfo,
 }
 
 impl std::fmt::Debug for MergeExecutor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MergeExecutor")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
+            .field("schema", &self.info.schema)
+            .field("pk_indices", &self.info.pk_indices)
             .field("num_inputs", &self.num_inputs)
             .finish()
     }
@@ -72,14 +68,17 @@ impl MergeExecutor {
         inputs: Vec<Receiver<Message>>,
     ) -> Self {
         Self {
-            schema,
-            pk_indices,
             num_inputs: inputs.len(),
             active: inputs,
             blocked: vec![],
             terminated: 0,
             next_barrier: None,
             actor_id,
+            info: ExecutorInfo {
+                schema,
+                pk_indices,
+                identity: "MergeExecutor".to_string(),
+            },
         }
     }
 }
@@ -91,15 +90,15 @@ impl Executor for MergeExecutor {
     }
 
     fn schema(&self) -> &Schema {
-        &self.schema
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
+        &self.info.pk_indices
     }
 
-    fn identity(&self) -> &'static str {
-        "MergeExecutor"
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 
