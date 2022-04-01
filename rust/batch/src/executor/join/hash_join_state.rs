@@ -185,9 +185,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
             )?);
             remaining_build_row_id = Some(RowId::default());
         }
-        if build_table.params.join_type().need_probe()
-            && build_table.params.has_non_equi_cond()
-        {
+        if build_table.params.join_type().need_probe() && build_table.params.has_non_equi_cond() {
             probe_matched_list = Some(LinkedList::new());
         }
 
