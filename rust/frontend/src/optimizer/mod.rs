@@ -190,6 +190,7 @@ impl PlanRoot {
                 .enforce_if_not_satisfies(self.plan.clone(), Order::any()),
             _ => panic!(),
         };
+
         // Ignore the required_dist and required_order, as they are provided by user now.
         // TODO: need more thinking and refactor.
 
