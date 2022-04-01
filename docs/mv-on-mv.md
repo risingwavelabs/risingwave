@@ -37,7 +37,7 @@ The full process of creation is:
 4. The broadcast operator receives the barrier, then creates a SnapshotStream of mv1 with e1, and creates a Chain operator, then connects them all. (only changes in the memory).
 5. The broadcast operator sends a normal barrier e1 to all downstreams, and continue.
 6. The chain operator consumes all messages from snapshot and receives EOF, then consumes buffered messages from upstream.
-7. StreamManager discovered that mv2 has almost the same epoch as mv1, and the creation success.
+7. StreamManager discovered that mv2 has almost caught up with the progress of mv1, and the creation success.
 
 ## Drop mview online
 
