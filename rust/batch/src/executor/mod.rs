@@ -94,7 +94,7 @@ pub trait Executor: Send {
     /// Turn an executor into a fused executor
     fn fuse(self) -> FusedExecutor<Self>
     where
-        Self: BoxedExecutorBuilder + Executor + std::marker::Sized,
+        Self: Executor + std::marker::Sized,
     {
         FusedExecutor::new(self)
     }

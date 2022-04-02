@@ -17,20 +17,19 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 
-use super::BoxedExecutorBuilder;
 use crate::executor::Executor;
 
 /// [`FusedExecutor`] is a wrapper around a Executor. After wrapping, once a call to
 /// `next` returns `Ok(None)`, all subsequent calls to `next` will return an
 /// error.
-pub struct FusedExecutor<T: BoxedExecutorBuilder + Executor> {
+pub struct FusedExecutor<T: Executor> {
     /// The underlying executor.
     inner: T,
     /// Whether the underlying executor should return `Err` or not.
     invalid: bool,
 }
 
-impl<T: BoxedExecutorBuilder + Executor> FusedExecutor<T> {
+impl<T: Executor> FusedExecutor<T> {
     pub fn new(executor: T) -> FusedExecutor<T> {
         FusedExecutor {
             inner: executor,
@@ -40,7 +39,7 @@ impl<T: BoxedExecutorBuilder + Executor> FusedExecutor<T> {
 }
 
 #[async_trait::async_trait]
-impl<T: BoxedExecutorBuilder + Executor> Executor for FusedExecutor<T> {
+impl<T: Executor> Executor for FusedExecutor<T> {
     async fn open(&mut self) -> Result<()> {
         self.inner.open().await
     }
