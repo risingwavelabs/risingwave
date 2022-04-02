@@ -194,11 +194,10 @@ impl RearrangedChainExecutor {
                     // Note that there's no phantom barrier in the snapshot. So we must have already
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
-                        assert!(barrier.epoch.curr <= last_rearranged_epoch.curr);
-                        if barrier.epoch.curr == last_rearranged_epoch.curr {
+                        if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
                             stop_rearrange_tx.take().unwrap().send(()).map_err(|_| {
-                                StreamExecutorError::channel_closed("stop_rearrange")
+                                StreamExecutorError::channel_closed("stop rearrange")
                             })?;
                             break;
                         }
@@ -228,7 +227,6 @@ impl RearrangedChainExecutor {
             // Note that there may still be some messages in `rearranged`. However the rearranged
             // barriers must be ignored, we should take the phantoms.
             let remaining_rearranged = Box::pin(rearranged.filter_map(|result| async {
-                tracing::debug!(actor = self.actor_id, "fliter mapped {:?}", result);
                 result
                     .map(RearrangedMessage::into_message_ignore_rearranged)
                     .transpose()
@@ -245,7 +243,6 @@ impl RearrangedChainExecutor {
             #[for_await]
             for msg in remaining {
                 let msg = msg?;
-                tracing::debug!(actor = self.actor_id, "remaining message: {:?}", msg);
                 if let Message::Barrier(_) = msg && let Some(notifier) = notifier.take()  {
                     // Notify about the finish right before the first barrier.
                     notifier.notify(create_epoch.curr);
