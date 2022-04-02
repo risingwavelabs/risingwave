@@ -109,8 +109,9 @@ impl From<&risingwave_pb::hummock::KeyRange> for KeyRange {
 
 #[cfg(test)]
 mod tests {
+    use crate::storage::key::key_with_epoch;
+
     use super::*;
-    use crate::hummock::key::key_with_epoch;
 
     #[test]
     fn test_key_range_compare() {

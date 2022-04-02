@@ -259,7 +259,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::{TikvStateStore, *};
-    use crate::hummock::key::next_key;
+    use risingwave_common::storage::key::next_key;
     use crate::StateStore;
 
     #[tokio::test]

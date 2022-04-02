@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod version_cmp;
+pub use version_cmp::*;
+pub mod key;
+pub mod key_range;
+pub mod compact;
 
-use risingwave_rpc_client::HummockMetaClient;
-
-use crate::common::MetaServiceOpts;
-
-pub async fn list_version() -> anyhow::Result<()> {
-    let meta_opts = MetaServiceOpts::from_env()?;
-    let meta_client = meta_opts.create_meta_client().await?;
-    let version = meta_client.pin_version(u64::MAX).await?;
-    println!("{:#?}", version);
-    meta_client.unpin_version(&[version.id]).await?;
-    Ok(())
-}
+pub type HummockSSTableId = u64;
+pub type HummockRefCount = u64;
+pub type HummockVersionId = u64;
+pub type HummockContextId = u32;
+pub type HummockEpoch = u64;
+pub const INVALID_EPOCH: HummockEpoch = 0;
+pub const INVALID_VERSION_ID: HummockVersionId = 0;
+pub const FIRST_VERSION_ID: HummockVersionId = 1;

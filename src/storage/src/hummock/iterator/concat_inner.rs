@@ -20,7 +20,7 @@ use async_trait::async_trait;
 use super::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionedComparator;
+use risingwave_common::storage::VersionedComparator;
 use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
 /// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.

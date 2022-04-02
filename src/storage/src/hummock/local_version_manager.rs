@@ -21,11 +21,11 @@ use std::time::Duration;
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
 use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{

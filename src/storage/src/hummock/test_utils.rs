@@ -22,7 +22,7 @@ use risingwave_common::config::StorageConfig;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::key::key_with_epoch;
+use risingwave_common::storage::key::key_with_epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;

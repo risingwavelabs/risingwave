@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use super::variants::*;
 use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionedComparator;
+use risingwave_common::storage::VersionedComparator;
 use crate::hummock::HummockResult;
 use crate::monitor::StateStoreMetrics;
 

@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
-use risingwave_storage::hummock::HummockContextId;
+use risingwave_common::storage::HummockContextId;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 const STREAM_BUFFER_SIZE: usize = 4;
@@ -144,7 +144,7 @@ mod tests {
     ) where
         S: MetaStore,
     {
-        let (original_tables, _) = generate_test_tables(
+        let original_tables = generate_test_tables(
             epoch,
             vec![hummock_manager_ref.get_new_table_id().await.unwrap()],
         );

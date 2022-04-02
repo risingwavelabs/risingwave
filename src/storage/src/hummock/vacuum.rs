@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use risingwave_pb::hummock::VacuumTask;
+use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::SstableStoreRef;
 
 pub struct Vacuum {}

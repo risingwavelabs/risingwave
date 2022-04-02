@@ -17,7 +17,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::{HummockStateStoreIter, HummockStorage, StateStore};
-use crate::hummock::hummock_meta_client::HummockMetaClient;
+use risingwave_rpc_client::HummockMetaClient;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};

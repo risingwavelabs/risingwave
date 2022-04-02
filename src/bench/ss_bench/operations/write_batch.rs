@@ -20,7 +20,7 @@ use std::time::Instant;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
-use risingwave_storage::hummock::hummock_meta_client::HummockMetaClient;
+use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::mock::MockHummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;

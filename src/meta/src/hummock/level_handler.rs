@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_pb::hummock::level_handler::KeyRangeTaskId;
 use risingwave_pb::hummock::SstableInfo;
-use risingwave_storage::hummock::key_range::KeyRange;
+use risingwave_common::storage::key_range::KeyRange;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SSTableStat {

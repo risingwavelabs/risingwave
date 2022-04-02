@@ -21,7 +21,7 @@ use super::super::{HummockResult, HummockValue};
 use super::{BlockIterator, Sstable};
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::version_cmp::VersionedComparator;
+use risingwave_common::storage::VersionedComparator;
 use crate::hummock::SstableStoreRef;
 
 pub trait SSTableIteratorBase: HummockIterator {}
@@ -162,7 +162,7 @@ mod tests {
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::key::key_with_epoch;
+    use risingwave_common::storage::key::key_with_epoch;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
         TEST_KEYS_COUNT,

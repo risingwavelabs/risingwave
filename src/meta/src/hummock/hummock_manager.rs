@@ -27,7 +27,7 @@ use risingwave_pb::hummock::{
     HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
     SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
 };
-use risingwave_storage::hummock::{
+use risingwave_common::storage::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
     INVALID_EPOCH,
 };
@@ -341,7 +341,7 @@ where
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
         let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
-            risingwave_storage::hummock::key_range::KeyRange,
+            risingwave_common::storage::key_range::KeyRange,
             u64,
             u64,
         )>| {

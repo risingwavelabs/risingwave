@@ -15,20 +15,14 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
+use risingwave_common::error::Result;
 use risingwave_pb::hummock::{
-    AddTablesRequest, CompactTask, GetNewTableIdRequest, HummockSnapshot, HummockVersion,
-    PinSnapshotRequest, PinVersionRequest, ReportCompactionTasksRequest, ReportVacuumTaskRequest,
-    SstableInfo, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse, UnpinSnapshotRequest,
-    UnpinVersionRequest, VacuumTask,
+    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
-use risingwave_rpc_client::MetaClient;
+use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{
-    HummockEpoch, HummockError, HummockResult, HummockSSTableId, HummockVersionId,
-    TracedHummockError,
-};
+use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId, TracedHummockError};
 use crate::monitor::HummockMetrics;
 
 #[derive(Default)]
@@ -41,189 +35,93 @@ impl tokio_retry::Condition<TracedHummockError> for RetryableError {
     }
 }
 
-/// Define the rpc client trait to ease unit test.
-#[async_trait]
-pub trait HummockMetaClient: Send + Sync + 'static {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion>;
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> HummockResult<()>;
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch>;
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> HummockResult<()>;
-    async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId>;
-    async fn add_tables(
-        &self,
-        epoch: HummockEpoch,
-        sstables: Vec<SstableInfo>,
-    ) -> HummockResult<HummockVersion>;
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> HummockResult<()>;
-    async fn commit_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
-    async fn abort_epoch(&self, epoch: HummockEpoch) -> HummockResult<()>;
-    async fn subscribe_compact_tasks(
-        &self,
-    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>>;
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()>;
-}
-
-pub struct RpcHummockMetaClient {
+pub struct MonitoredHummockMetaClient {
     meta_client: MetaClient,
 
     stats: Arc<HummockMetrics>,
 }
 
-impl RpcHummockMetaClient {
-    pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> RpcHummockMetaClient {
-        RpcHummockMetaClient { meta_client, stats }
+impl MonitoredHummockMetaClient {
+    pub fn new(meta_client: MetaClient, stats: Arc<HummockMetrics>) -> MonitoredHummockMetaClient {
+        MonitoredHummockMetaClient { meta_client, stats }
     }
 }
 
 #[async_trait]
-impl HummockMetaClient for RpcHummockMetaClient {
-    async fn pin_version(&self, last_pinned: HummockVersionId) -> HummockResult<HummockVersion> {
+impl HummockMetaClient for MonitoredHummockMetaClient {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
         self.stats.pin_version_counts.inc();
         let timer = self.stats.pin_version_latency.start_timer();
-        let result = self
-            .meta_client
-            .inner
-            .pin_version(PinVersionRequest {
-                context_id: self.meta_client.worker_id(),
-                last_pinned,
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.pin_version(last_pinned).await;
         timer.observe_duration();
-        Ok(result.pinned_version.unwrap())
+        res
     }
 
-    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> HummockResult<()> {
+    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
         self.stats.unpin_version_counts.inc();
         let timer = self.stats.unpin_version_latency.start_timer();
-        self.meta_client
-            .inner
-            .unpin_version(UnpinVersionRequest {
-                context_id: self.meta_client.worker_id(),
-                pinned_version_ids: pinned_version_ids.to_owned(),
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.unpin_version(pinned_version_ids).await;
         timer.observe_duration();
-        Ok(())
+        res
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> HummockResult<HummockEpoch> {
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
         self.stats.pin_snapshot_counts.inc();
         let timer = self.stats.pin_snapshot_latency.start_timer();
-        let result = self
-            .meta_client
-            .inner
-            .pin_snapshot(PinSnapshotRequest {
-                context_id: self.meta_client.worker_id(),
-                last_pinned,
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.pin_snapshot(last_pinned).await;
         timer.observe_duration();
-        Ok(result.snapshot.unwrap().epoch)
+        res
     }
 
-    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> HummockResult<()> {
+    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
         self.stats.unpin_snapshot_counts.inc();
         let timer = self.stats.unpin_snapshot_latency.start_timer();
-        self.meta_client
-            .inner
-            .unpin_snapshot(UnpinSnapshotRequest {
-                context_id: self.meta_client.worker_id(),
-                snapshots: pinned_epochs
-                    .iter()
-                    .map(|epoch| HummockSnapshot {
-                        epoch: epoch.to_owned(),
-                    })
-                    .collect_vec(),
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.unpin_snapshot(pinned_epochs).await;
         timer.observe_duration();
-        Ok(())
+        res
     }
 
-    async fn get_new_table_id(&self) -> HummockResult<HummockSSTableId> {
+    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
         self.stats.get_new_table_id_counts.inc();
         let timer = self.stats.get_new_table_id_latency.start_timer();
-        let result = self
-            .meta_client
-            .inner
-            .get_new_table_id(GetNewTableIdRequest {})
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.get_new_table_id().await;
         timer.observe_duration();
-        Ok(result.table_id)
+        res
     }
 
     async fn add_tables(
         &self,
         epoch: HummockEpoch,
         sstables: Vec<SstableInfo>,
-    ) -> HummockResult<HummockVersion> {
+    ) -> Result<HummockVersion> {
         self.stats.add_tables_counts.inc();
         let timer = self.stats.add_tables_latency.start_timer();
-        let resp = self
-            .meta_client
-            .inner
-            .add_tables(AddTablesRequest {
-                context_id: self.meta_client.worker_id(),
-                tables: sstables,
-                epoch,
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.add_tables(epoch, sstables).await;
         timer.observe_duration();
-        Ok(resp.version.unwrap())
+        res
     }
 
-    async fn report_compaction_task(&self, compact_task: CompactTask) -> HummockResult<()> {
+    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
         self.stats.report_compaction_task_counts.inc();
         let timer = self.stats.report_compaction_task_latency.start_timer();
-        self.meta_client
-            .inner
-            .report_compaction_tasks(ReportCompactionTasksRequest {
-                compact_task: Some(compact_task),
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
+        let res = self.meta_client.report_compaction_task(compact_task).await;
         timer.observe_duration();
-        Ok(())
+        res
     }
 
-    async fn commit_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+    async fn commit_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
         unimplemented!()
     }
 
-    async fn abort_epoch(&self, _epoch: HummockEpoch) -> HummockResult<()> {
+    async fn abort_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
         unimplemented!()
     }
 
-    async fn subscribe_compact_tasks(
-        &self,
-    ) -> HummockResult<Streaming<SubscribeCompactTasksResponse>> {
-        let stream = self
-            .meta_client
-            .to_owned()
-            .inner
-            .subscribe_compact_tasks(SubscribeCompactTasksRequest {
-                context_id: self.meta_client.worker_id(),
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
-        Ok(stream)
+    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        self.subscribe_compact_tasks().await
     }
 
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> HummockResult<()> {
-        self.meta_client
-            .to_owned()
-            .inner
-            .report_vacuum_task(ReportVacuumTaskRequest {
-                vacuum_task: Some(vacuum_task),
-            })
-            .await
-            .map_err(HummockError::meta_error)?;
-        Ok(())
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+        self.meta_client.report_vacuum_task(vacuum_task).await
     }
 }

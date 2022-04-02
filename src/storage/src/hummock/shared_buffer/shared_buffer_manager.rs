@@ -20,9 +20,9 @@ use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::variants::*;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -230,7 +230,7 @@ mod tests {
     use crate::hummock::iterator::{
         BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
     };
-    use crate::hummock::key::{key_with_epoch, user_key};
+    use risingwave_common::storage::key::{key_with_epoch, user_key};
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;

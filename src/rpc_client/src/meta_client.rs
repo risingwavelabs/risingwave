@@ -11,14 +11,15 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::fmt::Debug;
 use std::time::Duration;
 
+use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::storage::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::catalog::{
@@ -35,11 +36,13 @@ use risingwave_pb::ddl_service::{
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    AddTablesRequest, AddTablesResponse, GetNewTableIdRequest, GetNewTableIdResponse,
-    PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
+    AbortEpochRequest, AbortEpochResponse, AddTablesRequest, AddTablesResponse, CommitEpochRequest,
+    CommitEpochResponse, CompactTask, GetNewTableIdRequest, GetNewTableIdResponse, HummockSnapshot,
+    HummockVersion, PinSnapshotRequest, PinSnapshotResponse, PinVersionRequest, PinVersionResponse,
     ReportCompactionTasksRequest, ReportCompactionTasksResponse, ReportVacuumTaskRequest,
-    ReportVacuumTaskResponse, SubscribeCompactTasksRequest, SubscribeCompactTasksResponse,
-    UnpinSnapshotRequest, UnpinSnapshotResponse, UnpinVersionRequest, UnpinVersionResponse,
+    ReportVacuumTaskResponse, SstableInfo, SubscribeCompactTasksRequest,
+    SubscribeCompactTasksResponse, UnpinSnapshotRequest, UnpinSnapshotResponse,
+    UnpinVersionRequest, UnpinVersionResponse, VacuumTask,
 };
 use risingwave_pb::meta::catalog_service_client::CatalogServiceClient;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
@@ -57,6 +60,8 @@ use tokio::sync::mpsc::{Receiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Status, Streaming};
+
+use crate::hummock_meta_client::HummockMetaClient;
 
 type DatabaseId = u32;
 type SchemaId = u32;
@@ -279,6 +284,104 @@ impl MetaClient {
     }
 }
 
+#[async_trait]
+impl HummockMetaClient for MetaClient {
+    async fn pin_version(&self, last_pinned: HummockVersionId) -> Result<HummockVersion> {
+        let req = PinVersionRequest {
+            context_id: self.worker_id(),
+            last_pinned,
+        };
+        let resp = self.inner.pin_version(req).await?;
+        Ok(resp.pinned_version.unwrap())
+    }
+
+    async fn unpin_version(&self, pinned_version_ids: &[HummockVersionId]) -> Result<()> {
+        let req = UnpinVersionRequest {
+            context_id: self.worker_id(),
+            pinned_version_ids: pinned_version_ids.to_owned(),
+        };
+        self.inner.unpin_version(req).await?;
+        Ok(())
+    }
+
+    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+        let req = PinSnapshotRequest {
+            context_id: self.worker_id(),
+            last_pinned,
+        };
+        let resp = self.inner.pin_snapshot(req).await?;
+        Ok(resp.snapshot.unwrap().epoch)
+    }
+
+    async fn unpin_snapshot(&self, pinned_epochs: &[HummockEpoch]) -> Result<()> {
+        let req = UnpinSnapshotRequest {
+            context_id: self.worker_id(),
+            snapshots: pinned_epochs
+                .iter()
+                .map(|epoch| HummockSnapshot {
+                    epoch: epoch.to_owned(),
+                })
+                .collect(),
+        };
+        self.inner.unpin_snapshot(req).await?;
+        Ok(())
+    }
+
+    async fn get_new_table_id(&self) -> Result<HummockSSTableId> {
+        let resp = self.inner.get_new_table_id(GetNewTableIdRequest {}).await?;
+        Ok(resp.table_id)
+    }
+
+    async fn add_tables(
+        &self,
+        epoch: HummockEpoch,
+        sstables: Vec<SstableInfo>,
+    ) -> Result<HummockVersion> {
+        let req = AddTablesRequest {
+            context_id: self.worker_id(),
+            tables: sstables,
+            epoch,
+        };
+        let resp = self.inner.add_tables(req).await?;
+        Ok(resp.version.unwrap())
+    }
+
+    async fn report_compaction_task(&self, compact_task: CompactTask) -> Result<()> {
+        let req = ReportCompactionTasksRequest {
+            compact_task: Some(compact_task),
+        };
+        self.inner.report_compaction_tasks(req).await?;
+        Ok(())
+    }
+
+    async fn commit_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        let req = CommitEpochRequest { epoch };
+        self.inner.commit_epoch(req).await?;
+        Ok(())
+    }
+
+    async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
+        let req = AbortEpochRequest { epoch };
+        self.inner.abort_epoch(req).await?;
+        Ok(())
+    }
+
+    async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
+        let req = SubscribeCompactTasksRequest {
+            context_id: self.worker_id(),
+        };
+        self.inner.subscribe_compact_tasks(req).await
+    }
+
+    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
+        let req = ReportVacuumTaskRequest {
+            vacuum_task: Some(vacuum_task),
+        };
+        self.inner.report_vacuum_task(req).await?;
+        Ok(())
+    }
+}
+
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Debug, Clone)]
 pub struct GrpcMetaClient {
@@ -354,47 +457,22 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
+            ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
+            ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
+            ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
+            ,{ hummock_client, unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
+            ,{ hummock_client, add_tables, AddTablesRequest, AddTablesResponse }
+            ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
+            ,{ hummock_client, get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
+            ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
+            ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
+            ,{ hummock_client, commit_epoch, CommitEpochRequest, CommitEpochResponse }
+            ,{ hummock_client, abort_epoch, AbortEpochRequest, AbortEpochResponse }
         }
     };
 }
 
 for_all_meta_rpc! { grpc_meta_client_impl }
-
-macro_rules! grpc_hummock_meta_client_impl {
-    ([], $( {  $fn_name:ident, $req:ty, $resp:ty }),*) => {
-        $(paste! {
-            impl GrpcMetaClient {
-                pub async fn [<$fn_name>](&self, request: $req) -> std::result::Result<$resp, tonic::Status> {
-                    Ok(self
-                        .hummock_client
-                        .to_owned()
-                        .$fn_name(request)
-                        .await?
-                        .into_inner())
-                }
-            }
-        })*
-    }
-}
-
-macro_rules! for_hummock_meta_rpc {
-    ($macro:ident $(, $x:tt)*) => {
-        $macro! {
-            [$($x),*]
-            ,{ pin_version, PinVersionRequest, PinVersionResponse }
-            ,{ unpin_version, UnpinVersionRequest, UnpinVersionResponse }
-            ,{ pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }
-            ,{ unpin_snapshot, UnpinSnapshotRequest, UnpinSnapshotResponse }
-            ,{ add_tables, AddTablesRequest, AddTablesResponse }
-            ,{ report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
-            ,{ get_new_table_id, GetNewTableIdRequest, GetNewTableIdResponse }
-            ,{ subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-        }
-    };
-}
-
-for_hummock_meta_rpc! { grpc_hummock_meta_client_impl }
 
 impl GrpcMetaClient {
     // TODO(TaoWu): Use macro to refactor the following methods.

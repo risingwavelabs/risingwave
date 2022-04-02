@@ -20,7 +20,7 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use crate::hummock::key::user_key;
+use risingwave_common::storage::key::user_key;
 use crate::hummock::value::HummockValue;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;

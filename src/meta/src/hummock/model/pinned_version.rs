@@ -14,7 +14,7 @@
 
 use prost::Message;
 use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedVersion};
-use risingwave_storage::hummock::HummockVersionId;
+use risingwave_common::storage::HummockVersionId;
 
 use crate::model::MetadataModel;
 

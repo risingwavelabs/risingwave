@@ -29,7 +29,7 @@ use risingwave_common::util::value_encoding::deserialize_cell;
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
-use crate::hummock::key::next_key;
+use risingwave_common::storage::key::next_key;
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};

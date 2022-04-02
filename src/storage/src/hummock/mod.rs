@@ -27,14 +27,15 @@ mod block_cache;
 pub use block_cache::*;
 mod sstable;
 use risingwave_common::error::Result;
+use risingwave_rpc_client::HummockMetaClient;
 pub use sstable::*;
 pub mod compactor;
+#[cfg(test)]
+mod compactor_tests;
 mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
 mod iterator;
-pub mod key;
-pub mod key_range;
 pub mod local_version_manager;
 pub mod mock;
 mod shared_buffer;
@@ -48,10 +49,10 @@ mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-mod version_cmp;
 
 pub use error::*;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::storage::{VersionedComparator, *};
 use risingwave_pb::hummock::LevelType;
 use value::*;
 
@@ -63,25 +64,13 @@ use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
 use self::utils::range_overlap;
 use super::monitor::StateStoreMetrics;
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::iterator::ReverseUserIterator;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
-use crate::hummock::version_cmp::VersionedComparator;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
-
-pub type HummockTTL = u64;
-pub type HummockSSTableId = u64;
-pub type HummockRefCount = u64;
-pub type HummockVersionId = u64;
-pub type HummockContextId = u32;
-pub type HummockEpoch = u64;
-pub const INVALID_EPOCH: HummockEpoch = 0;
-pub const INVALID_VERSION_ID: HummockVersionId = 0;
-pub const FIRST_VERSION_ID: HummockVersionId = 1;
 
 /// Hummock is the state store backend.
 #[derive(Clone)]

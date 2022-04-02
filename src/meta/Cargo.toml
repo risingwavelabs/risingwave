@@ -34,7 +34,6 @@ rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-risingwave_storage = { path = "../storage" }
 serde = { version = "1", features = ["derive"] }
 serde_derive = "1"
 serde_json = "1"
@@ -61,3 +60,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 assert_matches = "1"
 rand = "0.8"
 tempfile = "3"
+
+[features]
+test = []

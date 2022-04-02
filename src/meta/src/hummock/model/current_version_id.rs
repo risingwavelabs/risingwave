@@ -14,7 +14,7 @@
 
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::HummockVersionRefId;
-use risingwave_storage::hummock::{HummockVersionId, FIRST_VERSION_ID};
+use risingwave_common::storage::{HummockVersionId, FIRST_VERSION_ID};
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;
 use crate::model::MetadataModel;

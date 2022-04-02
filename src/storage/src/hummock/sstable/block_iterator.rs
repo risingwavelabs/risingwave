@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 
 use super::{Block, KeyPrefix};
-use crate::hummock::version_cmp::VersionedComparator;
+use risingwave_common::storage::VersionedComparator;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {

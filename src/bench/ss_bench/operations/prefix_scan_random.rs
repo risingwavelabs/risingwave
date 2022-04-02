@@ -19,7 +19,7 @@ use bytes::Buf;
 use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
-use risingwave_storage::hummock::key::next_key;
+use risingwave_common::storage::key::next_key;
 use risingwave_storage::StateStore;
 
 use super::Operations;

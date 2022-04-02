@@ -158,7 +158,7 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};
-    use crate::hummock::key::user_key;
+    use risingwave_common::storage::key::user_key;
 
     fn transform_shared_buffer(
         batches: Vec<(Vec<u8>, HummockValue<Vec<u8>>)>,

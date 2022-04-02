@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use super::{HummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
-use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_common::storage::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -255,7 +255,7 @@ mod tests {
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::user_key;
+    use risingwave_common::storage::key::user_key;
     use crate::hummock::sstable::SSTableIterator;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;

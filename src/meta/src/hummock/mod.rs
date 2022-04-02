@@ -19,9 +19,13 @@ mod hummock_manager;
 mod hummock_manager_tests;
 mod level_handler;
 mod model;
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod vacuum;
+#[cfg(any(test, feature = "test"))]
+pub mod mock_hummock_meta_client;
+#[cfg(any(test, feature = "test"))]
+pub use mock_hummock_meta_client::MockHummockMetaClient;
 
 use std::sync::Arc;
 use std::time::Duration;
