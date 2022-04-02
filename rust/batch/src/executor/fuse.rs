@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::executor::Executor;
 
-/// [`FuseExecutor`] is a wrapper around a Executor. After wrapping, once a call to
+/// [`FusedExecutor`] is a wrapper around a Executor. After wrapping, once a call to
 /// `next` returns `Ok(None)`, all subsequent calls to `next` will return an
 /// error.
 pub struct FusedExecutor<T: BoxedExecutorBuilder + Executor> {
