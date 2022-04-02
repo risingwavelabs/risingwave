@@ -40,9 +40,7 @@
   }],
   "hashJoin": {
     "leftKey": [0],
-    "leftOutput": [0, 1, 2],
-    "rightKey": [0],
-    "rightOutput": [0]
+    "rightKey": [0]
   },
   "identity": "RwBatchHashJoin(condition\u003d[\u003d($0, $3)], joinType\u003d[inner])"
 }
