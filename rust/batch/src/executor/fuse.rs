@@ -24,9 +24,9 @@ use crate::executor::Executor;
 /// `next` returns `Ok(None)`, all subsequent calls to `next` will return an
 /// error.
 pub struct FuseExecutor<T: BoxedExecutorBuilder + Executor> {
-    /// The underlaying executor.
+    /// The underlying executor.
     inner: T,
-    /// Whethor the underlaying executor should return `Err` or not.
+    /// Whether the underlying executor should return `Err` or not.
     invalid: bool,
 }
 
@@ -44,7 +44,7 @@ impl<T: BoxedExecutorBuilder + Executor> Executor for FuseExecutor<T> {
         match self.inner.next().await? {
             res @ Some(_) => Ok(res),
             None => {
-                // Once the underlaying executor returns `Ok(None)`,
+                // Once the underlying executor returns `Ok(None)`,
                 // subsequence calls will return `Err`.
                 self.invalid = true;
                 Ok(None)
