@@ -116,7 +116,7 @@ impl EquiJoinParams {
     }
 
     #[inline(always)]
-    pub(super) fn output_types(&self) -> &[DataType] {
+    pub(super) fn full_data_types(&self) -> &[DataType] {
         &self.full_data_types
     }
 

@@ -194,7 +194,7 @@ impl<K: HashKey> TryFrom<BuildTable> for ProbeTable<K> {
 
         let array_builders = build_table
             .params
-            .output_types()
+            .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(build_table.params.batch_size()))
             .collect::<Result<Vec<_>>>()?;
@@ -283,17 +283,23 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn nullify_build_side_for_non_equi_condition(
         &mut self,
-        data_chunk: &mut DataChunk,
+        data_chunk: DataChunk,
         filter: &Bitmap,
-    ) {
-        let build_start_pos = self.params.left_len();
-        for col_idx in 0..self.params.right_len() {
-            data_chunk
-                .column_mut_at(build_start_pos + col_idx)
-                .array_mut_ref()
-                .unwrap()
-                .set_bitmap(filter.clone());
+    ) -> DataChunk {
+        let (columns, vis) = data_chunk.into_parts();
+        let mut new_column = Vec::with_capacity(self.params.full_data_types().len());
+
+        for (idx, col) in columns.into_iter().enumerate() {
+            if idx < self.params.right_len() {
+                new_column.push(col);
+            } else {
+                let array_ref = col.into_inner();
+                let mut array = Arc::try_unwrap(array_ref).unwrap();
+                array.set_bitmap(filter.clone());
+                new_column.push(Column::new(Arc::new(array)));
+            }
         }
+        DataChunk::new(new_column, vis)
     }
 
     fn remove_duplicate_rows_for_left_outer(&mut self, filter: Bitmap) -> Result<Bitmap> {
@@ -569,14 +575,14 @@ impl<K: HashKey> ProbeTable<K> {
 
     fn process_outer_join_non_equi_condition(
         &mut self,
-        mut data_chunk: DataChunk,
+        data_chunk: DataChunk,
     ) -> Result<Option<DataChunk>> {
         let filter = self.get_non_equi_cond_filter(&data_chunk)?;
-        self.nullify_build_side_for_non_equi_condition(&mut data_chunk, &filter);
+        let mut ret_chunk = self.nullify_build_side_for_non_equi_condition(data_chunk, &filter);
         let filter = self.remove_duplicate_rows(filter)?;
         // TODO(yuhao): We can calculate the cardinality in remove_duplicate_rows.
-        data_chunk.set_visibility(filter);
-        Ok(Some(data_chunk))
+        ret_chunk.set_visibility(filter);
+        Ok(Some(ret_chunk))
     }
 
     fn process_semi_join_non_equi_condition(
@@ -974,7 +980,7 @@ impl<K: HashKey> ProbeTable<K> {
 
         let new_array_builders = self
             .params
-            .output_types()
+            .full_data_types()
             .iter()
             .map(|data_type| data_type.create_array_builder(self.params.batch_size()))
             .collect::<Result<Vec<_>>>()?;

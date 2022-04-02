@@ -196,10 +196,6 @@ impl DataChunk {
         &self.columns[idx]
     }
 
-    pub fn column_mut_at(&mut self, idx: usize) -> &mut Column {
-        &mut self.columns[idx]
-    }
-
     pub fn columns(&self) -> &[Column] {
         &self.columns
     }

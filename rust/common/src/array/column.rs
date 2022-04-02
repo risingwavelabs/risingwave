@@ -50,11 +50,8 @@ impl Column {
         &*self.array
     }
 
-    /// This gets the mutable reference of the array in column.
-    /// Should be used very careful!!!
-    /// If the array is not shared before calling this function, it will return `None`.
-    pub fn array_mut_ref(&mut self) -> Option<&mut ArrayImpl> {
-        Arc::get_mut(&mut self.array)
+    pub fn into_inner(self) -> ArrayRef {
+        self.array
     }
 }
 
