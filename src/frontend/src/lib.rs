@@ -45,6 +45,7 @@ pub mod utils;
 extern crate log;
 mod meta_client;
 pub mod test_utils;
+extern crate core;
 extern crate risingwave_common;
 
 use std::ffi::OsString;
