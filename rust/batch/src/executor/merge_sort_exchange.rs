@@ -219,20 +219,23 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
             .collect::<Vec<Field>>();
 
         let num_sources = proto_sources.len();
-        Ok(Box::new(Self {
-            server_addr,
-            env: source.env.clone(),
-            source_inputs: vec![None; num_sources],
-            order_pairs,
-            min_heap: BinaryHeap::new(),
-            proto_sources,
-            sources: vec![],
-            source_creator: PhantomData,
-            schema: Schema { fields },
-            first_execution: true,
-            task_id: source.task_id.clone(),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                server_addr,
+                env: source.env.clone(),
+                source_inputs: vec![None; num_sources],
+                order_pairs,
+                min_heap: BinaryHeap::new(),
+                proto_sources,
+                sources: vec![],
+                source_creator: PhantomData,
+                schema: Schema { fields },
+                first_execution: true,
+                task_id: source.task_id.clone(),
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 

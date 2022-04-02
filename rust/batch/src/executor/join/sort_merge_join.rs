@@ -290,15 +290,18 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                         // TODO: Support more join type.
                         let probe_table_source = RowLevelIter::new(left_child);
                         let build_table_source = RowLevelIter::new(right_child);
-                        Ok(Box::new(Self::new(
-                            join_type,
-                            schema,
-                            probe_table_source,
-                            build_table_source,
-                            probe_key_idxs,
-                            build_key_idxs,
-                            "SortMergeJoinExecutor".to_string(),
-                        )))
+                        Ok(Box::new(
+                            Self::new(
+                                join_type,
+                                schema,
+                                probe_table_source,
+                                build_table_source,
+                                probe_key_idxs,
+                                build_key_idxs,
+                                "SortMergeJoinExecutor".to_string(),
+                            )
+                            .fuse(),
+                        ))
                     }
                     _ => unimplemented!("Do not support {:?} join type now.", join_type),
                 }

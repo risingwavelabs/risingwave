@@ -64,18 +64,21 @@ impl BoxedExecutorBuilder for OrderByExecutor {
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
-            return Ok(Box::new(Self {
-                order_pairs: Arc::new(order_pairs),
-                child,
-                vis_indices: vec![],
-                chunks: vec![],
-                sorted_indices: vec![],
-                min_heap: BinaryHeap::new(),
-                encoded_keys: vec![],
-                encodable: false,
-                disable_encoding: false,
-                identity: source.plan_node().get_identity().clone(),
-            }));
+            return Ok(Box::new(
+                Self {
+                    order_pairs: Arc::new(order_pairs),
+                    child,
+                    vis_indices: vec![],
+                    chunks: vec![],
+                    sorted_indices: vec![],
+                    min_heap: BinaryHeap::new(),
+                    encoded_keys: vec![],
+                    encodable: false,
+                    disable_encoding: false,
+                    identity: source.plan_node().get_identity().clone(),
+                }
+                .fuse(),
+            ));
         }
         Err(InternalError("OrderBy must have one child".to_string()).into())
     }
