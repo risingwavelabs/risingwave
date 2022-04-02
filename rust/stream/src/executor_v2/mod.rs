@@ -22,21 +22,21 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
+#[allow(dead_code)]
 mod chain;
 mod filter;
 mod merge;
 pub(crate) mod mview;
-#[allow(dead_code)]
 mod rearranged_chain;
 mod simple;
 #[cfg(test)]
 mod test_utils;
 mod v1_compat;
 
-pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 
