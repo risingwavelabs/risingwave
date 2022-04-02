@@ -43,7 +43,7 @@ impl ValueMeta {
         buf.put_u16_le(self.consistent_hash_value);
     }
 
-    pub fn decode(buf: &mut &[u8]) -> Self {
+    pub fn decode(mut buf: impl Buf) -> Self {
         let consistent_hash_value = buf.get_u16_le();
         Self {
             consistent_hash_value,
