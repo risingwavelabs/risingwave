@@ -36,11 +36,6 @@ pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
     Err(InternalError("The function is not supported".to_string()).into())
 }
 
-/// A placeholder function that returns T3 in [`gen_binary_expr_atm`]
-pub fn atm_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<T3> {
-    Err(InternalError("The function is not supported".to_string()).into())
-}
-
 /// This macro helps create arithmetic expression.
 /// It receive all the combinations of `gen_binary_expr` and generate corresponding match cases
 /// In [], the parameters are for constructing new expression
