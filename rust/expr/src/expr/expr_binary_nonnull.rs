@@ -49,7 +49,7 @@ pub fn cmp_placeholder<T1, T2, T3>(_l: T1, _r: T2) -> Result<bool> {
 /// * $The scalar function for expression, it's a generic function and specialized by the type of
 ///   `$i1, $i2, $cast`
 macro_rules! gen_atm_impl {
-    ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident }, )*) => {
+    ([$l:expr, $r:expr, $ret:expr], $( { $i1:tt, $i2:tt, $cast:tt, $func:ident },)*) => {
         match ($l.return_type(), $r.return_type()) {
             $(
                 ($i1! { type_match_pattern }, $i2! { type_match_pattern }) => {
