@@ -47,6 +47,13 @@ impl BoundSetExpr {
                 .collect(),
         }
     }
+
+    pub fn is_correlated(&self) -> bool {
+        match self {
+            BoundSetExpr::Select(s) => s.is_correlated(),
+            BoundSetExpr::Values(_) => false,
+        }
+    }
 }
 
 impl Binder {

@@ -198,7 +198,7 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+    use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 
     #[test]
     fn test_push_down() {
@@ -238,7 +238,7 @@ mod tests {
             .iter()
             .map(|input| match input {
                 ExprImpl::InputRef(i) => {
-                    InputRef::new(i.index() - left_col_num, i.data_type()).into()
+                    InputRef::new(i.index() - left_col_num, i.return_type()).into()
                 }
                 _ => panic!("Expect InputRef, got {:?}", input),
             })

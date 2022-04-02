@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_trait::async_trait;
-use futures::channel::mpsc::{Receiver, Sender};
+use futures::channel::mpsc::Sender;
 use futures::{SinkExt, StreamExt};
-use risingwave_common::catalog::Schema;
 use risingwave_common::try_match_expand;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -23,10 +21,9 @@ use risingwave_pb::task_service::GetStreamResponse;
 use risingwave_rpc_client::ComputeClient;
 use risingwave_storage::StateStore;
 use tonic::Streaming;
-use tracing_futures::Instrument;
 
-use super::{Executor, Message, PkIndicesRef, Result};
-use crate::executor::{ExecutorBuilder, PkIndices};
+use super::{Executor, Message, Result};
+use crate::executor::ExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore, UpDownActorIds};
 
 /// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
@@ -80,26 +77,6 @@ impl RemoteInput {
     }
 }
 
-/// `ReceiverExecutor` is used along with a channel. After creating a mpsc channel,
-/// there should be a `ReceiverExecutor` running in the background, so as to push
-/// messages down to the executors.
-pub struct ReceiverExecutor {
-    schema: Schema,
-    pk_indices: PkIndices,
-    receiver: Receiver<Message>,
-    /// Logical Operator Info
-    op_info: String,
-}
-
-impl std::fmt::Debug for ReceiverExecutor {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ReceiverExecutor")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .finish()
-    }
-}
-
 pub struct MergeExecutorBuilder {}
 
 impl ExecutorBuilder for MergeExecutorBuilder {
@@ -111,53 +88,5 @@ impl ExecutorBuilder for MergeExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::MergeNode)?;
         stream.create_merge_node(params, node)
-    }
-}
-
-impl ReceiverExecutor {
-    pub fn new(
-        schema: Schema,
-        pk_indices: PkIndices,
-        receiver: Receiver<Message>,
-        op_info: String,
-    ) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            receiver,
-            op_info,
-        }
-    }
-}
-
-#[async_trait]
-impl Executor for ReceiverExecutor {
-    async fn next(&mut self) -> Result<Message> {
-        let msg = self
-            .receiver
-            .next()
-            .instrument(tracing::trace_span!("idle"))
-            .await
-            .expect(
-                "upstream channel closed unexpectedly, please check error in upstream executors",
-            ); // TODO: remove unwrap
-
-        Ok(msg)
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        "ReceiverExecutor"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        &self.op_info
     }
 }

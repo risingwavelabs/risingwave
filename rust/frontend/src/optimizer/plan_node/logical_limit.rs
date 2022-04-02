@@ -26,8 +26,8 @@ use crate::utils::ColIndexMapping;
 pub struct LogicalLimit {
     pub base: PlanBase,
     input: PlanRef,
-    limit: usize,
-    offset: usize,
+    pub(super) limit: usize,
+    pub(super) offset: usize,
 }
 
 impl LogicalLimit {

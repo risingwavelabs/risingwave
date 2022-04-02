@@ -68,7 +68,7 @@ mod tests {
             let val = iter.value();
             assert_eq!(key, iterator_test_key_of(i).as_slice());
             assert_eq!(
-                val.into_put_value().unwrap(),
+                val.into_user_value().unwrap(),
                 iterator_test_value_of(i).as_slice()
             );
             i += 1;
@@ -84,7 +84,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(key, iterator_test_key_of(0).as_slice());
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(0).as_slice()
         );
     }
@@ -129,7 +129,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT + 1).as_slice());
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 1).as_slice()
         );
 
@@ -139,7 +139,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(key, iterator_test_key_of(0).as_slice());
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(0).as_slice()
         );
 
@@ -155,7 +155,7 @@ mod tests {
             iterator_test_key_of(3 * TEST_KEYS_COUNT - 1).as_slice()
         );
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(3 * TEST_KEYS_COUNT - 1).as_slice()
         );
 
@@ -206,7 +206,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT + 2).as_slice());
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 2).as_slice()
         );
 
@@ -219,7 +219,7 @@ mod tests {
         let val = iter.value();
         assert_eq!(key, iterator_test_key_of(TEST_KEYS_COUNT * 4).as_slice());
         assert_eq!(
-            val.into_put_value().unwrap(),
+            val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT * 4).as_slice()
         );
     }

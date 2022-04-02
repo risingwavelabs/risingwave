@@ -155,7 +155,7 @@ impl StateStore for MemoryStateStore {
         async move {
             let mut inner = self.inner.lock().await;
             for (key, value) in kv_pairs {
-                inner.insert((key, Reverse(epoch)), value.user_value());
+                inner.insert((key, Reverse(epoch)), value.user_value);
             }
             Ok(())
         }

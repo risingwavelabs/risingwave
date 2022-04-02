@@ -16,7 +16,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::Ident;
 
 use crate::binder::Binder;
-use crate::expr::{ExprImpl, InputRef};
+use crate::expr::{CorrelatedInputRef, ExprImpl, InputRef};
 
 impl Binder {
     pub fn bind_column(&mut self, idents: &[Ident]) -> Result<ExprImpl> {
@@ -31,13 +31,32 @@ impl Binder {
                 )
             }
         };
-        let index = match table_name {
-            Some(table_name) => self
-                .context
-                .get_index_with_table_name(column_name, table_name)?,
-            None => self.context.get_index(column_name)?,
-        };
-        let column = &self.context.columns[index];
-        Ok(InputRef::new(column.index, column.data_type.clone()).into())
+
+        if let Ok(index) = self.context.get_column_binding(table_name, column_name) {
+            let column = &self.context.columns[index];
+            return Ok(InputRef::new(column.index, column.data_type.clone()).into());
+        }
+
+        // Try to find a correlated column in `upper_contexts`, starting from the innermost context.
+        let mut err = ErrorCode::ItemNotFound(format!("Invalid column: {}", column_name)).into();
+        for (i, context) in self.upper_contexts.iter().rev().enumerate() {
+            // `depth` starts from 1.
+            let depth = i + 1;
+            match context.get_column_binding(table_name, column_name) {
+                Ok(index) => {
+                    let column = &context.columns[index];
+                    return Ok(CorrelatedInputRef::new(
+                        column.index,
+                        column.data_type.clone(),
+                        depth,
+                    )
+                    .into());
+                }
+                Err(e) => {
+                    err = e;
+                }
+            }
+        }
+        Err(err)
     }
 }

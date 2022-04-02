@@ -49,6 +49,10 @@ impl Column {
     pub fn array_ref(&self) -> &ArrayImpl {
         &*self.array
     }
+
+    pub fn into_inner(self) -> ArrayRef {
+        self.array
+    }
 }
 
 #[cfg(test)]

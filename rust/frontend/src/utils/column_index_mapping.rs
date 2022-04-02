@@ -18,7 +18,7 @@ use std::vec;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
-use crate::expr::{ExprImpl, ExprRewriter, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::property::{Distribution, FieldOrder, Order};
 
 /// `ColIndexMapping` is a partial mapping from usize to usize.
@@ -332,7 +332,7 @@ impl ColIndexMapping {
 
 impl ExprRewriter for ColIndexMapping {
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        InputRef::new(self.map(input_ref.index()), input_ref.data_type()).into()
+        InputRef::new(self.map(input_ref.index()), input_ref.return_type()).into()
     }
 }
 

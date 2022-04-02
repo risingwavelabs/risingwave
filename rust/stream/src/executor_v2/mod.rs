@@ -28,6 +28,7 @@ mod merge;
 pub(crate) mod mview;
 #[allow(dead_code)]
 mod rearranged_chain;
+pub mod receiver;
 mod simple;
 #[cfg(test)]
 mod test_utils;
