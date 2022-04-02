@@ -14,6 +14,7 @@
 
 use std::ffi::OsStr;
 use std::path::Path;
+use std::thread::available_parallelism;
 
 use anyhow::{anyhow, Context, Result};
 use console::style;
@@ -107,7 +108,12 @@ async fn main() -> Result<()> {
     }
 
     let result = futures::stream::iter(futures)
-        .buffer_unordered(8)
+        .buffer_unordered(
+            available_parallelism()
+                .map(|x| x.get())
+                .unwrap_or_default()
+                .max(2),
+        )
         .collect::<Vec<_>>()
         .await
         .iter()
