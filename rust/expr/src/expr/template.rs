@@ -28,7 +28,7 @@ use risingwave_common::types::{option_as_scalar_ref, DataType, Scalar};
 use crate::expr::{BoxedExpression, Expression};
 
 macro_rules! gen_eval {
-    { $macro:tt, $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
+    { $macro:ident, $ty_name:ident, $OA:ty, $($arg:ident,)* } => {
         fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
             paste! {
                 $(

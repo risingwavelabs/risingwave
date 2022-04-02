@@ -42,7 +42,7 @@ pub const ITER_NEXT_SIZE_SCALE: f64 = 400.0;
 /// Define all metrics.
 #[macro_export]
 macro_rules! for_all_metrics {
-    ($macro:tt) => {
+    ($macro:ident) => {
         $macro! {
             get_duration: Histogram,
             get_key_size: Histogram,
