@@ -23,10 +23,13 @@ use risingwave_common::util::chunk_coalesce::{
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
+use super::fuse::FuseExecutor;
 use super::{BoxedExecutor, BoxedExecutorBuilder};
 use crate::executor::{Executor, ExecutorBuilder};
 
-pub(super) struct FilterExecutor {
+pub(super) type FilterExecutor = FuseExecutor<FilterExecutorInner>;
+
+pub(super) struct FilterExecutorInner {
     expr: BoxedExpression,
     child: BoxedExecutor,
     chunk_builder: DataChunkBuilder,
@@ -37,7 +40,7 @@ pub(super) struct FilterExecutor {
 }
 
 #[async_trait::async_trait]
-impl Executor for FilterExecutor {
+impl Executor for FilterExecutorInner {
     async fn open(&mut self) -> Result<()> {
         self.child.open().await
     }
@@ -84,7 +87,7 @@ impl Executor for FilterExecutor {
     }
 }
 
-impl FilterExecutor {
+impl FilterExecutorInner {
     /// Fetch one chunk from child.
     async fn fetch_one_chunk(&mut self) -> Result<Option<DataChunk>> {
         if self.child_can_be_nexted {
@@ -108,7 +111,7 @@ impl FilterExecutor {
     }
 }
 
-impl BoxedExecutorBuilder for FilterExecutor {
+impl BoxedExecutorBuilder for FilterExecutorInner {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         ensure!(source.plan_node().get_children().len() == 1);
 
@@ -171,7 +174,7 @@ mod tests {
         mock_executor.add(data_chunk);
         let expr = make_expression(Type::Equal);
         let chunk_builder = DataChunkBuilder::new(mock_executor.schema().data_types(), 1);
-        let mut filter_executor = FilterExecutor {
+        let mut filter_executor = FilterExecutorInner {
             expr: build_from_prost(&expr).unwrap(),
             child: Box::new(mock_executor),
             chunk_builder,

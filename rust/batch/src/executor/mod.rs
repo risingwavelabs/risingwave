@@ -50,6 +50,7 @@ mod delete;
 mod drop_stream;
 mod drop_table;
 mod filter;
+mod fuse;
 mod generate_series;
 mod generic_exchange;
 mod hash_agg;
