@@ -59,6 +59,7 @@ impl SchemaCatalog {
         self.source_by_name.remove(&name).unwrap();
     }
 
+    // Use associated source to filter table.
     pub fn get_all_table_names(&self) -> Vec<String> {
         self.table_by_name
             .iter()
@@ -67,6 +68,7 @@ impl SchemaCatalog {
             .collect_vec()
     }
 
+    // Use associated source to filter mv.
     pub fn get_all_mv_names(&self) -> Vec<String> {
         self.table_by_name
             .iter()

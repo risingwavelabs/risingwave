@@ -2536,6 +2536,8 @@ impl Parser {
         })
     }
 
+    /// Parser `from schema` after `show tables` and `show mviews`, if not conclude `from` then use
+    /// default schema name.
     pub fn parse_from_identifier(&mut self) -> Result<Option<String>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
             Ok(Some(self.parse_identifier()?.value))

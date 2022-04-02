@@ -32,6 +32,7 @@ pub enum StatementType {
     CREATE_TABLE,
     CREATE_MATERIALIZED_VIEW,
     CREATE_SOURCE,
+    DESCRIBE_TABLE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
     DROP_STREAM,
@@ -107,6 +108,7 @@ impl PgResponse {
                 | StatementType::EXPLAIN
                 | StatementType::SHOW_SOURCE
                 | StatementType::SHOW_COMMAND
+                | StatementType::DESCRIBE_TABLE
         )
     }
 

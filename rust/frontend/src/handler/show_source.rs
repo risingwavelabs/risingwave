@@ -55,7 +55,7 @@ pub async fn handle_show_source(
     ))
 }
 
-/// Convert column desc to row which conclude column name and column datatype
+/// Convert column descs to rows which conclude name and type
 pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
     let mut rows = vec![];
     for col in columns {

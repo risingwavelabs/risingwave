@@ -31,7 +31,7 @@ pub async fn handle_describe_table(
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
-    // Get prost column_descs from source info and into column_descs
+    // Get column descs from table catalog
     let columns: Vec<ColumnDesc> = catalog_reader
         .get_table_by_name(session.database(), &schema_name, &source_name)?
         .columns
@@ -40,11 +40,11 @@ pub async fn handle_describe_table(
         .map(|c| c.column_desc.clone())
         .collect();
 
-    // Convert all column_descs to rows
+    // Convert all column descs to rows
     let rows = col_descs_to_rows(columns);
 
     Ok(PgResponse::new(
-        StatementType::SHOW_COMMAND,
+        StatementType::DESCRIBE_TABLE,
         rows.len() as i32,
         rows,
         vec![

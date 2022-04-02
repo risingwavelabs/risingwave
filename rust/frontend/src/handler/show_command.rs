@@ -27,44 +27,36 @@ pub async fn handle_show_command(
     command: ShowCommandObject,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
-
     let catalog_reader = session.env().catalog_reader().read_guard();
-    let row_descs = vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)];
-    let rows = match command {
-        ShowCommandObject::Table(Some(name)) => catalog_reader
-            .get_all_table_names(session.database(), &name)?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
-        ShowCommandObject::Table(None) => catalog_reader
-            .get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
-        ShowCommandObject::Database => catalog_reader
-            .get_all_database_names()?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
-        ShowCommandObject::Schema => catalog_reader
-            .get_all_schema_names(session.database())?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
-        ShowCommandObject::View(Some(name)) => catalog_reader
-            .get_all_mv_names(session.database(), &name)?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
-        ShowCommandObject::View(None) => catalog_reader
-            .get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
-            .iter()
-            .map(|n| Row::new(vec![Some(n.clone())]))
-            .collect_vec(),
+
+    let names = match command {
+        // If not include schema name, use default schema name
+        ShowCommandObject::Table(Some(name)) => {
+            catalog_reader.get_all_table_names(session.database(), &name)?
+        }
+        ShowCommandObject::Table(None) => {
+            catalog_reader.get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
+        }
+        ShowCommandObject::Database => catalog_reader.get_all_database_names()?,
+        ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
+        // If not include schema name, use default schema name
+        ShowCommandObject::View(Some(name)) => {
+            catalog_reader.get_all_mv_names(session.database(), &name)?
+        }
+        ShowCommandObject::View(None) => {
+            catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
+        }
         ShowCommandObject::Column(_table_name) => {
             todo!()
         }
     };
+
+    let rows = names
+        .into_iter()
+        .map(|n| Row::new(vec![Some(n)]))
+        .collect_vec();
+    let row_descs = vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)];
+
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         rows.len() as i32,
