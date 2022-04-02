@@ -98,12 +98,15 @@ impl BoxedExecutorBuilder for TopNExecutor {
             .collect();
         if let Some(child_plan) = source.plan_node.get_children().get(0) {
             let child = source.clone_for_plan(child_plan).build()?;
-            return Ok(Box::new(Self::new(
-                child,
-                order_pairs,
-                top_n_node.get_limit() as usize,
-                source.plan_node().get_identity().clone(),
-            )));
+            return Ok(Box::new(
+                Self::new(
+                    child,
+                    order_pairs,
+                    top_n_node.get_limit() as usize,
+                    source.plan_node().get_identity().clone(),
+                )
+                .fuse(),
+            ));
         }
         Err(InternalError("TopN must have one child".to_string()).into())
     }

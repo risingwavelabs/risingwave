@@ -19,12 +19,14 @@ use futures::SinkExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
-use risingwave_common::expr::*;
 use risingwave_common::types::*;
+use risingwave_expr::expr::*;
 use tokio::sync::oneshot;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
+use crate::executor_v2::receiver::ReceiverExecutor;
+use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor};
 use crate::task::{ActorHandle, SharedContext};
 
 pub struct MockConsumer {
@@ -66,7 +68,7 @@ async fn test_merger_sum_aggr() {
         let schema = Schema {
             fields: vec![Field::unnamed(DataType::Int64)],
         };
-        let input = ReceiverExecutor::new(schema, vec![], input_rx, "ReceiverExecutor".to_string());
+        let input = Box::new(ReceiverExecutor::new(schema, vec![], input_rx)).v1();
         // for the local aggregator, we need two states: row count and sum
         let aggregator = LocalSimpleAggExecutor::new(
             Box::new(input),
@@ -122,8 +124,7 @@ async fn test_merger_sum_aggr() {
     let schema = Schema {
         fields: vec![Field::unnamed(DataType::Int64)],
     };
-    let receiver_op =
-        ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
+    let receiver_op = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
         DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
@@ -139,7 +140,7 @@ async fn test_merger_sum_aggr() {
     });
 
     // use a merge operator to collect data from dispatchers before sending them to aggregator
-    let merger = MergeExecutor::new(schema, vec![], 0, outputs, "MergerExecutor".to_string());
+    let merger = Box::new(MergeExecutor::new(schema, vec![], 0, outputs)).v1();
 
     // for global aggregator, we need to sum data and sum row count
     let aggregator = SimpleAggExecutor::new(

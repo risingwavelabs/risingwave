@@ -20,7 +20,10 @@ use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 
 use crate::error::ErrorCode::{InternalError, IoError};
 use crate::error::{Result, RwError};
-use crate::vector_op::cast::UNIX_EPOCH_DAYS;
+
+/// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
+/// Minus this magic number to store the number of days since 1970-01-01.
+pub const UNIX_EPOCH_DAYS: i32 = 719_163;
 
 macro_rules! impl_chrono_wrapper {
     ($({ $variant_name:ident, $chrono:ty, $array:ident, $builder:ident }),*) => {
@@ -57,7 +60,7 @@ macro_rules! impl_chrono_wrapper {
 
 #[macro_export]
 macro_rules! for_all_chrono_variants {
-    ($macro:tt) => {
+    ($macro:ident) => {
         $macro! {
             { NaiveDateWrapper, NaiveDate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTimeWrapper, NaiveDateTime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },

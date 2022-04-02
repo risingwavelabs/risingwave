@@ -140,11 +140,14 @@ impl BoxedExecutorBuilder for DeleteExecutor {
         })?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        Ok(Box::new(Self::new(
-            table_id,
-            source.global_batch_env().source_manager_ref(),
-            child,
-        )))
+        Ok(Box::new(
+            Self::new(
+                table_id,
+                source.global_batch_env().source_manager_ref(),
+                child,
+            )
+            .fuse(),
+        ))
     }
 }
 

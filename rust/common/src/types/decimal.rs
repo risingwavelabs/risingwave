@@ -28,7 +28,7 @@ pub enum Decimal {
 }
 
 macro_rules! impl_from_integer {
-    ([$(($T:ty, $from_int:tt)), *]) => {
+    ([$(($T:ty, $from_int:ident)), *]) => {
         $(fn $from_int(num: $T) -> Option<Self> {
             RustDecimal::$from_int(num).map(Decimal::Normalized)
         })*
@@ -36,7 +36,7 @@ macro_rules! impl_from_integer {
 }
 
 macro_rules! impl_to_integer {
-    ([$(($T:ty, $to_int:tt)), *]) => {
+    ([$(($T:ty, $to_int:ident)), *]) => {
         $(fn $to_int(&self) -> Option<$T> {
             match self {
                 Self::Normalized(d) => d.$to_int(),
@@ -47,7 +47,7 @@ macro_rules! impl_to_integer {
 }
 
 macro_rules! impl_to_float {
-    ([$(($T:ty, $to_float:tt)), *]) => {
+    ([$(($T:ty, $to_float:ident)), *]) => {
         $(fn $to_float(&self) -> Option<$T> {
             match self {
                 Self::Normalized(d) => d.$to_float(),
@@ -60,7 +60,7 @@ macro_rules! impl_to_float {
 }
 
 macro_rules! impl_from_float {
-    ([$(($T:ty, $from_float:tt)), *]) => {
+    ([$(($T:ty, $from_float:ident)), *]) => {
         $(fn $from_float(num: $T) -> Option<Self> {
             match num {
                 num if num.is_nan() => Some(Decimal::NaN),
@@ -108,7 +108,7 @@ macro_rules! impl_try_from_float {
 }
 
 macro_rules! checked_proxy {
-    ($trait:tt, $func:tt, $op: tt) => {
+    ($trait:ty, $func:ident, $op: tt) => {
         impl $trait for Decimal {
             fn $func(&self, other: &Self) -> Option<Self> {
                 match (self, other) {

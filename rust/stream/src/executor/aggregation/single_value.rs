@@ -144,7 +144,7 @@ impl<T: Array> StreamingSingleValueAgg<T> {
 }
 
 macro_rules! impl_single_value_agg {
-    ($array_type:tt, $result_variant:tt) => {
+    ($array_type:ty, $result_variant:ident) => {
         impl StreamingAggStateImpl for StreamingSingleValueAgg<$array_type> {
             fn apply_batch(
                 &mut self,

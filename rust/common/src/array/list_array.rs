@@ -169,6 +169,10 @@ impl Array for ListArray {
         &self.bitmap
     }
 
+    fn set_bitmap(&mut self, bitmap: Bitmap) {
+        self.bitmap = bitmap;
+    }
+
     fn hash_at<H: std::hash::Hasher>(&self, idx: usize, state: &mut H) {
         if !self.is_null(idx) {
             self.value.hash_at(idx, state)

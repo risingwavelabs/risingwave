@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::expr::BoxedExpression;
+use risingwave_expr::expr::BoxedExpression;
 
 use super::{Executor, ExecutorInfo, SimpleExecutor, SimpleExecutorWrapper, StreamExecutorResult};
 use crate::executor::PkIndicesRef;
@@ -171,9 +171,9 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, StreamChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::test_utils::MockSource;

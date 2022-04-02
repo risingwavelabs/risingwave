@@ -17,10 +17,10 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::util::chunk_coalesce::{
     DataChunkBuilder, SlicedDataChunk, DEFAULT_CHUNK_BUFFER_SIZE,
 };
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -125,14 +125,17 @@ impl BoxedExecutorBuilder for FilterExecutor {
             let chunk_builder =
                 DataChunkBuilder::new(child.schema().data_types(), DEFAULT_CHUNK_BUFFER_SIZE);
 
-            return Ok(Box::new(Self {
-                expr,
-                child,
-                chunk_builder,
-                last_input: None,
-                identity: source.plan_node().get_identity().clone(),
-                child_can_be_nexted: true,
-            }));
+            return Ok(Box::new(
+                Self {
+                    expr,
+                    child,
+                    chunk_builder,
+                    last_input: None,
+                    identity: source.plan_node().get_identity().clone(),
+                    child_can_be_nexted: true,
+                }
+                .fuse(),
+            ));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
     }
@@ -146,8 +149,8 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::{Array, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};

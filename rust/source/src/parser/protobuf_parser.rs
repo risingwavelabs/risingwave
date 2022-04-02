@@ -22,7 +22,6 @@ use risingwave_common::error::ErrorCode::{
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_common::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
@@ -30,6 +29,7 @@ use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
 use serde_value::Value;
 use url::Url;
 
+use super::common::str_to_date;
 use crate::{Event, SourceColumnDesc, SourceParser};
 
 /// Parser for Protobuf-encoded bytes.
@@ -177,11 +177,11 @@ impl ProtobufParser {
 }
 
 macro_rules! protobuf_match_type {
-    ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
+    ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
-            $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+            $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
             Value::Option(Some(boxed_value)) => match *boxed_value {
-                $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+                $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
                 _ => None,
             },
             _ => None,
@@ -290,11 +290,11 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::vector_op::cast::str_to_date;
     use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
+    use super::str_to_date;
     use crate::{ProtobufParser, SourceColumnDesc, SourceParser};
 
     static PROTO_FILE_DATA: &str = r#"

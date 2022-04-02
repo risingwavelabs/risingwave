@@ -42,15 +42,12 @@ pub struct ChainExecutor {
 fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
     match msg {
         Message::Chunk(chunk) => {
-            let columns = upstream_indices
+            let (ops, columns, visibility) = chunk.into_inner();
+            let mapped_columns = upstream_indices
                 .iter()
-                .map(|i| chunk.columns()[*i].clone())
+                .map(|&i| columns[i].clone())
                 .collect();
-            Message::Chunk(StreamChunk::new(
-                chunk.ops().to_vec(),
-                columns,
-                chunk.visibility().clone(),
-            ))
+            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
         }
         _ => msg,
     }
@@ -79,8 +76,7 @@ impl ChainExecutor {
     async fn execute_inner(self) {
         let mut upstream = self.upstream.execute();
 
-        // 1. Consume the upstream to get the first barrier.
-        //
+        // 1. Poll the upstream to get the first barrier.
         let first_msg = upstream.next().await.unwrap()?;
         let barrier = first_msg
             .as_barrier()
@@ -105,7 +101,6 @@ impl ChainExecutor {
 
         // 2. Consume the snapshot if needed. Note that the snapshot is already projected, so
         // there's no mapping required.
-        //
         if to_consume_snapshot {
             // Init the snapshot with reading epoch.
             let snapshot = self.snapshot.execute_with_epoch(epoch.prev);
@@ -118,11 +113,9 @@ impl ChainExecutor {
         }
 
         // 3. Report that we've finished the creation (for a workaround).
-        //
         self.notifier.notify(epoch.curr);
 
         // 4. Continuously consume the upstream.
-        //
         #[for_await]
         for msg in upstream {
             let msg = msg?;

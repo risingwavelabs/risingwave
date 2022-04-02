@@ -41,6 +41,10 @@ impl BoundQuery {
     pub fn data_types(&self) -> Vec<DataType> {
         self.body.data_types()
     }
+
+    pub fn is_correlated(&self) -> bool {
+        self.body.is_correlated()
+    }
 }
 
 impl Binder {
@@ -57,7 +61,8 @@ impl Binder {
         result
     }
 
-    fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
+    /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
+    pub(super) fn bind_query_inner(&mut self, query: Query) -> Result<BoundQuery> {
         let limit = query.get_limit_value();
         let offset = query.get_offset_value();
         let body = self.bind_set_expr(query.body)?;

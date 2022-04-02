@@ -15,7 +15,7 @@
 /// `array` builds an `Array` with `Option`.
 #[macro_export]
 macro_rules! array {
-    ($array:ident, [$( $value:expr ),*]) => {
+    ($array:ty, [$( $value:expr ),*]) => {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;
@@ -32,7 +32,7 @@ macro_rules! array {
 /// `empty_array` builds an empty `Array`.
 #[macro_export]
 macro_rules! empty_array {
-    ($array:tt) => {{
+    ($array:ty) => {{
         use $crate::array::{Array, ArrayBuilder};
         let builder = <$array as Array>::Builder::new(0).unwrap();
         builder.finish().unwrap()
@@ -42,7 +42,7 @@ macro_rules! empty_array {
 /// `array_nonnull` builds an `Array` with concrete values.
 #[macro_export]
 macro_rules! array_nonnull {
-    ($array:tt, [$( $value:expr ),*]) => {
+    ($array:ty, [$( $value:expr ),*]) => {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;
@@ -59,7 +59,7 @@ macro_rules! array_nonnull {
 /// `column` builds a `Column` with `Option`.
 #[macro_export]
 macro_rules! column {
-    ($array:tt, [$( $value:expr ),*]) => {
+    ($array:ty, [$( $value:expr ),*]) => {
         {
             use $crate::array::column::Column;
             let arr = $crate::array! { $array, [ $( $value ),* ] };
@@ -71,7 +71,7 @@ macro_rules! column {
 /// `column_nonnull` builds a `Column` with concrete values.
 #[macro_export]
 macro_rules! column_nonnull {
-    ($array:tt, [$( $value:expr ),*]) => {
+    ($array:ty, [$( $value:expr ),*]) => {
         {
             use $crate::array::column::Column;
             let arr = $crate::array_nonnull! { $array, [ $( $value ),* ] };

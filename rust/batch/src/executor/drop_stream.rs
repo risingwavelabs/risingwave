@@ -63,11 +63,14 @@ impl BoxedExecutorBuilder for DropStreamExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
-        Ok(Box::new(Self {
-            table_id,
-            source_manager: source.global_batch_env().source_manager_ref(),
-            schema: Schema { fields: vec![] },
-            identity: "DropStreamExecutor".to_string(),
-        }))
+        Ok(Box::new(
+            Self {
+                table_id,
+                source_manager: source.global_batch_env().source_manager_ref(),
+                schema: Schema { fields: vec![] },
+                identity: "DropStreamExecutor".to_string(),
+            }
+            .fuse(),
+        ))
     }
 }

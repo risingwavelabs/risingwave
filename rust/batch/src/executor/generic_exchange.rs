@@ -96,17 +96,20 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for GenericExchangeExecuto
         let sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
         let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
-        Ok(Box::new(Self {
-            sources,
-            server_addr,
-            env: source.env.clone(),
-            source_creator: PhantomData,
-            source_idx: 0,
-            current_source: None,
-            schema: Schema { fields },
-            task_id: source.task_id.clone(),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                sources,
+                server_addr,
+                env: source.env.clone(),
+                source_creator: PhantomData,
+                source_idx: 0,
+                current_source: None,
+                schema: Schema { fields },
+                task_id: source.task_id.clone(),
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 

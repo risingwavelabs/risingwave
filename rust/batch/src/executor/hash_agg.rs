@@ -26,7 +26,7 @@ use risingwave_common::hash::{
 };
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_common::vector_op::agg::{AggStateFactory, BoxedAggState};
+use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::HashAggNode;
 
@@ -44,7 +44,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Output = BoxedExecutor;
 
     fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
-        Box::new(HashAggExecutor::<K>::new(input))
+        Box::new(HashAggExecutor::<K>::new(input).fuse())
     }
 }
 

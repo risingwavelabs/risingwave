@@ -106,7 +106,7 @@ macro_rules! impl_flush_status {
 }
 
 macro_rules! for_all_entry {
-        ($macro:tt $(, $x:tt)*) => {
+        ($macro:ident $(, $x:tt)*) => {
                 $macro! {
                         [$($x),*],
                         { btree_map::Entry<K, Self>, BtreeMapFlushStatus },

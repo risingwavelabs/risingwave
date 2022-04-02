@@ -173,6 +173,8 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
         self.null_bitmap().is_set(idx).map(|v| !v).unwrap()
     }
 
+    fn set_bitmap(&mut self, bitmap: Bitmap);
+
     fn hash_at<H: Hasher>(&self, idx: usize, state: &mut H);
 
     fn hash_vec<H: Hasher>(&self, hashers: &mut [H]) {
@@ -230,7 +232,7 @@ impl<A: Array> CompactableArray for A {
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_variants {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*],
             { Int16, int16, I16Array, I16ArrayBuilder },
@@ -521,6 +523,12 @@ macro_rules! impl_array {
             pub fn value_at(&self, idx: usize) -> DatumRef<'_> {
                 match self {
                     $( Self::$variant_name(inner) => inner.value_at(idx).map(ScalarRefImpl::$variant_name), )*
+                }
+            }
+
+            pub fn set_bitmap(&mut self, bitmap: Bitmap) {
+                match self {
+                    $( Self::$variant_name(inner) => inner.set_bitmap(bitmap), )*
                 }
             }
 

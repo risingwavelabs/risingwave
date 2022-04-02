@@ -14,8 +14,8 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
 use risingwave_sqlparser::ast::{Function, FunctionArg, FunctionArgExpr};
 
 use crate::binder::bind_context::Clause;
@@ -33,7 +33,8 @@ impl Binder {
 
         if f.name.0.len() == 1 {
             let function_name = f.name.0.get(0).unwrap().value.as_str();
-            let agg_kind = match function_name {
+            let function_name = function_name.to_lowercase();
+            let agg_kind = match function_name.as_str() {
                 "count" => Some(AggKind::Count),
                 "sum" => Some(AggKind::Sum),
                 "min" => Some(AggKind::Min),
@@ -45,7 +46,7 @@ impl Binder {
                 self.ensure_aggregate_allowed()?;
                 return Ok(ExprImpl::AggCall(Box::new(AggCall::new(kind, inputs)?)));
             }
-            let function_type = match function_name {
+            let function_type = match function_name.as_str() {
                 "substr" => ExprType::Substr,
                 "length" => ExprType::Length,
                 "like" => ExprType::Like,
@@ -76,7 +77,7 @@ impl Binder {
                 }
             };
             Ok(FunctionCall::new_or_else(function_type, inputs, |args| {
-                Self::err_unsupported_func(function_name, args)
+                Self::err_unsupported_func(&function_name, args)
             })?
             .into())
         } else {

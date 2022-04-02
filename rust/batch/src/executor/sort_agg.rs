@@ -19,8 +19,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
-use risingwave_common::vector_op::agg::{
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::vector_op::agg::{
     create_sorted_grouper, AggStateFactory, BoxedAggState, BoxedSortedGrouper, EqGroups,
 };
 use risingwave_pb::plan::plan_node::NodeBody;
@@ -83,15 +83,18 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self {
-            agg_states,
-            group_exprs,
-            sorted_groupers,
-            child,
-            child_done: false,
-            schema: Schema { fields },
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                agg_states,
+                group_exprs,
+                sorted_groupers,
+                child,
+                child_done: false,
+                schema: Schema { fields },
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 
@@ -188,8 +191,8 @@ mod tests {
     use risingwave_common::array::{Array as _, I32Array, I64Array};
     use risingwave_common::array_nonnull;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::build_from_prost;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::{Arg, Type};

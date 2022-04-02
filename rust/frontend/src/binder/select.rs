@@ -52,6 +52,14 @@ impl BoundSelect {
             .map(|item| item.return_type())
             .collect()
     }
+
+    pub fn is_correlated(&self) -> bool {
+        self.select_items
+            .iter()
+            .chain(self.group_by.iter())
+            .chain(self.where_clause.iter())
+            .any(|expr| expr.has_correlated_input_ref())
+    }
 }
 
 impl Binder {

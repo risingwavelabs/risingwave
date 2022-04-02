@@ -20,8 +20,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, I32Array};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -133,12 +133,15 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self::new(
-            rows,
-            Schema { fields },
-            source.plan_node().get_identity().clone(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
-        )))
+        Ok(Box::new(
+            Self::new(
+                rows,
+                Schema { fields },
+                source.plan_node().get_identity().clone(),
+                DEFAULT_CHUNK_BUFFER_SIZE,
+            )
+            .fuse(),
+        ))
     }
 }
 
@@ -146,8 +149,8 @@ impl BoxedExecutorBuilder for ValuesExecutor {
 mod tests {
     use risingwave_common::array;
     use risingwave_common::array::{I16Array, I32Array, I64Array};
-    use risingwave_common::expr::LiteralExpression;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_expr::expr::LiteralExpression;
 
     use super::*;
 

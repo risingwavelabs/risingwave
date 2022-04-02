@@ -57,7 +57,9 @@ impl RowLevelIter {
         self.data_source.open().await?;
         while let Some(chunk) = self.data_source.next().await? {
             // Assuming all data are visible.
-            self.data.push(chunk.compact()?);
+            if chunk.cardinality() > 0 {
+                self.data.push(chunk.compact()?);
+            }
         }
         self.build_matched = Some(ChunkedData::<bool>::with_chunk_sizes(
             self.data.iter().map(|c| c.capacity()),

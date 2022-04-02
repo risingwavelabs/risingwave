@@ -367,24 +367,24 @@ macro_rules! ensure {
     ($cond:expr) => {
         if !$cond {
             let msg = stringify!($cond).to_string();
-            gen_error!($crate::error::ErrorCode::InternalError(msg));
+            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
     ($cond:expr, $msg:literal) => {
         if !$cond {
             let msg = $msg.to_string();
-            gen_error!($crate::error::ErrorCode::InternalError(msg));
+            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
-    ($cond:expr, $fmt:literal, $($arg:tt)*) => {
+    ($cond:expr, $fmt:literal, $($arg:expr)*) => {
         if !$cond {
             let msg = format!($fmt, $($arg)*);
-            gen_error!($crate::error::ErrorCode::InternalError(msg));
+            $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
     ($cond:expr, $error_code:expr) => {
         if !$cond {
-            gen_error!($error_code);
+            $crate::gen_error!($error_code);
         }
     }
 }
