@@ -5,7 +5,7 @@ statement ok
 create materialized view mv3 as select sum(v1) as sum_v1 from t3;
 
 query TT
-describe table t3;
+describe t3;
 ----
 v1 Int32
 v2 Int32
@@ -32,7 +32,7 @@ show tables from dev;
 t3
 
 query TT
-show views from dev;
+show materialized views from dev;
 ----
 mv3
 
