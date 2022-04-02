@@ -117,7 +117,7 @@ macro_rules! gen_cmp_impl {
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(

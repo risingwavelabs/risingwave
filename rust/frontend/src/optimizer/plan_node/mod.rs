@@ -326,7 +326,7 @@ macro_rules! for_all_plan_nodes {
 /// `for_logical_plan_nodes` includes all plan nodes with logical convention.
 #[macro_export]
 macro_rules! for_logical_plan_nodes {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
             ,{ Logical, Agg }
@@ -349,7 +349,7 @@ macro_rules! for_logical_plan_nodes {
 /// `for_batch_plan_nodes` includes all plan nodes with batch convention.
 #[macro_export]
 macro_rules! for_batch_plan_nodes {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
             ,{ Batch, SimpleAgg }
@@ -371,7 +371,7 @@ macro_rules! for_batch_plan_nodes {
 /// `for_stream_plan_nodes` includes all plan nodes with stream convention.
 #[macro_export]
 macro_rules! for_stream_plan_nodes {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
             ,{ Stream, Project }

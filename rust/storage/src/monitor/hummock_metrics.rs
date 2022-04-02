@@ -34,7 +34,7 @@ pub const REPORT_COMPACTION_TASK_LATENCY_SCALE: f64 = 0.1;
 /// Defines all metrics.
 #[macro_export]
 macro_rules! for_all_hummock_metrics {
-    ($macro:tt) => {
+    ($macro:ident) => {
         $macro! {
             pin_version_counts: GenericCounter<AtomicU64>,
             unpin_version_counts: GenericCounter<AtomicU64>,
