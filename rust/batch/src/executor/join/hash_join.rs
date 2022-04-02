@@ -336,13 +336,16 @@ impl HashKeyDispatcher for HashJoinExecutorBuilderDispatcher {
     type Output = BoxedExecutor;
 
     fn dispatch<K: HashKey>(input: HashJoinExecutorBuilder) -> Self::Output {
-        Box::new(HashJoinExecutor::<K>::new(
-            input.left_child,
-            input.right_child,
-            input.params,
-            input.schema,
-            format!("HashJoinExecutor{:?}", input.task_id),
-        ))
+        Box::new(
+            HashJoinExecutor::<K>::new(
+                input.left_child,
+                input.right_child,
+                input.params,
+                input.schema,
+                format!("HashJoinExecutor{:?}", input.task_id),
+            )
+            .fuse(),
+        )
     }
 }
 

@@ -245,22 +245,25 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                         let outer_table_source = RowLevelIter::new(left_child);
 
                         let join_state = NestedLoopJoinState::Build;
-                        Ok(Box::new(Self {
-                            join_expr,
-                            join_type,
-                            state: join_state,
-                            chunk_builder: DataChunkBuilder::new_with_default_size(
-                                schema.data_types(),
-                            ),
-                            schema,
-                            last_chunk: None,
-                            probe_side_schema,
-                            probe_side_source: outer_table_source,
-                            build_table: RowLevelIter::new(right_child),
-                            probe_remain_chunk_idx: 0,
-                            probe_remain_row_idx: 0,
-                            identity: "NestedLoopJoinExecutor".to_string(),
-                        }))
+                        Ok(Box::new(
+                            Self {
+                                join_expr,
+                                join_type,
+                                state: join_state,
+                                chunk_builder: DataChunkBuilder::new_with_default_size(
+                                    schema.data_types(),
+                                ),
+                                schema,
+                                last_chunk: None,
+                                probe_side_schema,
+                                probe_side_source: outer_table_source,
+                                build_table: RowLevelIter::new(right_child),
+                                probe_remain_chunk_idx: 0,
+                                probe_remain_row_idx: 0,
+                                identity: "NestedLoopJoinExecutor".to_string(),
+                            }
+                            .fuse(),
+                        ))
                     }
                     _ => unimplemented!("Do not support {:?} join type now.", join_type),
                 }

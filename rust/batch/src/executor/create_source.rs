@@ -136,19 +136,22 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             None
         };
 
-        Ok(Box::new(Self {
-            table_id,
-            config,
-            format,
-            source_manager: source.global_batch_env().source_manager_ref(),
-            columns,
-            schema: Schema { fields: vec![] },
-            properties: properties.clone(),
-            schema_location: schema_location.clone(),
-            parser: None,
-            row_id_index,
-            identity: "CreateSourceExecutor".to_string(),
-        }))
+        Ok(Box::new(
+            Self {
+                table_id,
+                config,
+                format,
+                source_manager: source.global_batch_env().source_manager_ref(),
+                columns,
+                schema: Schema { fields: vec![] },
+                properties: properties.clone(),
+                schema_location: schema_location.clone(),
+                parser: None,
+                row_id_index,
+                identity: "CreateSourceExecutor".to_string(),
+            }
+            .fuse(),
+        ))
     }
 }
 

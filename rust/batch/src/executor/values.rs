@@ -133,12 +133,15 @@ impl BoxedExecutorBuilder for ValuesExecutor {
             .map(Field::from)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self::new(
-            rows,
-            Schema { fields },
-            source.plan_node().get_identity().clone(),
-            DEFAULT_CHUNK_BUFFER_SIZE,
-        )))
+        Ok(Box::new(
+            Self::new(
+                rows,
+                Schema { fields },
+                source.plan_node().get_identity().clone(),
+                DEFAULT_CHUNK_BUFFER_SIZE,
+            )
+            .fuse(),
+        ))
     }
 }
 

@@ -36,11 +36,14 @@ impl BoxedExecutorBuilder for DropTableExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
-        Ok(Box::new(Self {
-            table_id,
-            schema: Schema { fields: vec![] },
-            identity: "DropTableExecutor".to_string(),
-        }))
+        Ok(Box::new(
+            Self {
+                table_id,
+                schema: Schema { fields: vec![] },
+                identity: "DropTableExecutor".to_string(),
+            }
+            .fuse(),
+        ))
     }
 }
 

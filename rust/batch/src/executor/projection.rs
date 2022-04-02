@@ -93,12 +93,15 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             .map(|expr| Field::unnamed(expr.return_type()))
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self {
-            expr: project_exprs,
-            child: child_node,
-            schema: Schema { fields },
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                expr: project_exprs,
+                child: child_node,
+                schema: Schema { fields },
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 
