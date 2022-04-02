@@ -44,7 +44,7 @@ impl HashKeyDispatcher for HashAggExecutorBuilderDispatcher {
     type Output = BoxedExecutor;
 
     fn dispatch<K: HashKey>(input: HashAggExecutorBuilder) -> Self::Output {
-        Box::new(HashAggExecutor::<K>::new(input))
+        Box::new(HashAggExecutor::<K>::new(input).fuse())
     }
 }
 
