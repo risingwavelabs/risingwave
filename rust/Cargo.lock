@@ -56,6 +56,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5d78ce20460b82d3fa150275ed9d55e21064fc7951177baacf86a145c4a4b1f"
+
+[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3562,6 +3568,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -3786,9 +3793,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_expr"
+version = "0.1.4"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "either",
+ "itertools",
+ "lazy_static",
+ "log",
+ "lru",
+ "memcomparable",
+ "more-asserts",
+ "num-traits",
+ "paste",
+ "prettytable-rs",
+ "prost",
+ "risingwave_common",
+ "risingwave_pb",
+ "rust_decimal",
+ "serde",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "toml",
+ "tonic",
+ "twox-hash",
+ "value-encoding",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_frontend"
 version = "0.1.4"
 dependencies = [
+ "arc-swap",
  "assert-impl",
  "async-trait",
  "byteorder",
@@ -3809,6 +3854,7 @@ dependencies = [
  "pgwire",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_expr",
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -3995,6 +4041,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_storage",
  "serde",
@@ -4129,6 +4176,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",

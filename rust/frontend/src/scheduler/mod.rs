@@ -17,8 +17,11 @@ use std::sync::Arc;
 use crate::session::SessionImpl;
 
 #[allow(dead_code)]
-mod plan_fragmenter;
-pub mod query_manager;
+mod execution;
+#[allow(dead_code)]
+pub mod plan_fragmenter;
+mod query_manager;
+pub use query_manager::*;
 #[allow(dead_code)]
 pub mod schedule;
 

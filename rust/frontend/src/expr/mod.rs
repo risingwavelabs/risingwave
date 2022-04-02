@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Scalar};
+use risingwave_expr::expr::AggKind;
 mod input_ref;
 pub use input_ref::*;
 mod literal;

@@ -34,9 +34,9 @@ use risingwave_common::array::{
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::Result;
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::*;
+use risingwave_expr::expr::AggKind;
+use risingwave_expr::*;
 pub use row_count::*;
 
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;

@@ -39,8 +39,8 @@ use crate::handler::handle;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
-use crate::scheduler::query_manager::QueryManager;
-use crate::scheduler::schedule::WorkerNodeManager;
+use crate::scheduler::schedule::{WorkerNodeManager, WorkerNodeManagerRef};
+use crate::scheduler::QueryManager;
 use crate::FrontendOpts;
 
 pub struct OptimizerContext {
@@ -224,6 +224,10 @@ impl FrontendEnv {
 
     pub fn worker_node_manager(&self) -> &WorkerNodeManager {
         &*self.worker_node_manager
+    }
+
+    pub fn worker_node_manager_ref(&self) -> WorkerNodeManagerRef {
+        self.worker_node_manager.clone()
     }
 
     pub fn meta_client(&self) -> &dyn FrontendMetaClient {
