@@ -106,8 +106,8 @@ pub fn generate_test_tables(
     for (i, table_id) in table_ids.into_iter().enumerate() {
         let mut b = SSTableBuilder::new(opt.clone());
         let kv_pairs = vec![
-            (i + 1, HummockValue::Put(b"test".as_slice())),
-            ((i + 1) * 10, HummockValue::Put(b"test".as_slice())),
+            (i + 1, HummockValue::put(b"test".as_slice())),
+            ((i + 1) * 10, HummockValue::put(b"test".as_slice())),
         ];
         for kv in kv_pairs {
             b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1);
