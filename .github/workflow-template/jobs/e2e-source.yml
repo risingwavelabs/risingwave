@@ -58,7 +58,7 @@ jobs:
         name: Download risingwave binary
         with:
           name: risingwave-dev
-          path: ./rust/target/debug
+          path: ./src/target/debug
 
       - uses: actions/download-artifact@v2
         name: Download frontend binary
@@ -70,19 +70,19 @@ jobs:
         name: Download playground binary
         with:
           name: risedev-playground-dev
-          path: ./rust/target/debug
+          path: ./src/target/debug
 
       - uses: actions/download-artifact@v2
         name: Download risingwave_regress_test binary
         with:
           name: risingwave_regress_test-dev
-          path: ./rust/target/debug
+          path: ./src/target/debug
 
       - name: Adjust permission
         run: |
-          chmod +x ./rust/target/debug/risingwave
-          chmod +x ./rust/target/debug/risedev-playground
-          chmod +x ./rust/target/debug/risingwave_regress_test
+          chmod +x ./src/target/debug/risingwave
+          chmod +x ./src/target/debug/risedev-playground
+          chmod +x ./src/target/debug/risingwave_regress_test
 
       - name: Run batch tests on Postgresql
         run: |
@@ -109,7 +109,7 @@ jobs:
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
-          RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
+          RUST_LOG=info cd src && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
             --input `pwd`/tests/regress/data \
             --output `pwd`/tests/regress/output \

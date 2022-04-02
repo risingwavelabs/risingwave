@@ -36,41 +36,41 @@ jobs:
 
       - name: Run rust cargo-sort check
         run: |
-          cd rust && cargo sort -c -w
+          cd src && cargo sort -c -w
 
       - name: Run rust cargo-hakari check
         run: |
-          cd rust && cargo hakari verify
+          cd src && cargo hakari verify
 
       - name: Run rust format check
         run: |
-          cd rust && cargo fmt --all -- --check
+          cd src && cargo fmt --all -- --check
 
       - name: Run rust doc check
         run: |
-          cd rust && cargo doc --document-private-items
+          cd src && cargo doc --document-private-items
 
       - name: Build Rust components
         run: |
-          cd rust && cargo build --profile $[<profile>] --features=all-in-one
+          cd src && cargo build --profile $[<profile>] --features=all-in-one
 
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<target>]/risingwave
+            src/target/$[<target>]/risingwave
 
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<target>]/risingwave_regress_test
+            src/target/$[<target>]/risingwave_regress_test
 
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-$[<profile>]
           if-no-files-found: error
           path: |
-            rust/target/$[<target>]/risedev-playground
+            src/target/$[<target>]/risedev-playground
