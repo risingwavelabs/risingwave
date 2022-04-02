@@ -98,18 +98,9 @@ impl InputRef {
         InputRef { index, data_type }
     }
 
-    pub fn get_expr_type(&self) -> ExprType {
-        ExprType::InputRef
-    }
-
     /// Get a reference to the input ref's index.
     pub fn index(&self) -> usize {
         self.index
-    }
-
-    /// Get a reference to the input ref's data type.
-    pub fn data_type(&self) -> DataType {
-        self.data_type.clone()
     }
 
     /// Convert [`InputRef`] to an arg of agg call.
@@ -130,7 +121,7 @@ impl Expr for InputRef {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
         ExprNode {
-            expr_type: self.get_expr_type().into(),
+            expr_type: ExprType::InputRef.into(),
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(RexNode::InputRef(InputRefExpr {
                 column_idx: self.index() as i32,

@@ -45,7 +45,7 @@ impl ColumnBinding {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Clause {
     Where,
     Values,
@@ -60,7 +60,7 @@ impl Display for Clause {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct BindContext {
     // Columns of all tables.
     pub columns: Vec<ColumnBinding>,
@@ -73,7 +73,18 @@ pub struct BindContext {
 }
 
 impl BindContext {
-    pub fn get_index(&self, column_name: &String) -> Result<usize> {
+    pub fn get_column_binding(
+        &self,
+        table_name: Option<&String>,
+        column_name: &String,
+    ) -> Result<usize> {
+        match table_name {
+            Some(table_name) => self.get_index_with_table_name(column_name, table_name),
+            None => self.get_index(column_name),
+        }
+    }
+
+    fn get_index(&self, column_name: &String) -> Result<usize> {
         let columns = self
             .indexs_of
             .get(column_name)
@@ -85,7 +96,7 @@ impl BindContext {
         }
     }
 
-    pub fn get_index_with_table_name(
+    fn get_index_with_table_name(
         &self,
         column_name: &String,
         table_name: &String,

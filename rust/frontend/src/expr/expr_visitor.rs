@@ -12,8 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{AggCall, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
+use super::{AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery};
 
+/// Traverse an expression tree.
+///
+/// Each method of the trait is a hook that can be overridden to customize the behavior when
+/// traversing the corresponding type of node. By default, every method recursively visits the
+/// subtree.
+///
+/// Note: The default implementation for `visit_subquery` is a no-op, i.e., expressions inside
+/// subqueries are not traversed.
 pub trait ExprVisitor {
     fn visit_expr(&mut self, expr: &ExprImpl) {
         match expr {
@@ -22,6 +30,7 @@ pub trait ExprVisitor {
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),
             ExprImpl::AggCall(inner) => self.visit_agg_call(inner),
             ExprImpl::Subquery(inner) => self.visit_subquery(inner),
+            ExprImpl::CorrelatedInputRef(inner) => self.visit_correlated_input_ref(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &FunctionCall) {
@@ -39,4 +48,5 @@ pub trait ExprVisitor {
     fn visit_literal(&mut self, _: &Literal) {}
     fn visit_input_ref(&mut self, _: &InputRef) {}
     fn visit_subquery(&mut self, _: &Subquery) {}
+    fn visit_correlated_input_ref(&mut self, _: &CorrelatedInputRef) {}
 }

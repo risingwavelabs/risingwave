@@ -19,7 +19,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject, LogicalScan, PlanRef};
 use crate::planner::Planner;
 
@@ -83,7 +83,7 @@ impl Planner {
                     ))));
                     expr_aliases.push(None);
                 }
-                let time_col_data_type = time_col.data_type();
+                let time_col_data_type = time_col.return_type();
                 let window_start =
                     ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                         ExprType::TumbleStart,
