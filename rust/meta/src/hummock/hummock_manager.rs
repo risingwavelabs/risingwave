@@ -102,48 +102,6 @@ macro_rules! abort_multi_var {
     }
 }
 
-/// Parse a mutable reference expression DSL
-/// - For r($field), return the immutable reference to the field
-/// - For mr($field), return the mutable reference to the field
-/// - For `var_txn($field)`, return a `VarTransaction` that wraps the field
-macro_rules! parse_mut_ref_expr {
-    // take the immutable ref
-    ($var:ident,r, $field:ident) => {
-        &$var.$field
-    };
-    // take the mutable ref
-    ($var:ident,mr, $field:ident) => {
-        &mut $var.$field
-    };
-    // start a var txn
-    ($var:ident,var_txn, $field:ident) => {
-        VarTransaction::new(&mut $var.$field)
-    };
-}
-
-/// Split a mutable reference of a struct to multiple reference, mutable reference or
-/// `VarTransaction` to its field
-macro_rules! split_fields_mut_ref {
-    ($mut_ref_expr:expr, $mut_ref_type:ident ($field: ident)) => {
-        {
-            let mut_ref = $mut_ref_expr;
-            parse_mut_ref_expr! (mut_ref, $mut_ref_type, $field)
-        }
-    };
-    ($mut_ref_expr:expr, $(
-        $mut_ref_type:ident ($field: ident)
-    ), *) => {
-        {
-            let mut_ref = $mut_ref_expr;
-            (
-                $(
-                    parse_mut_ref_expr! (mut_ref, $mut_ref_type, $field),
-                )*
-            )
-        }
-    };
-}
-
 struct Versioning {
     current_version_id: CurrentHummockVersionId,
     hummock_versions: BTreeMap<HummockVersionId, HummockVersion>,
@@ -293,12 +251,10 @@ where
         last_pinned: HummockVersionId,
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
-        let (mut pinned_versions, hummock_versions, current_version_id) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            var_txn(pinned_versions),
-            r(hummock_versions),
-            r(current_version_id)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
+        let hummock_versions = &versioning.hummock_versions;
+        let current_version_id = versioning.current_version_id.clone();
         let mut context_pinned_version = pinned_versions.new_entry_txn_or_default(
             context_id,
             HummockPinnedVersion {
@@ -348,8 +304,7 @@ where
         pinned_version_ids: impl AsRef<[HummockVersionId]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut pinned_versions =
-            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_versions));
+        let mut pinned_versions = VarTransaction::new(&mut versioning_guard.pinned_versions);
         let mut context_pinned_version = match pinned_versions.new_entry_txn(context_id) {
             None => {
                 return Ok(());
@@ -506,12 +461,10 @@ where
     ) -> Result<HummockVersion> {
         let mut versioning_guard = self.versioning.write().await;
 
-        let (mut current_version_id, mut hummock_versions, mut sstable_id_infos) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            var_txn(current_version_id),
-            var_txn(hummock_versions),
-            var_txn(sstable_id_infos)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
+        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
 
         let current_hummock_version = hummock_versions
             .get(&current_version_id.id())
@@ -613,8 +566,7 @@ where
             .unwrap()
             .max_committed_epoch;
 
-        let mut pinned_snapshots =
-            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_snapshots));
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
 
         let mut context_pinned_snapshot = pinned_snapshots.new_entry_txn_or_default(
             context_id,
@@ -663,8 +615,7 @@ where
         hummock_snapshots: impl AsRef<[HummockSnapshot]>,
     ) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let mut pinned_snapshots =
-            split_fields_mut_ref!(versioning_guard.deref_mut(), var_txn(pinned_snapshots));
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning_guard.pinned_snapshots);
 
         let mut context_pinned_snapshot = match pinned_snapshots.new_entry_txn(context_id) {
             None => {
@@ -691,11 +642,11 @@ where
         assignee_context_id: HummockContextId,
     ) -> Result<Option<CompactTask>> {
         let mut compaction_guard = self.compaction.lock().await;
-        let (mut compact_status, mut compact_task_assignment) = split_fields_mut_ref!(
-            compaction_guard.deref_mut(),
-            var_txn(compact_status),
-            var_txn(compact_task_assignment)
-        );
+
+        let compaction = compaction_guard.deref_mut();
+        let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
+        let mut compact_task_assignment =
+            VarTransaction::new(&mut compaction.compact_task_assignment);
         for assignment in compact_task_assignment.values() {
             if assignment.context_id == assignee_context_id {
                 // We allow at most one on-going compact task for each context.
@@ -775,11 +726,10 @@ where
         let compact_metrics = compact_task.metrics.clone();
         let compacted_watermark = compact_task.watermark;
         let mut compaction_guard = self.compaction.lock().await;
-        let (mut compact_status, mut compact_task_assignment) = split_fields_mut_ref!(
-            compaction_guard.deref_mut(),
-            var_txn(compact_status),
-            var_txn(compact_task_assignment)
-        );
+        let compaction = compaction_guard.deref_mut();
+        let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
+        let mut compact_task_assignment =
+            VarTransaction::new(&mut compaction.compact_task_assignment);
         // The task is not found.
         if !compact_task_assignment.contains_key(&compact_task.task_id) {
             return Ok(false);
@@ -796,18 +746,11 @@ where
         if compact_task.task_status {
             // The compact task is finished.
             let mut versioning_guard = self.versioning.write().await;
-            let (
-                mut current_version_id,
-                mut hummock_versions,
-                mut stale_sstables,
-                mut sstable_id_infos,
-            ) = split_fields_mut_ref!(
-                versioning_guard.deref_mut(),
-                var_txn(current_version_id),
-                var_txn(hummock_versions),
-                var_txn(stale_sstables),
-                var_txn(sstable_id_infos)
-            );
+            let versioning = versioning_guard.deref_mut();
+            let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
+            let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+            let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
+            let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
             let old_version = hummock_versions
                 .get(&current_version_id.id())
                 .unwrap()
@@ -911,11 +854,9 @@ where
         let mut compaction_guard = self.compaction.lock().await;
         let mut compact_status = VarTransaction::new(&mut compaction_guard.compact_status);
         let mut versioning_guard = self.versioning.write().await;
-        let (mut current_version_id, mut hummock_versions) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            var_txn(current_version_id),
-            var_txn(hummock_versions)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
+        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
         let old_version_copy = hummock_versions.get(&old_version_id).unwrap().clone();
@@ -1011,12 +952,10 @@ where
 
     pub async fn abort_epoch(&self, epoch: HummockEpoch) -> Result<()> {
         let mut versioning_guard = self.versioning.write().await;
-        let (mut current_version_id, mut hummock_versions, mut stale_sstables) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            var_txn(current_version_id),
-            var_txn(hummock_versions),
-            var_txn(stale_sstables)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let mut current_version_id = VarTransaction::new(&mut versioning.current_version_id);
+        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+        let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
         let old_version_id = current_version_id.increase();
         let new_version_id = current_version_id.id();
         let old_hummock_version = hummock_versions.get(&old_version_id).unwrap().clone();
@@ -1107,17 +1046,14 @@ where
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
         let mut compaction_guard = self.compaction.lock().await;
-        let (mut compact_status, mut compact_task_assignment) = split_fields_mut_ref!(
-            compaction_guard.deref_mut(),
-            var_txn(compact_status),
-            var_txn(compact_task_assignment)
-        );
+        let compaction = compaction_guard.deref_mut();
+        let mut compact_status = VarTransaction::new(&mut compaction.compact_status);
+        let mut compact_task_assignment =
+            VarTransaction::new(&mut compaction.compact_task_assignment);
         let mut versioning_guard = self.versioning.write().await;
-        let (mut pinned_versions, mut pinned_snapshots) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            var_txn(pinned_versions),
-            var_txn(pinned_snapshots)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let mut pinned_versions = VarTransaction::new(&mut versioning.pinned_versions);
+        let mut pinned_snapshots = VarTransaction::new(&mut versioning.pinned_snapshots);
 
         let mut to_commit = false;
         for context_id in context_ids.as_ref() {
@@ -1215,13 +1151,11 @@ where
         if versioning_guard.hummock_versions.get(&version_id).is_none() {
             return Ok(());
         }
-        let (pinned_versions_ref, mut hummock_versions, mut stale_sstables, mut sstable_id_infos) = split_fields_mut_ref!(
-            versioning_guard.deref_mut(),
-            r(pinned_versions),
-            var_txn(hummock_versions),
-            var_txn(stale_sstables),
-            var_txn(sstable_id_infos)
-        );
+        let versioning = versioning_guard.deref_mut();
+        let pinned_versions_ref = &versioning.pinned_versions;
+        let mut hummock_versions = VarTransaction::new(&mut versioning.hummock_versions);
+        let mut stale_sstables = VarTransaction::new(&mut versioning.stale_sstables);
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning.sstable_id_infos);
         hummock_versions.remove(&version_id);
         // Delete record in HummockTablesToDelete if any.
         if let Some(ssts_to_delete) = stale_sstables.get_mut(&version_id) {
