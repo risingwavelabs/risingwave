@@ -7,6 +7,7 @@ members = [
   "compute",
   "connector",
   "ctl",
+  "expr",
   "frontend",
   "frontend/test_runner",
   "meta",

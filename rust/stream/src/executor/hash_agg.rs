@@ -462,7 +462,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::*;
+    use risingwave_expr::expr::*;
 
     use super::*;
     use crate::executor::test_utils::*;

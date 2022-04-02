@@ -22,7 +22,7 @@ use risingwave_common::error::ErrorCode::{
 };
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_common::vector_op::cast::str_to_date;
+use risingwave_expr::vector_op::cast::str_to_date;
 use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
@@ -290,7 +290,7 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::vector_op::cast::str_to_date;
+    use risingwave_expr::vector_op::cast::str_to_date;
     use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;

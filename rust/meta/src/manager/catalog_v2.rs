@@ -20,9 +20,9 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{CatalogVersion, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{CatalogError, InternalError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::{ensure, gen_error};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{Database, Schema, Source, Table};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};

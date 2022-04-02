@@ -17,9 +17,9 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::{ensure, gen_error};
 use tokio::sync::Mutex;
 
 use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
