@@ -21,9 +21,11 @@ use risingwave_common::catalog::{ColumnId, Schema};
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::ManagedMViewState;
+use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::mview::ManagedMViewState;
+use crate::executor_v2::{
+    BoxedExecutor, BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndicesRef,
+};
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -125,7 +127,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
 }
 
 impl<S: StateStore> Executor for MaterializeExecutor<S> {
-    fn execute(self: Box<Self>) -> super::BoxedMessageStream {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
 
@@ -133,7 +135,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
         &self.info.schema
     }
 
-    fn pk_indices(&self) -> super::PkIndicesRef {
+    fn pk_indices(&self) -> PkIndicesRef {
         &self.info.pk_indices
     }
 

@@ -24,7 +24,7 @@ pub use super::executor::{
 
 mod chain;
 mod filter;
-mod materialize;
+pub(crate) mod mview;
 mod simple;
 #[cfg(test)]
 mod test_utils;
@@ -32,7 +32,7 @@ mod v1_compat;
 
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
-pub use materialize::MaterializeExecutor;
+pub use mview::MaterializeExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 

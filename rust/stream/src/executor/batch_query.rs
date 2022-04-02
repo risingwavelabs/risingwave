@@ -184,7 +184,7 @@ mod test {
     use std::vec;
 
     use super::*;
-    use crate::executor::mview::test_utils::gen_basic_table;
+    use crate::executor_v2::mview::test_utils::gen_basic_table;
 
     #[tokio::test]
     async fn test_basic() {

@@ -72,7 +72,7 @@ mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
 mod lookup;
-mod managed_state;
+pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
 mod mview;
