@@ -321,7 +321,7 @@ where
 }
 
 macro_rules! impl_fold_agg {
-    ($result:tt, $result_variant:tt, $input:tt) => {
+    ($result:ty, $result_variant:ident, $input:ty) => {
         impl<S> StreamingAggStateImpl for StreamingFoldAgg<$result, $input, S>
         where
             S: StreamingFoldable<<$result as Array>::OwnedItem, <$input as Array>::OwnedItem>,

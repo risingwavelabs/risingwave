@@ -177,11 +177,11 @@ impl ProtobufParser {
 }
 
 macro_rules! protobuf_match_type {
-    ($value:expr, $target_scalar_type:path, { $($serde_type:tt),* }, $target_type:tt) => {
+    ($value:expr, $target_scalar_type:path, { $($serde_type:ident),* }, $target_type:ty) => {
         $value.and_then(|v| match v {
-            $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+            $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
             Value::Option(Some(boxed_value)) => match *boxed_value {
-                $(Value::$serde_type(b) => Some($target_type::from(b)), )*
+                $(Value::$serde_type(b) => Some(<$target_type>::from(b)), )*
                 _ => None,
             },
             _ => None,

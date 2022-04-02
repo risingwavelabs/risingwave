@@ -376,7 +376,7 @@ macro_rules! ensure {
             $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
         }
     };
-    ($cond:expr, $fmt:literal, $($arg:tt)*) => {
+    ($cond:expr, $fmt:literal, $($arg:expr)*) => {
         if !$cond {
             let msg = format!($fmt, $($arg)*);
             $crate::gen_error!($crate::error::ErrorCode::InternalError(msg));
