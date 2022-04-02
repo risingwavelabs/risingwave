@@ -27,6 +27,7 @@ pub mod hash_util;
 pub mod ordered;
 pub mod prost;
 pub mod sort_util;
+pub mod env_var;
 #[macro_use]
 pub mod try_match;
 pub mod value_encoding;

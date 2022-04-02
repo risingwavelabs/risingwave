@@ -16,6 +16,7 @@ use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_sqlparser::ast::Statement;
 use tracing::info;
 
@@ -31,8 +32,7 @@ lazy_static::lazy_static! {
     /// until the entire dataflow is refreshed. In other words, every related table & MV will
     /// be able to see the write.
     /// TODO: Use session config to set this.
-    static ref IMPLICIT_FLUSH: bool =
-        std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "1".to_string() }) == "1";
+    pub(super) static ref IMPLICIT_FLUSH: bool = env_var_is_true("RW_IMPLICIT_FLUSH");
 }
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {

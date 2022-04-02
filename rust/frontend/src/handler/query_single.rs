@@ -17,19 +17,12 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
+use super::query::IMPLICIT_FLUSH;
 use crate::binder::Binder;
 use crate::handler::util::{to_pg_field, to_pg_rows};
 use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
-
-lazy_static::lazy_static! {
-    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
-    /// until the entire dataflow is refreshed. In other words, every related table & MV will
-    /// be able to see the write.
-    static ref IMPLICIT_FLUSH: bool =
-     std::env::var("RW_IMPLICIT_FLUSH").unwrap_or_else(|_| { "true".to_string() }).parse().unwrap();
-}
 
 pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
