@@ -15,8 +15,8 @@
 use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 
+use risingwave_common::ensure;
 use risingwave_common::error::Result;
-use risingwave_common::{ensure, gen_error};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::stream_plan::StreamNode;
 

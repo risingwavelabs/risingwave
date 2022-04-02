@@ -18,8 +18,8 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
 use risingwave_common::try_match_expand;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;
@@ -169,9 +169,9 @@ mod tests {
     use risingwave_common::array::{I64Array, *};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::test_utils::MockSource;

@@ -3568,6 +3568,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",
@@ -3792,6 +3793,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_expr"
+version = "0.1.4"
+dependencies = [
+ "anyhow",
+ "async-stream",
+ "async-trait",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "either",
+ "itertools",
+ "lazy_static",
+ "log",
+ "lru",
+ "memcomparable",
+ "more-asserts",
+ "num-traits",
+ "paste",
+ "prettytable-rs",
+ "prost",
+ "risingwave_common",
+ "risingwave_pb",
+ "rust_decimal",
+ "serde",
+ "smallvec",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "toml",
+ "tonic",
+ "twox-hash",
+ "value-encoding",
+ "workspace-hack",
+]
+
+[[package]]
 name = "risingwave_frontend"
 version = "0.1.4"
 dependencies = [
@@ -3816,6 +3854,7 @@ dependencies = [
  "pgwire",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_expr",
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -4002,6 +4041,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_storage",
  "serde",
@@ -4136,6 +4176,7 @@ dependencies = [
  "rdkafka",
  "risingwave_common",
  "risingwave_connector",
+ "risingwave_expr",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_source",

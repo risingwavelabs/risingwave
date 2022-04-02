@@ -21,9 +21,9 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::chunked_data::RowId;
@@ -570,10 +570,10 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{DataType, ScalarRefImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::nested_loop_join::{

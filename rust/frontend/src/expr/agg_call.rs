@@ -14,8 +14,8 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
 
 use super::{Expr, ExprImpl};
 
