@@ -24,7 +24,7 @@ pub use super::executor::{
 
 mod chain;
 mod filter;
-mod merge;
+pub mod merge;
 pub(crate) mod mview;
 #[allow(dead_code)]
 mod rearranged_chain;
