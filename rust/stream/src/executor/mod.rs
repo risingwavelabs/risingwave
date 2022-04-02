@@ -207,7 +207,7 @@ impl Mutation {
 }
 
 impl Barrier {
-    fn to_protobuf(&self) -> ProstBarrier {
+    pub fn to_protobuf(&self) -> ProstBarrier {
         let Barrier {
             epoch, mutation, ..
         }: Barrier = self.clone();
