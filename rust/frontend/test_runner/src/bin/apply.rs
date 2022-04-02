@@ -15,7 +15,7 @@
 use std::ffi::OsStr;
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use console::style;
 use futures::StreamExt;
 use risingwave_frontend_test_runner::{resolve_testcase_id, TestCase};
@@ -64,9 +64,14 @@ async fn main() -> Result<()> {
                     let cases = resolve_testcase_id(cases)?;
                     let mut updated_cases = vec![];
 
-                    for case in cases {
-                        let result = case.run(false).await?;
-                        let updated_case = result.as_test_case(&case)?;
+                    for (idx, case) in cases.into_iter().enumerate() {
+                        let case_desc = format!(
+                            "failed on case #{} (id: {})",
+                            idx,
+                            case.id.clone().unwrap_or_else(|| "<none>".to_string())
+                        );
+                        let result = case.run(false).await.context(case_desc.clone())?;
+                        let updated_case = result.as_test_case(&case).context(case_desc)?;
                         updated_cases.push(updated_case);
                     }
 
@@ -89,7 +94,7 @@ async fn main() -> Result<()> {
                     }
                     Err(err) => {
                         println!(
-                            "{} {} \n        {}",
+                            "{} {} \n        {:#}",
                             style(" failed").red().bold(),
                             filename.to_string_lossy(),
                             err

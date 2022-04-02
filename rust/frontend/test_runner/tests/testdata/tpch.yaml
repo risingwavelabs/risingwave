@@ -1,44 +1,82 @@
 - id: create_tables
   sql: |
-    CREATE TABLE lineitem (
-      l_orderkey BIGINT NOT NULL,
-      l_partkey INTEGER NOT NULL,
-      l_suppkey INTEGER NOT NULL,
-      l_linenumber INTEGER NOT NULL,
-      l_quantity NUMERIC NOT NULL,
-      l_extendedprice NUMERIC NOT NULL,
-      l_discount NUMERIC NOT NULL,
-      l_tax NUMERIC NOT NULL,
-      l_returnflag CHAR(1) NOT NULL,
-      l_linestatus CHAR(1) NOT NULL,
-      l_shipdate DATE NOT NULL,
-      l_commitdate DATE NOT NULL,
-      l_receiptdate DATE NOT NULL,
-      l_shipinstruct CHAR(25) NOT NULL,
-      l_shipmode CHAR(10) NOT NULL,
-      l_comment VARCHAR(44) NOT NULL
-    );
+    CREATE TABLE supplier (
+            s_suppkey  INTEGER,
+            s_name VARCHAR(25),
+            s_address VARCHAR(40),
+            s_nationkey INTEGER,
+            s_phone VARCHAR(15),
+            s_acctbal NUMERIC,
+            s_comment VARCHAR(101));
+
+    CREATE TABLE part (
+            p_partkey INTEGER,
+            p_name VARCHAR(55),
+            p_mfgr VARCHAR(25),
+            p_brand VARCHAR(10),
+            p_type VARCHAR(100),
+            p_size INTEGER,
+            p_container VARCHAR(10),
+            p_retailprice NUMERIC,
+            p_comment VARCHAR(23));
+
+    CREATE TABLE partsupp (
+            ps_partkey INTEGER,
+            ps_suppkey INTEGER,
+            ps_availqty INTEGER,
+            ps_supplycost NUMERIC,
+            ps_comment VARCHAR(199));
+
     CREATE TABLE customer (
-      c_custkey INTEGER NOT NULL,
-      c_name VARCHAR(25) NOT NULL,
-      c_address VARCHAR(40) NOT NULL,
-      c_nationkey INTEGER NOT NULL,
-      c_phone CHAR(15) NOT NULL,
-      c_acctbal NUMERIC NOT NULL,
-      c_mktsegment CHAR(10) NOT NULL,
-      c_comment VARCHAR(117) NOT NULL
-    );
+            c_custkey INTEGER,
+            c_name VARCHAR(25),
+            c_address VARCHAR(40),
+            c_nationkey INTEGER,
+            c_phone VARCHAR(15),
+            c_acctbal NUMERIC,
+            c_mktsegment VARCHAR(10),
+            c_comment VARCHAR(117));
+
     CREATE TABLE orders (
-      o_orderkey BIGINT NOT NULL,
-      o_custkey INTEGER NOT NULL,
-      o_orderstatus CHAR(1) NOT NULL,
-      o_totalprice NUMERIC NOT NULL,
-      o_orderdate DATE NOT NULL,
-      o_orderpriority CHAR(15) NOT NULL,
-      o_clerk CHAR(15) NOT NULL,
-      o_shippriority INTEGER NOT NULL,
-      o_comment VARCHAR(79) NOT NULL
-    );
+            o_orderkey BIGINT,
+            o_custkey INTEGER,
+            o_orderstatus VARCHAR(1),
+            o_totalprice NUMERIC,
+            o_orderdate DATE,
+            o_orderpriority VARCHAR(15),
+            o_clerk VARCHAR(15),
+            o_shippriority INTEGER,
+            o_comment VARCHAR(79));
+
+    CREATE TABLE lineitem (
+            l_orderkey BIGINT,
+            l_partkey INTEGER,
+            l_suppkey INTEGER,
+            l_linenumber INTEGER,
+            l_quantity NUMERIC,
+            l_extendedprice NUMERIC,
+            l_discount NUMERIC,
+            l_tax NUMERIC,
+            l_returnflag VARCHAR(1),
+            l_linestatus VARCHAR(1),
+            l_shipdate DATE,
+            l_commitdate DATE,
+            l_receiptdate DATE,
+            l_shipinstruct VARCHAR(25),
+            l_shipmode VARCHAR(10),
+            l_comment VARCHAR(44));
+
+    CREATE TABLE nation (
+            n_nationkey INTEGER,
+            n_name VARCHAR(25),
+            n_regionkey INTEGER,
+            n_comment VARCHAR(152));
+
+    CREATE TABLE region (
+            r_regionkey INTEGER,
+            r_name VARCHAR(25),
+            r_comment VARCHAR(152));
+
 - id: tpch_q1
   before:
     - create_tables
@@ -50,16 +88,14 @@
       sum(l_extendedprice) as sum_base_price,
       sum(l_extendedprice * (1 - l_discount)) as sum_disc_price,
       sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge,
-      avg(l_quantity) as avg_qty,
-      avg(l_extendedprice) as avg_price,
-      avg(l_discount) as avg_disc,
+      round(avg(l_quantity), 4) as avg_qty,
+      round(avg(l_extendedprice), 4) as avg_price,
+      round(avg(l_discount), 4) as avg_disc,
       count(*) as count_order
     from
       lineitem
-    /*
     where
-      l_shipdate <= date '1998-12-01' - interval '71 days'
-    */
+      l_shipdate <= date '1998-12-01' - interval '71' day
     group by
       l_returnflag,
       l_linestatus
@@ -81,6 +117,55 @@
           StreamProject { exprs: [$4, $5, $0, $1, ($1 * (1:Int32 - $2)), (($1 * (1:Int32 - $2)) * (1:Int32 + $3)), $2, $6], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
             StreamExchange { dist: HashShard([4, 5]) }
               StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, _row_id#0], pk_indices: [6] }
+- id: tpch_q2
+  before:
+    - create_tables
+  sql: |
+    select
+        s_acctbal,
+        s_name,
+        n_name,
+        p_partkey,
+        p_mfgr,
+        s_address,
+        s_phone,
+        s_comment
+    from
+            part,
+            supplier,
+            partsupp,
+            nation,
+            region
+    where
+            p_partkey = ps_partkey
+            and s_suppkey = ps_suppkey
+      and p_size = 4
+      and p_type like '%TIN'
+            and s_nationkey = n_nationkey
+            and n_regionkey = r_regionkey
+            and r_name = 'AFRICA'
+            and ps_supplycost = (
+                    select
+                            min(ps_supplycost)
+                    from
+                            partsupp,
+                            supplier,
+                            nation,
+                            region
+                    where
+                            p_partkey = ps_partkey
+                            and s_suppkey = ps_suppkey
+                            and s_nationkey = n_nationkey
+                            and n_regionkey = r_regionkey
+                            and r_name = 'AFRICA'
+            )
+    order by
+          s_acctbal desc,
+          n_name,
+          s_name,
+          p_partkey
+    limit 100;
+  logical_plan: ""
 - id: tpch_q3
   before:
     - create_tables
@@ -98,10 +183,8 @@
       c_mktsegment = 'FURNITURE'
       and c_custkey = o_custkey
       and l_orderkey = o_orderkey
-    /*
       and o_orderdate < date '1995-03-29'
       and l_shipdate > date '1995-03-29'
-    */
     group by
       l_orderkey,
       o_orderdate,
@@ -109,6 +192,8 @@
     order by
       revenue desc,
       o_orderdate
+    /* TODO: support order + limit */
+    /* LIMIT 10; */
   batch_plan: |
     BatchExchange { order: [$1 DESC, $2 ASC], dist: Single }
       BatchSort { order: [$1 DESC, $2 ASC] }
@@ -146,6 +231,61 @@
                         StreamTableScan { table: orders, columns: [o_orderkey, o_custkey, o_orderdate, o_shippriority, _row_id#0], pk_indices: [4] }
                 StreamExchange { dist: HashShard([0]) }
                   StreamTableScan { table: lineitem, columns: [l_orderkey, l_extendedprice, l_discount, _row_id#0], pk_indices: [3] }
+- id: tpch_q4
+  before:
+    - create_tables
+  sql: |
+    select
+      o_orderpriority,
+      count(*) as order_count
+    from
+      orders
+    where
+      o_orderdate >= date '1997-07-01'
+      and o_orderdate < date '1997-07-01' + interval '3' month
+      and exists (
+        select
+          *
+        from
+          lineitem
+        where
+          l_orderkey = o_orderkey
+          and l_commitdate < l_receiptdate
+      )
+    group by
+      o_orderpriority
+    order by
+      o_orderpriority;
+  logical_plan: ""
+- id: tpch_q5
+  before:
+    - create_tables
+  sql: |
+    select
+      n_name,
+      sum(l_extendedprice * (1 - l_discount)) as revenue
+    from
+      customer,
+      orders,
+      lineitem,
+      supplier,
+      nation,
+      region
+    where
+      c_custkey = o_custkey
+      and l_orderkey = o_orderkey
+      and l_suppkey = s_suppkey
+      and c_nationkey = s_nationkey
+      and s_nationkey = n_nationkey
+      and n_regionkey = r_regionkey
+      and r_name = 'MIDDLE EAST'
+      and o_orderdate >= date '1994-01-01'
+      and o_orderdate < date '1994-01-01' + interval '1' year
+    group by
+      n_name
+    order by
+      revenue desc;
+  logical_plan: ""
 - id: tpch_q6
   before:
     - create_tables
@@ -173,3 +313,427 @@
           StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
             StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
               StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+- id: tpch_q7
+  before:
+    - create_tables
+  sql: |
+    select
+      supp_nation,
+      cust_nation,
+      l_year,
+      sum(volume) as revenue
+    from
+      (
+        select
+          n1.n_name as supp_nation,
+          n2.n_name as cust_nation,
+          extract(year from l_shipdate) as l_year,
+          l_extendedprice * (1 - l_discount) as volume
+        from
+          supplier,
+          lineitem,
+          orders,
+          customer,
+          nation n1,
+          nation n2
+        where
+          s_suppkey = l_suppkey
+          and o_orderkey = l_orderkey
+          and c_custkey = o_custkey
+          and s_nationkey = n1.n_nationkey
+          and c_nationkey = n2.n_nationkey
+          and (
+            (n1.n_name = 'ROMANIA' and n2.n_name = 'IRAN')
+            or (n1.n_name = 'IRAN' and n2.n_name = 'ROMANIA')
+          )
+          and l_shipdate between date '1983-01-01' and date '2000-12-31'
+      ) as shipping
+    group by
+      supp_nation,
+      cust_nation,
+      l_year
+    order by
+      supp_nation,
+      cust_nation,
+      l_year;
+  logical_plan: ""
+- id: tpch_q8
+  before:
+    - create_tables
+  sql: |
+    select
+      o_year,
+      round(sum(case
+        when nation = 'IRAN' then volume
+        else 0
+      end) / sum(volume), 6) as mkt_share
+    from
+      (
+        select
+          extract(year from o_orderdate) as o_year,
+          l_extendedprice * (1 - l_discount) as volume,
+          n2.n_name as nation
+        from
+          part,
+          supplier,
+          lineitem,
+          orders,
+          customer,
+          nation n1,
+          nation n2,
+          region
+        where
+          p_partkey = l_partkey
+          and s_suppkey = l_suppkey
+          and l_orderkey = o_orderkey
+          and o_custkey = c_custkey
+          and c_nationkey = n1.n_nationkey
+          and n1.n_regionkey = r_regionkey
+          and r_name = 'ASIA'
+          and s_nationkey = n2.n_nationkey
+          and o_orderdate between date '1995-01-01' and date '1996-12-31'
+          and p_type = 'PROMO ANODIZED STEEL'
+      ) as all_nations
+    group by
+      o_year
+    order by
+      o_year;
+  logical_plan: ""
+- id: tpch_q9
+  before:
+    - create_tables
+  sql: |
+    select
+      nation,
+      o_year,
+      round(sum(amount), 2) as sum_profit
+    from
+      (
+        select
+          n_name as nation,
+          extract(year from o_orderdate) as o_year,
+          l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount
+        from
+          part,
+          supplier,
+          lineitem,
+          partsupp,
+          orders,
+          nation
+        where
+          s_suppkey = l_suppkey
+          and ps_suppkey = l_suppkey
+          and ps_partkey = l_partkey
+          and p_partkey = l_partkey
+          and o_orderkey = l_orderkey
+          and s_nationkey = n_nationkey
+          and p_name like '%yellow%'
+      ) as profit
+    group by
+      nation,
+      o_year
+    order by
+      nation,
+      o_year desc;
+  logical_plan: ""
+- id: tpch_q10
+  before:
+    - create_tables
+  sql: |
+    select
+      c_custkey,
+      c_name,
+      sum(l_extendedprice * (1.00 - l_discount)) as revenue,
+      c_acctbal,
+      n_name,
+      c_address,
+      c_phone,
+      c_comment
+    from
+      customer,
+      orders,
+      lineitem,
+      nation
+    where
+      c_custkey = o_custkey
+      and l_orderkey = o_orderkey
+      and o_orderdate >= date '1994-01-01'
+      and o_orderdate < date '1994-01-01' + interval '3' month
+      and l_returnflag = 'R'
+      and c_nationkey = n_nationkey
+    group by
+      c_custkey,
+      c_name,
+      c_acctbal,
+      c_phone,
+      n_name,
+      c_address,
+      c_comment
+    order by
+      revenue desc
+    limit 20;
+  logical_plan: ""
+- id: tpch_q12
+  before:
+    - create_tables
+  sql: |
+    select
+        l_shipmode,
+        sum(case
+            when o_orderpriority = '1-URGENT'
+                or o_orderpriority = '2-HIGH'
+                then 1
+            else 0
+        end) as high_line_count,
+        sum(case
+            when o_orderpriority <> '1-URGENT'
+                and o_orderpriority <> '2-HIGH'
+                then 1
+            else 0
+        end) as low_line_count
+    from
+        orders,
+        lineitem
+    where
+        o_orderkey = l_orderkey
+        and l_shipmode in ('FOB', 'SHIP')
+        and l_commitdate < l_receiptdate
+        and l_shipdate < l_commitdate
+        and l_receiptdate >= date '1994-01-01'
+        and l_receiptdate < date '1994-01-01' + interval '1' year
+    group by
+        l_shipmode
+    order by
+        l_shipmode;
+  binder_error: ""
+- id: tpch_q13
+  before:
+    - create_tables
+  sql: |
+    select
+      c_count,
+      count(*) as custdist
+    from
+      (
+        select
+          c_custkey,
+          count(o_orderkey) as c_count
+        from
+          customer left outer join orders on
+            c_custkey = o_custkey
+            and o_comment not like '%:1%:2%'
+        group by
+          c_custkey
+      ) as c_orders (c_custkey, c_count)
+    group by
+      c_count
+    order by
+      custdist desc,
+      c_count desc;
+  logical_plan: ""
+- id: tpch_q14
+  before:
+    - create_tables
+  sql: |
+    select
+      100.00 * sum(case
+        when p_type like 'PROMO%'
+          then l_extendedprice * (1 - l_discount)
+        else 0
+      end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue
+    from
+      lineitem,
+      part
+    where
+      l_partkey = p_partkey
+      and l_shipdate >= date '1995-09-01'
+      and l_shipdate < date '1995-09-01' + interval '1' month;
+  logical_plan: ""
+- id: tpch_q15
+  before:
+    - create_tables
+  sql: |
+    select
+      s_suppkey,
+      s_name,
+      s_address,
+      s_phone,
+      total_revenue
+    from
+      supplier,
+      (
+        select
+        l_suppkey,
+        sum(l_extendedprice * (1 - l_discount)) as total_revenue
+      from
+        lineitem
+      where
+        l_shipdate >= date '1993-01-01'
+        and l_shipdate < date '1993-01-01' + interval '3' month
+      group by
+        l_suppkey
+      ) as revenue0 (supplier_no, total_revenue)
+    where
+      s_suppkey = supplier_no
+      and total_revenue = (
+        select
+          max(total_revenue) as max_revenue
+        from
+          (
+            select
+            l_suppkey,
+            sum(l_extendedprice * (1 - l_discount)) as total_revenue
+          from
+            lineitem
+          where
+            l_shipdate >= date '1993-01-01'
+            and l_shipdate < date '1993-01-01' + interval '3' month
+          group by
+            l_suppkey
+          ) as revenue0 (supplier_no, total_revenue)
+      )
+    order by
+      s_suppkey;
+  logical_plan: ""
+- id: tpch_q17
+  before:
+    - create_tables
+  sql: |
+    select
+      ROUND(sum(l_extendedprice) / 7.0, 16) as avg_yearly
+    from
+      lineitem,
+      part
+    where
+      p_partkey = l_partkey
+      and p_brand = 'Brand#13'
+      and p_container = 'JUMBO PKG'
+      and l_quantity < (
+        select
+          0.2 * avg(l_quantity)
+        from
+          lineitem
+        where
+          l_partkey = p_partkey
+      );
+  logical_plan: ""
+- id: tpch_q18
+  before:
+    - create_tables
+  sql: |
+    select
+      c_name,
+      c_custkey,
+      o_orderkey,
+      o_orderdate,
+      o_totalprice,
+      sum(l_quantity) quantity
+    from
+      customer,
+      orders,
+      lineitem
+    where
+      o_orderkey in (
+        select
+          l_orderkey
+        from
+          lineitem
+        group by
+          l_orderkey having
+            sum(l_quantity) > 1
+      )
+      and c_custkey = o_custkey
+      and o_orderkey = l_orderkey
+    group by
+      c_name,
+      c_custkey,
+      o_orderkey,
+      o_orderdate,
+      o_totalprice
+    order by
+      o_totalprice desc,
+      o_orderdate
+    LIMIT 100;
+  binder_error: ""
+- id: tpch_q19
+  before:
+    - create_tables
+  sql: |
+    select
+      sum(l_extendedprice* (1 - l_discount)) as revenue
+    from
+      lineitem,
+      part
+    where
+      (
+        p_partkey = l_partkey
+        and p_brand = 'Brand#52'
+        and p_container in ('SM CASE', 'SM BOX', 'SM PACK', 'SM PKG')
+        and l_quantity >= 1 and l_quantity <= 11
+        and p_size between 1 and 5
+        and l_shipmode in ('AIR', 'AIR REG')
+        and l_shipinstruct = 'DELIVER IN PERSON'
+      )
+      or
+      (
+        p_partkey = l_partkey
+        and p_brand = 'Brand#24'
+        and p_container in ('MED BAG', 'MED BOX', 'MED PKG', 'MED PACK')
+        and l_quantity >= 30 and l_quantity <= 40
+        and p_size between 1 and 10
+        and l_shipmode in ('AIR', 'AIR REG')
+        and l_shipinstruct = 'DELIVER IN PERSON'
+      )
+      or
+      (
+        p_partkey = l_partkey
+        and p_brand = 'Brand#32'
+        and p_container in ('LG CASE', 'LG BOX', 'LG PACK', 'LG PKG')
+        and l_quantity >= 10 and l_quantity <= 20
+        and p_size between 1 and 15
+        and l_shipmode in ('AIR', 'AIR REG')
+        and l_shipinstruct = 'DELIVER IN PERSON'
+      );
+  binder_error: ""
+- id: tpch_q20
+  before:
+    - create_tables
+  sql: |
+    select
+      s_name,
+      s_address
+    from
+      supplier,
+      nation
+    where
+      s_suppkey in (
+        select
+          ps_suppkey
+        from
+          partsupp
+        where
+          ps_partkey in (
+            select
+              p_partkey
+            from
+              part
+            where
+              p_name like 'forest%'
+          )
+          and ps_availqty > (
+            select
+              0.5 * sum(l_quantity)
+            from
+              lineitem
+            where
+              l_partkey = ps_partkey
+              and l_suppkey = ps_suppkey
+              and l_shipdate >= date '1994-01-01'
+              and l_shipdate < date '1994-01-01' + interval '1' year
+          )
+      )
+      and s_nationkey = n_nationkey
+      and n_name = 'KENYA'
+    order by
+      s_name;
+  binder_error: ""
