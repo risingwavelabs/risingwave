@@ -45,7 +45,7 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             create_table::handle_create_table(context, name, columns).await
         }
         Statement::Describe { name } => describe::handle_describe(context, name).await,
-        Statement::ShowColumn {name} => describe::handle_describe(context, name).await,
+        Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
         Statement::ShowCommand(show_object) => {
             show::handle_show_command(context, show_object).await
         }

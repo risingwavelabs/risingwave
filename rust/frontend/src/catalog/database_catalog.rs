@@ -45,10 +45,7 @@ impl DatabaseCatalog {
     }
 
     pub fn get_all_schema_names(&self) -> Vec<String> {
-        self.schema_by_name
-            .keys()
-            .cloned()
-            .collect_vec()
+        self.schema_by_name.keys().cloned().collect_vec()
     }
 
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
