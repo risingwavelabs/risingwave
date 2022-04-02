@@ -50,8 +50,8 @@ impl SourceParser for JSONParser {
 mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_common::vector_op::cast::str_to_date;
 
+    use super::super::common::str_to_date;
     use crate::{JSONParser, SourceColumnDesc, SourceParser};
 
     #[test]

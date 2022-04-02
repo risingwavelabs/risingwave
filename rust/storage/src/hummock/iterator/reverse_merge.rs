@@ -77,7 +77,7 @@ mod test {
             let val = mi.value();
             assert_eq!(key, iterator_test_key_of(i).as_slice());
             assert_eq!(
-                val.into_put_value().unwrap(),
+                val.into_user_value().unwrap(),
                 iterator_test_value_of(i).as_slice()
             );
             i -= 1;
@@ -141,7 +141,7 @@ mod test {
         let k = mi.key();
         let v = mi.value();
         assert_eq!(
-            v.into_put_value().unwrap(),
+            v.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT + 4).as_slice()
         );
         assert_eq!(k, iterator_test_key_of(TEST_KEYS_COUNT + 4).as_slice());
@@ -152,7 +152,7 @@ mod test {
         let k = mi.key();
         let v = mi.value();
         assert_eq!(
-            v.into_put_value().unwrap(),
+            v.into_user_value().unwrap(),
             iterator_test_value_of(2 * TEST_KEYS_COUNT + 7).as_slice()
         );
         assert_eq!(k, iterator_test_key_of(2 * TEST_KEYS_COUNT + 7).as_slice());
@@ -164,7 +164,7 @@ mod test {
         let k = mi.key();
         let v = mi.value();
         assert_eq!(
-            v.into_put_value().unwrap(),
+            v.into_user_value().unwrap(),
             iterator_test_value_of(3 * TEST_KEYS_COUNT).as_slice()
         );
         assert_eq!(k, iterator_test_key_of(3 * TEST_KEYS_COUNT).as_slice());

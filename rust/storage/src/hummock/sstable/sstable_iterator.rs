@@ -187,7 +187,7 @@ mod tests {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
             assert_bytes_eq!(key, test_key_of(cnt));
-            assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
         }

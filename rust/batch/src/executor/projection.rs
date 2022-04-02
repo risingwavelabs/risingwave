@@ -16,7 +16,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -107,8 +107,8 @@ mod tests {
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::{InputRefExpression, LiteralExpression};
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;

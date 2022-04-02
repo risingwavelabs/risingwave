@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
-use risingwave_common::expr::build_from_prost;
 use risingwave_common::try_match_expand;
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::StateStore;

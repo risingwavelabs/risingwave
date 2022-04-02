@@ -23,10 +23,11 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::util::env_var::env_var_is_true;
+use risingwave_expr::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -37,6 +38,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -553,7 +555,7 @@ impl LocalStreamManagerCore {
         // Epoch check
         executor = Box::new(EpochCheckExecutor::new(executor));
         // Cache clear
-        if std::env::var(CACHE_CLEAR_ENABLED_ENV_VAR_KEY).is_ok() {
+        if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
             executor = Box::new(CacheClearExecutor::new(executor));
         }
 
@@ -647,13 +649,15 @@ impl LocalStreamManagerCore {
                 params.op_info,
             )))
         } else {
-            Ok(Box::new(MergeExecutor::new(
-                schema,
-                params.pk_indices,
-                params.actor_id,
-                rxs,
-                params.op_info,
-            )))
+            Ok(Box::new(
+                Box::new(MergeExecutorV2::new(
+                    schema,
+                    params.pk_indices,
+                    params.actor_id,
+                    rxs,
+                ))
+                .v1(),
+            ))
         }
     }
 

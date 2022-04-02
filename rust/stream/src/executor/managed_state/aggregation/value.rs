@@ -127,7 +127,7 @@ mod tests {
 
     fn create_test_count_state() -> AggCall {
         AggCall {
-            kind: risingwave_common::expr::AggKind::Count,
+            kind: risingwave_expr::expr::AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
         }

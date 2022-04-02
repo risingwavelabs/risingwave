@@ -221,8 +221,8 @@ mod tests {
     use risingwave_common::catalog::schema_test_utils;
     use risingwave_common::column_nonnull;
     use risingwave_common::error::Result;
-    use risingwave_common::expr::AggKind;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::AggKind;
 
     use super::LocalSimpleAggExecutor;
     use crate::executor::test_utils::MockSource;

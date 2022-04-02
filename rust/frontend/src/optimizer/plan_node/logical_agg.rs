@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 
 use super::{

@@ -12,12 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono::NaiveDate;
 use num_traits::FromPrimitive;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{self, InternalError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, Decimal, ScalarImpl, ScalarRef};
-use risingwave_common::vector_op::cast::str_to_date;
+use risingwave_common::types::{DataType, Decimal, NaiveDateWrapper, ScalarImpl, ScalarRef};
 use serde_json::Value;
+
+#[inline(always)]
+pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
+    Ok(NaiveDateWrapper::new(
+        NaiveDate::parse_from_str(elem, "%Y-%m-%d")
+            .map_err(|e| RwError::from(ErrorCode::ParseError(Box::new(e))))?,
+    ))
+}
 
 use crate::SourceColumnDesc;
 
