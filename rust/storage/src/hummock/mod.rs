@@ -69,7 +69,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::validate_epoch;
 use crate::hummock::version_cmp::VersionedComparator;
-use crate::storage_value::{value_to_user_value, StorageValue};
+use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
@@ -189,10 +189,7 @@ impl HummockStorage {
         // Iterator gets us the key, we tell if it's the key we want
         // or key next to it.
         let value = match user_key(iter.key()) == key {
-            true => iter
-                .value()
-                .into_put_value()
-                .map(|x| value_to_user_value(Bytes::copy_from_slice(x))),
+            true => iter.value().into_user_value().map(Bytes::copy_from_slice),
             false => None,
         };
         Ok(value)
@@ -247,7 +244,7 @@ impl StateStore for HummockStorage {
                 .get(key, (version.max_committed_epoch() + 1)..=epoch)
             {
                 self.stats.get_shared_buffer_hit_counts.inc();
-                return Ok(v.into_put_value().map(value_to_user_value));
+                return Ok(v.into_user_value().map(|v| v.into()));
             }
             let internal_key = key_with_epoch(key.to_vec(), epoch);
 
