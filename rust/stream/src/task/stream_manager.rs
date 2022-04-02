@@ -702,7 +702,7 @@ impl LocalStreamManagerCore {
                             match init_client.await {
                                 Ok(remote_input) => remote_input.run().await,
                                 Err(e) => {
-                                    info!("Spawn remote input fails:{}", e);
+                                    error!("Spawn remote input fails:{}", e);
                                 }
                             }
                         });

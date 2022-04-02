@@ -51,7 +51,6 @@ impl RemoteInput {
     pub async fn run(mut self) {
         #[for_await]
         for data_res in self.stream {
-            // let data = data?;
             match data_res {
                 Ok(stream_msg) => {
                     let msg_res = Message::from_protobuf(
@@ -61,16 +60,16 @@ impl RemoteInput {
                     );
                     match msg_res {
                         Ok(msg) => {
-                            let _ = self.sender.send(msg).await;
+                            self.sender.send(msg).await.unwrap();
                         }
                         Err(e) => {
-                            info!("RemoteInput forward message error:{}", e);
+                            error!("RemoteInput forward message error:{}", e);
                             break;
                         }
                     }
                 }
                 Err(e) => {
-                    info!("RemoteInput tonic error status:{}", e);
+                    error!("RemoteInput tonic error status:{}", e);
                     break;
                 }
             }
