@@ -54,7 +54,7 @@ We use the term consistency to denote the model of the *completeness and correct
 
 To guarantee consistency, RisingWave introduces a Chandy-Lamport style consistent snapshot algorithm as its checkpoint scheme. In particular, RisingWave will periodically repeat the following procedure:
 
-1. The meta initializes a barrier and broadcasts it to all source actors across the streaming engine. 
+1. The meta service initializes a barrier and broadcasts it to all source actors across the streaming engine. 
 2. For each actor, when it receives a barrier on any of its input channels, it waits for all barrier comes and flushes its dirty states to the storage layer. 
 3. When all dirty states from a compute node are flushed, the compute node sends a finish signal to the meta. 
 4. After receiving the finish signal from all compute nodes, the meta updates its meta information and finishes the checkpoint procedure.
@@ -65,7 +65,7 @@ To improve the efficiency, all dirty states on the same compute node are gathere
 
 ### Fault tolerance
 
-When the streaming engine crashes down, the system must globally rollback to a previous consistent snapshot. To achieve this, whenever the meta detects the failover of some certain compute node or any undergoing checkpoint procedure, it issues a reset command as a barrier. After rebuilding the streaming pipeline, each executor will reset its local state from a consistent snapshot on the storage and recover its computation. 
+When the streaming engine crashes down, the system must globally rollback to a previous consistent snapshot. To achieve this, whenever the meta detects the failover of some certain compute node or any undergoing checkpoint procedure, it triggers a recovery process. After rebuilding the streaming pipeline, each executor will reset its local state from a consistent snapshot on the storage and recover its computation. 
 
 ## Advanced features
 
