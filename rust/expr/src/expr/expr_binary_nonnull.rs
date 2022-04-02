@@ -122,7 +122,7 @@ macro_rules! gen_cmp_impl {
 /// * `general_f`: generic cmp function (require a common ``TryInto`` type for two input).
 /// * `str_f`: cmp function between str
 macro_rules! gen_binary_expr_cmp {
-    ($macro:tt, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
+    ($macro:ident, $general_f:ident, $str_f:ident, $l:expr, $r:expr, $ret:expr) => {
         match ($l.return_type(), $r.return_type()) {
             (DataType::Varchar, DataType::Varchar) => {
                 Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
@@ -198,7 +198,7 @@ macro_rules! gen_binary_expr_cmp {
 /// * `interval_date_f`: atm function between date and interval
 macro_rules! gen_binary_expr_atm {
     (
-        $macro:tt,
+        $macro:ident,
         $general_f:ident,
         $timestamp_timestamp_f:ident,
         $date_date_f:ident,

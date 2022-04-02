@@ -338,7 +338,7 @@ macro_rules! grpc_meta_client_impl {
 }
 
 macro_rules! for_all_meta_rpc {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
             ,{ cluster_client, add_worker_node, AddWorkerNodeRequest, AddWorkerNodeResponse }
@@ -378,7 +378,7 @@ macro_rules! grpc_hummock_meta_client_impl {
 }
 
 macro_rules! for_hummock_meta_rpc {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*]
             ,{ pin_version, PinVersionRequest, PinVersionResponse }

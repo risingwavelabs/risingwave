@@ -289,7 +289,7 @@ pub trait ScalarRef<'a>:
 /// `{ enum variant name, function suffix name, scalar type, scalar ref type }`
 #[macro_export]
 macro_rules! for_all_scalar_variants {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*],
             { Int16, int16, i16, i16 },
@@ -419,7 +419,7 @@ impl ToOwnedDatum for DatumRef<'_> {
 /// `for_all_native_types` includes all native variants of our scalar types.
 #[macro_export]
 macro_rules! for_all_native_types {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*],
             { i16, Int16 },

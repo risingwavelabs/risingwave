@@ -232,7 +232,7 @@ impl<A: Array> CompactableArray for A {
 /// See the following implementations for example.
 #[macro_export]
 macro_rules! for_all_variants {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x),*],
             { Int16, int16, I16Array, I16ArrayBuilder },

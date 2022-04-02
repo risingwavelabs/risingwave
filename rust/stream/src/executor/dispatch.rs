@@ -302,7 +302,7 @@ macro_rules! impl_dispatcher {
 }
 
 macro_rules! for_all_dispatcher_variants {
-    ($macro:tt $(, $x:tt)*) => {
+    ($macro:ident $(, $x:tt)*) => {
         $macro! {
             [$($x), *],
             { Hash },

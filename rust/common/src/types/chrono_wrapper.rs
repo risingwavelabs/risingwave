@@ -60,7 +60,7 @@ macro_rules! impl_chrono_wrapper {
 
 #[macro_export]
 macro_rules! for_all_chrono_variants {
-    ($macro:tt) => {
+    ($macro:ident) => {
         $macro! {
             { NaiveDateWrapper, NaiveDate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTimeWrapper, NaiveDateTime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
