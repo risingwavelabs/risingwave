@@ -107,8 +107,7 @@ impl ChainExecutor {
 
             #[for_await]
             for msg in snapshot {
-                let msg = msg?;
-                yield msg;
+                yield msg?;
             }
         }
 
@@ -118,8 +117,7 @@ impl ChainExecutor {
         // 4. Continuously consume the upstream.
         #[for_await]
         for msg in upstream {
-            let msg = msg?;
-            yield mapping(&self.upstream_indices, msg);
+            yield mapping(&self.upstream_indices, msg?);
         }
     }
 }

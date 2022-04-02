@@ -211,17 +211,29 @@ impl RearrangedChainExecutor {
             }
 
             // 7. Rearranged stream finished. Now we take back the remaining upstream.
-            let remaining_upstream = upstream_poll_handle.await.unwrap()?;
-            // Then notify about the finish.
-            self.notifier.notify(create_epoch.curr);
+            let mut remaining_upstream = upstream_poll_handle.await.unwrap()?;
 
             // 8. Begin to consume remaining upstream.
             tracing::debug!(actor = self.actor_id, "begin to consume remaining upstream");
 
             #[for_await]
-            for msg in remaining_upstream {
+            for msg in &mut remaining_upstream {
                 let msg = msg?;
-                yield msg;
+                if let Message::Barrier(_) = msg {
+                    // Notify about the finish right before the first barrier in upstream.
+                    self.notifier.notify(create_epoch.curr);
+                    yield msg;
+
+                    break;
+                } else {
+                    yield msg;
+                }
+            }
+
+            // 9. Now we directly forward the messages from the upstream.
+            #[for_await]
+            for msg in remaining_upstream {
+                yield msg?;
             }
         } else {
             // If there's no need to consume the snapshot ...
@@ -229,8 +241,7 @@ impl RearrangedChainExecutor {
 
             #[for_await]
             for msg in upstream {
-                let msg = msg?;
-                yield msg;
+                yield msg?;
             }
         }
     }
@@ -244,8 +255,7 @@ impl RearrangedChainExecutor {
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<Message>>> {
         #[for_await]
         for msg in &mut upstream {
-            let msg = msg?;
-            match msg {
+            match msg? {
                 // If we polled a chunk, simply put it to the `upstream_tx`.
                 Message::Chunk(chunk) => {
                     upstream_tx
