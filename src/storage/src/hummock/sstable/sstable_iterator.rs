@@ -157,6 +157,7 @@ impl SSTableIteratorType for SSTableIterator {
 
 #[cfg(test)]
 mod tests {
+    use fail::FailScenario;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_hummock_sdk::key::key_with_epoch;
@@ -265,6 +266,7 @@ mod tests {
     #[tokio::test]
     #[cfg(feature = "failpoints")]
     async fn test_table_read_failpoint() {
+        let scenario = FailScenario::setup();
         let mem_read_err_fp = "mem_read_err";
         // build remote table
         let sstable_store = mock_sstable_store();
@@ -298,10 +300,12 @@ mod tests {
         fail::remove(mem_read_err_fp);
         sstable_iter.seek(&seek_key).await.unwrap();
         assert_eq!(sstable_iter.key(), test_key_of(600));
+        scenario.teardown();
     }
     #[tokio::test]
     #[cfg(feature = "failpoints")]
     async fn test_vacuum_and_metadata_failpoint() {
+        let scenario = FailScenario::setup();
         let metadata_upload_err = "metadata_upload_err";
         let mem_upload_err = "mem_upload_err";
         let mem_delete_err = "mem_delete_err";
@@ -309,6 +313,7 @@ mod tests {
         fail::cfg_callback(metadata_upload_err, move || {
             fail::cfg(mem_upload_err, "return").unwrap();
             fail::cfg(mem_delete_err, "return").unwrap();
+            fail::remove(metadata_upload_err);
         })
         .unwrap();
 
@@ -321,9 +326,10 @@ mod tests {
             .await;
         assert!(result.is_err());
 
+        fail::remove(metadata_upload_err);
         fail::remove(mem_delete_err);
         fail::remove(mem_upload_err);
-        fail::remove(metadata_upload_err);
+
         sstable_store
             .put(&table, data, CachePolicy::NotFill)
             .await
@@ -341,5 +347,6 @@ mod tests {
             sstable_iter.next().await.unwrap();
         }
         assert_eq!(cnt, TEST_KEYS_COUNT);
+        scenario.teardown();
     }
 }

@@ -16,9 +16,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
-use risingwave_meta::hummock::MockHummockMetaClient;
-use risingwave_rpc_client::HummockMetaClient;
-
 use super::iterator::UserIterator;
 use super::HummockStorage;
 use crate::hummock::iterator::test_utils::{
@@ -187,6 +184,7 @@ async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_failpoint_read_upload() {
+    let scenario = FailScenario::setup();
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
@@ -334,6 +332,7 @@ async fn test_failpoint_read_upload() {
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
+    scenario.teardown();
 }
 
 #[tokio::test]
@@ -443,6 +442,7 @@ async fn test_reload_storage() {
 #[tokio::test]
 #[cfg(feature = "failpoints")]
 async fn test_basic_failpoint() {
+    let scenario = FailScenario::setup();
     let mem_read_err = "mem_read_err";
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
@@ -543,4 +543,5 @@ async fn test_basic_failpoint() {
     let len = count_iter(&mut iter).await;
     assert_eq!(len, TEST_KEYS_COUNT);
     fail::remove(mem_read_err);
+    scenario.teardown();
 }
