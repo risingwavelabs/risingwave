@@ -36,6 +36,7 @@ pub fn default_config_for_test() -> StorageConfig {
         sstable_size: 256 * (1 << 20),
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,
+        share_buffers_sync_parallelism: 2,
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,

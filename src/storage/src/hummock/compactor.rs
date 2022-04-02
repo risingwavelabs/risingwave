@@ -100,7 +100,7 @@ impl Compactor {
             splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
         };
         if start_user_keys.len() > 1 {
-            let split_num = 2;
+            let split_num = context.options.share_buffers_sync_parallelism as usize;
             let buffer_per_split = start_user_keys.len() / split_num;
             for i in 1..split_num {
                 key_split_append(
