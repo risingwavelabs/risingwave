@@ -40,10 +40,10 @@ pub async fn handle_show_command(
         ShowCommandObject::Database => catalog_reader.get_all_database_names()?,
         ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowCommandObject::View(Some(ident)) => {
+        ShowCommandObject::MView(Some(ident)) => {
             catalog_reader.get_all_mv_names(session.database(), &ident.value)?
         }
-        ShowCommandObject::View(None) => {
+        ShowCommandObject::MView(None) => {
             catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
         }
         ShowCommandObject::Column(_table_name) => {

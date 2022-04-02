@@ -170,7 +170,9 @@ impl Parser {
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
                 Keyword::SHOW => Ok(self.parse_show()?),
-                Keyword::DESCRIBE => Ok(self.parse_describe()?),
+                Keyword::DESCRIBE => Ok(Statement::DescribeTable {
+                    name: self.parse_object_name()?,
+                }),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -2481,17 +2483,6 @@ impl Parser {
         }
     }
 
-    /// Parser sql like `describe table t`.
-    pub fn parse_describe(&mut self) -> Result<Statement, ParserError> {
-        if !self.parse_keyword(Keyword::TABLE) {
-            self.expected("table after describe", self.peek_token())
-        } else {
-            Ok(Statement::DescribeTable {
-                name: self.parse_object_name()?,
-            })
-        }
-    }
-
     /// Parser sql like `show databases` command.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let index = self.index;
@@ -2510,17 +2501,12 @@ impl Parser {
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowCommand(ShowCommandObject::View(
+                        return Ok(Statement::ShowCommand(ShowCommandObject::MView(
                             self.parse_from_identifier()?,
                         )));
                     } else {
                         return self.expected("views after materialized", self.peek_token());
                     }
-                }
-                Keyword::VIEWS => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::View(
-                        self.parse_from_identifier()?,
-                    )));
                 }
                 Keyword::SOURCE => {
                     return Ok(Statement::ShowSource {

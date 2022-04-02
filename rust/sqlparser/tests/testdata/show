@@ -28,32 +28,20 @@ SHOW TABLES FROM t
 =>
 ShowCommand(Table(Some(Ident { value: "t", quote_style: None })))
 
-SHOW VIEWS
----
-SHOW VIEWS
-=>
-ShowCommand(View(None))
-
-SHOW VIEWS FROM t
----
-SHOW VIEWS FROM t
-=>
-ShowCommand(View(Some(Ident { value: "t", quote_style: None })))
-
 SHOW MATERIALIZED VIEWS
 ---
-SHOW VIEWS
+SHOW MATERIALIZED VIEWS
 =>
-ShowCommand(View(None))
+ShowCommand(MView(None))
 
 SHOW MATERIALIZED VIEWS FROM t
 ---
-SHOW VIEWS FROM t
+SHOW MATERIALIZED VIEWS FROM t
 =>
-ShowCommand(View(Some(Ident { value: "t", quote_style: None })))
+ShowCommand(MView(Some(Ident { value: "t", quote_style: None })))
 
-DESCRIBE TABLE schema.t
+DESCRIBE schema.t
 ---
-DESCRIBE TABLE schema.t
+DESCRIBE schema.t
 =>
 DescribeTable { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
