@@ -23,15 +23,24 @@ use crate::executor::Executor;
 /// [`FuseExecutor`] is a wrapper around a Executor. After wrapping, once a call to
 /// `next` returns `Ok(None)`, all subsequent calls to `next` will return an
 /// error.
-pub struct FuseExecutor<T: BoxedExecutorBuilder + Executor> {
+pub struct FusedExecutor<T: BoxedExecutorBuilder + Executor> {
     /// The underlying executor.
     inner: T,
     /// Whether the underlying executor should return `Err` or not.
     invalid: bool,
 }
 
+impl<T: BoxedExecutorBuilder + Executor> FusedExecutor<T> {
+    pub fn new(executor: T) -> FusedExecutor<T> {
+        FusedExecutor {
+            inner: executor,
+            invalid: false,
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl<T: BoxedExecutorBuilder + Executor> Executor for FuseExecutor<T> {
+impl<T: BoxedExecutorBuilder + Executor> Executor for FusedExecutor<T> {
     async fn open(&mut self) -> Result<()> {
         self.inner.open().await
     }
@@ -65,7 +74,7 @@ impl<T: BoxedExecutorBuilder + Executor> Executor for FuseExecutor<T> {
     }
 }
 
-impl<T: BoxedExecutorBuilder + Executor> BoxedExecutorBuilder for FuseExecutor<T> {
+impl<T: BoxedExecutorBuilder + Executor> BoxedExecutorBuilder for FusedExecutor<T> {
     fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
         T::new_boxed_executor(source)
     }
