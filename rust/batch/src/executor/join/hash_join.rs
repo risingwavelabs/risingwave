@@ -764,8 +764,6 @@ mod tests {
 
             // TODO: Replace this with unsorted comparison
             // assert_eq!(expected, result_chunk);
-            println!("Expected data chunk: {:?}", expected);
-            println!("Result data chunk: {:?}", output_chunk);
             assert!(is_data_chunk_eq(&expected, &output_chunk));
         }
     }

@@ -858,7 +858,6 @@ impl<K: HashKey> ProbeTable<K> {
             self.next_probe_row();
         }
         self.probe_matched_list = Some(probe_matched_list);
-        println!("probe matched {:?}", self.probe_matched_list);
         Ok(None)
     }
 
