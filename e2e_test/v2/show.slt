@@ -18,32 +18,32 @@ v1 Int32
 v2 Int32
 v3 Int32
 
-query TT
+query T
 show databases;
 ----
 dev
 
-query TT
+query T
 show schemas;
 ----
 dev
 
-query TT
+query T
 show tables;
 ----
 t3
 
-query TT
+query T
 show tables from dev;
 ----
 t3
 
-query TT
+query T
 show materialized views from dev;
 ----
 mv3
 
-query TT
+query T
 show materialized views;
 ----
 mv3

@@ -34,7 +34,7 @@ pub fn col_descs_to_rows(columns: Vec<ColumnDesc>) -> Vec<Row> {
                 .into_iter()
                 .map(|c| {
                     let type_name = {
-                        // if datatype is struct, use type name as struct name
+                        // If datatype is struct, use type name as struct name
                         if let DataType::Struct { fields: _f } = c.data_type {
                             c.type_name.clone()
                         } else {
@@ -58,6 +58,7 @@ pub async fn handle_describe(
 
     let catalog_reader = session.env().catalog_reader().read_guard();
 
+    // For Source, it doesn't have table catalog so use get source to get column descs.
     let columns: Vec<ColumnDesc> = {
         match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
@@ -101,7 +102,7 @@ mod tests {
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
-    async fn test_show_source_handler() {
+    async fn test_describe_handler() {
         let proto_file = create_proto_file();
         let sql = format!(
             r#"CREATE SOURCE t
