@@ -48,7 +48,7 @@ use crate::vector_op::upper::upper;
 /// * `$func`: The scalar function for expression, it's a generic function and specialized by the
 ///   type of `$input, $cast`
 macro_rules! gen_cast_impl {
-    ([$child:expr, $ret:expr], $( { $input:tt, $cast:tt, $func:expr } ),*) => {
+    ([$child:expr, $ret:expr], $( { $input:ident, $cast:ident, $func:expr } ),*) => {
         match ($child.return_type(), $ret.clone()) {
             $(
                 ($input! { type_match_pattern }, $cast! { type_match_pattern }) => Box::new(
@@ -152,7 +152,7 @@ macro_rules! gen_cast {
 /// * `$ret`: return expression
 /// * `$input`: input type
 macro_rules! gen_neg_impl {
-    ($child:expr, $ret:expr, $($input:tt),*) => {
+    ($child:expr, $ret:expr, $($input:ident),*) => {
         match $child.return_type() {
             $(
                 $input! {type_match_pattern} => Box::new(

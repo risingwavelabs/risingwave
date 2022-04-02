@@ -617,7 +617,7 @@ impl LocalStreamManagerCore {
         }
 
         macro_rules! for_all_join_types {
-            ($macro:tt) => {
+            ($macro:ident) => {
                 $macro! {
                     { Inner, Inner },
                     { LeftOuter, LeftOuter },
