@@ -1,9 +1,3 @@
-SHOW SOURCE t
----
-SHOW SOURCE t
-=>
-ShowSource { name: ObjectName([Ident { value: "t", quote_style: None }]) }
-
 SHOW DATABASES
 ---
 SHOW DATABASES
@@ -32,16 +26,22 @@ SHOW MATERIALIZED VIEWS
 ---
 SHOW MATERIALIZED VIEWS
 =>
-ShowCommand(MView(None))
+ShowCommand(MaterializedView(None))
 
 SHOW MATERIALIZED VIEWS FROM t
 ---
 SHOW MATERIALIZED VIEWS FROM t
 =>
-ShowCommand(MView(Some(Ident { value: "t", quote_style: None })))
+ShowCommand(MaterializedView(Some(Ident { value: "t", quote_style: None })))
 
 DESCRIBE schema.t
 ---
 DESCRIBE schema.t
 =>
-DescribeTable { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
+Describe { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
+
+SHOW COLUMNS FROM schema.t
+---
+SHOW COLUMNS FROM schema.t
+=>
+ShowColumn { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }

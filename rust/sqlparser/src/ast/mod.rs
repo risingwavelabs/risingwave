@@ -646,8 +646,7 @@ pub enum ShowCommandObject {
     Table(Option<Ident>),
     Database,
     Schema,
-    MView(Option<Ident>),
-    Column(ObjectName),
+    MaterializedView(Option<Ident>),
 }
 
 impl fmt::Display for ShowCommandObject {
@@ -655,11 +654,12 @@ impl fmt::Display for ShowCommandObject {
         match self {
             ShowCommandObject::Database => f.write_str("DATABASES"),
             ShowCommandObject::Schema => f.write_str("SCHEMAS"),
-            ShowCommandObject::MView(None) => f.write_str("MATERIALIZED VIEWS"),
+            ShowCommandObject::MaterializedView(None) => f.write_str("MATERIALIZED VIEWS"),
             ShowCommandObject::Table(None) => f.write_str("TABLES"),
-            ShowCommandObject::MView(Some(name)) => write!(f, "MATERIALIZED VIEWS FROM {}", name),
+            ShowCommandObject::MaterializedView(Some(name)) => {
+                write!(f, "MATERIALIZED VIEWS FROM {}", name)
+            }
             ShowCommandObject::Table(Some(name)) => write!(f, "TABLES FROM {}", name),
-            ShowCommandObject::Column(name) => write!(f, "COLUMNS FROM {}", name),
         }
     }
 }
@@ -766,14 +766,14 @@ pub enum Statement {
         name: ObjectName,
         operation: AlterTableOperation,
     },
-    /// DESCRIBE TABLE
-    DescribeTable {
-        /// Table name
+    /// DESCRIBE TABLE OR SOURCE
+    Describe {
+        /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW SOURCE
-    ShowSource {
-        /// Table name
+    /// SHOW COLUMN FROM TABLE OR SOURCE
+    ShowColumn {
+        /// Table or Source name
         name: ObjectName,
     },
     /// SHOW COMMAND
@@ -912,12 +912,12 @@ impl fmt::Display for Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::DescribeTable { name } => {
+            Statement::Describe { name } => {
                 write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowSource { name } => {
-                write!(f, "SHOW SOURCE {}", name)?;
+            Statement::ShowColumn { name } => {
+                write!(f, "SHOW COLUMNS FROM {}", name)?;
                 Ok(())
             }
             Statement::ShowCommand(show_object) => {

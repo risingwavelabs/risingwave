@@ -140,13 +140,12 @@ impl Catalog {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
 
-    pub fn get_all_database_names(&self) -> Result<Vec<String>> {
-        Ok(self
+    pub fn get_all_database_names(&self) -> Vec<String> {
+        self
             .database_by_name
             .keys()
-            .into_iter()
             .cloned()
-            .collect_vec())
+            .collect_vec()
     }
 
     pub fn get_schema_by_name(&self, db_name: &str, schema_name: &str) -> Result<&SchemaCatalog> {

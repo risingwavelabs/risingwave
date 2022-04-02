@@ -37,17 +37,14 @@ pub async fn handle_show_command(
         ShowCommandObject::Table(None) => {
             catalog_reader.get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
         }
-        ShowCommandObject::Database => catalog_reader.get_all_database_names()?,
+        ShowCommandObject::Database => catalog_reader.get_all_database_names(),
         ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowCommandObject::MView(Some(ident)) => {
+        ShowCommandObject::MaterializedView(Some(ident)) => {
             catalog_reader.get_all_mv_names(session.database(), &ident.value)?
         }
-        ShowCommandObject::MView(None) => {
+        ShowCommandObject::MaterializedView(None) => {
             catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
-        }
-        ShowCommandObject::Column(_table_name) => {
-            todo!()
         }
     };
 
@@ -55,12 +52,11 @@ pub async fn handle_show_command(
         .into_iter()
         .map(|n| Row::new(vec![Some(n)]))
         .collect_vec();
-    let row_descs = vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)];
 
     Ok(PgResponse::new(
         StatementType::SHOW_COMMAND,
         rows.len() as i32,
         rows,
-        row_descs,
+        vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)],
     ))
 }

@@ -170,7 +170,7 @@ impl Parser {
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
                 Keyword::SHOW => Ok(self.parse_show()?),
-                Keyword::DESCRIBE => Ok(Statement::DescribeTable {
+                Keyword::DESCRIBE => Ok(Statement::Describe {
                     name: self.parse_object_name()?,
                 }),
                 Keyword::GRANT => Ok(self.parse_grant()?),
@@ -2490,7 +2490,7 @@ impl Parser {
             match w.keyword {
                 Keyword::TABLES => {
                     return Ok(Statement::ShowCommand(ShowCommandObject::Table(
-                        self.parse_from_identifier()?,
+                        self.parse_from_and_identifier()?,
                     )));
                 }
                 Keyword::DATABASES => {
@@ -2501,17 +2501,21 @@ impl Parser {
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowCommand(ShowCommandObject::MView(
-                            self.parse_from_identifier()?,
+                        return Ok(Statement::ShowCommand(ShowCommandObject::MaterializedView(
+                            self.parse_from_and_identifier()?,
                         )));
                     } else {
                         return self.expected("views after materialized", self.peek_token());
                     }
                 }
-                Keyword::SOURCE => {
-                    return Ok(Statement::ShowSource {
-                        name: self.parse_object_name()?,
-                    });
+                Keyword::COLUMNS => {
+                    if self.parse_keyword(Keyword::FROM) {
+                        return Ok(Statement::ShowColumn {
+                            name: self.parse_object_name()?,
+                        });
+                    } else {
+                        return self.expected("from after columns", self.peek_token());
+                    }
                 }
                 _ => {}
             }
@@ -2524,7 +2528,7 @@ impl Parser {
 
     /// Parser `from schema` after `show tables` and `show mviews`, if not conclude `from` then use
     /// default schema name.
-    pub fn parse_from_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
+    pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
             Ok(Some(self.parse_identifier()?))
         } else {

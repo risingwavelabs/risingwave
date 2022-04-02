@@ -12,12 +12,19 @@ v2 Int32
 v3 Int32
 
 query TT
+show columns from t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+
+query TT
 show databases;
 ----
 dev
 
 query TT
-show databases;
+show schemas;
 ----
 dev
 
