@@ -271,6 +271,7 @@ impl RearrangedChainExecutor {
         stop_rearrange_rx: oneshot::Receiver<()>,
     ) -> StreamExecutorResult<impl Stream<Item = StreamExecutorResult<Message>>> {
         // Stop when `stop_rearrange_rx` is received.
+        // TODO(bugen): clearer way to select from both, since the left side is an oneshot
         let mut selected = select_with_strategy(
             stop_rearrange_rx.into_stream().map(Either::Left),
             upstream.map(Either::Right),
