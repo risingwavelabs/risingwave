@@ -87,7 +87,7 @@ pub async fn gen_iterator_test_sstable_base(
         (0..total).map(|i| {
             (
                 iterator_test_key_of(idx_mapping(i)),
-                HummockValue::put_without_meta(iterator_test_value_of(idx_mapping(i))),
+                HummockValue::put(iterator_test_value_of(idx_mapping(i))),
             )
         }),
         sstable_store,

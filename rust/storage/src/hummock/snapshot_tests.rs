@@ -182,8 +182,8 @@ async fn test_snapshot() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (1, HummockValue::put_without_meta(b"test".to_vec())),
-            (2, HummockValue::put_without_meta(b"test".to_vec())),
+            (1, HummockValue::put(b"test".to_vec())),
+            (2, HummockValue::put(b"test".to_vec())),
         ],
         epoch1,
     )
@@ -198,8 +198,8 @@ async fn test_snapshot() {
         mock_hummock_meta_client.as_ref(),
         vec![
             (1, HummockValue::Delete(Default::default())),
-            (3, HummockValue::put_without_meta(b"test".to_vec())),
-            (4, HummockValue::put_without_meta(b"test".to_vec())),
+            (3, HummockValue::put(b"test".to_vec())),
+            (4, HummockValue::put(b"test".to_vec())),
         ],
         epoch2,
     )
@@ -261,10 +261,10 @@ async fn test_snapshot_range_scan() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (1, HummockValue::put_without_meta(b"test".to_vec())),
-            (2, HummockValue::put_without_meta(b"test".to_vec())),
-            (3, HummockValue::put_without_meta(b"test".to_vec())),
-            (4, HummockValue::put_without_meta(b"test".to_vec())),
+            (1, HummockValue::put(b"test".to_vec())),
+            (2, HummockValue::put(b"test".to_vec())),
+            (3, HummockValue::put(b"test".to_vec())),
+            (4, HummockValue::put(b"test".to_vec())),
         ],
         epoch,
     )
@@ -318,10 +318,10 @@ async fn test_snapshot_reverse_range_scan() {
         vm.clone(),
         mock_hummock_meta_client.as_ref(),
         vec![
-            (1, HummockValue::put_without_meta(b"test".to_vec())),
-            (2, HummockValue::put_without_meta(b"test".to_vec())),
-            (3, HummockValue::put_without_meta(b"test".to_vec())),
-            (4, HummockValue::put_without_meta(b"test".to_vec())),
+            (1, HummockValue::put(b"test".to_vec())),
+            (2, HummockValue::put(b"test".to_vec())),
+            (3, HummockValue::put(b"test".to_vec())),
+            (4, HummockValue::put(b"test".to_vec())),
         ],
         epoch,
     )

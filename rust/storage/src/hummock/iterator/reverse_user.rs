@@ -435,23 +435,15 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (1, 300, HummockValue::delete_without_meta()),
-            (
-                2,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
+            (1, 300, HummockValue::delete()),
+            (2, 100, HummockValue::put(iterator_test_value_of(2))),
         ];
         let table0 =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
 
         let kv_pairs = vec![
-            (
-                1,
-                400,
-                HummockValue::put_without_meta(iterator_test_value_of(1)),
-            ),
-            (2, 200, HummockValue::delete_without_meta()),
+            (1, 400, HummockValue::put(iterator_test_value_of(1))),
+            (2, 200, HummockValue::delete()),
         ];
         let table1 =
             gen_iterator_test_sstable_from_kv_pair(1, kv_pairs, sstable_store.clone()).await;
@@ -486,62 +478,22 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::delete_without_meta()),
-            (
-                0,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(0)),
-            ),
-            (
-                1,
-                200,
-                HummockValue::put_without_meta(iterator_test_value_of(1)),
-            ),
-            (1, 100, HummockValue::delete_without_meta()),
-            (2, 400, HummockValue::delete_without_meta()),
-            (
-                2,
-                300,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
-            (2, 200, HummockValue::delete_without_meta()),
-            (
-                2,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
-            (
-                3,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(3)),
-            ),
-            (5, 200, HummockValue::delete_without_meta()),
-            (
-                5,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(5)),
-            ),
-            (
-                6,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(6)),
-            ),
-            (
-                7,
-                300,
-                HummockValue::put_without_meta(iterator_test_value_of(7)),
-            ),
-            (7, 200, HummockValue::delete_without_meta()),
-            (
-                7,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(7)),
-            ),
-            (
-                8,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(8)),
-            ),
+            (0, 200, HummockValue::delete()),
+            (0, 100, HummockValue::put(iterator_test_value_of(0))),
+            (1, 200, HummockValue::put(iterator_test_value_of(1))),
+            (1, 100, HummockValue::delete()),
+            (2, 400, HummockValue::delete()),
+            (2, 300, HummockValue::put(iterator_test_value_of(2))),
+            (2, 200, HummockValue::delete()),
+            (2, 100, HummockValue::put(iterator_test_value_of(2))),
+            (3, 100, HummockValue::put(iterator_test_value_of(3))),
+            (5, 200, HummockValue::delete()),
+            (5, 100, HummockValue::put(iterator_test_value_of(5))),
+            (6, 100, HummockValue::put(iterator_test_value_of(6))),
+            (7, 300, HummockValue::put(iterator_test_value_of(7))),
+            (7, 200, HummockValue::delete()),
+            (7, 100, HummockValue::put(iterator_test_value_of(7))),
+            (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
@@ -609,51 +561,19 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::delete_without_meta()),
-            (
-                0,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(0)),
-            ),
-            (
-                1,
-                200,
-                HummockValue::put_without_meta(iterator_test_value_of(1)),
-            ),
-            (1, 100, HummockValue::delete_without_meta()),
-            (
-                2,
-                300,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
-            (2, 200, HummockValue::delete_without_meta()),
-            (2, 100, HummockValue::delete_without_meta()),
-            (
-                3,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(3)),
-            ),
-            (5, 200, HummockValue::delete_without_meta()),
-            (
-                5,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(5)),
-            ),
-            (
-                6,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(6)),
-            ),
-            (
-                7,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(7)),
-            ),
-            (
-                8,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(8)),
-            ),
+            (0, 200, HummockValue::delete()),
+            (0, 100, HummockValue::put(iterator_test_value_of(0))),
+            (1, 200, HummockValue::put(iterator_test_value_of(1))),
+            (1, 100, HummockValue::delete()),
+            (2, 300, HummockValue::put(iterator_test_value_of(2))),
+            (2, 200, HummockValue::delete()),
+            (2, 100, HummockValue::delete()),
+            (3, 100, HummockValue::put(iterator_test_value_of(3))),
+            (5, 200, HummockValue::delete()),
+            (5, 100, HummockValue::put(iterator_test_value_of(5))),
+            (6, 100, HummockValue::put(iterator_test_value_of(6))),
+            (7, 100, HummockValue::put(iterator_test_value_of(7))),
+            (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
@@ -721,52 +641,20 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::delete_without_meta()),
-            (
-                0,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(0)),
-            ),
-            (
-                1,
-                200,
-                HummockValue::put_without_meta(iterator_test_value_of(1)),
-            ),
-            (1, 100, HummockValue::delete_without_meta()),
-            (
-                2,
-                300,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
-            (2, 200, HummockValue::delete_without_meta()),
-            (2, 100, HummockValue::delete_without_meta()),
-            (
-                3,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(3)),
-            ),
-            (5, 200, HummockValue::delete_without_meta()),
-            (
-                5,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(5)),
-            ),
-            (
-                6,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(6)),
-            ),
-            (7, 200, HummockValue::delete_without_meta()),
-            (
-                7,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(7)),
-            ),
-            (
-                8,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(8)),
-            ),
+            (0, 200, HummockValue::delete()),
+            (0, 100, HummockValue::put(iterator_test_value_of(0))),
+            (1, 200, HummockValue::put(iterator_test_value_of(1))),
+            (1, 100, HummockValue::delete()),
+            (2, 300, HummockValue::put(iterator_test_value_of(2))),
+            (2, 200, HummockValue::delete()),
+            (2, 100, HummockValue::delete()),
+            (3, 100, HummockValue::put(iterator_test_value_of(3))),
+            (5, 200, HummockValue::delete()),
+            (5, 100, HummockValue::put(iterator_test_value_of(5))),
+            (6, 100, HummockValue::put(iterator_test_value_of(6))),
+            (7, 200, HummockValue::delete()),
+            (7, 100, HummockValue::put(iterator_test_value_of(7))),
+            (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
@@ -832,52 +720,20 @@ mod tests {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value
         let kv_pairs = vec![
-            (0, 200, HummockValue::delete_without_meta()),
-            (
-                0,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(0)),
-            ),
-            (
-                1,
-                200,
-                HummockValue::put_without_meta(iterator_test_value_of(1)),
-            ),
-            (1, 100, HummockValue::delete_without_meta()),
-            (
-                2,
-                300,
-                HummockValue::put_without_meta(iterator_test_value_of(2)),
-            ),
-            (2, 200, HummockValue::delete_without_meta()),
-            (2, 100, HummockValue::delete_without_meta()),
-            (
-                3,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(3)),
-            ),
-            (5, 200, HummockValue::delete_without_meta()),
-            (
-                5,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(5)),
-            ),
-            (
-                6,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(6)),
-            ),
-            (7, 200, HummockValue::delete_without_meta()),
-            (
-                7,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(7)),
-            ),
-            (
-                8,
-                100,
-                HummockValue::put_without_meta(iterator_test_value_of(8)),
-            ),
+            (0, 200, HummockValue::delete()),
+            (0, 100, HummockValue::put(iterator_test_value_of(0))),
+            (1, 200, HummockValue::put(iterator_test_value_of(1))),
+            (1, 100, HummockValue::delete()),
+            (2, 300, HummockValue::put(iterator_test_value_of(2))),
+            (2, 200, HummockValue::delete()),
+            (2, 100, HummockValue::delete()),
+            (3, 100, HummockValue::put(iterator_test_value_of(3))),
+            (5, 200, HummockValue::delete()),
+            (5, 100, HummockValue::put(iterator_test_value_of(5))),
+            (6, 100, HummockValue::put(iterator_test_value_of(6))),
+            (7, 200, HummockValue::delete()),
+            (7, 100, HummockValue::put(iterator_test_value_of(7))),
+            (8, 100, HummockValue::put(iterator_test_value_of(8))),
         ];
         let table =
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
@@ -1037,7 +893,7 @@ mod tests {
                         truth
                             .entry(key_bytes.clone())
                             .or_default()
-                            .insert(Reverse(time), HummockValue::delete_without_meta());
+                            .insert(Reverse(time), HummockValue::delete());
                     }
                     false => {
                         let value_size = rng.gen_range(100..=200);
@@ -1046,10 +902,10 @@ mod tests {
                             .take(value_size)
                             .map(char::from)
                             .collect();
-                        truth.entry(key_bytes.clone()).or_default().insert(
-                            Reverse(time),
-                            HummockValue::put_without_meta(value.into_bytes()),
-                        );
+                        truth
+                            .entry(key_bytes.clone())
+                            .or_default()
+                            .insert(Reverse(time), HummockValue::put(value.into_bytes()));
                     }
                 }
                 prev_time = time + 1;

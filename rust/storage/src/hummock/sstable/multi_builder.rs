@@ -192,7 +192,7 @@ mod tests {
             builder
                 .add_user_key(
                     b"key".to_vec(),
-                    HummockValue::put_without_meta(b"value"),
+                    HummockValue::put(b"value"),
                     (table_capacity - i) as u64,
                 )
                 .await
@@ -219,7 +219,7 @@ mod tests {
             () => {
                 epoch -= 1;
                 builder
-                    .add_user_key(b"k".to_vec(), HummockValue::put_without_meta(b"v"), epoch)
+                    .add_user_key(b"k".to_vec(), HummockValue::put(b"v"), epoch)
                     .await
                     .unwrap();
             };
@@ -258,7 +258,7 @@ mod tests {
         builder
             .add_full_key(
                 FullKey::from_user_key_slice(b"k", 233).as_slice(),
-                HummockValue::put_without_meta(b"v"),
+                HummockValue::put(b"v"),
                 false,
             )
             .await

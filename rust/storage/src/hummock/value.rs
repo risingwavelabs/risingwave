@@ -85,11 +85,11 @@ where
         matches!(self, Self::Delete(_))
     }
 
-    pub fn put_without_meta(data: T) -> Self {
+    pub fn put(data: T) -> Self {
         Self::Put(Default::default(), data)
     }
 
-    pub fn delete_without_meta() -> Self {
+    pub fn delete() -> Self {
         Self::Delete(Default::default())
     }
 }

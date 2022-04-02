@@ -270,14 +270,14 @@ mod tests {
         for key in put_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::put_without_meta(iterator_test_value_of(*idx).into()),
+                HummockValue::put(iterator_test_value_of(*idx).into()),
             ));
             *idx += 1;
         }
         for key in delete_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::delete_without_meta(),
+                HummockValue::delete(),
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
@@ -353,7 +353,7 @@ mod tests {
             shared_buffer_manager
                 .get(keys[2].as_slice(), ..=epoch2)
                 .unwrap(),
-            HummockValue::delete_without_meta()
+            HummockValue::delete()
         );
         assert_eq!(
             shared_buffer_manager
