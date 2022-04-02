@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 
-use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
+use super::BoxedExecutorBuilder;
 use crate::executor::Executor;
 
 /// [`FusedExecutor`] is a wrapper around a Executor. After wrapping, once a call to
@@ -71,11 +71,5 @@ impl<T: BoxedExecutorBuilder + Executor> Executor for FusedExecutor<T> {
 
     fn identity(&self) -> &str {
         self.inner.identity()
-    }
-}
-
-impl<T: BoxedExecutorBuilder + Executor> BoxedExecutorBuilder for FusedExecutor<T> {
-    fn new_boxed_executor(source: &ExecutorBuilder) -> Result<BoxedExecutor> {
-        T::new_boxed_executor(source)
     }
 }
