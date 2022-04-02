@@ -38,6 +38,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::merge::RemoteInput;
 use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
 use crate::task::{
@@ -699,9 +700,9 @@ impl LocalStreamManagerCore {
                                 Ok::<_, RwError>(remote_input)
                             };
                             match init_client.await {
-                                Ok(mut remote_input) => remote_input.run().await,
+                                Ok(remote_input) => remote_input.run().await,
                                 Err(e) => {
-                                    info!("Spawn remote input fails:{}", e);
+                                    error!("Spawn remote input fails:{}", e);
                                 }
                             }
                         });

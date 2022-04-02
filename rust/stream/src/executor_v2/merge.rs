@@ -13,17 +13,69 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use futures::channel::mpsc::Receiver;
+use futures::channel::mpsc::{Receiver, Sender};
 use futures::future::select_all;
-use futures::StreamExt;
-use futures_async_stream::try_stream;
+use futures::{SinkExt, StreamExt};
+use futures_async_stream::{for_await, try_stream};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
+use risingwave_pb::task_service::GetStreamResponse;
+use risingwave_rpc_client::ComputeClient;
+use tonic::Streaming;
 use tracing_futures::Instrument;
 
 use super::{Barrier, Executor, Message, PkIndicesRef};
 use crate::executor::{Mutation, PkIndices};
 use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, ExecutorInfo};
+use crate::task::UpDownActorIds;
+
+/// Receive data from `gRPC` and forwards to `MergerExecutor`/`ReceiverExecutor`
+pub struct RemoteInput {
+    stream: Streaming<GetStreamResponse>,
+    sender: Sender<Message>,
+}
+
+impl RemoteInput {
+    /// Create a remote input from compute client and related info. Should provide the corresponding
+    /// compute client of where the actor is placed.
+    pub async fn create(
+        client: ComputeClient,
+        up_down_ids: UpDownActorIds,
+        sender: Sender<Message>,
+    ) -> Result<Self> {
+        let stream = client.get_stream(up_down_ids.0, up_down_ids.1).await?;
+        Ok(Self { stream, sender })
+    }
+
+    pub async fn run(mut self) {
+        #[for_await]
+        for data_res in self.stream {
+            match data_res {
+                Ok(stream_msg) => {
+                    let msg_res = Message::from_protobuf(
+                        stream_msg
+                            .get_message()
+                            .expect("no message in stream response!"),
+                    );
+                    match msg_res {
+                        Ok(msg) => {
+                            self.sender.send(msg).await.unwrap();
+                        }
+                        Err(e) => {
+                            error!("RemoteInput forward message error:{}", e);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("RemoteInput tonic error status:{}", e);
+                    break;
+                }
+            }
+        }
+    }
+}
 
 /// `MergeExecutor` merges data from multiple channels. Dataflow from one channel
 /// will be stopped on barrier.
@@ -186,7 +238,8 @@ mod tests {
     use tonic::{Request, Response, Status};
 
     use super::*;
-    use crate::executor::{Executor, RemoteInput};
+    use crate::executor::Executor;
+    use crate::executor_v2::merge::RemoteInput;
     use crate::executor_v2::Executor as ExecutorV2;
 
     fn build_test_chunk(epoch: u64) -> StreamChunk {
@@ -337,7 +390,7 @@ mod tests {
         assert!(server_run.load(Ordering::SeqCst));
         let (tx, mut rx) = channel(16);
         let input_handle = tokio::spawn(async move {
-            let mut remote_input =
+            let remote_input =
                 RemoteInput::create(ComputeClient::new(addr.into()).await.unwrap(), (0, 0), tx)
                     .await
                     .unwrap();
