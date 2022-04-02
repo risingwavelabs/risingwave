@@ -304,8 +304,8 @@ mod tests {
     use global_simple_agg::*;
     use risingwave_common::catalog::Field;
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::*;
     use risingwave_common::types::*;
+    use risingwave_expr::expr::*;
 
     use crate::executor::test_utils::*;
     use crate::executor::*;

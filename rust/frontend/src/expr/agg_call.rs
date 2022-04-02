@@ -14,12 +14,12 @@
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::AggKind;
 use risingwave_common::types::DataType;
+use risingwave_expr::expr::AggKind;
 
 use super::{Expr, ExprImpl};
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Hash)]
 pub struct AggCall {
     agg_kind: AggKind,
     return_type: DataType,

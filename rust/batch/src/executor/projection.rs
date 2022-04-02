@@ -16,7 +16,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use super::{BoxedExecutor, BoxedExecutorBuilder};
@@ -107,8 +107,8 @@ mod tests {
     use risingwave_common::array::{Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::column_nonnull;
-    use risingwave_common::expr::{InputRefExpression, LiteralExpression};
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::{InputRefExpression, LiteralExpression};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -124,7 +124,7 @@ mod tests {
         let expr1 = InputRefExpression::new(DataType::Int32, 0);
         let expr_vec = vec![Box::new(expr1) as BoxedExpression];
 
-        let schema = schema_unamed! { DataType::Int32, DataType::Int32 };
+        let schema = schema_unnamed! { DataType::Int32, DataType::Int32 };
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(chunk);
 
@@ -175,7 +175,7 @@ mod tests {
         let mut proj_executor = ProjectionExecutor {
             expr: vec![Box::new(literal)],
             child: Box::new(values_executor),
-            schema: schema_unamed!(DataType::Int32),
+            schema: schema_unnamed!(DataType::Int32),
             identity: "ProjectionExecutor".to_string(),
         };
 

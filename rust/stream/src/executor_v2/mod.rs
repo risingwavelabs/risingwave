@@ -25,6 +25,8 @@ pub use super::executor::{
 mod chain;
 mod filter;
 pub(crate) mod mview;
+#[allow(dead_code)]
+mod rearranged_chain;
 mod simple;
 #[cfg(test)]
 mod test_utils;

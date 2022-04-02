@@ -108,7 +108,7 @@ fn preprocess_options(opts: &mut Opts) {
 }
 
 /// This is used to benchmark the state store performance.
-/// For usage, see: <https://github.com/singularity-data/risingwave/blob/main/docs/developer/benchmark_tool/state_store.md>
+/// For usage, see `README.md`
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
     let mut opts = Opts::parse();
@@ -125,6 +125,8 @@ async fn main() {
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: false,
+        block_cache_capacity: 256 << 20,
+        meta_cache_capacity: 64 << 20,
     });
 
     let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());

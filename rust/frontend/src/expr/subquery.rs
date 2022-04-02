@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::Hash;
+
 use risingwave_common::types::DataType;
 
 use super::Expr;
@@ -24,7 +26,7 @@ pub enum SubqueryKind {
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
     /// `IN` | `NOT IN` | `SOME` | `ALL` subquery. Returns a boolean.
-    SetComparision,
+    SetComparison,
 }
 
 /// Subquery expression.
@@ -56,6 +58,14 @@ impl PartialEq for Subquery {
     }
 }
 
+impl Hash for Subquery {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {
+        unreachable!("Subquery {:?} has not been hashed", self)
+    }
+}
+
+impl Eq for Subquery {}
+
 impl Expr for Subquery {
     fn return_type(&self) -> DataType {
         match self.kind {
@@ -65,7 +75,7 @@ impl Expr for Subquery {
                 types[0].clone()
             }
             SubqueryKind::Existential => DataType::Boolean,
-            SubqueryKind::SetComparision => DataType::Boolean,
+            SubqueryKind::SetComparison => DataType::Boolean,
         }
     }
 

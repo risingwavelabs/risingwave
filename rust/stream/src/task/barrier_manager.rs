@@ -39,7 +39,7 @@ pub struct FinishedCreateMview {
     pub epoch: u64,
 
     /// The id of the actor that is responsible for running this DDL. Usually the actor of
-    /// [`ChainExecutor`] for creating MV.
+    /// [`crate::executor_v2::ChainExecutor`] for creating MV.
     pub actor_id: ActorId,
 }
 
@@ -209,6 +209,11 @@ impl LocalBarrierManager {
     /// This will be piggybacked by the collection of current/next barrier and then be reported
     /// to the meta service.
     pub fn finish_create_mview(&mut self, ddl_epoch: u64, actor_id: ActorId) {
+        info!(
+            "create mview finish on actor {} with ddl epoch {}",
+            actor_id, ddl_epoch
+        );
+
         match &mut self.state {
             #[cfg(test)]
             BarrierState::Local => {}

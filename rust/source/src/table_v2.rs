@@ -46,7 +46,7 @@ pub struct TableSourceV2 {
     /// All columns in this table.
     column_descs: Vec<ColumnDesc>,
 
-    /// Curren allocated row id.
+    /// Current allocated row id.
     next_row_id: AtomicUsize,
 }
 
@@ -71,7 +71,7 @@ impl TableSourceV2 {
         (((worker_id as u64) << 32) + (local_row_id as u64)) as i64
     }
 
-    /// Asynchronously write stream chunk into table. Changes writen here will be simply passed to
+    /// Asynchronously write stream chunk into table. Changes written here will be simply passed to
     /// the associated streaming task via channel, and then be materialized to storage there.
     ///
     /// Returns an oneshot channel which will be notified when the chunk is taken by some reader,

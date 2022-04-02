@@ -19,8 +19,8 @@ use futures::SinkExt;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
-use risingwave_common::expr::*;
 use risingwave_common::types::*;
+use risingwave_expr::expr::*;
 use tokio::sync::oneshot;
 
 use super::*;
@@ -126,7 +126,7 @@ async fn test_merger_sum_aggr() {
         ReceiverExecutor::new(schema.clone(), vec![], rx, "ReceiverExecutor".to_string());
     let dispatcher = DispatchExecutor::new(
         Box::new(receiver_op),
-        RoundRobinDataDispatcher::new(inputs),
+        DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(inputs)),
         0,
         ctx,
     );

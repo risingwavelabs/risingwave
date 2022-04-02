@@ -28,15 +28,15 @@ use crate::common::StreamChunkBuilder;
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
     /// The side for arrangement. Currently, it should be a
-    /// [`MaterializeExecutor`].
+    /// `MaterializeExecutor`.
     ///
-    /// [`MaterializeExecutor`]: crate::executor::mview::MaterializeExecutor
+    /// `MaterializeExecutor`
     pub arrangement: Box<dyn Executor>,
 
     /// The side for stream. It can be any stream, but it will generally be a
-    /// [`MaterializeExecutor`].
+    /// `MaterializeExecutor`.
     ///
-    /// [`MaterializeExecutor`]: crate::executor::mview::MaterializeExecutor
+    /// `MaterializeExecutor`
     pub stream: Box<dyn Executor>,
 
     /// The keyspace for arrangement. [`LookupExecutor`] will use this keyspace to read the state
@@ -46,11 +46,11 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// Should be the same as [`ColumnDesc`] in the arrangement.
     ///
     /// From the perspective of arrangements, `arrangement_col_descs` include all columns of the
-    /// [`MaterializeExecutor`]. For example, if we already have a table with 3 columns: `a, b,
+    /// `MaterializeExecutor`. For example, if we already have a table with 3 columns: `a, b,
     /// _row_id`, and we create an arrangement with join key `a` on it. `arrangement_col_descs`
     /// should contain all 3 columns.
     ///
-    /// [`MaterializeExecutor`]: crate::executor::mview::MaterializeExecutor
+    /// `MaterializeExecutor`
     pub arrangement_col_descs: Vec<ColumnDesc>,
 
     /// Should be the same as [`OrderPair`] in the arrangement.
@@ -191,7 +191,7 @@ impl<S: StateStore> LookupExecutor<S> {
     }
 
     /// Try produce one stream message from [`LookupExecutor`]. If there's no message to produce, it
-    /// will return `None`, and the `next` function of [`LookupExecutor`] will continously polling
+    /// will return `None`, and the `next` function of [`LookupExecutor`] will continuously polling
     /// messages until there's one.
     ///
     /// If we can use `async_stream` to write this part, things could be easier.

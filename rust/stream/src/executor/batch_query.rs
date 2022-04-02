@@ -32,7 +32,7 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 const DEFAULT_BATCH_SIZE: usize = 100;
 
 /// [`BatchQueryExecutor`] pushes m-view data batch to the downstream executor. Currently, this
-/// executor is used as input of the [`crate::executor::ChainExecutor`] to support MV-on-MV.
+/// executor is used as input of the [`crate::executor_v2::ChainExecutor`] to support MV-on-MV.
 pub struct BatchQueryExecutor<S: StateStore> {
     /// The primary key indices of the schema
     pk_indices: PkIndices,

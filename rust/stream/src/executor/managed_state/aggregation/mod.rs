@@ -16,7 +16,7 @@
 
 mod value;
 
-use risingwave_common::expr::AggKind;
+use risingwave_expr::expr::AggKind;
 pub use value::*;
 mod extreme;
 mod extreme_serializer;

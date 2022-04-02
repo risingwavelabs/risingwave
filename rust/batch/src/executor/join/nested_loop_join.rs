@@ -21,9 +21,9 @@ use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
-use risingwave_common::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
+use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::chunked_data::RowId;
@@ -68,20 +68,21 @@ pub struct NestedLoopJoinExecutor {
 
 /// If current row finished probe, executor will advance to next row.
 /// If there is batched chunk generated in probing, return it. Note that:
-/// `None` do not mean no matched row find (it is written in [`chunk_builder`])
+/// `None` do not mean no matched row find (it is written in
+/// [`NestedLoopJoinExecutor::chunk_builder`])
 struct ProbeResult {
     cur_row_finished: bool,
     chunk: Option<DataChunk>,
 }
 
 enum NestedLoopJoinState {
-    /// [`Build`] should load all inner table into memory.
+    /// [`Self::Build`] should load all inner table into memory.
     Build,
-    /// One Difference between [`FirstProbe`] and [`Probe`]:
-    /// Only init the probe side source until [`FirstProbe`] so that
+    /// One Difference between [`Self::FirstProbe`] and [`Self::Probe`]:
+    /// Only init the probe side source until [`Self::FirstProbe`] so that
     /// avoid unnecessary init if build side fail.
     FirstProbe,
-    /// [`Probe`] finds matching rows for all outer table.
+    /// [`Self::Probe`] finds matching rows for all outer table.
     Probe,
     ProbeRemaining,
     Done,
@@ -327,8 +328,8 @@ impl NestedLoopJoinExecutor {
         Ok(None)
     }
 
-    /// Similar to [`probe_remaining`] in [`HashJoin`]. For nested loop join, iterate the build
-    /// table and append row if not matched in [`NestedLoopJoinState::Probe`].
+    /// Similar to [`super::hash_join::HashJoinExecutor::probe_remaining`]. For nested loop join,
+    /// iterate the build table and append row if not matched in [`NestedLoopJoinState::Probe`].
     fn probe_remaining(&mut self) -> Result<Option<DataChunk>> {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
@@ -569,10 +570,10 @@ mod tests {
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::InputRefExpression;
     use risingwave_common::types::{DataType, ScalarRefImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::InputRefExpression;
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::nested_loop_join::{

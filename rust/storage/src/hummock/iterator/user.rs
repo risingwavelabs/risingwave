@@ -152,9 +152,8 @@ impl<'a> UserIterator<'a> {
                         self.last_val.clear();
                         assert!(val.len() >= VALUE_META_SIZE);
                         // Currently, upper layer does not need value meta, so we simply exclude it.
-                        if val.len() > VALUE_META_SIZE {
-                            self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
-                        }
+                        self.last_val.extend_from_slice(&val[VALUE_META_SIZE..]);
+
                         // handle range scan
                         match &self.key_range.1 {
                             Included(end_key) => self.out_of_range = key > end_key.as_slice(),

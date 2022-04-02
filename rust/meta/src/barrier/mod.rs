@@ -123,15 +123,15 @@ impl ScheduledBarriers {
     }
 }
 
-/// [`GlobalBarrierManager`] sends barriers to all registered compute nodes and collect them, with
-/// monotonic increasing epoch numbers. On compute nodes, [`LocalBarrierManager`] will serve these
-/// requests and dispatch them to source actors.
+/// [`crate::barrier::GlobalBarrierManager`] sends barriers to all registered compute nodes and
+/// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
+/// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
 ///
 /// Configuration change in our system is achieved by the mutation in the barrier. Thus,
-/// [`GlobalBarrierManager`] provides a set of interfaces like a state machine, accepting
-/// [`Command`] that carries info to build [`Mutation`]. To keep the consistency between barrier
-/// manager and meta store, some actions like "drop materialized view" or "create mv on mv" must be
-/// done in barrier manager transactional using [`Command`].
+/// [`crate::barrier::GlobalBarrierManager`] provides a set of interfaces like a state machine,
+/// accepting [`Command`] that carries info to build `Mutation`. To keep the consistency between
+/// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
+/// must be done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
@@ -158,7 +158,7 @@ where
 {
     const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
 
-    /// Create a new [`GlobalBarrierManager`].
+    /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
@@ -167,15 +167,8 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         // TODO: make this configurable
-        let interval = Duration::from_millis(if let Ok(x) = std::env::var("RW_CI") && x == "true" {
-            // Use a shorter interval to discovery more bugs on CI.
-            500
-        } else if cfg!(debug_assertions) {
-            // Use a longer interval to better debug with tracing.
-            5000
-        } else {
-            100
-        });
+        // TODO: when tracing is on, warn the developer on this short interval.
+        let interval = Duration::from_millis(100);
 
         Self {
             interval,
@@ -388,8 +381,6 @@ where
         let (collect_tx, collect_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
 
-        let is_create_mview = matches!(command, Command::CreateMaterializedView { .. });
-
         self.do_schedule(
             command,
             Notifier {
@@ -401,14 +392,6 @@ where
         .await?;
 
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
-
-        // TODO: review this workaround
-        if is_create_mview {
-            // Insert a flush immediately.
-            // For speed up the creation of MVs with a small amount of data.
-            self.wait_for_next_barrier_to_collect().await?;
-        }
-
         finish_rx.await.unwrap(); // Wait for this command to be finished.
 
         Ok(())

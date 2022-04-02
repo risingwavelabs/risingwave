@@ -72,7 +72,7 @@ impl EqJoinPredicate {
     /// ```sql
     /// input_ref(0) = input_ref(1) and input_ref(0) = input_ref(2) and input_ref(1) > input_ref(3)
     /// ```
-    /// And the `create funcitons` should return `JoinPredicate`
+    /// And the `create functions` should return `JoinPredicate`
     /// ```sql
     ///   other_conds = Vec[input_ref(1) = input_ref(1), input_ref(1) > input_ref(3)],
     ///   keys= Vec[(1,1)]

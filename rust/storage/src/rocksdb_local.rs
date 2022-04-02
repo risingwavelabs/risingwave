@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
@@ -23,7 +23,9 @@ use rocksdb::{DBIterator, ReadOptions, SeekKey, Writable, WriteBatch, WriteOptio
 use tokio::sync::OnceCell;
 use tokio::task;
 
-use super::{StateStore, StateStoreIter};
+use crate::storage_value::StorageValue;
+use crate::store::*;
+use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
 #[derive(Clone)]
 pub struct RocksDBStateStore {
@@ -46,52 +48,96 @@ impl RocksDBStateStore {
     }
 }
 
-#[async_trait]
 impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
+    define_state_store_associated_type!();
 
-    async fn get(&self, key: &[u8], _epoch: u64) -> Result<Option<Bytes>> {
-        self.storage().await.get(key).await
+    fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
+        async move { self.storage().await.get(key).await }
     }
 
-    async fn ingest_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>, _epoch: u64) -> Result<()> {
-        self.storage().await.write_batch(kv_pairs).await
-    }
-
-    async fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
-    {
-        let range = (
-            key_range.start_bound().map(|b| b.as_ref().to_owned()),
-            key_range.end_bound().map(|b| b.as_ref().to_owned()),
-        );
-        RocksDBStateStoreIter::new(self.clone(), range).await
-    }
-
-    async fn replicate_batch(
+    fn scan<R, B>(
         &self,
-        _kv_pairs: Vec<(Bytes, Option<Bytes>)>,
-        _epoch: u64,
-    ) -> Result<()> {
-        unimplemented!()
-    }
-
-    async fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Result<Self::Iter<'_>>
+        key_range: R,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
-        B: AsRef<[u8]>,
+        B: AsRef<[u8]> + Send,
     {
-        unimplemented!()
+        async move {
+            let mut iter = self.iter(key_range, epoch).await?;
+            let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+            for _ in 0..limit.unwrap_or(usize::MAX) {
+                match iter.next().await? {
+                    Some(kv) => kvs.push(kv),
+                    None => break,
+                }
+            }
+
+            Ok(kvs)
+        }
     }
 
-    async fn wait_epoch(&self, _epoch: u64) -> Result<()> {
-        unimplemented!()
+    fn reverse_scan<R, B>(
+        &self,
+        _key_range: R,
+        _limit: Option<usize>,
+        _epoch: u64,
+    ) -> Self::ReverseScanFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
     }
 
-    async fn sync(&self, _epoch: Option<u64>) -> Result<()> {
-        unimplemented!()
+    fn ingest_batch(
+        &self,
+        kv_pairs: Vec<(Bytes, StorageValue)>,
+        _epoch: u64,
+    ) -> Self::IngestBatchFuture<'_> {
+        async move { self.storage().await.write_batch(kv_pairs).await }
+    }
+
+    fn replicate_batch(
+        &self,
+        _kv_pairs: Vec<(Bytes, StorageValue)>,
+        _epoch: u64,
+    ) -> Self::ReplicateBatchFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn iter<R, B>(&self, key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move {
+            let range = (
+                key_range.start_bound().map(|b| b.as_ref().to_owned()),
+                key_range.end_bound().map(|b| b.as_ref().to_owned()),
+            );
+            RocksDBStateStoreIter::new(self.clone(), range).await
+        }
+    }
+
+    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    where
+        R: RangeBounds<B> + Send,
+        B: AsRef<[u8]> + Send,
+    {
+        async move { unimplemented!() }
+    }
+
+    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+        async move { unimplemented!() }
+    }
+
+    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+        async move { unimplemented!() }
     }
 }
 
@@ -146,55 +192,57 @@ impl RocksDBStateStoreIter {
     }
 }
 
-#[async_trait]
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
+    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
 
-    async fn next(&mut self) -> Result<Option<Self::Item>> {
-        let mut end_key = Bytes::new();
-        let mut is_end_exclude = false;
-        let mut is_end_unbounded = false;
-        match self.key_range.end_bound() {
-            Bound::Included(e_key) => {
-                end_key = Bytes::from(e_key.clone());
+    fn next(&mut self) -> Self::NextFuture<'_> {
+        async move {
+            let mut end_key = Bytes::new();
+            let mut is_end_exclude = false;
+            let mut is_end_unbounded = false;
+            match self.key_range.end_bound() {
+                Bound::Included(e_key) => {
+                    end_key = Bytes::from(e_key.clone());
+                }
+                Bound::Excluded(e_key) => {
+                    end_key = Bytes::from(e_key.clone());
+                    is_end_exclude = true;
+                }
+                Bound::Unbounded => {
+                    is_end_unbounded = true;
+                }
             }
-            Bound::Excluded(e_key) => {
-                end_key = Bytes::from(e_key.clone());
-                is_end_exclude = true;
-            }
-            Bound::Unbounded => {
-                is_end_unbounded = true;
-            }
+
+            let mut iter = self.iter.take().unwrap();
+            let (kv, iter) = tokio::task::spawn_blocking(move || {
+                let result = iter.valid().map_err(|e| RwError::from(InternalError(e)));
+                if let Err(e) = result {
+                    return (Err(e), iter);
+                }
+                if !result.unwrap() {
+                    return (Ok(None), iter);
+                }
+                let k = Bytes::from(iter.key().to_vec());
+                let v = Bytes::from(iter.value().to_vec());
+
+                if is_end_unbounded {
+                    return (Ok(Some((k, v))), iter);
+                }
+                if k > end_key || (k == end_key && is_end_exclude) {
+                    return (Ok(None), iter);
+                }
+                if let Err(e) = iter.next().map_err(|e| RwError::from(InternalError(e))) {
+                    return (Err(e), iter);
+                }
+                (Ok(Some((k, v))), iter)
+            })
+            .await
+            .unwrap();
+
+            self.iter = Some(iter);
+            kv
         }
-
-        let mut iter = self.iter.take().unwrap();
-        let (kv, iter) = tokio::task::spawn_blocking(move || {
-            let result = iter.valid().map_err(|e| RwError::from(InternalError(e)));
-            if let Err(e) = result {
-                return (Err(e), iter);
-            }
-            if !result.unwrap() {
-                return (Ok(None), iter);
-            }
-            let k = Bytes::from(iter.key().to_vec());
-            let v = Bytes::from(iter.value().to_vec());
-
-            if is_end_unbounded {
-                return (Ok(Some((k, v))), iter);
-            }
-            if k > end_key || (k == end_key && is_end_exclude) {
-                return (Ok(None), iter);
-            }
-            if let Err(e) = iter.next().map_err(|e| RwError::from(InternalError(e))) {
-                return (Err(e), iter);
-            }
-            (Ok(Some((k, v))), iter)
-        })
-        .await
-        .unwrap();
-
-        self.iter = Some(iter);
-        kv
     }
 }
 
@@ -230,9 +278,10 @@ impl RocksDBStorage {
         .await?
     }
 
-    async fn write_batch(&self, kv_pairs: Vec<(Bytes, Option<Bytes>)>) -> Result<()> {
+    async fn write_batch(&self, kv_pairs: Vec<(Bytes, StorageValue)>) -> Result<()> {
         let wb = WriteBatch::new();
         for (key, value) in kv_pairs {
+            let value = value.user_value();
             if let Some(value) = value {
                 if let Err(e) = wb.put(key.as_ref(), value.as_ref()) {
                     return Err(InternalError(e).into());
@@ -288,10 +337,10 @@ mod tests {
         let result = rocksdb_state_store.get("key3".as_bytes(), 0).await;
         assert_eq!(result.unwrap(), None);
 
-        let kv_pairs: Vec<(Bytes, Option<Bytes>)> = vec![
-            ("key1".into(), Some("val1".into())),
-            ("key2".into(), Some("val2".into())),
-            ("key3".into(), Some("val3".into())),
+        let kv_pairs: Vec<(Bytes, StorageValue)> = vec![
+            ("key1".into(), StorageValue::new_default_put("val1")),
+            ("key2".into(), StorageValue::new_default_put("val2")),
+            ("key3".into(), StorageValue::new_default_put("val3")),
         ];
         rocksdb_state_store.ingest_batch(kv_pairs, 0).await.unwrap();
         let result = rocksdb_state_store

@@ -244,6 +244,8 @@ mod tests {
             obj_client,
             remote_dir.to_string(),
             Arc::new(StateStoreMetrics::unused()),
+            64 << 20,
+            64 << 20,
         ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
@@ -276,7 +278,7 @@ mod tests {
         for key in delete_keys {
             shared_buffer_items.push((
                 Bytes::from(key_with_epoch(key.clone(), epoch)),
-                HummockValue::Delete(StorageValue::new_default_delete().to_bytes()),
+                HummockValue::Delete(StorageValue::new_default_delete().encode_to_bytes()),
             ));
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
@@ -321,7 +323,7 @@ mod tests {
             &shared_buffer_manager,
         );
 
-        let delete_val = StorageValue::new_default_delete().to_bytes();
+        let delete_val = StorageValue::new_default_delete().encode_to_bytes();
 
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {

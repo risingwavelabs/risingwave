@@ -77,7 +77,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
     pub deserializer: CellBasedRowDeserializer,
 }
 
-/// Message from the [`arrange_join_stream`].
+/// Message from the `arrange_join_stream`.
 pub enum ArrangeMessage {
     /// Arrangement sides' update in this epoch. There will be only one arrange batch message
     /// within epoch. Once the executor receives an arrange batch message, it will replicate batch
@@ -96,12 +96,12 @@ pub enum ArrangeMessage {
 /// For example, the executor will receive the following message sequence from
 /// `stream_lookup_arrange_prev_epoch`:
 ///
-/// * [Msg] Barrier (prev = [1], current = [2])
-/// * [Msg] Stream (key = a)
-/// * [Do] lookup `a` in arrangement of epoch [1] (prev epoch)
-/// * [Msg] Arrangement (batch)
-/// * [Do] replicate batch with epoch [2]
-/// * Barrier (prev = [2], current = [3])
+/// * `[Msg`] Barrier (prev = `[1`], current = `[2`])
+/// * `[Msg`] Stream (key = a)
+/// * `[Do`] lookup `a` in arrangement of epoch `[1`] (prev epoch)
+/// * `[Msg`] Arrangement (batch)
+/// * `[Do`] replicate batch with epoch `[2`]
+/// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = RwError)]
 pub async fn stream_lookup_arrange_prev_epoch(
     stream: Box<dyn Executor>,
@@ -134,12 +134,12 @@ pub async fn stream_lookup_arrange_prev_epoch(
 /// For example, the executor will receive the following message sequence from
 /// `stream_lookup_arrange_this_epoch`:
 ///
-/// * [Msg] Barrier (prev = [1], current = [2])
-/// * [Msg] Arrangement (batch)
-/// * [Do] replicate batch with epoch [2]
-/// * [Msg] Stream (key = a)
-/// * [Do] lookup `a` in arrangement of epoch [2] (current epoch)
-/// * Barrier (prev = [2], current = [3])
+/// * `[Msg`] Barrier (prev = `[1`], current = `[2`])
+/// * `[Msg`] Arrangement (batch)
+/// * `[Do`] replicate batch with epoch `[2`]
+/// * `[Msg`] Stream (key = a)
+/// * `[Do`] lookup `a` in arrangement of epoch `[2`] (current epoch)
+/// * Barrier (prev = `[2`], current = `[3`])
 #[try_stream(ok = ArrangeMessage, error = RwError)]
 pub async fn stream_lookup_arrange_this_epoch(
     stream: Box<dyn Executor>,

@@ -32,6 +32,9 @@ pub enum StreamExecutorError {
 
     #[error("chunk operation error {0}")]
     EvalError(RwError),
+
+    #[error("channel `{0}` closed")]
+    ChannelClosed(String),
 }
 
 impl StreamExecutorError {
@@ -45,6 +48,10 @@ impl StreamExecutorError {
 
     pub fn eval_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::EvalError(error.into()).into()
+    }
+
+    pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
+        Self::ChannelClosed(name.into()).into()
     }
 }
 
@@ -75,7 +82,7 @@ impl std::fmt::Debug for TracedStreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to internal error of [`RwResult`].
+/// Always convert [`TracedStreamExecutorError`] to internal error of `RwResult`.
 impl From<TracedStreamExecutorError> for RwError {
     fn from(h: TracedStreamExecutorError) -> Self {
         ErrorCode::InternalError(h.to_string()).into()

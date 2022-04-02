@@ -200,7 +200,7 @@ impl Mutation {
         matches!(self, Mutation::Stop(_))
     }
 
-    /// Return ture if the mutation is add output.
+    /// Return true if the mutation is add output.
     pub fn is_add_output(&self) -> bool {
         matches!(self, Mutation::AddOutput(_))
     }
@@ -426,7 +426,7 @@ pub trait StatefulExecutor: Executor {
     /// Try initializing the executor if not done.
     /// Return:
     /// - Some(Epoch) if the executor is successfully initialized
-    /// - None if the executor has been intialized
+    /// - None if the executor has been initialized
     fn try_init_executor<'a>(
         &'a mut self,
         msg: impl TryInto<&'a Barrier, Error = ()>,
