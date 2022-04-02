@@ -21,7 +21,7 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::Keyspace;
 
-use crate::executor::ManagedMViewState;
+use crate::executor_v2::mview::ManagedMViewState;
 
 #[tokio::test]
 async fn test_mview_table() {
