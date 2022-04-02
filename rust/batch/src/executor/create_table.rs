@@ -61,13 +61,16 @@ impl BoxedExecutorBuilder for CreateTableExecutor {
 
         let table_id = TableId::from(&node.table_ref_id);
 
-        Ok(Box::new(Self {
-            table_id,
-            source_manager: source.global_batch_env().source_manager_ref(),
-            table_columns: node.column_descs.clone(),
-            identity: "CreateTableExecutor".to_string(),
-            info: node.info.clone().unwrap(),
-        }))
+        Ok(Box::new(
+            Self {
+                table_id,
+                source_manager: source.global_batch_env().source_manager_ref(),
+                table_columns: node.column_descs.clone(),
+                identity: "CreateTableExecutor".to_string(),
+                info: node.info.clone().unwrap(),
+            }
+            .fuse(),
+        ))
     }
 }
 

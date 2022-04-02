@@ -31,6 +31,7 @@ pub use row_seq_scan::*;
 use sort_agg::*;
 use top_n::*;
 
+use self::fuse::FusedExecutor;
 use crate::executor::create_source::CreateSourceExecutor;
 pub use crate::executor::create_table::CreateTableExecutor;
 pub use crate::executor::delete::DeleteExecutor;
@@ -50,6 +51,7 @@ mod delete;
 mod drop_stream;
 mod drop_table;
 mod filter;
+mod fuse;
 mod generate_series;
 mod generic_exchange;
 mod hash_agg;
@@ -88,6 +90,14 @@ pub trait Executor: Send {
 
     /// Identity string of the executor
     fn identity(&self) -> &str;
+
+    /// Turn an executor into a fused executor
+    fn fuse(self) -> FusedExecutor<Self>
+    where
+        Self: Executor + std::marker::Sized,
+    {
+        FusedExecutor::new(self)
+    }
 }
 
 pub type BoxedExecutor = Box<dyn Executor>;

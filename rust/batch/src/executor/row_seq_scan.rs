@@ -100,14 +100,17 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             let storage_stats = state_store.stats();
             let batch_stats = source.global_batch_env().stats();
             let table = CellBasedTable::new_adhoc(keyspace, column_descs, storage_stats);
-            Ok(Box::new(RowSeqScanExecutor::new(
-                table,
-                RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
-                source.task_id.task_id == 0,
-                source.plan_node().get_identity().clone(),
-                source.epoch,
-                batch_stats,
-            )))
+            Ok(Box::new(
+                RowSeqScanExecutor::new(
+                    table,
+                    RowSeqScanExecutorBuilder::DEFAULT_CHUNK_SIZE,
+                    source.task_id.task_id == 0,
+                    source.plan_node().get_identity().clone(),
+                    source.epoch,
+                    batch_stats,
+                )
+                .fuse(),
+            ))
         })
     }
 }

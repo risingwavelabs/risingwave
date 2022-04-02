@@ -91,12 +91,15 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
             }
         };
 
-        Ok(Box::new(Self {
-            reader,
-            done: false,
-            schema: Schema { fields },
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                reader,
+                done: false,
+                schema: Schema { fields },
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 

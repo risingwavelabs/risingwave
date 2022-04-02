@@ -176,13 +176,16 @@ impl BoxedExecutorBuilder for InsertExecutor {
         })?;
         let child = source.clone_for_plan(proto_child).build()?;
 
-        Ok(Box::new(Self::new(
-            table_id,
-            source.global_batch_env().source_manager_ref(),
-            child,
-            source.global_batch_env().worker_id(),
-            insert_node.frontend_v2,
-        )))
+        Ok(Box::new(
+            Self::new(
+                table_id,
+                source.global_batch_env().source_manager_ref(),
+                child,
+                source.global_batch_env().worker_id(),
+                insert_node.frontend_v2,
+            )
+            .fuse(),
+        ))
     }
 }
 

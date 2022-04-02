@@ -125,14 +125,17 @@ impl BoxedExecutorBuilder for FilterExecutor {
             let chunk_builder =
                 DataChunkBuilder::new(child.schema().data_types(), DEFAULT_CHUNK_BUFFER_SIZE);
 
-            return Ok(Box::new(Self {
-                expr,
-                child,
-                chunk_builder,
-                last_input: None,
-                identity: source.plan_node().get_identity().clone(),
-                child_can_be_nexted: true,
-            }));
+            return Ok(Box::new(
+                Self {
+                    expr,
+                    child,
+                    chunk_builder,
+                    last_input: None,
+                    identity: source.plan_node().get_identity().clone(),
+                    child_can_be_nexted: true,
+                }
+                .fuse(),
+            ));
         }
         Err(InternalError("Filter must have one children".to_string()).into())
     }

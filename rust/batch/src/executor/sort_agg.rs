@@ -83,15 +83,18 @@ impl BoxedExecutorBuilder for SortAggExecutor {
             .map(Field::unnamed)
             .collect::<Vec<Field>>();
 
-        Ok(Box::new(Self {
-            agg_states,
-            group_exprs,
-            sorted_groupers,
-            child,
-            child_done: false,
-            schema: Schema { fields },
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                agg_states,
+                group_exprs,
+                sorted_groupers,
+                child,
+                child_done: false,
+                schema: Schema { fields },
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 

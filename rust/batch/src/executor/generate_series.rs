@@ -41,14 +41,17 @@ impl BoxedExecutorBuilder for GenerateSeriesI32Executor {
             NodeBody::GenerateInt32Series
         )?;
 
-        Ok(Box::new(Self {
-            start: node.start,
-            stop: node.stop,
-            step: node.step,
-            cur: node.start,
-            schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
-            identity: source.plan_node().get_identity().clone(),
-        }))
+        Ok(Box::new(
+            Self {
+                start: node.start,
+                stop: node.stop,
+                step: node.step,
+                cur: node.start,
+                schema: Schema::new(vec![Field::unnamed(DataType::Int32)]),
+                identity: source.plan_node().get_identity().clone(),
+            }
+            .fuse(),
+        ))
     }
 }
 
