@@ -21,8 +21,8 @@ use risingwave_common::catalog::ColumnId;
 pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::{Keyspace, StateStore};
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
