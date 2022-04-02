@@ -25,6 +25,7 @@ use risingwave_storage::Keyspace;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::test_utils::*;
 use crate::executor::*;
+use crate::executor_v2::{Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2};
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
@@ -118,15 +119,18 @@ async fn create_arrangement(
 
     let keyspace = Keyspace::table_root(memory_state_store, &table_id);
 
-    Box::new(MaterializeExecutor::new(
-        Box::new(source),
-        keyspace,
-        arrangement_col_arrange_rules(),
-        column_ids,
-        1,
-        "ArrangeExecutor".to_string(),
-        vec![],
-    ))
+    Box::new(
+        Box::new(MaterializeExecutorV2::new_from_v1(
+            Box::new(source),
+            keyspace,
+            arrangement_col_arrange_rules(),
+            column_ids,
+            1,
+            "ArrangeExecutor".to_string(),
+            vec![],
+        ))
+        .v1(),
+    )
 }
 
 /// Create a test source.

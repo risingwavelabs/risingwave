@@ -17,14 +17,17 @@ use std::fmt;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use risingwave_common::catalog::ColumnId;
 pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::OrderPair;
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
-use super::{ChainExecutor, Executor, ExecutorInfo, FilterExecutor};
+use super::{ChainExecutor, Executor, ExecutorInfo, FilterExecutor, MaterializeExecutor};
 use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
@@ -152,6 +155,27 @@ impl ChainExecutor {
             notifier,
             actor_id,
             info,
+        )
+    }
+}
+
+impl<S: StateStore> MaterializeExecutor<S> {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        keyspace: Keyspace<S>,
+        keys: Vec<OrderPair>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        Self::new(
+            Box::new(ExecutorV1AsV2(input)),
+            keyspace,
+            keys,
+            column_ids,
+            executor_id,
+            key_indices,
         )
     }
 }
