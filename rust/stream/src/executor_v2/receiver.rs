@@ -1,10 +1,7 @@
-use async_stream::stream;
 use futures::channel::mpsc::Receiver;
-use futures::{Stream, StreamExt};
-use futures_async_stream::try_stream;
+use futures::StreamExt;
 use risingwave_common::catalog::Schema;
 
-use crate::executor_v2::error::TracedStreamExecutorError;
 use crate::executor_v2::{
     BoxedMessageStream, Executor, ExecutorInfo, Message, PkIndices, PkIndicesRef,
 };
@@ -42,7 +39,7 @@ impl ReceiverExecutor {
 
 impl Executor for ReceiverExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.execute_inner().boxed()
+        self.receiver.map(Ok).boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -55,25 +52,5 @@ impl Executor for ReceiverExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
-    }
-}
-
-impl ReceiverExecutor {
-    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
-    async fn execute_inner(self) {
-        let stream = Self::stream(self.receiver);
-        #[for_await]
-        for val in stream {
-            yield val;
-        }
-    }
-
-    /// Drains message in receiver and convert it into stream.
-    fn stream(recv: Receiver<Message>) -> impl Stream<Item = Message> {
-        stream! {
-            for await value in recv {
-                yield value;
-            }
-        }
     }
 }
