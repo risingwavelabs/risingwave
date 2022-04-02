@@ -643,10 +643,10 @@ impl fmt::Display for ShowCreateObject {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowCommandObject {
-    Table,
+    Table(Option<String>),
     Database,
     Schema,
-    View,
+    View(Option<String>),
     Column(ObjectName),
 }
 
@@ -655,9 +655,11 @@ impl fmt::Display for ShowCommandObject {
         match self {
             ShowCommandObject::Database => f.write_str("DATABASES"),
             ShowCommandObject::Schema => f.write_str("SCHEMAS"),
-            ShowCommandObject::View => f.write_str("VIEWS"),
-            ShowCommandObject::Table => f.write_str("TABLES"),
-            ShowCommandObject::Column(names) => write!(f, "COLUMNS FROM {}", names),
+            ShowCommandObject::View(None) => f.write_str("VIEWS"),
+            ShowCommandObject::Table(None) => f.write_str("TABLES"),
+            ShowCommandObject::View(Some(name)) => write!(f, "VIEWS FROM {}", name),
+            ShowCommandObject::Table(Some(name)) => write!(f, "TABLES FROM {}", name),
+            ShowCommandObject::Column(name) => write!(f, "COLUMNS FROM {}", name),
         }
     }
 }

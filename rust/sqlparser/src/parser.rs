@@ -2498,7 +2498,9 @@ impl Parser {
         if let Token::Word(w) = self.next_token() {
             match w.keyword {
                 Keyword::TABLES => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Table));
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Table(
+                        self.parse_from_identifier()?,
+                    )));
                 }
                 Keyword::DATABASES => {
                     return Ok(Statement::ShowCommand(ShowCommandObject::Database));
@@ -2508,13 +2510,17 @@ impl Parser {
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowCommand(ShowCommandObject::View));
+                        return Ok(Statement::ShowCommand(ShowCommandObject::View(
+                            self.parse_from_identifier()?,
+                        )));
                     } else {
                         return self.expected("views after materialized", self.peek_token());
                     }
                 }
                 Keyword::VIEWS => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::View));
+                    return Ok(Statement::ShowCommand(ShowCommandObject::View(
+                        self.parse_from_identifier()?,
+                    )));
                 }
                 Keyword::SOURCE => {
                     return Ok(Statement::ShowSource {
@@ -2528,6 +2534,14 @@ impl Parser {
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
+    }
+
+    pub fn parse_from_identifier(&mut self) -> Result<Option<String>, ParserError> {
+        if self.parse_keyword(Keyword::FROM) {
+            Ok(Some(self.parse_identifier()?.value))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {
