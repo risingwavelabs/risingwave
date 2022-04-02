@@ -731,7 +731,8 @@ mod tests {
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
-    use crate::executor::ReceiverExecutor;
+    use crate::executor_v2::receiver::ReceiverExecutor;
+    use crate::executor_v2::Executor;
     use crate::task::{LOCAL_OUTPUT_CHANNEL_SIZE, LOCAL_TEST_ADDR};
 
     #[derive(Debug)]
@@ -896,19 +897,14 @@ mod tests {
     async fn test_configuration_change() {
         let schema = Schema { fields: vec![] };
         let (mut tx, rx) = channel(16);
-        let input = Box::new(ReceiverExecutor::new(
-            schema.clone(),
-            vec![],
-            rx,
-            "ReceiverExecutor".to_string(),
-        ));
+        let input = Box::new(ReceiverExecutor::new(schema.clone(), vec![], rx)).v1();
         let data_sink = Arc::new(Mutex::new(vec![]));
         let actor_id = 233;
         let output = Box::new(MockOutput::new(actor_id, data_sink));
         let ctx = Arc::new(SharedContext::for_test());
 
         let mut executor = Box::new(DispatchExecutor::new(
-            input,
+            Box::new(input),
             DispatcherImpl::Simple(SimpleDispatcher::new(output)),
             actor_id,
             ctx.clone(),

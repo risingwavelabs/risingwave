@@ -38,6 +38,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
@@ -642,12 +643,14 @@ impl LocalStreamManagerCore {
         let mut rxs = self.get_receive_message(params.actor_id, upstreams)?;
 
         if upstreams.len() == 1 {
-            Ok(Box::new(ReceiverExecutor::new(
-                schema,
-                params.pk_indices,
-                rxs.remove(0),
-                params.op_info,
-            )))
+            Ok(Box::new(
+                Box::new(ReceiverExecutor::new(
+                    schema,
+                    params.pk_indices,
+                    rxs.remove(0),
+                ))
+                .v1(),
+            ))
         } else {
             Ok(Box::new(
                 Box::new(MergeExecutorV2::new(
