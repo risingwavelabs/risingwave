@@ -32,7 +32,7 @@ mod v1_compat;
 
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
-pub use mview::MaterializeExecutor;
+pub use mview::*;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 
