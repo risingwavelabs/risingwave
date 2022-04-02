@@ -31,8 +31,8 @@ pub async fn handle_show_command(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowCommandObject::Table(Some(name)) => {
-            catalog_reader.get_all_table_names(session.database(), &name)?
+        ShowCommandObject::Table(Some(ident)) => {
+            catalog_reader.get_all_table_names(session.database(), &ident.value)?
         }
         ShowCommandObject::Table(None) => {
             catalog_reader.get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
@@ -40,8 +40,8 @@ pub async fn handle_show_command(
         ShowCommandObject::Database => catalog_reader.get_all_database_names()?,
         ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowCommandObject::View(Some(name)) => {
-            catalog_reader.get_all_mv_names(session.database(), &name)?
+        ShowCommandObject::View(Some(ident)) => {
+            catalog_reader.get_all_mv_names(session.database(), &ident.value)?
         }
         ShowCommandObject::View(None) => {
             catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?

@@ -643,10 +643,10 @@ impl fmt::Display for ShowCreateObject {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowCommandObject {
-    Table(Option<String>),
+    Table(Option<Ident>),
     Database,
     Schema,
-    View(Option<String>),
+    View(Option<Ident>),
     Column(ObjectName),
 }
 

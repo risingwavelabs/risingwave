@@ -1,11 +1,59 @@
-SHOW TABLE t
----
-SHOW TABLE t
-=>
-ShowTable { name: ObjectName([Ident { value: "t", quote_style: None }]) }
-
 SHOW SOURCE t
 ---
 SHOW SOURCE t
 =>
 ShowSource { name: ObjectName([Ident { value: "t", quote_style: None }]) }
+
+SHOW DATABASES
+---
+SHOW DATABASES
+=>
+ShowCommand(Database)
+
+SHOW SCHEMAS
+---
+SHOW SCHEMAS
+=>
+ShowCommand(Schema)
+
+SHOW TABLES
+---
+SHOW TABLES
+=>
+ShowCommand(Table(None))
+
+SHOW TABLES FROM t
+---
+SHOW TABLES FROM t
+=>
+ShowCommand(Table(Some(Ident { value: "t", quote_style: None })))
+
+SHOW VIEWS
+---
+SHOW VIEWS
+=>
+ShowCommand(View(None))
+
+SHOW VIEWS FROM t
+---
+SHOW VIEWS FROM t
+=>
+ShowCommand(View(Some(Ident { value: "t", quote_style: None })))
+
+SHOW MATERIALIZED VIEWS
+---
+SHOW VIEWS
+=>
+ShowCommand(View(None))
+
+SHOW MATERIALIZED VIEWS FROM t
+---
+SHOW VIEWS FROM t
+=>
+ShowCommand(View(Some(Ident { value: "t", quote_style: None })))
+
+DESCRIBE TABLE schema.t
+---
+DESCRIBE TABLE schema.t
+=>
+DescribeTable { name: ObjectName([Ident { value: "schema", quote_style: None }, Ident { value: "t", quote_style: None }]) }
