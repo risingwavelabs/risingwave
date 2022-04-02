@@ -37,6 +37,7 @@ use tokio::task::JoinHandle;
 
 use super::{CollectResult, ComputeClientPool};
 use crate::executor::*;
+use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor as MergeExecutorV2};
 use crate::task::{
     ActorId, ConsumableChannelPair, SharedContext, StreamEnvironment, UpDownActorIds,
     LOCAL_OUTPUT_CHANNEL_SIZE,
@@ -647,13 +648,15 @@ impl LocalStreamManagerCore {
                 params.op_info,
             )))
         } else {
-            Ok(Box::new(MergeExecutor::new(
-                schema,
-                params.pk_indices,
-                params.actor_id,
-                rxs,
-                params.op_info,
-            )))
+            Ok(Box::new(
+                Box::new(MergeExecutorV2::new(
+                    schema,
+                    params.pk_indices,
+                    params.actor_id,
+                    rxs,
+                ))
+                .v1(),
+            ))
         }
     }
 

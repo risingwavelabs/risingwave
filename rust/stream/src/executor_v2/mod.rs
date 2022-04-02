@@ -25,6 +25,7 @@ pub use super::executor::{
 mod chain;
 mod filter;
 pub(crate) mod mview;
+mod merge;
 #[allow(dead_code)]
 mod rearranged_chain;
 mod simple;
@@ -35,6 +36,7 @@ mod v1_compat;
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use mview::*;
+pub use merge::MergeExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 
