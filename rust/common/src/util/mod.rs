@@ -23,6 +23,7 @@ pub mod addr;
 pub mod bit_util;
 pub mod chunk_coalesce;
 pub mod encoding_for_comparison;
+pub mod env_var;
 pub mod hash_util;
 pub mod ordered;
 pub mod prost;
