@@ -18,10 +18,10 @@ use std::mem::take;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::expr::BoxedExpression;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
@@ -441,10 +441,10 @@ mod tests {
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk, F32Array, F64Array, I32Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
-    use risingwave_common::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_common::expr::{BoxedExpression, InputRefExpression};
     use risingwave_common::hash::Key32;
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
+    use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::hash_join::{EquiJoinParams, HashJoinExecutor};
