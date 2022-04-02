@@ -4,6 +4,7 @@ version = "0.1.4"
 edition = "2021"
 
 [dependencies]
+fail = "0.5"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -71,9 +72,10 @@ criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
 
-# [features]
-# rocksdb-local = ["rocksdb"]
-# tikv = ["tikv-client"]
+[features]
+default = ["fail/failpoints"]
+#rocksdb-local = ["rocksdb"]
+#tikv = ["tikv-client"]
 
 [[bench]]
 name = "bench_block_iter"

@@ -59,24 +59,14 @@ mod tests {
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::VacuumTask;
-
-    use crate::hummock::iterator::test_utils::default_builder_opt_for_test;
+    use crate::hummock::iterator::test_utils::{default_builder_opt_for_test, mock_sstable_store};
+    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
-    use crate::hummock::SstableStore;
-    use crate::monitor::StateStoreMetrics;
-    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     #[tokio::test]
     async fn test_vacuum_tracked_data() {
-        let sstable_store = Arc::new(SstableStore::new(
-            Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new())),
-            String::from("test_dir"),
-            Arc::new(StateStoreMetrics::unused()),
-            64 << 20,
-            64 << 20,
-        ));
-
+        let sstable_store_ref = mock_sstable_store();
         // Put some SSTs to object store
         let sst_ids = (1..10).collect_vec();
         let mut sstables = vec![];

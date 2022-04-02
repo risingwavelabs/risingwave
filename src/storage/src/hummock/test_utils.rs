@@ -91,19 +91,27 @@ pub fn gen_test_sstable_data(
 }
 
 /// Generates a test table from the given `kv_iter` and put the kv value to `sstable_store`
+pub async fn gen_test_sstable_inner(
+    opts: SSTableBuilderOptions,
+    sst_id: u64,
+    kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
+    sstable_store: SstableStoreRef,
+    poliy: CachePolicy,
+) -> Sstable {
+    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
+    let sst = Sstable { id: sst_id, meta };
+    sstable_store.put(&sst, data, poliy).await.unwrap();
+    sst
+}
+
+/// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
 pub async fn gen_test_sstable(
     opts: SSTableBuilderOptions,
     sst_id: u64,
     kv_iter: impl Iterator<Item = (Vec<u8>, HummockValue<Vec<u8>>)>,
     sstable_store: SstableStoreRef,
 ) -> Sstable {
-    let (data, meta) = gen_test_sstable_data(opts, kv_iter);
-    let sst = Sstable { id: sst_id, meta };
-    sstable_store
-        .put(&sst, data, CachePolicy::Fill)
-        .await
-        .unwrap();
-    sst
+    gen_test_sstable_inner(opts, sst_id, kv_iter, sstable_store, CachePolicy::Fill).await
 }
 
 /// The key (with epoch 0) of an index in the test table

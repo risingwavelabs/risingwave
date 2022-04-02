@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::ensure;
@@ -33,12 +34,18 @@ pub struct InMemObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
+        fail_point!("mem_upload_err", |_| Err(RwError::from(InternalError(
+            format!("mem upload worry")
+        ))));
         ensure!(!obj.is_empty());
         self.objects.lock().await.insert(path.into(), obj);
         Ok(())
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
+        fail_point!("mem_read_err", |_| Err(RwError::from(InternalError(
+            format!("mem read worry")
+        ))));
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
@@ -60,6 +67,9 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn delete(&self, path: &str) -> Result<()> {
+        fail_point!("mem_delete_err", |_| Err(RwError::from(InternalError(
+            format!("mem delete worry")
+        ))));
         self.objects.lock().await.remove(path);
         Ok(())
     }

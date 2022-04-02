@@ -23,8 +23,9 @@ mod test {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_iterator_test_sstable_base,
+        gen_iterator_test_sstable_base_without_buff, iterator_test_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
     use crate::hummock::sstable::SSTableIterator;
@@ -213,5 +214,49 @@ mod test {
             mi.next().await.unwrap();
         }
         assert_eq!(count, TEST_KEYS_COUNT * 2);
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "failpoints")]
+    async fn test_merge_failpoint_invalid_key() {
+        let mem_read_err = "mem_read_err";
+        let sstable_store = mock_sstable_store();
+        let table0 = gen_iterator_test_sstable_base_without_buff(
+            0,
+            default_builder_opt_for_test(),
+            |x| x,
+            sstable_store.clone(),
+            200,
+        )
+        .await;
+        let table1 = gen_iterator_test_sstable_base_without_buff(
+            1,
+            default_builder_opt_for_test(),
+            |x| 200 + x,
+            sstable_store.clone(),
+            200,
+        )
+        .await;
+        let tables = vec![Arc::new(table0), Arc::new(table1)];
+        let mut mi = MergeIterator::new(
+            tables.iter().map(|table| -> Box<dyn HummockIterator> {
+                Box::new(SSTableIterator::new(table.clone(), sstable_store.clone()))
+            }),
+            Arc::new(StateStoreMetrics::unused()),
+        );
+        mi.rewind().await.unwrap();
+        let mut count = 0;
+        fail::cfg(mem_read_err, "return").unwrap();
+        while mi.is_valid() {
+            count += 1;
+            match mi.next().await {
+                Err(_) => {
+                    assert!(count < 200 * 2);
+                }
+                Ok(_) => {}
+            };
+        }
+        fail::remove(mem_read_err);
+        assert!(count < 200 * 2);
     }
 }

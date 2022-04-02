@@ -21,8 +21,8 @@ use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
-use crate::hummock::test_utils::gen_test_sstable;
-use crate::hummock::{sstable_store, HummockValue, SSTableBuilderOptions, Sstable};
+use crate::hummock::test_utils::{gen_test_sstable, gen_test_sstable_inner};
+use crate::hummock::{sstable_store, CachePolicy, HummockValue, SSTableBuilderOptions, Sstable};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
@@ -91,6 +91,28 @@ pub async fn gen_iterator_test_sstable_base(
             )
         }),
         sstable_store,
+    )
+    .await
+}
+
+pub async fn gen_iterator_test_sstable_base_without_buff(
+    sst_id: u64,
+    opts: SSTableBuilderOptions,
+    idx_mapping: impl Fn(usize) -> usize,
+    sstable_store: SstableStoreRef,
+    total: usize,
+) -> Sstable {
+    gen_test_sstable_inner(
+        opts,
+        sst_id,
+        (0..total).map(|i| {
+            (
+                iterator_test_key_of(idx_mapping(i)),
+                HummockValue::Put(iterator_test_value_of(idx_mapping(i))),
+            )
+        }),
+        sstable_store,
+        CachePolicy::NotFill,
     )
     .await
 }
