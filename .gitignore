@@ -28,17 +28,17 @@ legacy/**/build
 legacy/**/bin
 
 # Rust
-rust/**/target
-rust/**/target_tarpaulin
-rust/proto/
-rust/prost/src/*.rs
-!rust/prost/src/lib.rs
-!rust/prost/src/imp.rs
+src/**/target
+src/**/target_tarpaulin
+src/proto/
+src/prost/src/*.rs
+!src/prost/src/lib.rs
+!src/prost/src/imp.rs
 **/file_descriptor_set.bin
 # runtime log
-rust/log/
-# rusty-tags
-**/rusty-tags.vi
+src/log/
+# srcy-tags
+**/srcy-tags.vi
 
 # ctags
 **/tags

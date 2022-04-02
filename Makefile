@@ -59,13 +59,13 @@ rust_test_with_coverage:
 	exit 1
 
 rust_build:
-	cd rust && cargo build
+	cd src && cargo build
 
 rust_clean:
-	cd rust && cargo clean
+	cd src && cargo clean
 
 rust_clean_build:
-	cd rust && cargo clean && cargo build
+	cd src && cargo clean && cargo build
 
 rust_doc:
 	echo "This command is deprecated. Use ./risedev docs instead."
@@ -73,7 +73,7 @@ rust_doc:
 
 # state store bench
 ss_bench_build:
-	cd rust && cargo build --workspace --bin ss-bench
+	cd src && cargo build --workspace --bin ss-bench
 
 sqllogictest:
 	cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin

@@ -22,7 +22,7 @@ dependencies = [
 script = '''
 #!/bin/bash
 set -e
-cd rust/frontend/test_runner/tests/testdata/
+cd src/frontend/test_runner/tests/testdata/
 
 for f in *.apply.yaml
 do
@@ -41,7 +41,7 @@ dependencies = [
 script = '''
 #!/bin/bash
 set -e
-cd rust/frontend/test_runner/tests/testdata/
+cd src/frontend/test_runner/tests/testdata/
 
 for f in *.apply.yaml
 do

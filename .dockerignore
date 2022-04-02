@@ -27,14 +27,14 @@ go/bin/
 legacy/**/build
 
 # Rust
-rust/**/target
-rust/**/target_tarpaulin
-rust/proto/
-rust/prost/src/*.rs
-!rust/prost/src/lib.rs
+src/**/target
+src/**/target_tarpaulin
+src/proto/
+src/prost/src/*.rs
+!src/prost/src/lib.rs
 **/file_descriptor_set.bin
 # runtime log
-rust/log/
+src/log/
 # rusty-tags
 **/rusty-tags.vi
 
