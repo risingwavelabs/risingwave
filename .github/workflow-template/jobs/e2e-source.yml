@@ -111,9 +111,9 @@ jobs:
           psql --version
           RUST_LOG=info timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
-            --input `pwd`/tests/regress/data \
-            --output `pwd`/tests/regress/output \
-            --schedule `pwd`/tests/regress/data/schedule
+            --input `pwd`/src/tests/regress/data \
+            --output `pwd`/src/tests/regress/output \
+            --schedule `pwd`/src/tests/regress/data/schedule
 
       - name: Kill cluster
         run: |
