@@ -32,6 +32,7 @@ end
 ]
 
 [env]
+CARGO_MAKE_EXTEND_WORKSPACE_MAKEFILE = true
 RISEDEV_CARGO_BUILD_FEATURES = { value = "all-in-one", condition = { env_set = ["ENABLE_ALL_IN_ONE"] } }
 
 [config]
