@@ -36,14 +36,14 @@ jobs:
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          cd src && cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --locked -- -D warnings
 
       - name: Run rust test with coverage
         run: |
-          cd src && cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
 
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: src
+          directory: .
           flags: rust

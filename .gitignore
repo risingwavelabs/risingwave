@@ -30,6 +30,7 @@ legacy/**/bin
 # Rust
 src/**/target
 src/**/target_tarpaulin
+target/
 src/proto/
 src/prost/src/*.rs
 !src/prost/src/lib.rs
