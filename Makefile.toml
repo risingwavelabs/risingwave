@@ -9,7 +9,7 @@ extend = [
 ]
 
 env_files = [
-  "risedev-components.user.env"
+  "./risedev-components.user.env"
 ]
 
 
