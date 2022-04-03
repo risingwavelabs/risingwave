@@ -26,7 +26,7 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{Executor as ExecutorV2, MergeExecutor};
+use crate::executor_v2::{Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor};
 use crate::task::{ActorHandle, SharedContext};
 
 pub struct MockConsumer {
@@ -70,25 +70,28 @@ async fn test_merger_sum_aggr() {
         };
         let input = Box::new(ReceiverExecutor::new(schema, vec![], input_rx)).v1();
         // for the local aggregator, we need two states: row count and sum
-        let aggregator = LocalSimpleAggExecutor::new(
-            Box::new(input),
-            vec![
-                AggCall {
-                    kind: AggKind::RowCount,
-                    args: AggArgs::None,
-                    return_type: DataType::Int64,
-                },
-                AggCall {
-                    kind: AggKind::Sum,
-                    args: AggArgs::Unary(DataType::Int64, 0),
-                    return_type: DataType::Int64,
-                },
-            ],
-            vec![],
-            1,
-            "LocalSimpleAggExecutor".to_string(),
+        let aggregator = Box::new(
+            LocalSimpleAggExecutor::new_from_v1(
+                Box::new(input),
+                vec![
+                    AggCall {
+                        kind: AggKind::RowCount,
+                        args: AggArgs::None,
+                        return_type: DataType::Int64,
+                    },
+                    AggCall {
+                        kind: AggKind::Sum,
+                        args: AggArgs::Unary(DataType::Int64, 0),
+                        return_type: DataType::Int64,
+                    },
+                ],
+                vec![],
+                1,
+                "LocalSimpleAggExecutor".to_string(),
+            )
+            .unwrap(),
         )
-        .unwrap();
+        .v1();
         let (tx, rx) = channel(16);
         let consumer =
             SenderConsumer::new(Box::new(aggregator), Box::new(LocalOutput::new(233, tx)));
