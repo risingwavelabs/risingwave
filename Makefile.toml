@@ -105,9 +105,9 @@ set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend-v2"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
 '''
 
 [tasks.link-all-in-one-binaries]
@@ -120,11 +120,11 @@ set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
 mkdir -p "${PREFIX_BIN}/risingwave"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
 '''
 
 [tasks.link-user-bin]
@@ -137,11 +137,11 @@ set -e
 
 rm -rf "${PREFIX_USR_BIN}"
 mkdir -p "${PREFIX_USR_BIN}"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
-ln -s "$(pwd)/src/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
 '''
 
 [tasks.post-build-risingwave]
@@ -306,7 +306,7 @@ category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "src/target/${BUILD_MODE_DIR}/risedev-playground"
+command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Start a full RisingWave dev cluster using risedev-playground"
 
@@ -506,7 +506,7 @@ dependencies = [
   "clean-data",
   "pre-start-playground"
 ]
-command = "src/target/${BUILD_MODE_DIR}/risedev-playground"
+command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
 
