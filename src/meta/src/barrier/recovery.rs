@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
+use futures::future::try_join_all;
 use log::debug;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview;
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
+    UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -24,14 +29,17 @@ use crate::barrier::command::CommandContext;
 use crate::barrier::info::BarrierActorInfo;
 use crate::barrier::{Command, GlobalBarrierManager};
 use crate::manager::Epoch;
+use crate::model::ActorId;
 use crate::storage::MetaStore;
+
+pub type RecoveryResult = (Epoch, HashSet<ActorId>, Vec<FinishedCreateMview>);
 
 impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: u64, prev_command: &Command) -> Epoch {
+    pub(crate) async fn recovery(&self, prev_epoch: u64, prev_command: &Command) -> RecoveryResult {
         let new_epoch = self.env.epoch_generator().generate();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
@@ -51,6 +59,12 @@ where
                 continue;
             }
 
+            // Refresh sources in local source manger of compute node.
+            if self.sync_sources(&info).await.is_err() {
+                debug!("sync_sources failed");
+                continue;
+            }
+
             // update and build all actors.
             if self.update_actors(&info).await.is_err() || self.build_actors(&info).await.is_err() {
                 continue;
@@ -65,17 +79,24 @@ where
                 new_epoch.into_inner(),
                 Command::checkpoint(),
             );
-            if self.inject_barrier(&command_ctx).await.is_err()
-                || command_ctx.post_collect().await.is_err()
-            {
+
+            let responses = self.inject_barrier(&command_ctx).await;
+
+            if responses.is_err() || command_ctx.post_collect().await.is_err() {
                 continue;
             }
 
             debug!("recovery success");
-            break;
+            return (
+                new_epoch,
+                Default::default(), // TODO: replace with all chain actors.
+                responses
+                    .unwrap()
+                    .into_iter()
+                    .flat_map(|r| r.finished_create_mviews)
+                    .collect(),
+            );
         }
-
-        new_epoch
     }
 
     /// Clean up previous command dirty data. Currently, we only need to handle table fragments info
@@ -93,6 +114,34 @@ where
                 tokio::time::sleep(Self::RECOVERY_RETRY_INTERVAL).await;
             }
         }
+    }
+
+    /// Sync all sources in compute nodes, the local source manager in compute nodes may be dirty
+    /// already.
+    async fn sync_sources(&self, info: &BarrierActorInfo) -> Result<()> {
+        // Attention, using catalog v2 here, it's not compatible with Java frontend.
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let sources = catalog_guard.list_sources().await?;
+
+        let futures = info.node_map.iter().map(|(_, node)| {
+            let request = SyncSourcesRequest {
+                sources: sources.clone(),
+            };
+            async move {
+                let client = &self.env.stream_clients().get(node).await?;
+                client
+                    .to_owned()
+                    .sync_sources(request)
+                    .await
+                    .to_rw_result()?;
+
+                Ok::<_, RwError>(())
+            }
+        });
+
+        try_join_all(futures).await?;
+
+        Ok(())
     }
 
     /// Update all actors in compute nodes.
@@ -191,7 +240,7 @@ where
                 }
             }
         }
-        debug!("all compute nodes have been restarted.");
+        debug!("all compute nodes have been reset.");
         Ok(())
     }
 }

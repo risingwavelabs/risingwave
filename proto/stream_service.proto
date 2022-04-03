@@ -101,9 +101,11 @@ message DropSourceResponse {
   common.Status status = 1;
 }
 
-message ShutdownRequest {}
+message SyncSourcesRequest {
+  repeated catalog.Source sources = 1;
+}
 
-message ShutdownResponse {
+message SyncSourcesResponse {
   common.Status status = 1;
 }
 
@@ -115,8 +117,8 @@ service StreamService {
   rpc ForceStopActors(ForceStopActorsRequest) returns (ForceStopActorsResponse);
   rpc InjectBarrier(InjectBarrierRequest) returns (InjectBarrierResponse);
   rpc CreateSource(CreateSourceRequest) returns (CreateSourceResponse);
+  rpc SyncSources(SyncSourcesRequest) returns (SyncSourcesResponse);
   rpc DropSource(DropSourceRequest) returns (DropSourceResponse);
-  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 // TODO: Lifecycle management for actors.

@@ -272,6 +272,7 @@ where
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
     pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
+        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
         self.barrier_manager
             .run_command(Command::DropMaterializedView(table_id.clone()))
             .await?;
@@ -324,7 +325,7 @@ mod tests {
     use crate::barrier::GlobalBarrierManager;
     use crate::cluster::ClusterManager;
     use crate::hummock::HummockManager;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{CatalogManager, MetaSrvEnv};
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
@@ -417,17 +418,17 @@ mod tests {
             unimplemented!()
         }
 
-        async fn shutdown(
-            &self,
-            _request: Request<ShutdownRequest>,
-        ) -> std::result::Result<Response<ShutdownResponse>, Status> {
-            unimplemented!()
-        }
-
         async fn force_stop_actors(
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
+            unimplemented!()
+        }
+
+        async fn sync_sources(
+            &self,
+            _request: Request<SyncSourcesRequest>,
+        ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
             unimplemented!()
         }
     }
@@ -477,6 +478,7 @@ mod tests {
                 .await?;
             cluster_manager.activate_worker_node(host).await?;
 
+            let catalog_manager = Arc::new(CatalogManager::new(env.clone()).await?);
             let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
             let meta_metrics = Arc::new(MetaMetrics::new());
             let hummock_manager = Arc::new(
@@ -486,6 +488,7 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
+                catalog_manager,
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),

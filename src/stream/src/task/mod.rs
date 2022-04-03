@@ -25,13 +25,11 @@ use crate::executor::Message;
 mod barrier_manager;
 mod compute_client_pool;
 mod env;
-mod observer_manager;
 mod stream_manager;
 
 pub use barrier_manager::*;
 pub use compute_client_pool::*;
 pub use env::*;
-pub use observer_manager::*;
 pub use stream_manager::*;
 
 #[cfg(test)]

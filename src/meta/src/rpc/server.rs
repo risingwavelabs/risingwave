@@ -47,7 +47,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
+use crate::stream::{FragmentManager, GlobalSourceManager, GlobalStreamManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -140,7 +140,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     }
 
     let catalog_manager = Arc::new(
-        StoredCatalogManager::new(meta_store.clone(), env.notification_manager_ref())
+        StoredCatalogManager::new(meta_store, env.notification_manager_ref())
             .await
             .unwrap(),
     );
@@ -149,6 +149,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     let barrier_manager = Arc::new(GlobalBarrierManager::new(
         env.clone(),
         cluster_manager.clone(),
+        catalog_manager_v2.clone(),
         fragment_manager.clone(),
         hummock_manager.clone(),
         meta_metrics.clone(),
@@ -176,9 +177,13 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     ));
 
     let source_manager = Arc::new(
-        SourceManager::new(meta_store, barrier_manager.clone())
-            .await
-            .unwrap(),
+        GlobalSourceManager::new(
+            env.clone(),
+            cluster_manager.clone(),
+            barrier_manager.clone(),
+        )
+        .await
+        .unwrap(),
     );
 
     {
@@ -195,16 +200,16 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         env.clone(),
         catalog_manager_v2.clone(),
         stream_manager.clone(),
+        source_manager,
         cluster_manager.clone(),
         fragment_manager.clone(),
     );
     let cluster_srv = ClusterServiceImpl::<S>::new(cluster_manager.clone());
     let stream_srv = StreamServiceImpl::<S>::new(
+        env.clone(),
         stream_manager,
         fragment_manager.clone(),
         cluster_manager.clone(),
-        source_manager,
-        env.clone(),
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
