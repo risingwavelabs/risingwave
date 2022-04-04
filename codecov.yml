@@ -14,11 +14,11 @@ coverage:
       rust:
         only_pulls: true # no status will be posted for commits not on a pull request
         paths:
-          - "rust/"
+          - "src/"
         target: auto # compared with the coverage from the base commit
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
 comment:
   # do not comment until 2 builds collected (java & rust)
   after_n_builds: 2
 ignore:
-  - "rust/risedevtooltool"
+  - "src/risedevtooltool"

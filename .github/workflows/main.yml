@@ -21,6 +21,7 @@ env:
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
+  PROTOC_NO_VENDOR: true
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -224,7 +225,7 @@ jobs:
         name: Download risingwave binary
         with:
           name: risingwave-dev
-          path: ./rust/target/debug
+          path: ./target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
@@ -234,11 +235,11 @@ jobs:
         name: Download playground binary
         with:
           name: risedev-playground-dev
-          path: ./rust/target/debug
+          path: ./target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./rust/target/debug/risingwave
-          chmod +x ./rust/target/debug/risedev-playground
+          chmod +x ./target/debug/risingwave
+          chmod +x ./target/debug/risedev-playground
       - name: Install required components
         run: |
           apt-get update -yy -o Acquire::Retries=3
@@ -329,7 +330,7 @@ jobs:
         name: Download risingwave binary
         with:
           name: risingwave-release
-          path: ./rust/target/debug
+          path: ./target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
@@ -339,11 +340,11 @@ jobs:
         name: Download playground binary
         with:
           name: risedev-playground-release
-          path: ./rust/target/debug
+          path: ./target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./rust/target/debug/risingwave
-          chmod +x ./rust/target/debug/risedev-playground
+          chmod +x ./target/debug/risingwave
+          chmod +x ./target/debug/risedev-playground
       - name: Install required components
         run: |
           apt-get update -yy -o Acquire::Retries=3
@@ -456,7 +457,7 @@ jobs:
         name: Download risingwave binary
         with:
           name: risingwave-dev
-          path: ./rust/target/debug
+          path: ./target/debug
       - uses: actions/download-artifact@v2
         name: Download frontend binary
         with:
@@ -466,17 +467,17 @@ jobs:
         name: Download playground binary
         with:
           name: risedev-playground-dev
-          path: ./rust/target/debug
+          path: ./target/debug
       - uses: actions/download-artifact@v2
         name: Download risingwave_regress_test binary
         with:
           name: risingwave_regress_test-dev
-          path: ./rust/target/debug
+          path: ./target/debug
       - name: Adjust permission
         run: |
-          chmod +x ./rust/target/debug/risingwave
-          chmod +x ./rust/target/debug/risedev-playground
-          chmod +x ./rust/target/debug/risingwave_regress_test
+          chmod +x ./target/debug/risingwave
+          chmod +x ./target/debug/risedev-playground
+          chmod +x ./target/debug/risingwave_regress_test
       - name: Run batch tests on Postgresql
         run: |
           timeout 10m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
@@ -492,11 +493,11 @@ jobs:
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
-          RUST_LOG=info cd rust && timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
+          RUST_LOG=info timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
-            --input `pwd`/tests/regress/data \
-            --output `pwd`/tests/regress/output \
-            --schedule `pwd`/tests/regress/data/schedule
+            --input `pwd`/src/tests/regress/data \
+            --output `pwd`/src/tests/regress/output \
+            --schedule `pwd`/src/tests/regress/data/schedule
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k
@@ -543,7 +544,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -564,37 +569,34 @@ jobs:
           cargo install cargo-sort cargo-hakari
       - name: Run rust cargo-sort check
         run: |
-          cd rust && cargo sort -c -w
+          cargo sort -c -w
       - name: Run rust cargo-hakari check
         run: |
-          cd rust && cargo hakari verify
+          cargo hakari verify
       - name: Run rust format check
         run: |
-          cd rust && cargo fmt --all -- --check
-      - name: Run rust doc check
-        run: |
-          cd rust && cargo doc --document-private-items
+          cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cd rust && cargo build --profile dev --features=all-in-one
+          cargo build --profile dev --features=all-in-one
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-dev
           if-no-files-found: error
           path: |
-            rust/target/debug/risingwave
+            target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-dev
           if-no-files-found: error
           path: |
-            rust/target/debug/risingwave_regress_test
+            target/debug/risingwave_regress_test
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-dev
           if-no-files-found: error
           path: |
-            rust/target/debug/risedev-playground
+            target/debug/risedev-playground
   compute-node-build-release:
     needs: start-runner-c
     runs-on: ${{ needs.start-runner-c.outputs.label }}
@@ -607,7 +609,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -628,37 +634,34 @@ jobs:
           cargo install cargo-sort cargo-hakari
       - name: Run rust cargo-sort check
         run: |
-          cd rust && cargo sort -c -w
+          cargo sort -c -w
       - name: Run rust cargo-hakari check
         run: |
-          cd rust && cargo hakari verify
+          cargo hakari verify
       - name: Run rust format check
         run: |
-          cd rust && cargo fmt --all -- --check
-      - name: Run rust doc check
-        run: |
-          cd rust && cargo doc --document-private-items
+          cargo fmt --all -- --check
       - name: Build Rust components
         run: |
-          cd rust && cargo build --profile release --features=all-in-one
+          cargo build --profile release --features=all-in-one
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-release
           if-no-files-found: error
           path: |
-            rust/target/release/risingwave
+            target/release/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-release
           if-no-files-found: error
           path: |
-            rust/target/release/risingwave_regress_test
+            target/release/risingwave_regress_test
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-release
           if-no-files-found: error
           path: |
-            rust/target/release/risedev-playground
+            target/release/risedev-playground
   compute-node-test:
     needs:
       - start-runner-b
@@ -672,7 +675,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -692,14 +699,17 @@ jobs:
       - name: Run rust clippy check
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
-          cd rust && cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --all-targets --locked -- -D warnings
+      - name: Run rust doc check
+        run: |
+          cargo doc --document-private-items --no-deps
       - name: Run rust test with coverage
         run: |
-          cd rust && cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
+          cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast
       - uses: codecov/codecov-action@v2
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          directory: rust
+          directory: .
           flags: rust
   misc-check:
     runs-on: ubuntu-latest
