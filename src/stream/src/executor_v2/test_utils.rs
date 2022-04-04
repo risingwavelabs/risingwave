@@ -17,8 +17,8 @@ use std::collections::{HashSet, VecDeque};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_storage::Keyspace;
 use risingwave_storage::memory::MemoryStateStore;
+use risingwave_storage::Keyspace;
 
 use super::error::TracedStreamExecutorError;
 use super::{Barrier, Executor, Message, Mutation, PkIndices, StreamChunk};
