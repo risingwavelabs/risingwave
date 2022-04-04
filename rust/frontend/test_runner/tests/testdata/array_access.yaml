@@ -1,0 +1,6 @@
+- sql: |
+    create table t (a int[][][][]);
+    select t.a from t
+  logical_plan: |
+    LogicalProject { exprs: [$1], expr_alias: [a] }
+      LogicalScan { table: t, columns: [_row_id, a] }

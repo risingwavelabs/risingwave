@@ -57,4 +57,3 @@ sql parser error: Expected ], found: [
 CREATE TABLE t(a int]);
 ---
 sql parser error: Expected ',' or ')' after column definition, found: ]
-                    
