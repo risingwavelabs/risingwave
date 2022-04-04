@@ -26,9 +26,6 @@ use crate::executor_v2::{
 /// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
 /// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].
 pub trait AggExecutor: StatefulExecutor {
-    /// If exists, we should send a Barrier while next called.
-    fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
-
     /// Apply the chunk to the dirty state.
     fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()>;
 
@@ -81,10 +78,6 @@ impl<E> AggExecutor for AggExecutorWrapper<E>
 where
     E: AggExecutor,
 {
-    fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
-        self.inner.cached_barrier_message_mut()
-    }
-
     fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         self.inner.map_chunk(chunk)
     }
@@ -104,36 +97,31 @@ where
         let input = self.input.execute();
         #[for_await]
         for msg in input {
-            if let Some(barrier) = std::mem::take(self.inner.cached_barrier_message_mut()) {
-                yield Message::Barrier(barrier);
-            }
-
             let msg = msg?;
             if self.inner.try_init_executor(&msg).is_some() {
                 // Pass through the first msg directly after initializing theself
                 yield msg;
-            } else {
-                match msg {
-                    Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
-                    Message::Barrier(barrier) if barrier.is_stop_mutation() => {
+            }
+            match msg {
+                Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
+                Message::Barrier(barrier) if barrier.is_stop_mutation() => {
+                    yield Message::Barrier(barrier);
+                    break;
+                }
+                Message::Barrier(barrier) => {
+                    let epoch = barrier.epoch.curr;
+                    if let Some(chunk) = self.inner.flush_data()? {
+                        // Cache the barrier_msg and send it later.
+                        self.inner
+                            .update_executor_state(ExecutorState::Active(epoch));
+                        yield Message::Chunk(chunk);
                         yield Message::Barrier(barrier);
-                    }
-                    Message::Barrier(barrier) => {
-                        let epoch = barrier.epoch.curr;
-                        // TODO: handle epoch rollback, and set cached_barrier_message.
-                        yield if let Some(chunk) = self.inner.flush_data()? {
-                            // Cache the barrier_msg and send it later.
-                            *self.inner.cached_barrier_message_mut() = Some(barrier);
-                            self.inner
-                                .update_executor_state(ExecutorState::Active(epoch));
-                            Message::Chunk(chunk)
-                        } else {
-                            // No fresh data need to flush, just forward the barrier.
-                            self.inner
-                                .update_executor_state(ExecutorState::Active(epoch));
-                            Message::Barrier(barrier)
-                        };
-                    }
+                    } else {
+                        // No fresh data need to flush, just forward the barrier.
+                        self.inner
+                            .update_executor_state(ExecutorState::Active(epoch));
+                        yield Message::Barrier(barrier)
+                    };
                 }
             }
         }

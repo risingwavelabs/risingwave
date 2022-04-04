@@ -62,10 +62,6 @@ pub struct AggLocalSimpleAggExecutor {
     /// Primary key indices.
     pk_indices: PkIndices,
 
-    /// If `next_barrier_message` exists, we should send a Barrier while next called.
-    // TODO: This can be optimized while async gen fn stablized.
-    cached_barrier_message: Option<Barrier>,
-
     /// Aggregation states after last barrier.
     states: Vec<Box<dyn StreamingAggStateImpl>>,
 
@@ -107,7 +103,6 @@ impl AggLocalSimpleAggExecutor {
             },
             schema,
             pk_indices,
-            cached_barrier_message: None,
             states,
             is_dirty: false,
             agg_calls,
@@ -135,10 +130,6 @@ impl Executor for AggLocalSimpleAggExecutor {
 }
 
 impl AggExecutor for AggLocalSimpleAggExecutor {
-    fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier> {
-        &mut self.cached_barrier_message
-    }
-
     fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         self.agg_calls
