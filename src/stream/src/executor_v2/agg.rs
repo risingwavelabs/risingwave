@@ -106,7 +106,7 @@ where
                     Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
                     Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                         yield Message::Barrier(barrier);
-                        break;
+                        ()
                     }
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch.curr;
