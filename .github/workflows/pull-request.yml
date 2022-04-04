@@ -418,9 +418,6 @@ jobs:
       - name: Run rust format check
         run: |
           cargo fmt --all -- --check
-      - name: Run rust doc check
-        run: |
-          cargo doc --document-private-items
       - name: Build Rust components
         run: |
           cargo build --profile dev --features=all-in-one
@@ -476,6 +473,9 @@ jobs:
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
           cargo clippy --all-targets --locked -- -D warnings
+      - name: Run rust doc check
+        run: |
+          cargo doc --document-private-items --no-deps
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast

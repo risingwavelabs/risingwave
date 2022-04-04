@@ -5,8 +5,8 @@ private = true
 script = '''
 #!/bin/bash
 set -e
-cd rust && cargo run --bin planner-test-apply
-cd frontend/test_runner/tests/testdata/
+cargo run --bin planner-test-apply
+cd src/frontend/test_runner/tests/testdata/
 
 for f in *.apply.yaml
 do
