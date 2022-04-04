@@ -2483,8 +2483,8 @@ impl Parser {
         }
     }
 
-    /// First if have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show.
-    /// Return Statement::ShowCommand and Statement::ShowColumn.
+    /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show.
+    /// Return Statement::ShowCommand or Statement::ShowColumn.
     /// If not, return Statement::ShowVariable.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let index = self.index;
@@ -2528,7 +2528,7 @@ impl Parser {
         })
     }
 
-    /// Parser `from schema` after `show tables` and `show mviews`, if not conclude `from` then use
+    /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude `from` then use
     /// default schema name.
     pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
