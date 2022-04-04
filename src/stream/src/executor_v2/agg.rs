@@ -93,6 +93,7 @@ where
 {
     /// An implementation of [`Executor::execute`] for [`AggExecutor`].
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    #[allow(clippy::unused_unit)]
     pub(crate) async fn agg_executor_execute(mut self: Box<Self>) {
         let input = self.input.execute();
         #[for_await]
