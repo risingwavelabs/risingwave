@@ -23,9 +23,8 @@ use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StatefulExecutor,
 };
 
-/// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], and
-/// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`], providing
-/// an implementation of [`Executor::executor`] by [`agg_executor_executor`].
+/// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
+/// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].
 pub trait AggExecutor: StatefulExecutor {
     /// If exists, we should send a Barrier while next called.
     fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
