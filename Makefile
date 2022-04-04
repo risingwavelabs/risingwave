@@ -5,16 +5,16 @@ all: java rust
 java: java_test
 
 java_test:
-	cd java && ./gradlew test
+	cd legacy && ./gradlew test
 
 java_build:
-	cd java && ./gradlew build
+	cd legacy && ./gradlew build
 
 java_check:
-	cd java && ./gradlew check
+	cd legacy && ./gradlew check
 
 java_coverage_report:
-	cd java && ./gradlew jacocoRootReport
+	cd legacy && ./gradlew jacocoRootReport
 
 rust:
 	echo "This command is deprecated. Use ./risedev check instead."
@@ -59,13 +59,13 @@ rust_test_with_coverage:
 	exit 1
 
 rust_build:
-	cd rust && cargo build
+	cd src && cargo build
 
 rust_clean:
-	cd rust && cargo clean
+	cd src && cargo clean
 
 rust_clean_build:
-	cd rust && cargo clean && cargo build
+	cd src && cargo clean && cargo build
 
 rust_doc:
 	echo "This command is deprecated. Use ./risedev docs instead."
@@ -73,7 +73,7 @@ rust_doc:
 
 # state store bench
 ss_bench_build:
-	cd rust && cargo build --workspace --bin ss-bench
+	cd src && cargo build --workspace --bin ss-bench
 
 sqllogictest:
 	cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features bin

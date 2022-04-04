@@ -4,115 +4,72 @@
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave)
 
-## Download
-Run:
-```shell
-git clone https://github.com/singularity-data/risingwave.git
-```
+## Quick Start
 
-## Environment
+### Installation
 
-* OS: macOS, Linux
-* Java 11
-* Rust
-* CMake
-* Protocol Buffers
-* OpenSSL
-* PostgreSQL (psql) (>= 14.1)
+You may start RisingWave with our pre-built binary, or build from source.
 
-To install components in macOS, run:
+**Use Pre-built Binary (Linux x86_64)**
 
 ```shell
-brew install java11
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-brew install cmake
-brew install protobuf
-brew install openssl
+wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4/risingwave-v0.1.4-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.4-unknown-linux.tar.gz
+./risingwave playground
 ```
 
-Note that we only tested our code against Java 11. So please use the specific version!
-
-## Development
-
-You should have already seen multiple folders in our repo:
-- The `java` folder contains the system's frontend code. The frontend includes parser, binder, planner,
-optimizer, and other components. We use Calcite to serve as our query optimizer.
-- The `rust` folder contains the system's backend code. The backend includes the streaming engine, OLAP
-engine, storage engine and meta service.
-- The `e2e_test` folder contains the latest end-to-end test cases.
-
-### RiseDev
-
-RiseDev is the tool for developing RisingWave. Using RiseDev requires tmux.
+**Build from Source (macOS, Linux)**
 
 ```shell
-brew install tmux
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh                 # Install Rust toolchain
+git clone https://github.com/singularity-data/risingwave.git && cd risingwave  # Clone the repo
+./risedev playground                                                           # Compile and start the playground
 ```
 
-Then, in the root directory, simply run:
+Building from source requires several tools to be installed in the system. You may also use `./risedev configure` to adjust compile settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+
+If you want to start a full cluster, enable metrics, and persist data, you may also refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+
+### The First Query
+
+To connect to the RisingWave server, you will need to install Postgres client in advance.
 
 ```shell
-./risedev d # shortcut for ./risedev dev
-psql -h localhost -p 4567 -d dev
+psql -h localhost -p 4566 -d dev
 ```
 
-Everything will be set for you.
+```sql
+/* create a table */
+create table t1(v1 int not null);
 
-There are a lot of other running configurations, like `ci-1node`, `ci-3node`, `dev-compute-node`. You may find more in `./risedev --help`.
+/* create a materialized view based on the previous table */
+create materialized view mv1 as select sum(v1) as sum_v1 from t1;
 
-To stop the playground,
+/* insert some data into the source table */
+insert into t1 values (1), (2), (3);
 
-```shell
-./risedev k # shortcut for ./risedev kill
+/* ensure materialized view has been updated */
+flush;
+
+/* the materialized view should reflect the changes in source table */
+select * from mv1;
 ```
 
-To view the logs,
+If everything works, you will see
 
-```shell
-./risedev l # shortcut for ./risedev logs
+```
+ sum_v1
+--------
+      6
+(1 row)
 ```
 
-And you can configure components for RiseDev.
+in the Postgres shell.
 
-```shell
-./risedev configure
-```
+## License
 
-For developers who only develop Rust code (e.g., frontend-v2), use the following command to start an all-in-one process:
-
-```shell
-./risedev p
-```
-
-For more information, refer to `README.md` under `rust/risedevtool`.
-
-### Dashboard
-
-To preview the web page, install Node.js, and
-
-```shell
-cd rust/meta/src/dashboard && npx reload -b
-```
-
-### Dashboard v2
-
-The developement instructions for dashboard v2 is in [here](https://github.com/singularity-data/risingwave/blob/main/dashboard/README.md).
+RisingWave is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-Thanks for your interest in contributing to the project, please refer to the [CONTRIBUTING.md](https://github.com/singularity-data/risingwave/blob/main/CONTRIBUTING.md).
-
-## Toolchain
-
-Currently, we are using nightly toolchain `nightly-2022-03-09`. If anyone needs to upgrade
-the toolchain, be sure to bump `rust-toolchain` file as well as GitHub workflow.
-
-## Documentation
-
-The Rust codebase is documented with docstring, and you could view the documentation by:
-
-```shell
-make rust_doc
-cd rust/target/doc
-open risingwave/index.html
-```
+Thanks for your interest in contributing to the project, please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.

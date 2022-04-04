@@ -1,0 +1,21 @@
+[package]
+edition = "2021"
+name = "risingwave_pb"
+version = "0.1.0"
+
+[dependencies]
+bytes = "1"
+pbjson = "0.3"
+prost = "0.10"
+prost-helpers = { path = "helpers" }
+prost-types = "0.10"
+serde = { version = "1", features = ["derive"] }
+tonic = "0.7"
+workspace-hack = { version = "0.1", path = "../workspace-hack" }
+
+[build-dependencies]
+pbjson-build = "0.3"
+prost = "0.10"
+prost-types = "0.10"
+quote = "1"
+tonic-build = "0.7"

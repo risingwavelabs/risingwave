@@ -1,0 +1,17 @@
+[server]
+heartbeat_interval = 1000
+
+[batch]
+chunk_size = 1024
+
+[streaming]
+chunk_size = 1024
+
+[storage]
+sstable_size = 268435456
+block_size = 4096
+bloom_false_positive = 0.1
+data_directory = "hummock_001"
+async_checkpoint_enabled = true
+block_cache_capacity = 268435456
+meta_cache_capacity = 67108864

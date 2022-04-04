@@ -1,0 +1,136 @@
+jobs:
+  end-to-end-risedev-$[<profile>]:
+    name: e2e-test-risedev-$[<profile>]
+    needs:
+      - compute-node-build-$[<profile>]
+      - frontend-check
+      - start-runner-$[<runner>] # The $[xx] will be replaced by scripts
+    runs-on: ${{ needs.start-runner-$[<runner>].outputs.label }} # run the job on the newly created runner
+    container:
+      image: public.ecr.aws/x5u3w5h6/risingwave-build-env:latest
+      options: --security-opt seccomp=unconfined
+    timeout-minutes: 20 # NOTE: Increase this number when we have more tests.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Install rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN }}
+          components: rustfmt, clippy
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v2
+        with:
+          java-version: "11"
+          distribution: "adopt"
+
+      - uses: actions/download-artifact@v2
+        name: Download risingwave binary
+        with:
+          # Even if we might download release binary, we place it under `debug` folder to make CI scripts easier to compose.
+          name: risingwave-$[<profile>]
+          path: ./target/debug
+
+      - uses: actions/download-artifact@v2
+        name: Download frontend binary
+        with:
+          name: risingwave-fe-runnable.jar
+          path: ./.risingwave/bin
+
+      - uses: actions/download-artifact@v2
+        name: Download playground binary
+        with:
+          name: risedev-playground-$[<profile>]
+          path: ./target/debug
+
+      - name: Adjust permission
+        run: |
+          chmod +x ./target/debug/risingwave
+          chmod +x ./target/debug/risedev-playground
+
+      - name: Install required components
+        run: |
+          apt-get update -yy -o Acquire::Retries=3
+          apt-get install --upgrade -yy tmux -o Acquire::Retries=3
+
+      - name: Generate RiseDev CI config
+        run: |
+          cp risedev-components.ci.env risedev-components.user.env
+
+      - name: Download sqllogictest
+        run: |
+          wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
+          chmod +x ${DIR}/${BINARY}
+        env:
+          DIR: /usr/local/bin
+          BINARY: sqllogictest
+
+      - name: Download cargo-make
+        run: |
+          curl -fL ${RW_CARGO_MAKE_URL} -o ~/cargo-make.zip
+          unzip ~/cargo-make.zip -d ~
+          mv "${HOME}/${RW_CARGO_MAKE_DIRECTORY}" ~/cargo-make
+
+      - name: Prepare RiseDev playground
+        run: |
+          ~/cargo-make/makers link-all-in-one-binaries
+          ~/cargo-make/makers pre-start-playground
+
+      # --- Tests ---
+      #
+      # Note: If you encounter timeout when running tests without introducing new ones,
+      # please double check whether there is performance degradation. Only increase the timeout
+      # if the degradation is reasonable or to be fixed soon.
+
+      - name: e2e test w/ Rust frontend
+        timeout-minutes: 2
+        run: |
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
+          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
+      - name: e2e test streaming 3-node # Note: RiseDev cluster cannot be used to run e2e coverage unless we rebuild frontend in this workflow
+        timeout-minutes: 4
+        run: |
+          ~/cargo-make/makers ci-start ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
+      - name: e2e test streaming 3-node w/o cache
+        timeout-minutes: 4
+        run: |
+          RW_NO_CACHE=1 ~/cargo-make/makers ci-start ci-3node
+          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
+      - name: e2e test batch 3-node
+        timeout-minutes: 2
+        run: |
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
+          sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
+      # --- Post Tasks ---
+
+      - name: Dump last 300 lines of logs on failure
+        if: ${{ failure() }}
+        run: ~/cargo-make/makers logs
+
+      - uses: actions/upload-artifact@v2
+        if: ${{ failure() }}
+        name: Upload RiseDev logs on failure (You may find it in artifacts)
+        with:
+          path: .risingwave/log/
+          name: risedev-logs

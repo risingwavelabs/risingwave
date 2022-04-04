@@ -1,7 +1,0 @@
-- sql: |
-    create table t (v int[] not null);
-    select * from t;
-  logical_plan: |
-    LogicalLimit { limit: 4, offset: 0 }
-      LogicalProject { exprs: [$0, $1], expr_alias: [_row_id, v] }
-        LogicalScan { table: t, columns: [_row_id, v] }
