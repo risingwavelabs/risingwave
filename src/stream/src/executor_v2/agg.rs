@@ -17,7 +17,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 
-use crate::executor::{AggCall, Barrier, ExecutorState};
+use crate::executor::{AggCall, ExecutorState};
 use crate::executor_v2::error::{StreamExecutorResult, TracedStreamExecutorError};
 use crate::executor_v2::{
     BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StatefulExecutor,
@@ -101,27 +101,28 @@ where
             if self.inner.try_init_executor(&msg).is_some() {
                 // Pass through the first msg directly after initializing theself
                 yield msg;
-            }
-            match msg {
-                Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
-                Message::Barrier(barrier) if barrier.is_stop_mutation() => {
-                    yield Message::Barrier(barrier);
-                    break;
-                }
-                Message::Barrier(barrier) => {
-                    let epoch = barrier.epoch.curr;
-                    if let Some(chunk) = self.inner.flush_data()? {
-                        // Cache the barrier_msg and send it later.
-                        self.inner
-                            .update_executor_state(ExecutorState::Active(epoch));
-                        yield Message::Chunk(chunk);
+            } else {
+                match msg {
+                    Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
+                    Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                         yield Message::Barrier(barrier);
-                    } else {
-                        // No fresh data need to flush, just forward the barrier.
-                        self.inner
-                            .update_executor_state(ExecutorState::Active(epoch));
-                        yield Message::Barrier(barrier)
-                    };
+                        break;
+                    }
+                    Message::Barrier(barrier) => {
+                        let epoch = barrier.epoch.curr;
+                        if let Some(chunk) = self.inner.flush_data()? {
+                            // Cache the barrier_msg and send it later.
+                            self.inner
+                                .update_executor_state(ExecutorState::Active(epoch));
+                            yield Message::Chunk(chunk);
+                            yield Message::Barrier(barrier);
+                        } else {
+                            // No fresh data need to flush, just forward the barrier.
+                            self.inner
+                                .update_executor_state(ExecutorState::Active(epoch));
+                            yield Message::Barrier(barrier)
+                        };
+                    }
                 }
             }
         }

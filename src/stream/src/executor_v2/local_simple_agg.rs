@@ -26,7 +26,7 @@ use crate::executor::{
 };
 use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{Barrier, BoxedMessageStream, PkIndices, StatefulExecutor};
+use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
 
 pub type LocalSimpleAggExecutor = AggExecutorWrapper<AggLocalSimpleAggExecutor>;
 
