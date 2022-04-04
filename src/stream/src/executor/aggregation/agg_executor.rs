@@ -29,7 +29,7 @@ use crate::executor::managed_state::aggregation::ManagedStateImpl;
 use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
 
 /// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
-/// [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
+/// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
@@ -181,7 +181,7 @@ impl<S: StateStore> AggState<S> {
     }
 }
 
-/// Trait for [`crate::executor::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`],
+/// Trait for [`crate::executor::HashAggExecutor`],
 /// providing an implementation of [`Executor::next`] by [`agg_executor_next`].
 #[async_trait]
 pub trait AggExecutor: StatefulExecutor {
