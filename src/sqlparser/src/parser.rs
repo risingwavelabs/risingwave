@@ -2528,8 +2528,8 @@ impl Parser {
         })
     }
 
-    /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude `from` then use
-    /// default schema name.
+    /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude
+    /// `from` then use default schema name.
     pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
         if self.parse_keyword(Keyword::FROM) {
             Ok(Some(self.parse_identifier()?))
