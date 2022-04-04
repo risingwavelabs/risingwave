@@ -1298,8 +1298,8 @@ where
         Ok(invalid_context_ids)
     }
 
-    /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) and its
-    /// `id_create_timestamp` + `sst_retention_interval` >= current timestamp.
+    /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
+    /// least `sst_retention_interval` since `id_create_timestamp`
     pub async fn mark_orphan_ssts(
         &self,
         sst_retention_interval: Duration,
@@ -1310,9 +1310,7 @@ where
         let now = sstable_id_info::get_timestamp_now();
         let mut marked = vec![];
         for (_, sstable_id_info) in sstable_id_infos.iter_mut() {
-            if sstable_id_info.meta_create_timestamp != INVALID_TIMESTAMP
-                || sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP
-            {
+            if sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
                 continue;
             }
             let is_orphan = sstable_id_info.meta_create_timestamp == INVALID_TIMESTAMP
