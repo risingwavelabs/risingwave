@@ -46,10 +46,6 @@ jobs:
         run: |
           cargo fmt --all -- --check
 
-      - name: Run rust doc check
-        run: |
-          cargo doc --document-private-items
-
       - name: Build Rust components
         run: |
           cargo build --profile $[<profile>] --features=all-in-one
