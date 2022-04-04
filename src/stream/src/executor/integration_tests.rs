@@ -26,7 +26,9 @@ use tokio::sync::oneshot;
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
 use crate::executor_v2::receiver::ReceiverExecutor;
-use crate::executor_v2::{Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor};
+use crate::executor_v2::{
+    Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, SimpleAggExecutor,
+};
 use crate::task::{ActorHandle, SharedContext};
 
 pub struct MockConsumer {
@@ -146,26 +148,30 @@ async fn test_merger_sum_aggr() {
     let merger = Box::new(MergeExecutor::new(schema, vec![], 0, outputs)).v1();
 
     // for global aggregator, we need to sum data and sum row count
-    let aggregator = SimpleAggExecutor::new(
-        Box::new(merger),
-        vec![
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 0),
-                return_type: DataType::Int64,
-            },
-            AggCall {
-                kind: AggKind::Sum,
-                args: AggArgs::Unary(DataType::Int64, 1),
-                return_type: DataType::Int64,
-            },
-        ],
-        create_in_memory_keyspace(),
-        vec![],
-        2,
-        "SimpleAggExecutor".to_string(),
-        vec![],
-    );
+    let aggregator = Box::new(
+        SimpleAggExecutor::new_from_v1(
+            Box::new(merger),
+            vec![
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary(DataType::Int64, 0),
+                    return_type: DataType::Int64,
+                },
+                AggCall {
+                    kind: AggKind::Sum,
+                    args: AggArgs::Unary(DataType::Int64, 1),
+                    return_type: DataType::Int64,
+                },
+            ],
+            create_in_memory_keyspace(),
+            vec![],
+            2,
+            "SimpleAggExecutor".to_string(),
+            vec![],
+        )
+        .unwrap(),
+    )
+    .v1();
 
     let projection = ProjectExecutor::new(
         Box::new(aggregator),

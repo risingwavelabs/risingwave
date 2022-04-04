@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
@@ -25,13 +26,14 @@ use crate::executor_v2::{
 
 /// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
 /// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].
+#[async_trait]
 pub trait AggExecutor: StatefulExecutor {
     /// Apply the chunk to the dirty state.
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()>;
+    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()>;
 
     /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
     /// no dirty states to flush, return `Ok(None)`.
-    fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>>;
+    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>>;
 }
 
 /// The struct wraps a [`AggExecutor`]
@@ -74,16 +76,17 @@ where
     }
 }
 
+#[async_trait]
 impl<E> AggExecutor for AggExecutorWrapper<E>
 where
     E: AggExecutor,
 {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        self.inner.map_chunk(chunk)
+    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+        self.inner.map_chunk(chunk).await
     }
 
-    fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
-        self.inner.flush_data()
+    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+        self.inner.flush_data().await
     }
 }
 
@@ -104,14 +107,14 @@ where
                 yield msg;
             } else {
                 match msg {
-                    Message::Chunk(chunk) => self.inner.map_chunk(chunk)?,
+                    Message::Chunk(chunk) => self.inner.map_chunk(chunk).await?,
                     Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                         yield Message::Barrier(barrier);
                         ()
                     }
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch.curr;
-                        if let Some(chunk) = self.inner.flush_data()? {
+                        if let Some(chunk) = self.inner.flush_data().await? {
                             // Cache the barrier_msg and send it later.
                             self.inner
                                 .update_executor_state(ExecutorState::Active(epoch));

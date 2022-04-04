@@ -17,6 +17,7 @@ use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
@@ -25,6 +26,7 @@ pub use super::executor::{
 mod agg;
 mod chain;
 mod filter;
+mod global_simple_agg;
 mod local_simple_agg;
 pub mod merge;
 pub(crate) mod mview;
@@ -38,6 +40,7 @@ mod v1_compat;
 
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
+pub use global_simple_agg::SimpleAggExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
@@ -103,6 +106,11 @@ pub trait Executor: Send + 'static {
         let stream = Box::pin(stream);
 
         StreamExecutorV1 { stream, info }
+    }
+
+    /// Clears the in-memory cache of the executor. It's no-op by default.
+    fn clear_cache(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 

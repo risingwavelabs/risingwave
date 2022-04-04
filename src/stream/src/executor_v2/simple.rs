@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
@@ -20,10 +21,11 @@ use super::error::{StreamExecutorResult, TracedStreamExecutorError};
 use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StreamChunk};
 
 /// Executor which can handle [`StreamChunk`]s one by one.
+#[async_trait]
 pub trait SimpleExecutor: Send + 'static {
     /// convert a single chunk to another chunk.
     // TODO: How about use `map_filter_chunk` and output chunk optionally?
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
+    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;
@@ -74,7 +76,7 @@ where
         for msg in input {
             let msg = msg?;
             yield match msg {
-                Message::Chunk(chunk) => Message::Chunk(inner.map_chunk(chunk)?),
+                Message::Chunk(chunk) => Message::Chunk(inner.map_chunk(chunk).await?),
                 m => m,
             }
         }

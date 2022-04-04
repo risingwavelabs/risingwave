@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
@@ -22,7 +23,8 @@ use risingwave_common::error::Result;
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    create_streaming_agg_state, AggCall, ExecutorState, PkIndicesRef, StreamingAggStateImpl,
+    create_streaming_agg_state, AggCall, ExecutorState, PkIndicesRef,
+    StreamingAggStateImpl,
 };
 use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
 use crate::executor_v2::error::StreamExecutorError;
@@ -129,8 +131,9 @@ impl Executor for AggLocalSimpleAggExecutor {
     }
 }
 
+#[async_trait]
 impl AggExecutor for AggLocalSimpleAggExecutor {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         self.agg_calls
             .iter()
@@ -149,7 +152,7 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
         Ok(())
     }
 
-    fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
         if !self.is_dirty {
             return Ok(None);
         }

@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
@@ -69,8 +70,9 @@ impl Debug for SimpleFilterExecutor {
     }
 }
 
+#[async_trait]
 impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
+    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();

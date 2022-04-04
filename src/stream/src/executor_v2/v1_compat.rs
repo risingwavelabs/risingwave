@@ -32,6 +32,7 @@ use super::{
     MaterializeExecutor,
 };
 use crate::executor::AggCall;
+use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
@@ -194,5 +195,27 @@ impl LocalSimpleAggExecutor {
     ) -> Result<Self> {
         let input = Box::new(ExecutorV1AsV2(input));
         Self::new(input, agg_calls, pk_indices, executor_id)
+    }
+}
+
+impl<S: StateStore> SimpleAggExecutor<S> {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        agg_calls: Vec<AggCall>,
+        keyspace: Keyspace<S>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Result<Self> {
+        let input = Box::new(ExecutorV1AsV2(input));
+        Self::new(
+            input,
+            agg_calls,
+            keyspace,
+            pk_indices,
+            executor_id,
+            key_indices,
+        )
     }
 }
