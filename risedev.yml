@@ -578,7 +578,7 @@ template:
     enable-tiered-cache: false
 
     # RPC endpoint for source connector node
-    connector-source-endpoint: "127.0.0.1:61261"
+    connector-source-endpoint: "127.0.0.1:60061"
 
     # Minio instances used by this compute node
     provide-minio: "minio*"

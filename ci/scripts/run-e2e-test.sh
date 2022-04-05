@@ -27,6 +27,12 @@ buildkite-agent artifact download "e2e_test/generated/*" ./
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
+echo "--- Download connector node jar"
+buildkite-agent artifact download service-1.0-SNAPSHOT.jar target/debug/
+
+echo "--- Import data to MySQL"
+mysql -u root -p123456 < ./e2e_test/source/mysql_cdc.sql
+
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
 chmod +x ./target/debug/risedev-dev

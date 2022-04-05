@@ -42,6 +42,14 @@ cargo build \
     -p risingwave_compaction_test \
     --features "static-link static-log-level" --profile "$profile"
 
+
+echo "--- Build Java connector node"
+git clone git@github.com:risingwavelabs/risingwave-connector-node.git
+cd risingwave-connector-node
+mvn package
+echo "--- Upload Java artifacts"
+buildkite-agent artifact upload service/target/service-1.0-SNAPSHOT.jar
+
 echo "--- Compress RisingWave debug info"
 objcopy --compress-debug-sections=zlib-gnu target/"$target"/risingwave
 
