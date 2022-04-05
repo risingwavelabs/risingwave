@@ -13,6 +13,9 @@
 // limitations under the License.
 
 mod error;
+
+use std::fmt::Debug;
+
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
@@ -27,6 +30,7 @@ mod agg;
 mod chain;
 mod filter;
 mod global_simple_agg;
+mod hash_agg;
 mod local_simple_agg;
 pub mod merge;
 pub(crate) mod mview;
@@ -41,6 +45,7 @@ mod v1_compat;
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
+pub use hash_agg::HashAggExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
@@ -66,7 +71,7 @@ pub struct ExecutorInfo {
 }
 
 /// `Executor` supports handling of control messages.
-pub trait Executor: Send + 'static {
+pub trait Executor: Send + Debug + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
     /// Return the schema of the OUTPUT of the executor.

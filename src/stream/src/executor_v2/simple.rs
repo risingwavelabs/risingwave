@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
@@ -43,9 +45,18 @@ pub struct SimpleExecutorWrapper<E> {
     pub(super) inner: E,
 }
 
+impl<E> std::fmt::Debug for SimpleExecutorWrapper<E>
+where
+    E: SimpleExecutor + Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.inner)
+    }
+}
+
 impl<E> Executor for SimpleExecutorWrapper<E>
 where
-    E: SimpleExecutor,
+    E: SimpleExecutor + Debug,
 {
     fn schema(&self) -> &Schema {
         self.inner.schema()

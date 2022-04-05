@@ -34,6 +34,7 @@ use crate::task::{ActorId, FinishCreateMviewNotifier};
 ///
 /// [`RearrangedChainExecutor`] resolves the latency problem when creating MV with a huge amount of
 /// existing data, by rearranging the barrier from the upstream. Check the design doc for details.
+#[derive(Debug)]
 pub struct RearrangedChainExecutor {
     snapshot: BoxedExecutor,
 

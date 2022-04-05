@@ -37,6 +37,7 @@ pub trait AggExecutor: StatefulExecutor {
 }
 
 /// The struct wraps a [`AggExecutor`]
+#[derive(Debug)]
 pub struct AggExecutorWrapper<E> {
     pub(super) input: BoxedExecutor,
     pub(super) inner: E,
@@ -133,9 +134,9 @@ where
     }
 }
 
-/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should be
-/// provided.
+/// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
+/// be provided.
 pub fn generate_agg_schema(
     input: &dyn Executor,
     agg_calls: &[AggCall],

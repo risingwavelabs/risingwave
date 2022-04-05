@@ -14,10 +14,9 @@
 
 use std::fmt::Debug;
 
-use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row, StreamChunk};
+use risingwave_common::array::{ArrayBuilderImpl, ArrayImpl, ArrayRef, Op, Row};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
@@ -26,10 +25,10 @@ use static_assertions::const_assert_eq;
 
 use super::AggCall;
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{Barrier, Executor, ExecutorState, Message, PkDataTypes, StatefulExecutor};
+use crate::executor::{Executor, PkDataTypes};
 
 /// States for [`crate::executor_v2::LocalSimpleAggExecutor`],
-/// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor::HashAggExecutor`].
+/// [`crate::executor_v2::SimpleAggExecutor`] and [`crate::executor_v2::HashAggExecutor`].
 pub struct AggState<S: StateStore> {
     /// Current managed states for all [`AggCall`]s.
     pub managed_states: Vec<ManagedStateImpl<S>>,
@@ -91,7 +90,7 @@ impl<S: StateStore> AggState<S> {
     }
 
     /// Build changes into `builders` and `new_ops`, according to previous and current states. Note
-    /// that for [`crate::executor::HashAggExecutor`].
+    /// that for [`crate::executor_v2::HashAggExecutor`].
     ///
     /// Returns how many rows are appended in builders.
     pub async fn build_changes(
@@ -181,23 +180,6 @@ impl<S: StateStore> AggState<S> {
     }
 }
 
-/// Trait for [`crate::executor::HashAggExecutor`],
-/// providing an implementation of [`Executor::next`] by [`agg_executor_next`].
-#[async_trait]
-pub trait AggExecutor: StatefulExecutor {
-    /// If exists, we should send a Barrier while next called.
-    fn cached_barrier_message_mut(&mut self) -> &mut Option<Barrier>;
-
-    /// Apply the chunk to the dirty state.
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> Result<()>;
-
-    /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
-    /// no dirty states to flush, return `Ok(None)`.
-    async fn flush_data(&mut self) -> Result<Option<StreamChunk>>;
-
-    fn input(&mut self) -> &mut dyn Executor;
-}
-
 /// Get clones of aggregation inputs by `agg_calls` and `columns`.
 pub fn agg_input_arrays(agg_calls: &[AggCall], columns: &[Column]) -> Vec<Vec<ArrayRef>> {
     agg_calls
@@ -229,44 +211,9 @@ pub fn agg_input_array_refs<'a>(
         .collect()
 }
 
-/// An implementation of [`Executor::next`] for [`AggExecutor`].
-pub async fn agg_executor_next<E: AggExecutor>(executor: &mut E) -> Result<Message> {
-    if let Some(barrier) = std::mem::take(executor.cached_barrier_message_mut()) {
-        return Ok(Message::Barrier(barrier));
-    }
-
-    loop {
-        let msg = executor.input().next().await?;
-        if executor.try_init_executor(&msg).is_some() {
-            // Pass through the first msg directly after initializing the executor
-            return Ok(msg);
-        }
-        match msg {
-            Message::Chunk(chunk) => executor.apply_chunk(chunk).await?,
-            Message::Barrier(barrier) if barrier.is_stop_mutation() => {
-                return Ok(Message::Barrier(barrier));
-            }
-            Message::Barrier(barrier) => {
-                let epoch = barrier.epoch.curr;
-                // TODO: handle epoch rollback, and set cached_barrier_message.
-                return if let Some(chunk) = executor.flush_data().await? {
-                    // Cache the barrier_msg and send it later.
-                    *executor.cached_barrier_message_mut() = Some(barrier);
-                    executor.update_executor_state(ExecutorState::Active(epoch));
-                    Ok(Message::Chunk(chunk))
-                } else {
-                    // No fresh data need to flush, just forward the barrier.
-                    executor.update_executor_state(ExecutorState::Active(epoch));
-                    Ok(Message::Barrier(barrier))
-                };
-            }
-        }
-    }
-}
-
-/// Generate [`crate::executor::HashAggExecutor`]'s schema from `input`, `agg_calls` and
-/// `group_key_indices`. For [`crate::executor::HashAggExecutor`], the group key indices should be
-/// provided.
+/// Generate [`crate::executor_v2::HashAggExecutor`]'s schema from `input`, `agg_calls` and
+/// `group_key_indices`. For [`crate::executor_v2::HashAggExecutor`], the group key indices should
+/// be provided.
 pub fn generate_agg_schema(
     input: &dyn Executor,
     agg_calls: &[AggCall],
@@ -289,7 +236,7 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor::HashAggExecutor`], the
+/// Generate initial [`AggState`] from `agg_calls`. For [`crate::executor_v2::HashAggExecutor`], the
 /// group key should be provided.
 pub async fn generate_agg_state<S: StateStore>(
     key: Option<&Row>,
