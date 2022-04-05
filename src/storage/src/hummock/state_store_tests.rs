@@ -182,9 +182,7 @@ async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
 }
 
 #[tokio::test]
-#[cfg(feature = "failpoints")]
 async fn test_failpoint_read_upload() {
-    let scenario = FailScenario::setup();
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
@@ -332,9 +330,113 @@ async fn test_failpoint_read_upload() {
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
-    scenario.teardown();
 }
+#[tokio::test]
+async fn test_failpoint_buffer_drop() {
+    let mem_read_err = "mem_read_err";
+    let object_client = Arc::new(InMemObjectStore::new());
+    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let hummock_options = Arc::new(default_config_for_test());
 
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let hummock_storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store,
+        local_version_manager,
+        Arc::new(MockHummockMetaClient::new(Arc::new(
+            MockHummockMetaService::new(),
+        ))),
+        Arc::new(StateStoreMetrics::unused()),
+    )
+        .await
+        .unwrap();
+    let anchor = Bytes::from("aa");
+    // Write first batch.
+    let batch1 = (0..TEST_KEYS_COUNT).map(|i| {
+        (
+            Bytes::from(key_with_epoch(
+                format!("key_test_{:05}", i).as_bytes().to_vec(),
+                0,
+            )),
+            HummockValue::Put(Bytes::from(test_value_of(i))),
+        )
+    });
+    // Write second batch.
+    let mut batch2 = vec![
+        (Bytes::from("cc"), Some(Bytes::from("333"))),
+        (anchor.clone(), Some(Bytes::from("111111"))),
+    ];
+
+    // Make sure the batch is sorted.
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+
+    // epoch 1 is reserved by storage service
+    let epoch1: u64 = 1;
+
+    // Write first batch.
+    hummock_storage.write_batch(batch1, epoch1).await.unwrap();
+    let epoch2 = epoch1 + 1;
+    hummock_storage
+        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
+        .await
+        .unwrap();
+    fail::cfg(mem_read_err, "return").unwrap();
+    //get an iter before commit
+    let mut iter = hummock_storage
+        .range_scan(..=b"key_test_10001".to_vec(), epoch1)
+        .await
+        .unwrap();
+    iter.rewind().await.unwrap();
+    let len = count_iter(&mut iter).await;
+    assert_eq!(len, TEST_KEYS_COUNT);
+    let test1 = key_with_epoch(format!("key_test_{:05}", 100).as_bytes().to_vec(), 0);
+    hummock_storage
+        .shared_buffer_manager()
+        .get(&test1, 0..2)
+        .unwrap();
+    //commit epoch1
+    hummock_storage
+        .hummock_meta_client()
+        .commit_epoch(epoch1)
+        .await
+        .unwrap();
+    hummock_storage.sync(Some(epoch1)).await.unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .local_version_manager()
+            .get_version()
+            .unwrap()
+            .max_committed_epoch(),
+        epoch1
+    );
+    //commit epoch2
+    hummock_storage
+        .hummock_meta_client()
+        .commit_epoch(epoch2)
+        .await
+        .unwrap();
+    hummock_storage.sync(Some(epoch2)).await.unwrap();
+
+    assert_eq!(
+        hummock_storage
+            .local_version_manager()
+            .get_version()
+            .unwrap()
+            .max_committed_epoch(),
+        epoch2
+    );
+    //epoch1 in buffer?
+    hummock_storage
+        .shared_buffer_manager()
+        .get(&test1, 0..2)
+        .unwrap();
+    //iter is_valid?
+    iter.rewind().await.unwrap();
+    let len = count_iter(&mut iter).await;
+    assert_eq!(len, TEST_KEYS_COUNT);
+    fail::remove(mem_read_err);
+}
 #[tokio::test]
 /// Fix this when we finished epoch management.
 #[ignore]
@@ -438,110 +540,4 @@ async fn test_reload_storage() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 3);
-}
-#[tokio::test]
-#[cfg(feature = "failpoints")]
-async fn test_basic_failpoint() {
-    let scenario = FailScenario::setup();
-    let mem_read_err = "mem_read_err";
-    let object_client = Arc::new(InMemObjectStore::new());
-    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
-    let hummock_options = Arc::new(default_config_for_test());
-
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-    let hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        local_version_manager,
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-    let anchor = Bytes::from("aa");
-
-    let batch1 = (0..TEST_KEYS_COUNT).map(|i| {
-        (
-            Bytes::from(key_with_epoch(
-                format!("key_test_{:05}", i).as_bytes().to_vec(),
-                0,
-            )),
-            HummockValue::Put(Bytes::from(test_value_of(i))),
-        )
-    });
-
-    let mut batch2 = vec![
-        (Bytes::from("cc"), Some(Bytes::from("333"))),
-        (anchor.clone(), Some(Bytes::from("111111"))),
-    ];
-
-    // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-    // epoch 0 is reserved by storage service
-    let epoch1: u64 = 1;
-
-    // Write first batch.
-    hummock_storage.write_batch(batch1, epoch1).await.unwrap();
-    let epoch2 = epoch1 + 1;
-    hummock_storage
-        .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
-        .await
-        .unwrap();
-    fail::cfg(mem_read_err, "return").unwrap();
-    let mut iter = hummock_storage
-        .range_scan(..=b"key_test_10001".to_vec(), epoch1)
-        .await
-        .unwrap();
-    iter.rewind().await.unwrap();
-    let len = count_iter(&mut iter).await;
-    assert_eq!(len, TEST_KEYS_COUNT);
-    let test1 = key_with_epoch(format!("key_test_{:05}", 100).as_bytes().to_vec(), 0);
-    hummock_storage
-        .shared_buffer_manager()
-        .get(&test1, 0..2)
-        .unwrap();
-
-    hummock_storage
-        .hummock_meta_client()
-        .commit_epoch(epoch1)
-        .await
-        .unwrap();
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
-
-    assert_eq!(
-        hummock_storage
-            .local_version_manager()
-            .get_version()
-            .unwrap()
-            .max_committed_epoch(),
-        epoch1
-    );
-
-    hummock_storage
-        .hummock_meta_client()
-        .commit_epoch(epoch2)
-        .await
-        .unwrap();
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
-
-    assert_eq!(
-        hummock_storage
-            .local_version_manager()
-            .get_version()
-            .unwrap()
-            .max_committed_epoch(),
-        epoch2
-    );
-    hummock_storage
-        .shared_buffer_manager()
-        .get(&test1, 0..2)
-        .unwrap();
-    iter.rewind().await.unwrap();
-    let len = count_iter(&mut iter).await;
-    assert_eq!(len, TEST_KEYS_COUNT);
-    fail::remove(mem_read_err);
-    scenario.teardown();
 }

@@ -157,7 +157,6 @@ impl SSTableIteratorType for SSTableIterator {
 
 #[cfg(test)]
 mod tests {
-    use fail::FailScenario;
     use itertools::Itertools;
     use rand::prelude::*;
     use risingwave_hummock_sdk::key::key_with_epoch;
@@ -264,9 +263,8 @@ mod tests {
         assert!(!sstable_iter.is_valid());
     }
     #[tokio::test]
-    #[cfg(feature = "failpoints")]
-    async fn test_table_read_failpoint() {
-        let scenario = FailScenario::setup();
+
+    async fn test_failpoint_table_read() {
         let mem_read_err_fp = "mem_read_err";
         // build remote table
         let sstable_store = mock_sstable_store();
@@ -300,16 +298,14 @@ mod tests {
         fail::remove(mem_read_err_fp);
         sstable_iter.seek(&seek_key).await.unwrap();
         assert_eq!(sstable_iter.key(), test_key_of(600));
-        scenario.teardown();
     }
     #[tokio::test]
-    #[cfg(feature = "failpoints")]
-    async fn test_vacuum_and_metadata_failpoint() {
-        let scenario = FailScenario::setup();
+    async fn test_failpoint_vacuum_and_metadata() {
         let metadata_upload_err = "metadata_upload_err";
         let mem_upload_err = "mem_upload_err";
         let mem_delete_err = "mem_delete_err";
         let sstable_store = mock_sstable_store();
+        //when upload data is successful, but upload meta is fail and delete is fail
         fail::cfg_callback(metadata_upload_err, move || {
             fail::cfg(mem_upload_err, "return").unwrap();
             fail::cfg(mem_delete_err, "return").unwrap();
@@ -347,6 +343,5 @@ mod tests {
             sstable_iter.next().await.unwrap();
         }
         assert_eq!(cnt, TEST_KEYS_COUNT);
-        scenario.teardown();
     }
 }

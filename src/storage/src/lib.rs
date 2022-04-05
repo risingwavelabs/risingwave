@@ -32,6 +32,9 @@
 #![feature(map_first_last)]
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
+#![feature(test)]
+#![feature(custom_test_frameworks)]
+#![test_runner(hummock::test_runner::run_failpont_tests)]
 
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
@@ -61,6 +64,7 @@ pub mod tikv;
 pub mod tikv;
 
 pub use keyspace::Keyspace;
+extern crate test;
 pub use store::{StateStore, StateStoreIter};
 pub use store_impl::StateStoreImpl;
 

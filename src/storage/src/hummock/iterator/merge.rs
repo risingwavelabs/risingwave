@@ -20,7 +20,6 @@ pub type MergeIterator<'a> = MergeIteratorInner<'a, FORWARD>;
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
-    use fail::FailScenario;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -218,9 +217,7 @@ mod test {
     }
 
     #[tokio::test]
-    #[cfg(feature = "failpoints")]
-    async fn test_merge_failpoint_invalid_key() {
-        let scenario = FailScenario::setup();
+    async fn test_failpoint_merge_invalid_key() {
         let mem_read_err = "mem_read_err";
         let sstable_store = mock_sstable_store();
         let table0 = gen_iterator_test_sstable_base_without_buff(
@@ -260,6 +257,5 @@ mod test {
         }
         fail::remove(mem_read_err);
         assert!(count < 200 * 2);
-        scenario.teardown();
     }
 }
