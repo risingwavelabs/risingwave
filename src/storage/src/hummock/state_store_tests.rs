@@ -348,8 +348,8 @@ async fn test_failpoint_buffer_drop() {
         ))),
         Arc::new(StateStoreMetrics::unused()),
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
     let anchor = Bytes::from("aa");
     // Write first batch.
     let batch1 = (0..TEST_KEYS_COUNT).map(|i| {
@@ -381,7 +381,7 @@ async fn test_failpoint_buffer_drop() {
         .await
         .unwrap();
     fail::cfg(mem_read_err, "return").unwrap();
-    //get an iter before commit
+    // get an iter before commit
     let mut iter = hummock_storage
         .range_scan(..=b"key_test_10001".to_vec(), epoch1)
         .await
@@ -394,7 +394,7 @@ async fn test_failpoint_buffer_drop() {
         .shared_buffer_manager()
         .get(&test1, 0..2)
         .unwrap();
-    //commit epoch1
+    // commit epoch1
     hummock_storage
         .hummock_meta_client()
         .commit_epoch(epoch1)
@@ -410,7 +410,7 @@ async fn test_failpoint_buffer_drop() {
             .max_committed_epoch(),
         epoch1
     );
-    //commit epoch2
+    // commit epoch2
     hummock_storage
         .hummock_meta_client()
         .commit_epoch(epoch2)
@@ -426,12 +426,12 @@ async fn test_failpoint_buffer_drop() {
             .max_committed_epoch(),
         epoch2
     );
-    //epoch1 in buffer?
+    // epoch1 in buffer?
     hummock_storage
         .shared_buffer_manager()
         .get(&test1, 0..2)
         .unwrap();
-    //iter is_valid?
+    // iter is_valid?
     iter.rewind().await.unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, TEST_KEYS_COUNT);

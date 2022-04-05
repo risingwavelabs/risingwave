@@ -305,7 +305,7 @@ mod tests {
         let mem_upload_err = "mem_upload_err";
         let mem_delete_err = "mem_delete_err";
         let sstable_store = mock_sstable_store();
-        //when upload data is successful, but upload meta is fail and delete is fail
+        // when upload data is successful, but upload meta is fail and delete is fail
         fail::cfg_callback(metadata_upload_err, move || {
             fail::cfg(mem_upload_err, "return").unwrap();
             fail::cfg(mem_delete_err, "return").unwrap();
