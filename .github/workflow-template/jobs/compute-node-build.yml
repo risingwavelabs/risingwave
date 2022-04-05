@@ -12,7 +12,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -45,10 +50,6 @@ jobs:
       - name: Run rust format check
         run: |
           cargo fmt --all -- --check
-
-      - name: Run rust doc check
-        run: |
-          cargo doc --document-private-items
 
       - name: Build Rust components
         run: |
