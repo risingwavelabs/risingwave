@@ -101,16 +101,6 @@ pub struct AggSimpleAggExecutor<S: StateStore> {
     key_indices: Vec<usize>,
 }
 
-impl<S: StateStore> std::fmt::Debug for AggSimpleAggExecutor<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SimpleAggExecutor")
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .field("agg_calls", &self.agg_calls)
-            .finish()
-    }
-}
-
 impl<S: StateStore> AggSimpleAggExecutor<S> {
     pub fn new(
         input_info: ExecutorInfo,

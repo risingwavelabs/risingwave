@@ -25,7 +25,6 @@ use crate::task::{ActorId, FinishCreateMviewNotifier};
 /// newly appended executors. Currently, [`ChainExecutor`] is mainly used to implement MV on MV
 /// feature. It pipes new data of existing MVs to newly created MV only all of the old data in the
 /// existing MVs are dispatched.
-#[derive(Debug)]
 pub struct ChainExecutor {
     snapshot: BoxedExecutor,
 

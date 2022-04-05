@@ -78,7 +78,6 @@ impl ExecutorV1 for StreamExecutorV1 {
     }
 }
 
-#[derive(Debug)]
 pub struct ExecutorV1AsV2(pub Box<dyn ExecutorV1>);
 
 impl Executor for ExecutorV1AsV2 {

@@ -14,8 +14,6 @@
 
 mod error;
 
-use std::fmt::Debug;
-
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
@@ -71,7 +69,7 @@ pub struct ExecutorInfo {
 }
 
 /// `Executor` supports handling of control messages.
-pub trait Executor: Send + Debug + 'static {
+pub trait Executor: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
     /// Return the schema of the OUTPUT of the executor.

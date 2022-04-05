@@ -54,7 +54,6 @@ impl LocalSimpleAggExecutor {
     }
 }
 
-#[derive(Debug)]
 pub struct AggLocalSimpleAggExecutor {
     info: ExecutorInfo,
 

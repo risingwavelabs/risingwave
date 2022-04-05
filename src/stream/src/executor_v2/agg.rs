@@ -37,7 +37,6 @@ pub trait AggExecutor: StatefulExecutor {
 }
 
 /// The struct wraps a [`AggExecutor`]
-#[derive(Debug)]
 pub struct AggExecutorWrapper<E> {
     pub(super) input: BoxedExecutor,
     pub(super) inner: E,

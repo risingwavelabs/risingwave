@@ -183,17 +183,6 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
     }
 }
 
-impl<K: HashKey, S: StateStore> std::fmt::Debug for AggHashAggExecutor<K, S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AggregateExecutor")
-            .field("agg_calls", &self.agg_calls)
-            .field("key_indices", &self.key_indices)
-            .field("pk_indices", &self.pk_indices)
-            .field("schema", &self.schema)
-            .finish()
-    }
-}
-
 impl<K: HashKey, S: StateStore> Executor for AggHashAggExecutor<K, S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         panic!("Should execute by wrapper")
