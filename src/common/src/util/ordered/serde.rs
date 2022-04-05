@@ -26,13 +26,14 @@ use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::hash::VIRTUAL_KEY_COUNT;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
+    ScalarImpl,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
 
 /// The special `cell_id` reserved for a whole null row is `i32::MIN`.
-pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
+pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -167,11 +168,16 @@ pub fn serialize_pk_and_row(
             }
         }
     }
-    if all_null {
-        // Here we use a special column id -1 to represent a row consisting of all null values.
-        // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
-        // would return null datum as it has only a single cell with column id == -1 and `get`
-        // gets nothing.
+
+    if row.is_none() {
+        let key = [
+            pk_buf,
+            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
+        ]
+        .concat();
+
+        result.push((key, None));
+    } else if all_null {
         let key = [
             pk_buf,
             serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
@@ -179,7 +185,29 @@ pub fn serialize_pk_and_row(
         .concat();
         let value = serialize_cell(&None)?;
         result.push((key, Some(value)));
+    } else {
+        let key = [
+            pk_buf,
+            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
+        ]
+        .concat();
+        let datum: Datum = Some(ScalarImpl::from(0.1_f32));
+        let value = serialize_cell(&datum)?;
+        result.push((key, Some(value)));
     }
+    // if all_null {
+    //     // Here we use a special column id -1 to represent a row consisting of all null values.
+    //     // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
+    //     // would return null datum as it has only a single cell with column id == -1 and `get`
+    //     // gets nothing.
+    // let key = [
+    //     pk_buf,
+    //     serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
+    // ]
+    // .concat();
+    // let value = serialize_cell(&None)?;
+    // result.push((key, Some(value)));
+    // }
     Ok(result)
 }
 

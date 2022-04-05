@@ -19,7 +19,7 @@ use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::error::Result;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
-use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
+use risingwave_storage::cell_based_row_deserializer::{CellBasedRowDeserializer, CellType};
 pub use top_n_bottom_n_state::ManagedTopNBottomNState;
 pub use top_n_state::ManagedTopNState;
 
@@ -54,11 +54,14 @@ fn deserialize_bytes_to_pk_and_row<const TOP_N_TYPE: usize>(
     for (key, value) in pk_row_bytes {
         let pk_buf_and_row = cell_based_row_deserializer.deserialize(&key, &value)?;
         match pk_buf_and_row {
-            Some((mut pk_buf, row)) => {
-                let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, ordered_row_deserializer)?;
-                result.push((pk, row));
-            }
-            None => {}
+            CellType::Normal(pk_buf_and_row) => match pk_buf_and_row {
+                Some((mut pk_buf, row)) => {
+                    let pk = deserialize_pk::<TOP_N_TYPE>(&mut pk_buf, ordered_row_deserializer)?;
+                    result.push((pk, row));
+                }
+                None => {}
+            },
+            CellType::Special(_) => {}
         }
     }
     // Take out the final row.

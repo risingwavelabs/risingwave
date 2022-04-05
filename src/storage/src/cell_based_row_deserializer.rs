@@ -34,7 +34,11 @@ pub struct CellBasedRowDeserializer {
     /// which should also be done on the caller side.
     pk_bytes: Option<Vec<u8>>,
 }
-
+#[derive(Clone)]
+pub enum CellType {
+    Special(Option<(Vec<u8>, Row)>),
+    Normal(Option<(Vec<u8>, Row)>),
+}
 impl CellBasedRowDeserializer {
     pub fn new(table_column_descs: Vec<ColumnDesc>) -> Self {
         let num_cells = table_column_descs.len();
@@ -53,26 +57,23 @@ impl CellBasedRowDeserializer {
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
     /// deserialized. Then we return the key and the value of the previous row.
-    pub fn deserialize(
-        &mut self,
-        pk_with_cell_id: &Bytes,
-        cell: &Bytes,
-    ) -> Result<Option<(Vec<u8>, Row)>> {
+    pub fn deserialize(&mut self, pk_with_cell_id: &Bytes, cell: &Bytes) -> Result<CellType> {
         let pk_with_cell_id = pk_with_cell_id.to_vec();
         let pk_vec_len = pk_with_cell_id.len();
         let cur_pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
         let mut result = None;
-        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes {
+        let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
+        let cell_id = deserialize_column_id(cell_id_bytes)?;
+
+        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes && cell_id!=NULL_ROW_SPECIAL_CELL_ID {
             result = self.take();
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
-        } else if self.pk_bytes.is_none() {
+        } else if self.pk_bytes.is_none() && cell_id!=NULL_ROW_SPECIAL_CELL_ID{
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
         }
 
-        let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
-        let cell_id = deserialize_column_id(cell_id_bytes)?;
         if cell_id == NULL_ROW_SPECIAL_CELL_ID {
-            // do nothing
+            return Ok(CellType::Special(result));
         } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
             let mut de = value_encoding::Deserializer::new(cell.clone());
             if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
@@ -82,7 +83,8 @@ impl CellBasedRowDeserializer {
         } else {
             // ignore this cell
         }
-        Ok(result)
+
+        Ok(CellType::Normal(result))
     }
 
     /// Take the remaining data out of the deserializer.
@@ -104,6 +106,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::ordered::serialize_pk_and_row;
 
+    use super::CellType;
     use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 
     #[test]
@@ -129,7 +132,7 @@ mod tests {
             Some(ScalarImpl::Int64(1500)),
             Some(ScalarImpl::Float64(233.3f64.into())),
         ]);
-        let row2 = Row(vec![None, None, None, None]);
+        let row2 = Row(vec![None, Some(ScalarImpl::Int32(2020)), None, None]);
         let row3 = Row(vec![
             None,
             Some(ScalarImpl::Int32(2020)),
@@ -140,7 +143,6 @@ mod tests {
         let bytes2 = serialize_pk_and_row(&pk2, &Some(row2.clone()), &column_ids).unwrap();
         let bytes3 = serialize_pk_and_row(&pk3, &Some(row3.clone()), &column_ids).unwrap();
         let bytes = [bytes1, bytes2, bytes3].concat();
-
         let partial_table_column_descs = table_column_descs.into_iter().skip(1).take(3).collect();
         let mut result = vec![];
         let mut deserializer = CellBasedRowDeserializer::new(partial_table_column_descs);
@@ -148,11 +150,17 @@ mod tests {
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
                 .unwrap();
-            if let Some(pk_and_row) = pk_and_row {
-                result.push(pk_and_row.1);
+            match pk_and_row {
+                CellType::Normal(pk_and_row) => {
+                    if let Some(pk_and_row) = pk_and_row {
+                        result.push(pk_and_row.1);
+                    }
+                }
+                CellType::Special(_) => {}
             }
         }
         let pk_and_row = deserializer.take();
+
         result.push(pk_and_row.unwrap().1);
 
         for (expected, result) in [row1, row2, row3].into_iter().zip_eq(result.into_iter()) {

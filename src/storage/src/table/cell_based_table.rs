@@ -27,7 +27,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::TableIter;
-use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
+use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, CellType};
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::hummock::key::next_key;
 use crate::monitor::StateStoreMetrics;
@@ -401,8 +401,11 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
             let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
             match pk_and_row {
-                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
-                None => {}
+                CellType::Normal(pk_and_row) => match pk_and_row {
+                    Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                    None => {}
+                },
+                CellType::Special(_) => {}
             }
         }
     }
