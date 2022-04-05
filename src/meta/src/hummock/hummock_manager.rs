@@ -16,6 +16,7 @@ use std::cmp::max;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
@@ -475,14 +476,20 @@ where
         for sst_id in sstables.iter().map(|s| s.id) {
             match sstable_id_infos.get_mut(&sst_id) {
                 None => {
-                    #[cfg(not(test))]
                     return Err(ErrorCode::MetaError(format!(
-                        "invalid sst id {}, may have been vacuumed",
+                        "Invalid SST id {}, may have been vacuumed",
                         sst_id
                     ))
                     .into());
                 }
                 Some(sst_id_info) => {
+                    if sst_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
+                        return Err(ErrorCode::MetaError(format!(
+                            "SST id {} has been marked for vacuum",
+                            sst_id
+                        ))
+                        .into());
+                    }
                     if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
                         // This is a duplicate request.
                         return Ok(current_hummock_version);
@@ -1289,5 +1296,44 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
+    /// least `sst_retention_interval` since `id_create_timestamp`
+    pub async fn mark_orphan_ssts(
+        &self,
+        sst_retention_interval: Duration,
+    ) -> Result<Vec<SstableIdInfo>> {
+        let mut versioning_guard = self.versioning.write().await;
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
+
+        let now = sstable_id_info::get_timestamp_now();
+        let mut marked = vec![];
+        for (_, sstable_id_info) in sstable_id_infos.iter_mut() {
+            if sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
+                continue;
+            }
+            let is_orphan = sstable_id_info.meta_create_timestamp == INVALID_TIMESTAMP
+                && now >= sstable_id_info.id_create_timestamp
+                && now - sstable_id_info.id_create_timestamp >= sst_retention_interval.as_secs();
+            if is_orphan {
+                sstable_id_info.meta_delete_timestamp = now;
+                marked.push(sstable_id_info.clone());
+            }
+        }
+        if marked.is_empty() {
+            return Ok(vec![]);
+        }
+
+        commit_multi_var!(self, None, sstable_id_infos)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        tracing::debug!("Mark {:?} as orphan SSTs", marked);
+        Ok(marked)
     }
 }

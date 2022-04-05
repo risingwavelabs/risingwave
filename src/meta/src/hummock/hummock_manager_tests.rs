@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
@@ -23,7 +24,7 @@ use risingwave_pb::hummock::{
 };
 use risingwave_storage::hummock::compactor::Compactor;
 use risingwave_storage::hummock::{
-    HummockContextId, FIRST_VERSION_ID, INVALID_EPOCH, INVALID_VERSION_ID,
+    HummockContextId, HummockSSTableId, FIRST_VERSION_ID, INVALID_EPOCH, INVALID_VERSION_ID,
 };
 
 use crate::hummock::model::CurrentHummockVersionId;
@@ -119,8 +120,7 @@ async fn test_hummock_compaction_task() -> Result<()> {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    let (original_tables, _) = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
@@ -239,8 +239,7 @@ async fn test_hummock_table() -> Result<()> {
     let context_id = worker_node.id;
 
     let epoch: u64 = 1;
-    let table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    let (original_tables, _) = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
@@ -272,7 +271,6 @@ async fn test_hummock_table() -> Result<()> {
 async fn test_hummock_transaction() -> Result<()> {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
-    let mut table_id = 1;
     let mut committed_tables = vec![];
 
     // Add and commit tables in epoch1.
@@ -283,8 +281,7 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch1
         let (tables_in_epoch1, _) =
-            generate_test_tables(epoch1, (table_id..table_id + 2).collect());
-        table_id += 2;
+            generate_test_tables(epoch1, get_sst_ids(&hummock_manager, 2).await);
         hummock_manager
             .add_tables(context_id, tables_in_epoch1.clone(), epoch1)
             .await
@@ -329,8 +326,7 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch2
         let (tables_in_epoch2, _) =
-            generate_test_tables(epoch2, (table_id..table_id + 2).collect());
-        table_id += 2;
+            generate_test_tables(epoch2, get_sst_ids(&hummock_manager, 2).await);
         hummock_manager
             .add_tables(context_id, tables_in_epoch2.clone(), epoch2)
             .await
@@ -379,14 +375,13 @@ async fn test_hummock_transaction() -> Result<()> {
     {
         // Add tables in epoch3 and epoch4
         let (tables_in_epoch3, _) =
-            generate_test_tables(epoch3, (table_id..table_id + 2).collect());
-        table_id += 2;
+            generate_test_tables(epoch3, get_sst_ids(&hummock_manager, 2).await);
         hummock_manager
             .add_tables(context_id, tables_in_epoch3.clone(), epoch3)
             .await
             .unwrap();
         let (tables_in_epoch4, _) =
-            generate_test_tables(epoch4, (table_id..table_id + 2).collect());
+            generate_test_tables(epoch4, get_sst_ids(&hummock_manager, 2).await);
         hummock_manager
             .add_tables(context_id, tables_in_epoch4.clone(), epoch4)
             .await
@@ -559,8 +554,7 @@ async fn test_context_id_validation() {
     let invalid_context_id = HummockContextId::MAX;
     let context_id = worker_node.id;
     let epoch: u64 = 1;
-    let table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    let (original_tables, _) = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
 
     // Invalid context id is rejected.
     let error = hummock_manager
@@ -623,8 +617,7 @@ async fn test_hummock_manager_basic() {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    let (original_tables, _) = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
         .add_tables(context_id_1, original_tables.clone(), epoch)
         .await
@@ -884,8 +877,7 @@ async fn test_print_compact_task() -> Result<()> {
 
     // Add some sstables and commit.
     let epoch: u64 = 1;
-    let table_id = 1;
-    let (original_tables, _) = generate_test_tables(epoch, (table_id..table_id + 2).collect());
+    let (original_tables, _) = generate_test_tables(epoch, get_sst_ids(&hummock_manager, 2).await);
     hummock_manager
         .add_tables(context_id, original_tables.clone(), epoch)
         .await
@@ -911,4 +903,74 @@ async fn test_print_compact_task() -> Result<()> {
     assert!(s.contains("Compaction task id: 1, target level: 1"));
 
     Ok(())
+}
+
+#[tokio::test]
+async fn test_invalid_sst_id() {
+    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let epoch = 1;
+    let (ssts, _) = generate_test_tables(epoch, vec![HummockSSTableId::MAX]);
+    let error = hummock_manager
+        .add_tables(context_id, ssts.clone(), epoch)
+        .await
+        .unwrap_err();
+    assert!(matches!(error.inner(), ErrorCode::MetaError(_)));
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Error while interact with meta service: Invalid SST id {}, may have been vacuumed",
+            ssts.first().unwrap().id
+        )
+    );
+}
+
+#[tokio::test]
+async fn test_mark_orphan_ssts() {
+    let (_, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let epoch = 1;
+
+    let (ssts, _) = generate_test_tables(
+        epoch,
+        vec![hummock_manager.get_new_table_id().await.unwrap()],
+    );
+    // No SST is marked.
+    let marked = hummock_manager
+        .mark_orphan_ssts(Duration::from_secs(3600))
+        .await
+        .unwrap();
+    assert!(marked.is_empty());
+    hummock_manager
+        .add_tables(context_id, ssts.clone(), epoch)
+        .await
+        .unwrap();
+
+    let (ssts, _) = generate_test_tables(
+        epoch,
+        vec![hummock_manager.get_new_table_id().await.unwrap()],
+    );
+    let marked = hummock_manager
+        .mark_orphan_ssts(Duration::from_secs(0))
+        .await
+        .unwrap();
+    // The SST is marked.
+    assert_eq!(marked.len(), 1);
+    assert_eq!(
+        marked.first().as_ref().unwrap().id,
+        ssts.first().as_ref().unwrap().id
+    );
+    // Cannot add_tables for marked SST ids.
+    let error = hummock_manager
+        .add_tables(context_id, ssts.clone(), epoch)
+        .await
+        .unwrap_err();
+    assert!(matches!(error.inner(), ErrorCode::MetaError(_)));
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "Error while interact with meta service: SST id {} has been marked for vacuum",
+            ssts.first().unwrap().id
+        )
+    );
 }
