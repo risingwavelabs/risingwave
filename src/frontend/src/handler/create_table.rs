@@ -30,6 +30,8 @@ use crate::optimizer::plan_node::StreamSource;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+// FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
+pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
 
 pub fn gen_create_table_plan(
     session: &SessionImpl,
@@ -49,7 +51,7 @@ pub fn gen_create_table_plan(
         // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(0),
+            column_id: ColumnId::new(TABLE_SOURCE_PK_COLID),
             name: gen_row_id_column_name(0),
             field_descs: vec![],
             type_name: "".to_string(),
