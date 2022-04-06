@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
 
@@ -70,7 +71,10 @@ impl Debug for SimpleFilterExecutor {
 }
 
 impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
+    fn map_filter_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();
@@ -144,11 +148,15 @@ impl SimpleExecutor for SimpleFilterExecutor {
             panic!("unmatched type: filter expr returns a non-null array");
         }
 
-        let visibility = new_visibility
+        let visibility: Bitmap = new_visibility
             .try_into()
             .map_err(StreamExecutorError::eval_error)?;
-        let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
-        Ok(new_chunk)
+        Ok(if visibility.num_high_bits() > 0 {
+            let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
+            Some(new_chunk)
+        } else {
+            None
+        })
     }
 
     fn schema(&self) -> &Schema {
