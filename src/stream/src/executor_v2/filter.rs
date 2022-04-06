@@ -72,7 +72,7 @@ impl Debug for SimpleFilterExecutor {
 
 #[async_trait]
 impl SimpleExecutor for SimpleFilterExecutor {
-    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
+    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();

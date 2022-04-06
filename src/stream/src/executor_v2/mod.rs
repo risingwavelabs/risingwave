@@ -126,21 +126,13 @@ pub trait StatefulExecutor: Executor {
     /// Return:
     /// - Some(Epoch) if the executor is successfully initialized
     /// - None if the executor has been initialized
-    fn try_init_executor<'a>(
-        &'a mut self,
-        msg: impl TryInto<&'a Barrier, Error = ()>,
-    ) -> Option<Barrier> {
-        match self.executor_state() {
-            ExecutorState::Init => {
-                if let Ok(barrier) = msg.try_into() {
-                    // Move to Active state
-                    self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
-                    Some(barrier.clone())
-                } else {
-                    panic!("The first message the executor receives is not a barrier");
-                }
-            }
-            ExecutorState::Active(_) => None,
+    fn init_executor<'a>(&'a mut self, msg: &'a Message) -> Option<Barrier> {
+        if let Message::Barrier(barrier) = msg {
+            // Move to Active state
+            self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
+            Some(barrier.clone())
+        } else {
+            panic!("The first message the executor receives is not a barrier");
         }
     }
 }

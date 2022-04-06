@@ -29,10 +29,11 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    agg_input_arrays, generate_agg_state, pk_input_arrays, AggCall, AggState, ExecutorState,
-    PkDataTypes, PkIndicesRef,
+    agg_input_arrays, pk_input_arrays, AggCall, AggState, ExecutorState, PkDataTypes, PkIndicesRef,
 };
-use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
+use crate::executor_v2::agg::{
+    generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
+};
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
 
@@ -212,7 +213,7 @@ impl<K: HashKey, S: StateStore> Executor for AggHashAggExecutor<K, S> {
 
 #[async_trait]
 impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
-    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         let epoch = self.executor_state().epoch();
         let (data_chunk, ops) = chunk.into_parts();
         let keys =
@@ -274,8 +275,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                                 input_pk_data_types.clone(),
                                 epoch,
                             )
-                            .await
-                            .map_err(StreamExecutorError::eval_error)?,
+                            .await?,
                         ),
                     }
                 };
@@ -284,7 +284,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                 states
                     .may_mark_as_dirty(epoch)
                     .await
-                    .map_err(StreamExecutorError::eval_error)?;
+                    .map_err(StreamExecutorError::agg_state_error)?;
 
                 // 3. Apply batch to each of the state (per agg_call)
                 for (agg_state, data) in
@@ -294,7 +294,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                     agg_state
                         .apply_batch(&ops, Some(&vis_map), &data, epoch)
                         .await
-                        .map_err(StreamExecutorError::eval_error)?;
+                        .map_err(StreamExecutorError::agg_state_error)?;
                 }
 
                 Ok::<(_, Box<AggState<S>>), RwError>((key, states))
@@ -303,7 +303,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
 
         let mut buffered = stream::iter(futures).buffer_unordered(10);
         while let Some(result) = buffered.next().await {
-            let (key, state) = result.map_err(StreamExecutorError::eval_error)?;
+            let (key, state) = result.map_err(StreamExecutorError::agg_state_error)?;
             self.state_map.put(key, Some(state));
         }
 
@@ -325,7 +325,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                     for state in &mut states.as_mut().unwrap().managed_states {
                         state
                             .flush(&mut write_batch)
-                            .map_err(StreamExecutorError::eval_error)?;
+                            .map_err(StreamExecutorError::agg_state_error)?;
                     }
                 }
             }
@@ -358,7 +358,7 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
                 .unwrap()
                 .build_changes(&mut builders[self.key_indices.len()..], &mut new_ops, epoch)
                 .await
-                .map_err(StreamExecutorError::eval_error)?;
+                .map_err(StreamExecutorError::agg_state_error)?;
 
             for _ in 0..appended {
                 key.clone()

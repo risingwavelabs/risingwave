@@ -132,7 +132,7 @@ impl Executor for AggLocalSimpleAggExecutor {
 
 #[async_trait]
 impl AggExecutor for AggLocalSimpleAggExecutor {
-    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         self.agg_calls
             .iter()
@@ -146,7 +146,7 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
                     .collect_vec();
                 state.apply_batch(&ops, visibility.as_ref(), &cols[..])
             })
-            .map_err(StreamExecutorError::eval_error)?;
+            .map_err(StreamExecutorError::agg_state_error)?;
         self.is_dirty = true;
         Ok(())
     }
@@ -169,7 +169,7 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
                 state.reset();
                 Ok(())
             })
-            .map_err(StreamExecutorError::eval_error)?;
+            .map_err(StreamExecutorError::agg_state_error)?;
         let columns: Vec<Column> = builders
             .into_iter()
             .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })

@@ -24,10 +24,11 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    agg_input_array_refs, generate_agg_state, pk_input_array_refs, AggCall, AggState,
-    ExecutorState, PkIndicesRef,
+    agg_input_array_refs, pk_input_array_refs, AggCall, AggState, ExecutorState, PkIndicesRef,
 };
-use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
+use crate::executor_v2::agg::{
+    generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
+};
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
 
@@ -161,7 +162,7 @@ impl<S: StateStore> Executor for AggSimpleAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
-    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
         let epoch = self.executor_state().epoch();
         let (ops, columns, visibility) = chunk.into_inner();
 
@@ -194,8 +195,7 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
                 input_pk_data_types,
                 epoch,
             )
-            .await
-            .map_err(StreamExecutorError::eval_error)?;
+            .await?;
             self.states = Some(state);
         }
         let states = self.states.as_mut().unwrap();
@@ -204,14 +204,14 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         states
             .may_mark_as_dirty(epoch)
             .await
-            .map_err(StreamExecutorError::eval_error)?;
+            .map_err(StreamExecutorError::agg_state_error)?;
 
         // 3. Apply batch to each of the state (per agg_call)
         for (agg_state, data) in states.managed_states.iter_mut().zip_eq(all_agg_data.iter()) {
             agg_state
                 .apply_batch(&ops, visibility.as_ref(), data, epoch)
                 .await
-                .map_err(StreamExecutorError::eval_error)?;
+                .map_err(StreamExecutorError::agg_state_error)?;
         }
 
         Ok(())
@@ -232,7 +232,7 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         for state in &mut states.managed_states {
             state
                 .flush(&mut write_batch)
-                .map_err(StreamExecutorError::eval_error)?;
+                .map_err(StreamExecutorError::agg_state_error)?;
         }
         write_batch.ingest(epoch).await.unwrap();
 
@@ -249,7 +249,7 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         states
             .build_changes(&mut builders, &mut new_ops, epoch)
             .await
-            .map_err(StreamExecutorError::eval_error)?;
+            .map_err(StreamExecutorError::agg_state_error)?;
 
         let columns: Vec<Column> = builders
             .into_iter()

@@ -25,7 +25,7 @@ use super::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, 
 pub trait SimpleExecutor: Send + 'static {
     /// convert a single chunk to another chunk.
     // TODO: How about use `map_filter_chunk` and output chunk optionally?
-    async fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
+    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk>;
 
     /// See [`super::Executor::schema`].
     fn schema(&self) -> &Schema;
@@ -76,7 +76,7 @@ where
         for msg in input {
             let msg = msg?;
             yield match msg {
-                Message::Chunk(chunk) => Message::Chunk(inner.map_chunk(chunk).await?),
+                Message::Chunk(chunk) => Message::Chunk(inner.map_chunk(chunk)?),
                 m => m,
             }
         }
