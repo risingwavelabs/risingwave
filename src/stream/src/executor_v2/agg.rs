@@ -21,24 +21,24 @@ use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
 
 use crate::executor::managed_state::aggregation::ManagedStateImpl;
-use crate::executor::{AggCall, AggState, ExecutorState, PkDataTypes, ROW_COUNT_COLUMN};
+use crate::executor::{AggCall, AggState, PkDataTypes, ROW_COUNT_COLUMN};
 use crate::executor_v2::error::{
     StreamExecutorError, StreamExecutorResult, TracedStreamExecutorError,
 };
 use crate::executor_v2::{
-    BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef, StatefulExecutor,
+    BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef,
 };
 
 /// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
 /// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].
 #[async_trait]
-pub trait AggExecutor: StatefulExecutor {
+pub trait AggExecutor: Send + 'static {
     /// Apply the chunk to the dirty state.
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()>;
+    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()>;
 
     /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
     /// no dirty states to flush, return `Ok(None)`.
-    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>>;
+    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>>;
 }
 
 /// The struct wraps a [`AggExecutor`]
@@ -49,7 +49,7 @@ pub struct AggExecutorWrapper<E> {
 
 impl<E> Executor for AggExecutorWrapper<E>
 where
-    E: AggExecutor,
+    E: AggExecutor + Executor,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.agg_executor_execute().boxed()
@@ -68,30 +68,17 @@ where
     }
 }
 
-impl<E> StatefulExecutor for AggExecutorWrapper<E>
-where
-    E: AggExecutor,
-{
-    fn executor_state(&self) -> &ExecutorState {
-        self.inner.executor_state()
-    }
-
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
-        self.inner.update_executor_state(new_state)
-    }
-}
-
 #[async_trait]
 impl<E> AggExecutor for AggExecutorWrapper<E>
 where
     E: AggExecutor,
 {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        self.inner.apply_chunk(chunk).await
+    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()> {
+        self.inner.apply_chunk(chunk, epoch).await
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
-        self.inner.flush_data().await
+    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
+        self.inner.flush_data(epoch).await
     }
 }
 
@@ -104,30 +91,28 @@ where
     pub(crate) async fn agg_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
         let first_msg = input.next().await.unwrap()?;
-        self.inner.init_executor(&first_msg);
+        let mut epoch = if let Message::Barrier(barrier) = &first_msg {
+            barrier.epoch.curr
+        } else {
+            panic!("The first message the executor receives is not a barrier");
+        };
         yield first_msg;
 
         #[for_await]
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Chunk(chunk) => self.inner.apply_chunk(chunk).await?,
+                Message::Chunk(chunk) => self.inner.apply_chunk(chunk, epoch).await?,
                 Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                     yield Message::Barrier(barrier);
                 }
                 Message::Barrier(barrier) => {
-                    let epoch = barrier.epoch.curr;
-                    if let Some(chunk) = self.inner.flush_data().await? {
-                        self.inner
-                            .update_executor_state(ExecutorState::Active(epoch));
+                    let next_epoch = barrier.epoch.curr;
+                    if let Some(chunk) = self.inner.flush_data(epoch).await? {
                         yield Message::Chunk(chunk);
-                        yield Message::Barrier(barrier);
-                    } else {
-                        // No fresh data need to flush, just forward the barrier.
-                        self.inner
-                            .update_executor_state(ExecutorState::Active(epoch));
-                        yield Message::Barrier(barrier)
-                    };
+                    }
+                    yield Message::Barrier(barrier);
+                    epoch = next_epoch;
                 }
             }
         }

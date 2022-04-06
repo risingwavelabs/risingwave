@@ -50,8 +50,6 @@ pub use mview::*;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use v1_compat::StreamExecutorV1;
 
-use crate::executor::ExecutorState;
-
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 
@@ -114,25 +112,5 @@ pub trait Executor: Send + 'static {
     /// Clears the in-memory cache of the executor. It's no-op by default.
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())
-    }
-}
-
-pub trait StatefulExecutor: Executor {
-    fn executor_state(&self) -> &ExecutorState;
-
-    fn update_executor_state(&mut self, new_state: ExecutorState);
-
-    /// Try initializing the executor if not done.
-    /// Return:
-    /// - Some(Epoch) if the executor is successfully initialized
-    /// - None if the executor has been initialized
-    fn init_executor<'a>(&'a mut self, msg: &'a Message) -> Option<Barrier> {
-        if let Message::Barrier(barrier) = msg {
-            // Move to Active state
-            self.update_executor_state(ExecutorState::Active(barrier.epoch.curr));
-            Some(barrier.clone())
-        } else {
-            panic!("The first message the executor receives is not a barrier");
-        }
     }
 }

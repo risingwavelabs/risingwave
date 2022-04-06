@@ -24,13 +24,14 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    agg_input_array_refs, pk_input_array_refs, AggCall, AggState, ExecutorState, PkIndicesRef,
+    agg_input_array_refs, pk_input_array_refs, AggCall, AggState,
+    PkIndicesRef,
 };
 use crate::executor_v2::agg::{
     generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
 };
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
+use crate::executor_v2::{BoxedMessageStream, PkIndices};
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -94,9 +95,6 @@ pub struct AggSimpleAggExecutor<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
-    /// Executor state
-    executor_state: ExecutorState,
-
     #[allow(dead_code)]
     /// Indices of the columns on which key distribution depends.
     key_indices: Vec<usize>,
@@ -123,7 +121,6 @@ impl<S: StateStore> AggSimpleAggExecutor<S> {
             keyspace,
             states: None,
             agg_calls,
-            executor_state: ExecutorState::Init,
             key_indices,
         })
     }
@@ -162,8 +159,7 @@ impl<S: StateStore> Executor for AggSimpleAggExecutor<S> {
 
 #[async_trait]
 impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        let epoch = self.executor_state().epoch();
+    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // --- Retrieve all aggregation inputs in advance ---
@@ -217,12 +213,11 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         Ok(())
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
 
-        let epoch = self.executor_state().epoch();
         let states = match self.states.as_mut() {
             Some(states) if states.is_dirty() => states,
             _ => return Ok(None), // Nothing to flush.
@@ -260,16 +255,6 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         let chunk = StreamChunk::new(new_ops, columns, None);
 
         Ok(Some(chunk))
-    }
-}
-
-impl<S: StateStore> StatefulExecutor for AggSimpleAggExecutor<S> {
-    fn executor_state(&self) -> &ExecutorState {
-        &self.executor_state
-    }
-
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
-        self.executor_state = new_state;
     }
 }
 

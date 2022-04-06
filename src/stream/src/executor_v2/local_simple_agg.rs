@@ -23,11 +23,11 @@ use risingwave_common::error::Result;
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    create_streaming_agg_state, AggCall, ExecutorState, PkIndicesRef, StreamingAggStateImpl,
+    create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl,
 };
 use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
+use crate::executor_v2::{BoxedMessageStream, PkIndices};
 
 pub type LocalSimpleAggExecutor = AggExecutorWrapper<AggLocalSimpleAggExecutor>;
 
@@ -71,9 +71,6 @@ pub struct AggLocalSimpleAggExecutor {
 
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
-
-    /// Executor state
-    executor_state: ExecutorState,
 }
 
 impl AggLocalSimpleAggExecutor {
@@ -107,7 +104,6 @@ impl AggLocalSimpleAggExecutor {
             states,
             is_dirty: false,
             agg_calls,
-            executor_state: ExecutorState::Init,
         })
     }
 }
@@ -132,7 +128,7 @@ impl Executor for AggLocalSimpleAggExecutor {
 
 #[async_trait]
 impl AggExecutor for AggLocalSimpleAggExecutor {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
+    async fn apply_chunk(&mut self, chunk: StreamChunk, _epoch: u64) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
         self.agg_calls
             .iter()
@@ -151,7 +147,7 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
         Ok(())
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+    async fn flush_data(&mut self, _epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
         if !self.is_dirty {
             return Ok(None);
         }
@@ -178,16 +174,6 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
         let ops = vec![Op::Insert; 1];
         self.is_dirty = false;
         Ok(Some(StreamChunk::new(ops, columns, None)))
-    }
-}
-
-impl StatefulExecutor for AggLocalSimpleAggExecutor {
-    fn executor_state(&self) -> &ExecutorState {
-        &self.executor_state
-    }
-
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
-        self.executor_state = new_state;
     }
 }
 

@@ -29,13 +29,14 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{
-    agg_input_arrays, pk_input_arrays, AggCall, AggState, ExecutorState, PkDataTypes, PkIndicesRef,
+    agg_input_arrays, pk_input_arrays, AggCall, AggState, PkDataTypes,
+    PkIndicesRef,
 };
 use crate::executor_v2::agg::{
     generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
 };
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, PkIndices, StatefulExecutor};
+use crate::executor_v2::{BoxedMessageStream, PkIndices};
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -97,9 +98,6 @@ pub struct AggHashAggExecutor<K: HashKey, S: StateStore> {
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
-
-    /// Executor state
-    executor_state: ExecutorState,
 }
 
 impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
@@ -124,7 +122,6 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
             state_map: EvictableHashMap::new(1 << 16),
             agg_calls,
             key_indices,
-            executor_state: ExecutorState::Init,
         })
     }
 
@@ -213,8 +210,7 @@ impl<K: HashKey, S: StateStore> Executor for AggHashAggExecutor<K, S> {
 
 #[async_trait]
 impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
-    async fn apply_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<()> {
-        let epoch = self.executor_state().epoch();
+    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()> {
         let (data_chunk, ops) = chunk.into_parts();
         let keys =
             K::build(&self.key_indices, &data_chunk).map_err(StreamExecutorError::eval_error)?;
@@ -310,11 +306,10 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
         Ok(())
     }
 
-    async fn flush_data(&mut self) -> StreamExecutorResult<Option<StreamChunk>> {
+    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
         // --- Flush states to the state store ---
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
-        let epoch = self.executor_state().epoch();
         let (write_batch, dirty_cnt) = {
             let mut write_batch = self.keyspace.state_store().start_write_batch();
             let mut dirty_cnt = 0;
@@ -383,16 +378,6 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
 
         trace!("output_chunk: {:?}", &chunk);
         Ok(Some(chunk))
-    }
-}
-
-impl<K: HashKey, S: StateStore> StatefulExecutor for AggHashAggExecutor<K, S> {
-    fn executor_state(&self) -> &ExecutorState {
-        &self.executor_state
-    }
-
-    fn update_executor_state(&mut self, new_state: ExecutorState) {
-        self.executor_state = new_state;
     }
 }
 
