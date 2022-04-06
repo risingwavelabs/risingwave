@@ -32,6 +32,9 @@ pub enum StreamExecutorError {
     #[error("chunk operation error {0}")]
     EvalError(RwError),
 
+    #[error("aggregate state error {0}")]
+    AggStateError(RwError),
+
     #[error("channel `{0}` closed")]
     ChannelClosed(String),
 }
@@ -47,6 +50,10 @@ impl StreamExecutorError {
 
     pub fn eval_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::EvalError(error.into()).into()
+    }
+
+    pub fn agg_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::AggStateError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {

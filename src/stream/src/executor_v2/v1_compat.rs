@@ -20,6 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::catalog::ColumnId;
 pub use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_storage::{Keyspace, StateStore};
@@ -27,9 +28,12 @@ use risingwave_storage::{Keyspace, StateStore};
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 use super::{
-    BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor, MaterializeExecutor,
+    BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor, HashAggExecutor,
+    LocalSimpleAggExecutor, MaterializeExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
+use crate::executor::AggCall;
+use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
@@ -186,6 +190,63 @@ impl<S: StateStore> MaterializeExecutor<S> {
             keyspace,
             keys,
             column_ids,
+            executor_id,
+            key_indices,
+        )
+    }
+}
+
+impl LocalSimpleAggExecutor {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        agg_calls: Vec<AggCall>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        _op_info: String,
+    ) -> Result<Self> {
+        let input = Box::new(ExecutorV1AsV2(input));
+        Self::new(input, agg_calls, pk_indices, executor_id)
+    }
+}
+
+impl<S: StateStore> SimpleAggExecutor<S> {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        agg_calls: Vec<AggCall>,
+        keyspace: Keyspace<S>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Result<Self> {
+        let input = Box::new(ExecutorV1AsV2(input));
+        Self::new(
+            input,
+            agg_calls,
+            keyspace,
+            pk_indices,
+            executor_id,
+            key_indices,
+        )
+    }
+}
+
+impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        agg_calls: Vec<AggCall>,
+        key_indices: Vec<usize>,
+        keyspace: Keyspace<S>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+        _op_info: String,
+    ) -> Result<Self> {
+        let input = Box::new(ExecutorV1AsV2(input));
+        Self::new(
+            input,
+            agg_calls,
+            keyspace,
+            pk_indices,
             executor_id,
             key_indices,
         )

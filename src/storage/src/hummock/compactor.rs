@@ -18,6 +18,7 @@ use std::time::Duration;
 use bytes::{Bytes, BytesMut};
 use futures::stream::{self, StreamExt};
 use futures::Future;
+use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
@@ -30,6 +31,7 @@ use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, Mer
 use super::key::{get_epoch, Epoch, FullKey};
 use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
+use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::version_cmp::VersionedComparator;
 use super::{
@@ -85,13 +87,37 @@ impl Compactor {
     /// For compaction from shared buffer to level 0, this is the only function gets called.
     pub async fn compact_shared_buffer(
         context: Arc<CompactorContext>,
-        iter: MergeIterator<'_>,
+        buffers: Vec<SharedBufferBatch>,
+        stats: Arc<StateStoreMetrics>,
     ) -> HummockResult<Vec<Sstable>> {
+        let mut start_user_keys: Vec<_> = buffers.iter().map(|m| m.start_user_key()).collect();
+        start_user_keys.sort();
+        start_user_keys.dedup();
+        let mut splits = Vec::with_capacity(start_user_keys.len());
+        splits.push(KeyRange::new(Bytes::new(), Bytes::new()));
+        let mut key_split_append = |key_before_last: &Bytes| {
+            splits.last_mut().unwrap().right = key_before_last.clone();
+            splits.push(KeyRange::new(key_before_last.clone(), Bytes::new()));
+        };
+        if start_user_keys.len() > 1 {
+            let split_num = context.options.share_buffers_sync_parallelism as usize;
+            let buffer_per_split = start_user_keys.len() / split_num;
+            for i in 1..split_num {
+                key_split_append(
+                    &FullKey::from_user_key_slice(
+                        start_user_keys[i * buffer_per_split],
+                        Epoch::MAX,
+                    )
+                    .into_inner()
+                    .into(),
+                );
+            }
+        }
+
         // Local memory compaction looks at all key ranges.
-        let key_range = KeyRange::inf();
         let compact_task = CompactTask {
             input_ssts: vec![],
-            splits: vec![key_range.into()],
+            splits: splits.into_iter().map(|v| v.into()).collect_vec(),
             watermark: u64::MAX,
             sorted_output_ssts: vec![],
             task_id: 0,
@@ -101,10 +127,54 @@ impl Compactor {
             task_status: false,
         };
 
-        let compactor = Compactor::new(context, compact_task);
-        let (_, level0) = compactor.compact_key_range(0, iter).await?;
+        let parallelism = compact_task.splits.len();
+        let mut compact_success = true;
+        let mut output_ssts = Vec::with_capacity(parallelism);
+        let mut compaction_futures = vec![];
+        let compactor = Compactor::new(context, compact_task.clone());
 
-        Ok(level0)
+        for (split_index, _) in compact_task.splits.iter().enumerate() {
+            let compactor = compactor.clone();
+            let iter = {
+                let iters = buffers
+                    .iter()
+                    .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
+                MergeIterator::new(iters, stats.clone())
+            };
+            compaction_futures.push(tokio::spawn(async move {
+                compactor.compact_key_range(split_index, iter).await
+            }));
+        }
+
+        let mut buffered = stream::iter(compaction_futures).buffer_unordered(parallelism);
+        let mut err = None;
+        while let Some(future_result) = buffered.next().await {
+            match future_result.unwrap() {
+                Ok((split_index, ssts)) => {
+                    output_ssts.push((split_index, ssts));
+                }
+                Err(e) => {
+                    compact_success = false;
+                    tracing::warn!("Shared Buffer Compaction failed with error: {}", e);
+                    err = Some(e);
+                }
+            }
+        }
+
+        // Sort by split/key range index.
+        output_ssts.sort_by_key(|(split_index, _)| *split_index);
+
+        if compact_success {
+            let mut level0 = Vec::with_capacity(parallelism);
+
+            for (_, sst) in output_ssts {
+                level0.extend(sst);
+            }
+
+            Ok(level0)
+        } else {
+            Err(err.unwrap())
+        }
     }
 
     /// Handle a compaction task and report its status to hummock manager.
