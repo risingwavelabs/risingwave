@@ -65,6 +65,10 @@ impl<S: StateStore> ManagedMViewState<S> {
         assert_eq!(self.order_types.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
 
+        if pk.0.len() == 3 {
+            tracing::warn!(?pk, ?value, "mview put");
+        }
+
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
@@ -72,6 +76,10 @@ impl<S: StateStore> ManagedMViewState<S> {
     /// primary keys.
     pub fn delete(&mut self, pk: Row) {
         assert_eq!(self.order_types.len(), pk.size());
+
+        if pk.0.len() == 3 {
+            tracing::warn!(?pk, "mview delete");
+        }
 
         FlushStatus::do_delete(self.cache.entry(pk));
     }
