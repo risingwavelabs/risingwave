@@ -22,6 +22,7 @@ use crate::optimizer::PlanRef;
 pub enum ApplyOrder {
     TopDown,
     BottomUp,
+    BottomUpAndThenTopDown,
 }
 
 // TODO: we should have a builder of HeuristicOptimizer here
@@ -64,6 +65,11 @@ impl HeuristicOptimizer {
             ApplyOrder::BottomUp => {
                 plan = self.optimize_inputs(plan);
                 self.optimize_node(plan)
+            }
+            ApplyOrder::BottomUpAndThenTopDown => {
+                plan = self.optimize_inputs(plan);
+                plan = self.optimize_node(plan);
+                self.optimize_inputs(plan)
             }
         }
     }

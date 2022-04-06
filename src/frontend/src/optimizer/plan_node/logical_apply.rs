@@ -17,7 +17,9 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use risingwave_pb::plan::JoinType;
 
-use super::{ColPrunable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream};
+use super::{
+    ColPrunable, LogicalJoin, PlanBase, PlanNode, PlanRef, PlanTreeNodeBinary, ToBatch, ToStream,
+};
 use crate::utils::ColIndexMapping;
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
@@ -91,8 +93,28 @@ impl PlanTreeNodeBinary for LogicalApply {
 impl_plan_tree_node_for_binary! { LogicalApply }
 
 impl ColPrunable for LogicalApply {
-    fn prune_col(&self, _: &FixedBitSet) -> PlanRef {
-        panic!("LogicalApply should be unnested")
+    fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
+        self.must_contain_columns(required_cols);
+
+        let left_len = self.left.schema().fields.len();
+
+        let mut left_required_cols = FixedBitSet::with_capacity(self.left.schema().fields().len());
+        let mut right_required_cols =
+            FixedBitSet::with_capacity(self.right.schema().fields().len());
+        required_cols.ones().for_each(|i| {
+            if i < left_len {
+                left_required_cols.insert(i);
+            } else {
+                right_required_cols.insert(i - left_len);
+            }
+        });
+
+        LogicalApply::new(
+            self.left.prune_col(&left_required_cols),
+            self.right.prune_col(&right_required_cols),
+            self.join_type,
+        )
+        .into()
     }
 }
 

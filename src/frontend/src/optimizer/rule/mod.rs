@@ -15,6 +15,7 @@
 //! Define all [`Rule`]
 
 use super::PlanRef;
+use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, InputRef, Expr};
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.
@@ -37,3 +38,33 @@ mod project_elim;
 pub use project_elim::*;
 mod project_merge;
 pub use project_merge::*;
+mod apply_project;
+pub use apply_project::*;
+mod apply_filter;
+pub use apply_filter::*;
+mod apply_scan;
+pub use apply_scan::*;
+
+struct LiftCorrelatedInputRef {}
+
+impl ExprRewriter for LiftCorrelatedInputRef {
+    fn rewrite_correlated_input_ref(
+        &mut self,
+        correlated_input_ref: CorrelatedInputRef,
+    ) -> ExprImpl {
+        match correlated_input_ref.depth() {
+            0 => unreachable!(),
+            1 => InputRef::new(
+                correlated_input_ref.index(),
+                correlated_input_ref.return_type(),
+            )
+            .into(),
+            depth => CorrelatedInputRef::new(
+                correlated_input_ref.index(),
+                correlated_input_ref.return_type(),
+                depth - 1,
+            )
+            .into(),
+        }
+    }
+}
