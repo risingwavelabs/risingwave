@@ -22,6 +22,9 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::RwError;
 use risingwave_common::storage::compact::compact_task_to_string;
+use risingwave_common::storage::key::{get_epoch, Epoch, FullKey};
+use risingwave_common::storage::key_range::KeyRange;
+use risingwave_common::storage::VersionedComparator;
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
@@ -30,12 +33,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
-use risingwave_common::storage::key::{get_epoch, Epoch, FullKey};
-use risingwave_common::storage::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
-use risingwave_common::storage::VersionedComparator;
 use super::{
     HummockError, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
     SSTableIterator, Sstable,

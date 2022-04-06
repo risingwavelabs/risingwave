@@ -17,9 +17,9 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use risingwave_common::storage::VersionedComparator;
 
 use super::{Block, KeyPrefix};
-use risingwave_common::storage::VersionedComparator;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {

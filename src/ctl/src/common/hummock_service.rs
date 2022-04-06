@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use risingwave_common::config::StorageConfig;
-use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
+use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::{HummockMetrics, MonitoredStateStore, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 

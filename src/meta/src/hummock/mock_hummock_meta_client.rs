@@ -113,7 +113,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     }
 
     async fn report_vacuum_task(&self, _vacuum_task: VacuumTask) -> Result<()> {
-        unimplemented!()
+        Ok(())
     }
 }
 

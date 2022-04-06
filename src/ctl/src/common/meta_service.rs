@@ -14,7 +14,6 @@
 
 use std::env;
 
-
 use anyhow::Result;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;

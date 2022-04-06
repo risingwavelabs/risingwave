@@ -22,14 +22,14 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::storage::{
+    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
+    INVALID_EPOCH,
+};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
     SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
-};
-use risingwave_common::storage::{
-    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
-    INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 

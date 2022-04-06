@@ -14,9 +14,8 @@
 
 #[cfg(test)]
 mod tests {
-    
+
     use std::sync::Arc;
-    
 
     use bytes::Bytes;
     use risingwave_common::config::StorageConfig;
@@ -77,7 +76,8 @@ mod tests {
     #[ignore]
     // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
-        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) = setup_compute_env(8080).await;
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
         let hummock_meta_client = Arc::new(MockHummockMetaClient::new(
             hummock_manager_ref.clone(),
             worker_node.id,
@@ -138,8 +138,7 @@ mod tests {
         );
 
         // 4. compact
-        Compactor::compact(Arc::new(compact_ctx), compact_task.clone())
-            .await;
+        Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
 
         assert!(compact_task.task_status);
 
@@ -157,7 +156,10 @@ mod tests {
         assert!(table.meta.estimated_size > target_table_size);
 
         // 5. get compact task
-        let compact_task = hummock_manager_ref.get_compact_task(worker_node.id).await.unwrap();
+        let compact_task = hummock_manager_ref
+            .get_compact_task(worker_node.id)
+            .await
+            .unwrap();
 
         assert!(compact_task.is_none());
     }

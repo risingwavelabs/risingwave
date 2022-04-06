@@ -18,6 +18,7 @@ risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_storage = { path = "../storage" }
+risingwave_meta = {path = "../meta", features = ["test"]}
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = [
     "fs",

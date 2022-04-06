@@ -14,9 +14,9 @@
 
 mod version_cmp;
 pub use version_cmp::*;
+pub mod compact;
 pub mod key;
 pub mod key_range;
-pub mod compact;
 
 pub type HummockSSTableId = u64;
 pub type HummockRefCount = u64;

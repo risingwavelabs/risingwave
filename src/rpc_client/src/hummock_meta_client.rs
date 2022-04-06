@@ -14,12 +14,11 @@
 
 use async_trait::async_trait;
 use risingwave_common::error::Result;
-use risingwave_common::storage::{HummockEpoch, HummockVersionId, HummockSSTableId};
+use risingwave_common::storage::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockVersion, SubscribeCompactTasksResponse, VacuumTask, SstableInfo,
+    CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use tonic::Streaming;
-
 
 #[async_trait]
 pub trait HummockMetaClient: Send + Sync + 'static {

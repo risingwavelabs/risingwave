@@ -133,7 +133,8 @@ impl SharedBufferUploader {
                     })
                     .collect(),
             )
-            .await.map_err(HummockError::meta_error)?;
+            .await
+            .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);

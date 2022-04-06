@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
+use risingwave_common::storage::key::user_key;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;
@@ -20,7 +21,6 @@ use super::{
     BlockBuilder, BlockBuilderOptions, BlockMeta, SstableMeta, DEFAULT_BLOCK_SIZE,
     DEFAULT_ENTRY_SIZE, DEFAULT_RESTART_INTERVAL, VERSION,
 };
-use risingwave_common::storage::key::user_key;
 use crate::hummock::value::HummockValue;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;

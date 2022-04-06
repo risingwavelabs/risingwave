@@ -15,8 +15,9 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use risingwave_common::storage::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+
+use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -83,7 +84,10 @@ impl<'a> ReverseUserIterator<'a> {
 
     fn out_of_range(&self, key: &[u8]) -> bool {
         match &self.key_range.0 {
-            Included(begin_key) => key < begin_key.as_slice(),
+            Included(begin_key) => {
+                println!("begin: {:?} {:?}", begin_key, key);
+                key < begin_key.as_slice()
+            }
             Excluded(begin_key) => key <= begin_key.as_slice(),
             Unbounded => false,
         }
@@ -135,6 +139,7 @@ impl<'a> ReverseUserIterator<'a> {
             let key = to_user_key(full_key);
 
             if epoch <= self.read_epoch {
+                println!("{:?} {} {}", key, epoch, self.read_epoch);
                 if self.just_met_new_key {
                     self.last_key.clear();
                     self.last_key.extend_from_slice(key);
@@ -208,6 +213,7 @@ impl<'a> ReverseUserIterator<'a> {
         match &self.key_range.1 {
             Included(end_key) => {
                 let full_key = &key_with_epoch(end_key.clone(), 0);
+                println!("end_key: {:?}", full_key);
                 self.iterator.seek(full_key).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),
@@ -264,6 +270,8 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use risingwave_common::storage::key::{prev_key, user_key};
+    use risingwave_common::storage::VersionedComparator;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -272,11 +280,9 @@ mod tests {
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedHummockIterator;
-    use risingwave_common::storage::key::{prev_key, user_key};
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
-    use risingwave_common::storage::VersionedComparator;
     use crate::hummock::{ReverseSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
     use crate::storage_value::ValueMeta;
