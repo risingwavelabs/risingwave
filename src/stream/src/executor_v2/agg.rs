@@ -25,9 +25,7 @@ use crate::executor::{AggCall, AggState, PkDataTypes, ROW_COUNT_COLUMN};
 use crate::executor_v2::error::{
     StreamExecutorError, StreamExecutorResult, TracedStreamExecutorError,
 };
-use crate::executor_v2::{
-    BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef,
-};
+use crate::executor_v2::{BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndicesRef};
 
 /// Trait for [`crate::executor_v2::LocalSimpleAggExecutor`], providing
 /// an implementation of [`Executor::execute`] by [`AggExecutorWrapper::agg_executor_execute`].

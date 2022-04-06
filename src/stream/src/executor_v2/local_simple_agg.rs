@@ -22,9 +22,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{
-    create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl,
-};
+use crate::executor::{create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl};
 use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::{BoxedMessageStream, PkIndices};

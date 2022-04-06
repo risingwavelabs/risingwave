@@ -23,10 +23,7 @@ use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{
-    agg_input_array_refs, pk_input_array_refs, AggCall, AggState,
-    PkIndicesRef,
-};
+use crate::executor::{agg_input_array_refs, pk_input_array_refs, AggCall, AggState, PkIndicesRef};
 use crate::executor_v2::agg::{
     generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
 };
