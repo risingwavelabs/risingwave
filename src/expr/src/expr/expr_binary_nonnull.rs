@@ -391,7 +391,7 @@ fn new_tumble_start(
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
-            NaiveDateArray,
+            NaiveDateTimeArray,
             _,
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date
