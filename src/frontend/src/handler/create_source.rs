@@ -198,11 +198,16 @@ pub mod tests {
         assert_eq!(source.name, "t");
 
         // Only check stream source
+        let catalogs = source.columns;
+        let mut columns = vec![];
 
-        let columns = source
-            .columns
+        // Get all column descs
+        for catalog in catalogs {
+            columns.append(&mut catalog.column_desc.get_column_descs());
+        }
+        let columns = columns
             .iter()
-            .map(|col| (col.name(), col.data_type().clone()))
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
             .collect::<HashMap<&str, DataType>>();
 
         let city_type = DataType::Struct {

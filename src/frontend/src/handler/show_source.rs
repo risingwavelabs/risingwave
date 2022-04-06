@@ -38,6 +38,7 @@ pub async fn handle_show_source(
         .get_source_by_name(session.database(), &schema_name, &source_name)?
         .columns
         .iter()
+        .filter(|c| !c.is_hidden)
         .map(|c| c.column_desc.clone())
         .collect_vec();
 
