@@ -97,6 +97,11 @@ fn literal_type_match(return_type: &DataType, literal: Option<&ScalarImpl>) -> b
                     | (DataType::Date, ScalarImpl::Int32(_))
                     | (DataType::Char, ScalarImpl::Utf8(_))
                     | (DataType::Varchar, ScalarImpl::Utf8(_))
+                    | (DataType::Date, ScalarImpl::NaiveDate(_))
+                    | (DataType::Time, ScalarImpl::NaiveTime(_))
+                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
+                    | (DataType::Decimal, ScalarImpl::Decimal(_))
+                    | (DataType::Interval, ScalarImpl::Interval(_))
             )
         }
         None => true,
