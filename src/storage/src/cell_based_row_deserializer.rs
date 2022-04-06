@@ -34,11 +34,6 @@ pub struct CellBasedRowDeserializer {
     /// which should also be done on the caller side.
     pk_bytes: Option<Vec<u8>>,
 }
-#[derive(Clone)]
-pub enum CellType {
-    Special(Option<(Vec<u8>, Row)>),
-    Normal(Option<(Vec<u8>, Row)>),
-}
 impl CellBasedRowDeserializer {
     pub fn new(table_column_descs: Vec<ColumnDesc>) -> Self {
         let num_cells = table_column_descs.len();
