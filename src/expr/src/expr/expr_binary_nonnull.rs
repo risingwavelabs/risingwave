@@ -124,16 +124,6 @@ macro_rules! gen_binary_expr_cmp {
                     $l, $r, $ret, $str_f,
                 ))
             }
-            (DataType::Varchar, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
-            (DataType::Char, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
             _ => {
                 $macro! {
                     [$l, $r, $ret],

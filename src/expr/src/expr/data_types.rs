@@ -132,18 +132,6 @@ macro_rules! date {
 pub(crate) use date;
 
 #[macro_export]
-macro_rules! char {
-    ($macro:ident) => {
-        $macro! {
-            risingwave_common::types::DataType::Char,
-            risingwave_common::array::Utf8Array
-        }
-    };
-}
-
-pub(crate) use char;
-
-#[macro_export]
 macro_rules! varchar {
     ($macro:ident) => {
         $macro! {

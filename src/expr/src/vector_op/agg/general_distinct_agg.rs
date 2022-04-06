@@ -291,8 +291,8 @@ mod tests {
     fn vec_distinct_min_char() -> Result<()> {
         let input = Utf8Array::from_slice(&[Some("b"), Some("aa")])?;
         let agg_type = AggKind::Min;
-        let input_type = DataType::Char;
-        let return_type = DataType::Char;
+        let input_type = DataType::Varchar;
+        let return_type = DataType::Varchar;
         let actual = eval_agg(
             input_type,
             Arc::new(input.into()),
