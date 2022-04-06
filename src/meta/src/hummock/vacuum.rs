@@ -23,7 +23,7 @@ use risingwave_storage::hummock::HummockSSTableId;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
-use crate::hummock::model::{sstable_id_info, INVALID_TIMESTAMP};
+use crate::hummock::model::INVALID_TIMESTAMP;
 use crate::hummock::{CompactorManager, HummockManagerRef};
 use crate::storage::MetaStore;
 
@@ -44,8 +44,8 @@ pub struct VacuumTrigger<S: MetaStore> {
     hummock_manager: HummockManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: Arc<CompactorManager>,
-    /// Orphan sst ids which have been dispatched to vacuum nodes but are not replied yet.
-    pending_orphan_sst_ids: parking_lot::RwLock<HashSet<HummockSSTableId>>,
+    /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
+    pending_sst_ids: parking_lot::RwLock<HashSet<HummockSSTableId>>,
 }
 
 impl<S> VacuumTrigger<S>
@@ -59,7 +59,7 @@ where
         Self {
             hummock_manager,
             compactor_manager,
-            pending_orphan_sst_ids: Default::default(),
+            pending_sst_ids: Default::default(),
         }
     }
 
@@ -137,7 +137,7 @@ where
     /// Two types of SSTs can be deleted:
     /// - Orphan SST. The SST is 1) not tracked in meta, that's to say `meta_create_timestamp` is
     ///   not set, 2) and the SST has existed longer than `ORPHAN_SST_RETENTION_INTERVAL` since
-    ///   `id_create_timestamp`.
+    ///   `id_create_timestamp`. Its `meta_delete_timestamp` field will then be set.
     /// - SST marked for deletion. The SST is marked for deletion by `vacuum_tracked_data`, that's
     ///   to say `meta_delete_timestamp` is set.
     async fn vacuum_sst_data(
@@ -150,40 +150,32 @@ where
             // It is possible some vacuum workers have been asked to vacuum these SSTs previously,
             // but they don't report the results yet due to either latency or failure.
             // This is OK since trying to delete the same SST multiple times is safe.
-            let pending_sst_ids = vacuum
-                .pending_orphan_sst_ids
-                .read()
-                .iter()
-                .cloned()
-                .collect_vec();
+            let pending_sst_ids = vacuum.pending_sst_ids.read().iter().cloned().collect_vec();
             if !pending_sst_ids.is_empty() {
                 pending_sst_ids
             } else {
-                // 2. If no pending sst ids, then fetch new ones.
-                let now = sstable_id_info::get_timestamp_now();
+                // 2. If no pending SSTs, then fetch new ones.
+                // Set orphan SSTs' meta_delete_timestamp field.
+                vacuum
+                    .hummock_manager
+                    .mark_orphan_ssts(orphan_sst_retention_interval)
+                    .await?;
                 let ssts_to_delete = vacuum
                     .hummock_manager
                     .list_sstable_id_infos()
                     .await?
                     .into_iter()
                     .filter(|sstable_id_info| {
-                        let is_orphan = sstable_id_info.meta_create_timestamp == INVALID_TIMESTAMP
-                            && now >= sstable_id_info.id_create_timestamp
-                            && now - sstable_id_info.id_create_timestamp
-                                >= orphan_sst_retention_interval.as_secs();
-                        let is_marked_for_deletion =
-                            sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP;
-                        is_orphan || is_marked_for_deletion
+                        sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP
                     })
                     .map(|sstable_id_info| sstable_id_info.id)
                     .collect_vec();
-
                 if ssts_to_delete.is_empty() {
                     return Ok(vec![]);
                 }
-                // Keep these sst ids, so that we can remove them from metadata later.
+                // Keep these SST ids, so that we can remove them from metadata later.
                 vacuum
-                    .pending_orphan_sst_ids
+                    .pending_sst_ids
                     .write()
                     .extend(ssts_to_delete.clone());
                 ssts_to_delete
@@ -230,7 +222,7 @@ where
 
     pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
         let deleted_sst_ids = self
-            .pending_orphan_sst_ids
+            .pending_sst_ids
             .read()
             .iter()
             .filter(|p| vacuum_task.sstable_ids.contains(p))
@@ -240,7 +232,7 @@ where
             self.hummock_manager
                 .delete_sstable_ids(&deleted_sst_ids)
                 .await?;
-            self.pending_orphan_sst_ids
+            self.pending_sst_ids
                 .write()
                 .retain(|p| !deleted_sst_ids.contains(p));
         }

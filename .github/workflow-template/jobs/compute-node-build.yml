@@ -12,7 +12,12 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -36,41 +41,37 @@ jobs:
 
       - name: Run rust cargo-sort check
         run: |
-          cd src && cargo sort -c -w
+          cargo sort -c -w
 
       - name: Run rust cargo-hakari check
         run: |
-          cd src && cargo hakari verify
+          cargo hakari verify
 
       - name: Run rust format check
         run: |
-          cd src && cargo fmt --all -- --check
-
-      - name: Run rust doc check
-        run: |
-          cd src && cargo doc --document-private-items
+          cargo fmt --all -- --check
 
       - name: Build Rust components
         run: |
-          cd src && cargo build --profile $[<profile>] --features=all-in-one
+          cargo build --profile $[<profile>] --features=all-in-one
 
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-$[<profile>]
           if-no-files-found: error
           path: |
-            src/target/$[<target>]/risingwave
+            target/$[<target>]/risingwave
 
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave_regress_test-$[<profile>]
           if-no-files-found: error
           path: |
-            src/target/$[<target>]/risingwave_regress_test
+            target/$[<target>]/risingwave_regress_test
 
       - uses: actions/upload-artifact@v2
         with:
           name: risedev-playground-$[<profile>]
           if-no-files-found: error
           path: |
-            src/target/$[<target>]/risedev-playground
+            target/$[<target>]/risedev-playground

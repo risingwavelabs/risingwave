@@ -8,7 +8,7 @@ anyhow = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-axum = "0.4"
+axum = "0.5"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
@@ -29,7 +29,7 @@ num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
 paste = "1"
 prometheus = "0.13"
-prost = "0.9"
+prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
@@ -50,7 +50,7 @@ tokio = { version = "1", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-tonic = "0.6"
+tonic = "0.7"
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tower-http = { version = "0.2", features = ["add-extension", "cors", "fs"] }
 tracing = { version = "0.1" }
