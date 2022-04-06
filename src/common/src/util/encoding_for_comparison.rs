@@ -35,7 +35,6 @@ pub fn is_type_encodable(t: DataType) -> bool {
             | DataType::Float32
             | DataType::Float64
             | DataType::Varchar
-            | DataType::Char
     )
 }
 

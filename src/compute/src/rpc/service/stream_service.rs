@@ -104,10 +104,6 @@ impl StreamService for StreamServiceImpl {
         self.mgr
             .drop_actor(&actors)
             .map_err(|e| e.to_grpc_status())?;
-        self.mgr
-            .drop_materialized_view(&TableId::from(&req.table_ref_id), self.env.clone())
-            .await
-            .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(DropActorsResponse {
             request_id: req.request_id,
             status: None,

@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, BoundBaseTable, Result};
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {
@@ -76,8 +77,6 @@ impl Binder {
             .into());
         };
 
-        let time_col_data_type = time_col.return_type();
-
         self.pop_context();
 
         let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
@@ -107,12 +106,8 @@ impl Binder {
             })
             .chain(
                 [
-                    (
-                        "window_start".to_string(),
-                        time_col_data_type.clone(),
-                        false,
-                    ),
-                    ("window_end".to_string(), time_col_data_type, false),
+                    ("window_start".to_string(), DataType::Timestamp, false),
+                    ("window_end".to_string(), DataType::Timestamp, false),
                 ]
                 .into_iter(),
             );

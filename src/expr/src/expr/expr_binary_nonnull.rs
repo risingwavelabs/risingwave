@@ -124,16 +124,6 @@ macro_rules! gen_binary_expr_cmp {
                     $l, $r, $ret, $str_f,
                 ))
             }
-            (DataType::Varchar, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
-            (DataType::Char, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
             _ => {
                 $macro! {
                     [$l, $r, $ret],
@@ -391,7 +381,7 @@ fn new_tumble_start(
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
-            NaiveDateArray,
+            NaiveDateTimeArray,
             _,
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date
