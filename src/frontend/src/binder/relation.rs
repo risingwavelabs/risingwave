@@ -62,7 +62,7 @@ impl From<&TableCatalog> for BoundBaseTable {
     fn from(t: &TableCatalog) -> Self {
         Self {
             name: t.name.clone(),
-            table_id: t.id.clone(),
+            table_id: t.id,
             table_catalog: t.clone(),
         }
     }
