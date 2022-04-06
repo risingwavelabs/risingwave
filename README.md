@@ -4,6 +4,12 @@
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave)
 
+RisingWave is a cloud-native streaming database that uses SQL as the interface language. It is designed to reduce the complexity and cost of developing and using a stream processing platform so that developers can build applications more efficiently. It ingests streaming data, performs the processing that you specify (aggregates, joins, maps, enrichment, etc.), and dynamically updates the results. As a streaming database, RisingWave stores the results so that users can access them in real-time.
+
+RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
+
+Learn more in [Introduction to RisingWave](https://singularity-data.com/risingwave-docs/docs/latest/intro/).
+
 ## Quick Start
 
 ### Installation
@@ -65,6 +71,10 @@ If everything works, you will see
 ```
 
 in the Postgres shell.
+
+## Documentation
+
+You may refer to [RisingWave Docs](https://singularity-data.com/risingwave-docs/) for more information, such as architecture overview, how to create streaming source, etc.
 
 ## License
 
