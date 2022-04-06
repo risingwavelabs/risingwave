@@ -4,8 +4,8 @@ version = "0.1.4"
 edition = "2021"
 
 [dependencies]
-fail = "0.5"
 async-trait = "0.1"
+fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"]  }
 log = "0.4"
 paste = "1"

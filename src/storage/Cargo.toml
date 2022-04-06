@@ -4,7 +4,6 @@ version = "0.1.4"
 edition = "2021"
 
 [dependencies]
-fail = "0.5"
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -21,6 +20,7 @@ crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
+fail = "0.5"
 enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
