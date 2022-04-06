@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use log::warn;
 use risingwave_common::error::{Result, RwError};
 use tokio::sync::oneshot;
 
@@ -120,7 +121,10 @@ impl UnfinishedNotifiers {
                 }
             }
 
-            Entry::Vacant(_) => todo!("handle finish report after meta recovery"),
+            Entry::Vacant(_) => {
+                // TODO: should panic after meta recovery finish handled.
+                warn!("epoch not exist, mostly happened after meta recovery");
+            }
         }
     }
 }

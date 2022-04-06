@@ -183,3 +183,17 @@ pub async fn setup_compute_env(
         .unwrap();
     (env, hummock_manager, cluster_manager, worker_node)
 }
+
+pub async fn get_sst_ids<S>(
+    hummock_manager: &HummockManager<S>,
+    number: usize,
+) -> Vec<HummockSSTableId>
+where
+    S: MetaStore,
+{
+    let mut ret = vec![];
+    for _ in 0..number {
+        ret.push(hummock_manager.get_new_table_id().await.unwrap());
+    }
+    ret
+}

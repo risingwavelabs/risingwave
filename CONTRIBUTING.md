@@ -1,6 +1,7 @@
 # Develop RisingWave
 
 - [Develop RisingWave](#develop-risingwave)
+  - [Communication](#communication)
   - [Setting Up Development Environment](#setting-up-development-environment)
   - [Code Structure](#code-structure)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
@@ -23,6 +24,7 @@
   - [Sending a PR](#sending-a-pr)
     - [Pull Request Title](#pull-request-title)
     - [Pull Request Description](#pull-request-description)
+    - [CLA](#cla)
   - [Update CI Workflow](#update-ci-workflow)
   - [When adding new files...](#when-adding-new-files)
   - [When adding new dependencies...](#when-adding-new-dependencies)
@@ -30,6 +32,10 @@
 Thanks for your interest in contributing to RisingWave! Contributions of many kinds are encouraged and most welcome.
 
 If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose).
+
+## Communication
+
+RisingWave community is available on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join.
 
 ## Setting Up Development Environment
 
@@ -320,6 +326,10 @@ You may also check out our previous PRs in the [PR list](https://github.com/sing
 
 - If your PR is small (such as a typo fix), you can go brief.
 - If it is large and you have changed a lot, it's better to write more details.
+
+### CLA
+
+Contributors will need to sign Singularity Data's CLA.
 
 ## Update CI Workflow
 

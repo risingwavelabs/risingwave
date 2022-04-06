@@ -25,21 +25,31 @@ go/bin/
 **/.idea
 **/.gradle
 legacy/**/build
+legacy/**/bin
 
 # Rust
 src/**/target
 src/**/target_tarpaulin
+target/
 src/proto/
 src/prost/src/*.rs
 !src/prost/src/lib.rs
+!src/prost/src/imp.rs
 **/file_descriptor_set.bin
 # runtime log
 src/log/
-# rusty-tags
-**/rusty-tags.vi
+# srcy-tags
+**/srcy-tags.vi
 
 # ctags
 **/tags
 
 log/
 .git
+
+.risingwave/
+.bin/
+
+# generated files
+risedev-components.user.env
+riselab-components.user.env
