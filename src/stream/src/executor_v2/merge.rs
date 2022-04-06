@@ -192,7 +192,7 @@ impl MergeExecutor {
                 }
             }
 
-            // 2. Emit the barrier to downstream once all barriers collected from upstream.
+            // 2. Yield the barrier to downstream once all barriers collected from upstream.
             yield Message::Barrier(current_barrier.unwrap());
 
             // 3. Put back the upstreams.
