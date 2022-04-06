@@ -22,6 +22,7 @@ use risingwave_pb::catalog::{
     StreamSourceInfo as ProstSourceInfo, Table as ProstTable,
 };
 
+use super::source_catalog::SourceCatalog;
 use super::{CatalogError, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -145,32 +146,10 @@ impl Catalog {
         db_name: &str,
         schema_name: &str,
         source_name: &str,
-    ) -> Result<&ProstSource> {
+    ) -> Result<&SourceCatalog> {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
-    }
-
-    pub fn get_stream_source_by_name(
-        &self,
-        db_name: &str,
-        schema_name: &str,
-        source_name: &str,
-    ) -> Result<(SourceId, &ProstSourceInfo)> {
-        let source = self
-            .get_schema_by_name(db_name, schema_name)?
-            .get_source_by_name(source_name)
-            .ok_or_else(|| {
-                RwError::from(CatalogError::NotFound(
-                    "stream_source",
-                    source_name.to_string(),
-                ))
-            })?;
-        if let Some(Info::StreamSource(source_info)) = source.info {
-            return Ok((source.id, &source_info));
-        } else {
-            return Err(CatalogError::NotFound("stream_source", source_name.to_string()).into());
-        }
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.
@@ -186,11 +165,11 @@ impl Catalog {
         // Resolve source first.
         if let Some(source) = schema.get_source_by_name(relation_name) {
             // TODO: check if it is a materialized source and improve the err msg
-            match source.info.as_ref().unwrap() {
-                source::Info::TableSource(_) => {
+            match source.source_type {
+                risingwave_pb::stream_plan::source_node::SourceType::Table => {
                     Err(CatalogError::Duplicated("table", relation_name.to_string()).into())
                 }
-                source::Info::StreamSource(_) => {
+                risingwave_pb::stream_plan::source_node::SourceType::Source => {
                     Err(CatalogError::Duplicated("source", relation_name.to_string()).into())
                 }
             }

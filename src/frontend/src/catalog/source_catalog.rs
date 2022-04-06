@@ -20,7 +20,8 @@ use super::{ColumnId, SourceId};
 use crate::handler::create_table::TABLE_SOURCE_PK_COLID;
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
-struct SourceCatalog {
+#[derive(Clone, Debug)]
+pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
     pub columns: Vec<ColumnCatalog>,
