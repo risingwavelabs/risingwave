@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::Bitmap;
+use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
 
@@ -93,7 +93,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
 
         // TODO: Can we update ops and visibility inplace?
         let mut new_ops = Vec::with_capacity(n);
-        let mut new_visibility = Vec::with_capacity(n);
+        let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
         assert!(match visibility {
@@ -110,9 +110,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
                     Op::Insert | Op::Delete => {
                         new_ops.push(op);
                         if res {
-                            new_visibility.push(true);
+                            new_visibility.append(true);
                         } else {
-                            new_visibility.push(false);
+                            new_visibility.append(false);
                         }
                     }
                     Op::UpdateDelete => {
@@ -122,26 +122,26 @@ impl SimpleExecutor for SimpleFilterExecutor {
                         (true, false) => {
                             new_ops.push(Op::Delete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(true);
-                            new_visibility.push(false);
+                            new_visibility.append(true);
+                            new_visibility.append(false);
                         }
                         (false, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::Insert);
-                            new_visibility.push(false);
-                            new_visibility.push(true);
+                            new_visibility.append(false);
+                            new_visibility.append(true);
                         }
                         (true, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(true);
-                            new_visibility.push(true);
+                            new_visibility.append(true);
+                            new_visibility.append(true);
                         }
                         (false, false) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(false);
-                            new_visibility.push(false);
+                            new_visibility.append(false);
+                            new_visibility.append(false);
                         }
                     },
                 }
@@ -150,11 +150,10 @@ impl SimpleExecutor for SimpleFilterExecutor {
             panic!("unmatched type: filter expr returns a non-null array");
         }
 
-        let visibility: Bitmap = new_visibility
-            .try_into()
-            .map_err(StreamExecutorError::eval_error)?;
-        Ok(if visibility.num_high_bits() > 0 {
-            let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
+        let new_visibility = new_visibility.finish();
+
+        Ok(if new_visibility.num_high_bits() > 0 {
+            let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
             Some(new_chunk)
         } else {
             None
