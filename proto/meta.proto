@@ -162,7 +162,7 @@ message TableFragments {
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
   }
-  plan.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
 }
