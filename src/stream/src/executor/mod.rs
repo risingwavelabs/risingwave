@@ -180,11 +180,8 @@ impl Barrier {
         self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
     }
 
-    pub fn is_add_output_mutation(&self) -> bool {
-        self.mutation
-            .as_ref()
-            .map(|m| m.is_add_output())
-            .unwrap_or(false)
+    pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
+        matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
 }
 
