@@ -19,14 +19,14 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::try_match_expand;
+use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::ActorState;
-use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_plan::StreamActor;
 use tokio::sync::RwLock;
 
 use crate::cluster::WorkerId;
-use crate::model::{ActorId, MetadataModel, TableFragments};
-use crate::storage::MetaStore;
+use crate::model::{ActorId, MetadataModel, TableFragments, Transactional};
+use crate::storage::{MetaStore, Transaction};
 
 struct FragmentManagerCore {
     table_fragments: HashMap<TableId, TableFragments>,
@@ -108,8 +108,8 @@ where
         }
     }
 
-    /// update table fragments with downstream actor ids in sink actors.
-    pub async fn update_table_fragments_downstream(
+    /// Add table fragments with downstream actor ids in sink actors.
+    pub async fn add_table_fragments_downstream(
         &self,
         table_id: &TableId,
         extra_downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
@@ -140,17 +140,40 @@ where
         }
     }
 
+    /// Drop table fragments info and remove downstream actor infos in fragments from its dependent
+    /// tables.
     pub async fn drop_table_fragments(&self, table_id: &TableId) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(entry) => {
-                TableFragments::delete(&*self.meta_store, &TableRefId::from(table_id)).await?;
-                entry.remove();
+        if let Some(table_fragments) = map.get(table_id) {
+            let mut transaction = Transaction::default();
+            table_fragments.delete_in_transaction(&mut transaction)?;
+
+            let dependent_table_ids = table_fragments.dependent_table_ids();
+            let chain_actor_ids = table_fragments.chain_actor_ids();
+            for dependent_table_id in dependent_table_ids {
+                let dependent_table_fragments =
+                    map.get_mut(&dependent_table_id).ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "table_fragment for {} not exist!",
+                            dependent_table_id
+                        )))
+                    })?;
+                for fragment in dependent_table_fragments.fragments.values_mut() {
+                    if fragment.fragment_type == FragmentType::Sink as i32 {
+                        for actor in &mut fragment.actors {
+                            actor.dispatcher[0]
+                                .downstream_actor_id
+                                .retain(|x| !chain_actor_ids.contains(x));
+                        }
+                    }
+                }
+                dependent_table_fragments.upsert_in_transaction(&mut transaction)?;
             }
-            Entry::Vacant(_) => {
-                tracing::warn!("table_fragment not exist when dropping: {}", table_id)
-            }
+            self.meta_store.txn(transaction).await?;
+            map.remove(table_id);
+        } else {
+            tracing::warn!("table_fragment not exist when dropping: {}", table_id);
         }
 
         Ok(())
