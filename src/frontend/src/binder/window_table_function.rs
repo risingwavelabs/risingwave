@@ -62,7 +62,7 @@ impl Binder {
         let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
 
         // TODO: support alias.
-        let base = self.bind_table_or_source(schema_name, table_name, None)?;
+        let base = self.bind_table_or_source(&schema_name, &table_name, None)?;
 
         let Some(time_col_arg) = args.next() else {
             return Err(ErrorCode::BindError(

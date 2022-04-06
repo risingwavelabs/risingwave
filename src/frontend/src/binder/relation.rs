@@ -31,6 +31,7 @@ use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, SourceId, TableId};
 use crate::expr::{Expr, ExprImpl};
@@ -39,7 +40,7 @@ use crate::expr::{Expr, ExprImpl};
 /// It is usually part of the `from` clause.
 #[derive(Debug)]
 pub enum Relation {
-    Source(Box<BoundStreamSource>),
+    Source(Box<BoundSource>),
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
@@ -66,6 +67,7 @@ pub struct BoundSubquery {
     pub query: BoundQuery,
 }
 
+/// BoundTableSource is used by DML statement on table source like insert, updata
 #[derive(Debug)]
 pub struct BoundTableSource {
     pub name: String,       // explain-only
@@ -74,10 +76,8 @@ pub struct BoundTableSource {
 }
 
 #[derive(Debug)]
-pub struct BoundStreamSource {
-    pub name: String,
-    pub source_id: SourceId,
-    pub info: StreamSourceInfo,
+pub struct BoundSource {
+    pub catalog: SourceCatalog,
 }
 
 impl Binder {
@@ -156,7 +156,7 @@ impl Binder {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
                     let (schema_name, table_name) = Self::resolve_table_name(name)?;
-                    self.bind_table_or_source(schema_name, table_name, alias)
+                    self.bind_table_or_source(&schema_name, &table_name, alias)
                 } else {
                     let kind =
                         WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
@@ -193,19 +193,31 @@ impl Binder {
 
     pub(super) fn bind_table_or_source(
         &mut self,
-        schema_name: String,
-        table_name: String,
+        schema_name: &String,
+        table_name: &String,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        if let Some(bound_table) = self.try_bind_table(schema_name, table_name, alias)? {
-            Ok(Relation::BaseTable(Box::new(bound_table)))
-        } else if let Some(bound_source) =
-            self.try_bind_stream_source(schema_name, table_name, alias)?
+        let (ret, columns) = if let Some(bound_table) =
+            self.try_bind_table(schema_name, table_name)?
         {
-            Ok(Relation::Source(Box::new(bound_source)))
+            let columns = bound_table.table_catalog.columns.clone();
+            (Relation::BaseTable(Box::new(bound_table)), columns)
+        } else if let Some(bound_source) = self.try_bind_source(schema_name, table_name)? {
+            let columns = bound_source.catalog.columns.clone();
+            (Relation::Source(Box::new(bound_source)), columns)
         } else {
-            Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
-        }
+            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        };
+
+        self.bind_context(
+            columns
+                .iter()
+                .cloned()
+                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
+            table_name.clone(),
+            alias,
+        )?;
+        Ok(ret)
     }
 
     /// return the (`schema_name`, `table_name`)
@@ -226,17 +238,16 @@ impl Binder {
 
     pub(super) fn try_bind_table(
         &mut self,
-        schema_name: String,
-        table_name: String,
-        alias: Option<TableAlias>,
+        schema_name: &String,
+        table_name: &String,
     ) -> Result<Option<BoundBaseTable>> {
         if let Ok(table_catalog) =
             self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)
+                .get_table_by_name(&self.db_name, schema_name, table_name)
         {
             let table_id = table_catalog.id();
             Ok(Some(BoundBaseTable {
-                name: table_name,
+                name: table_name.clone(),
                 table_id,
                 table_catalog: table_catalog.clone(),
             }))
@@ -245,33 +256,17 @@ impl Binder {
         }
     }
 
-    pub(super) fn try_bind_stream_source(
+    pub(super) fn try_bind_source(
         &mut self,
-        schema_name: String,
-        table_name: String,
-        alias: Option<TableAlias>,
-    ) -> Result<Option<BoundStreamSource>> {
-        if let Ok((source_id, source_info)) =
-            self.catalog
-                .get_stream_source_by_name(&self.db_name, &schema_name, &table_name)
+        schema_name: &String,
+        table_name: &String,
+    ) -> Result<Option<BoundSource>> {
+        if let Ok(catalog) = self
+            .catalog
+            .get_source_by_name(&self.db_name, schema_name, table_name)
         {
-            let columns = source_info.columns.into_iter().map(ColumnCatalog::from);
-            self.bind_context(
-                columns.map(|c| {
-                    (
-                        c.column_desc.name.clone(),
-                        c.column_desc.data_type.clone(),
-                        c.is_hidden,
-                    )
-                }),
-                table_name.clone(),
-                alias,
-            )?;
-
-            Ok(Some(BoundStreamSource {
-                name: table_name,
-                source_id,
-                info: source_info.clone(),
+            Ok(Some(BoundSource {
+                catalog: catalog.clone(),
             }))
         } else {
             Ok(None)
@@ -285,13 +280,12 @@ impl Binder {
             .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
 
         let source_id = TableId::new(source.id);
-        let table_source_info = try_match_expand!(source.get_info()?, Info::TableSource)?;
 
-        let columns: Vec<ColumnDesc> = table_source_info
+        let columns = source
             .columns
             .iter()
             .filter(|c| !c.is_hidden)
-            .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
+            .map(|c| c.column_desc.clone())
             .collect();
 
         // Note(bugen): do not bind context here.

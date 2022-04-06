@@ -36,11 +36,11 @@ impl Binder {
         source_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
-        let (schema_name, table_name) = Self::resolve_table_name(source_name)?;
+        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
         let delete = BoundDelete {
             table_source: self.bind_table_source(source_name.clone())?,
             table: self
-                .try_bind_table(schema_name, table_name, None)?
+                .try_bind_table(&schema_name, &table_name)?
                 .ok_or_else(|| {
                     RwError::from(CatalogError::NotFound("table", source_name.to_string()))
                 })?,
