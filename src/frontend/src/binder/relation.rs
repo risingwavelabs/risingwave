@@ -241,7 +241,7 @@ impl Binder {
         Ok(BoundBaseTable {
             name: table_name.to_string(),
             table_id,
-            table_catalog: table_catalog.clone(),
+            table_catalog,
         })
     }
 
