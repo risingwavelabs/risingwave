@@ -41,6 +41,7 @@ mod simple;
 mod test_utils;
 mod v1_compat;
 
+pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;

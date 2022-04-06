@@ -6,13 +6,10 @@ use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
-use super::{Executor, ExecutorInfo, Message, PkIndices};
+use super::{Executor, ExecutorInfo, Message};
 use crate::executor_v2::BoxedMessageStream;
 
 pub struct BatchQueryExecutor<S: StateStore> {
-    /// The primary key indices of the schema
-    pk_indices: PkIndices,
-
     /// The [`CellBasedTable`] that needs to be queried
     table: CellBasedTable<S>,
 
@@ -30,6 +27,20 @@ impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
+    pub fn new(
+        table: CellBasedTable<S>,
+        batch_size: usize,
+        info: ExecutorInfo,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        Self {
+            table,
+            batch_size,
+            info,
+            key_indices,
+        }
+    }
+
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
         let mut iter = self

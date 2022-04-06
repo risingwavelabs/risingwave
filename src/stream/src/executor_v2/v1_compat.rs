@@ -23,13 +23,14 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
 use super::{
-    BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor, HashAggExecutor,
-    LocalSimpleAggExecutor, MaterializeExecutor,
+    BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
+    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor::AggCall;
@@ -250,5 +251,25 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             executor_id,
             key_indices,
         )
+    }
+}
+
+impl<S: StateStore> BatchQueryExecutor<S> {
+    const DEFAULT_BATCH_SIZE: usize = 100;
+
+    pub fn new_from_v1(
+        table: CellBasedTable<S>,
+        pk_indices: PkIndices,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        let schema = table.schema().clone();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "BatchQuery".to_owned(),
+        };
+
+        Self::new(table, Self::DEFAULT_BATCH_SIZE, info, key_indices)
     }
 }
