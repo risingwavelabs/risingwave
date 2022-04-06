@@ -14,6 +14,7 @@
 
 use std::fmt::{Debug, Formatter};
 
+use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -70,6 +71,7 @@ impl Debug for SimpleFilterExecutor {
     }
 }
 
+#[async_trait]
 impl SimpleExecutor for SimpleFilterExecutor {
     fn map_filter_chunk(
         &mut self,
