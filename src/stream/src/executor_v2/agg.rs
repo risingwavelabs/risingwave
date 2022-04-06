@@ -107,13 +107,13 @@ where
         self.inner.init_executor(&first_msg);
         yield first_msg;
 
-        while let Some(msg) = input.next().await {
+        #[for_await]
+        for msg in input {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => self.inner.apply_chunk(chunk).await?,
                 Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                     yield Message::Barrier(barrier);
-                    break;
                 }
                 Message::Barrier(barrier) => {
                     let epoch = barrier.epoch.curr;
