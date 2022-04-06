@@ -342,6 +342,13 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Timestamp, T::Time, T::Date],
         T::Decimal,
     );
+    build_binary_funcs(
+        &mut map,
+        &[E::TumbleStart],
+        &[T::Date, T::Timestamp],
+        &[T::Interval],
+        T::Timestamp,
+    );
     map
 }
 lazy_static::lazy_static! {
