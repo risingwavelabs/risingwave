@@ -332,7 +332,10 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
             return Ok(None);
         }
 
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch
+            .ingest(epoch)
+            .await
+            .map_err(StreamExecutorError::agg_state_error)?;
 
         // --- Produce the stream chunk ---
 

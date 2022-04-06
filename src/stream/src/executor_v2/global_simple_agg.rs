@@ -226,7 +226,10 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
                 .flush(&mut write_batch)
                 .map_err(StreamExecutorError::agg_state_error)?;
         }
-        write_batch.ingest(epoch).await.unwrap();
+        write_batch
+            .ingest(epoch)
+            .await
+            .map_err(StreamExecutorError::agg_state_error)?;
 
         // --- Create array builders ---
         // As the datatype is retrieved from schema, it contains both group key and aggregation

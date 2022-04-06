@@ -89,11 +89,10 @@ where
     pub(crate) async fn agg_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
         let first_msg = input.next().await.unwrap()?;
-        let mut epoch = if let Message::Barrier(barrier) = &first_msg {
-            barrier.epoch.curr
-        } else {
-            panic!("The first message the executor receives is not a barrier");
-        };
+        let barrier = first_msg
+            .as_barrier()
+            .expect("the first message received by agg executor must be a barrier");
+        let mut epoch = barrier.epoch.curr;
         yield first_msg;
 
         #[for_await]
@@ -103,10 +102,14 @@ where
                 Message::Chunk(chunk) => self.inner.apply_chunk(chunk, epoch).await?,
                 Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                     yield Message::Barrier(barrier);
+                    // FIXME: `break` should be added here after stopping mutation. But, current
+                    // actors does not stop correctly.
+                    // break;
                 }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
                     if let Some(chunk) = self.inner.flush_data(epoch).await? {
+                        assert_eq!(epoch, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
                     }
                     yield Message::Barrier(barrier);
