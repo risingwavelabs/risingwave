@@ -74,8 +74,21 @@ macro_rules! gen_cast {
     ($($x:tt, )* ) => {
         gen_cast_impl! {
             [$($x),*],
-            // FIXME: We can not unify char and varchar because they are different in PG while share the
-            // same logical type (String type) in our system (#2414).
+
+            // We do not always expect the frontend to do constant folding
+            // to eliminate the unnecessary cast.
+            { int16, int16, |x| Ok(x) },
+            { int32, int32, |x| Ok(x) },
+            { int64, int64, |x| Ok(x) },
+            { float64, float64, |x| Ok(x) },
+            { float32, float32, |x| Ok(x) },
+            { decimal, decimal, |x| Ok(x) },
+            { date, date, |x| Ok(x) },
+            { timestamp, timestamp, |x| Ok(x) },
+            { time, time, |x| Ok(x) },
+            { boolean, boolean, |x| Ok(x) },
+            { varchar, varchar, |x| Ok(x.into()) },
+
             { varchar, date, str_to_date },
             { varchar, time, str_to_time },
             { varchar, timestamp, str_to_timestamp },
@@ -104,8 +117,6 @@ macro_rules! gen_cast {
 
             { boolean, varchar, bool_to_str },
             { boolean, char, bool_to_str },
-            // TODO: decide whether nullability-cast should be allowed (#2350)
-            { boolean, boolean, |x| Ok(x) },
 
             { int16, int32, general_cast },
             { int16, int64, general_cast },
@@ -134,7 +145,6 @@ macro_rules! gen_cast {
             { float64, int64, to_i64 },
             { float64, float32, to_f32 }, // lossy
 
-            { decimal, decimal, dec_to_dec },
             { decimal, int16, dec_to_i16 },
             { decimal, int32, dec_to_i32 },
             { decimal, int64, dec_to_i64 },
@@ -303,15 +313,19 @@ pub fn new_rtrim_expr(expr_ia1: BoxedExpression, return_type: DataType) -> Boxed
 mod tests {
     use chrono::NaiveDate;
     use itertools::Itertools;
+    use num_traits::FromPrimitive;
     use risingwave_common::array::column::Column;
     use risingwave_common::array::*;
-    use risingwave_common::types::{NaiveDateWrapper, Scalar};
+    use risingwave_common::types::{
+        Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
+    };
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::FunctionCall;
 
     use super::super::*;
+    use super::new_unary_expr;
     use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::cast::{date_to_timestamp, str_parse};
 
@@ -520,5 +534,41 @@ mod tests {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
             assert_eq!(x, item);
         }
+    }
+
+    #[test]
+    fn test_same_type_cast() {
+        use risingwave_common::types::DataType;
+        use risingwave_pb::expr::expr_node::Type as ExprType;
+
+        fn assert_castible<T: Into<ScalarImpl>>(t: DataType, v: T) {
+            let expr = new_unary_expr(
+                ExprType::Cast,
+                t.clone(),
+                Box::new(LiteralExpression::new(t, Some(v.into()))) as BoxedExpression,
+            )
+            .unwrap();
+            expr.eval(&DataChunk::new_dummy(1)).unwrap();
+        }
+        assert_castible(DataType::Int16, 1_i16);
+        assert_castible(DataType::Int32, 1_i32);
+        assert_castible(DataType::Int64, 1_i64);
+        assert_castible(DataType::Boolean, true);
+        assert_castible(DataType::Float32, 3.0_f32);
+        assert_castible(DataType::Float64, 3.0_f64);
+        assert_castible(DataType::Decimal, Decimal::from_f32(3.15_f32).unwrap());
+        assert_castible(DataType::Varchar, "abc".to_string());
+        assert_castible(
+            DataType::Date,
+            NaiveDateWrapper::new_with_days(100).unwrap(),
+        );
+        assert_castible(
+            DataType::Time,
+            NaiveTimeWrapper::new_with_secs_nano(1, 1).unwrap(),
+        );
+        assert_castible(
+            DataType::Timestamp,
+            NaiveDateTimeWrapper::new_with_secs_nsecs(1, 1).unwrap(),
+        );
     }
 }
