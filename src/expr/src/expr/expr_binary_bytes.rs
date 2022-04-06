@@ -62,9 +62,9 @@ mod tests {
         i32_arg: Datum,
     ) -> BoxedExpression {
         f(
-            Box::new(LiteralExpression::new(DataType::Char, str_arg)),
+            Box::new(LiteralExpression::new(DataType::Varchar, str_arg)),
             Box::new(LiteralExpression::new(DataType::Int32, i32_arg)),
-            DataType::Char,
+            DataType::Varchar,
         )
     }
 

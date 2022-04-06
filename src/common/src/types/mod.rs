@@ -58,7 +58,6 @@ pub enum DataType {
     Float64,
     Decimal,
     Date,
-    Char,
     Varchar,
     Time,
     Timestamp,
@@ -81,15 +80,17 @@ pub enum DataSize {
 
 impl From<&ProstDataType> for DataType {
     fn from(proto: &ProstDataType) -> DataType {
-        match proto.get_type_name().expect("unsupported type") {
+        match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
             TypeName::Int32 => DataType::Int32,
             TypeName::Int64 => DataType::Int64,
             TypeName::Float => DataType::Float32,
             TypeName::Double => DataType::Float64,
             TypeName::Boolean => DataType::Boolean,
-            TypeName::Char => DataType::Char,
-            TypeName::Varchar => DataType::Varchar,
+            // TODO(TaoWu): Java frontend still interprets CHAR as a separate type.
+            // So to run e2e, we may return VARCHAR that mismatches with what Java frontend
+            // expected. Fix this when Java frontend fully deprecated.
+            TypeName::Varchar | TypeName::Char => DataType::Varchar,
             TypeName::Date => DataType::Date,
             TypeName::Time => DataType::Time,
             TypeName::Timestamp => DataType::Timestamp,
@@ -119,7 +120,7 @@ impl DataType {
             DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity)?.into(),
             DataType::Decimal => DecimalArrayBuilder::new(capacity)?.into(),
             DataType::Date => NaiveDateArrayBuilder::new(capacity)?.into(),
-            DataType::Char | DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
+            DataType::Varchar => Utf8ArrayBuilder::new(capacity)?.into(),
             DataType::Time => NaiveTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity)?.into(),
             DataType::Timestampz => PrimitiveArrayBuilder::<i64>::new(capacity)?.into(),
@@ -145,7 +146,6 @@ impl DataType {
             DataType::Float32 => TypeName::Float,
             DataType::Float64 => TypeName::Double,
             DataType::Boolean => TypeName::Boolean,
-            DataType::Char => TypeName::Char,
             DataType::Varchar => TypeName::Varchar,
             DataType::Date => TypeName::Date,
             DataType::Time => TypeName::Time,
@@ -176,7 +176,6 @@ impl DataType {
             DataType::Float32 => DataSize::Fixed(size_of::<OrderedF32>()),
             DataType::Float64 => DataSize::Fixed(size_of::<OrderedF64>()),
             DataType::Decimal => DataSize::Fixed(16),
-            DataType::Char => DataSize::Variable,
             DataType::Varchar => DataSize::Variable,
             DataType::Date => DataSize::Fixed(size_of::<i32>()),
             DataType::Time => DataSize::Fixed(size_of::<i64>()),
@@ -201,7 +200,7 @@ impl DataType {
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self, DataType::Char | DataType::Varchar)
+        matches!(self, DataType::Varchar)
     }
 
     pub fn is_date_or_timestamp(&self) -> bool {
@@ -219,14 +218,13 @@ impl DataType {
             DataType::Float64 => 6,
             DataType::Decimal => 7,
             DataType::Date => 8,
-            DataType::Char => 9,
-            DataType::Varchar => 10,
-            DataType::Time => 11,
-            DataType::Timestamp => 12,
-            DataType::Timestampz => 13,
-            DataType::Interval => 14,
-            DataType::Struct { .. } => 15,
-            DataType::List { .. } => 16,
+            DataType::Varchar => 9,
+            DataType::Time => 10,
+            DataType::Timestamp => 11,
+            DataType::Timestampz => 12,
+            DataType::Interval => 13,
+            DataType::Struct { .. } => 14,
+            DataType::List { .. } => 15,
         }
     }
 }
@@ -663,7 +661,7 @@ impl ScalarImpl {
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
-            Ty::Char | Ty::Varchar => Self::Utf8(String::deserialize(de)?),
+            Ty::Varchar => Self::Utf8(String::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal({
                 let (mantissa, scale) = de.deserialize_decimal()?;
