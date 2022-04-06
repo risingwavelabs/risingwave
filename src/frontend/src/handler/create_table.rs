@@ -53,7 +53,7 @@ pub fn gen_create_table_plan(
         // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
-            column_id: TABLE_SOURCE_PK_COLID.clone(),
+            column_id: TABLE_SOURCE_PK_COLID,
             name: gen_row_id_column_name(0),
             field_descs: vec![],
             type_name: "".to_string(),

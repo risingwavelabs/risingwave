@@ -15,11 +15,9 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::{Result, RwError};
-use risingwave_pb::catalog::source::Info;
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::{
-    source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
-    StreamSourceInfo as ProstSourceInfo, Table as ProstTable,
+    Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };
 
 use super::source_catalog::SourceCatalog;

@@ -14,18 +14,12 @@
 
 use std::fmt;
 
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 use risingwave_pb::stream_plan::SourceNode;
 
 use super::{LogicalSource, PlanBase, ToStreamProst};
 use crate::optimizer::property::Distribution;
-use crate::session::OptimizerContextRef;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
 #[derive(Debug, Clone)]

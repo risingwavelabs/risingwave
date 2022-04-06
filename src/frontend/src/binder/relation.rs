@@ -16,12 +16,9 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
@@ -30,10 +27,9 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
-use crate::catalog::{CatalogError, SourceId, TableId};
+use crate::catalog::{CatalogError, TableId};
 use crate::expr::{Expr, ExprImpl};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
@@ -67,7 +63,7 @@ pub struct BoundSubquery {
     pub query: BoundQuery,
 }
 
-/// BoundTableSource is used by DML statement on table source like insert, updata
+/// `BoundTableSource` is used by DML statement on table source like insert, updata
 #[derive(Debug)]
 pub struct BoundTableSource {
     pub name: String,       // explain-only
@@ -193,8 +189,8 @@ impl Binder {
 
     pub(super) fn bind_table_or_source(
         &mut self,
-        schema_name: &String,
-        table_name: &String,
+        schema_name: &str,
+        table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         let (ret, columns) = if let Some(bound_table) =
@@ -214,7 +210,7 @@ impl Binder {
                 .iter()
                 .cloned()
                 .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.clone(),
+            table_name.to_string(),
             alias,
         )?;
         Ok(ret)
@@ -238,8 +234,8 @@ impl Binder {
 
     pub(super) fn try_bind_table(
         &mut self,
-        schema_name: &String,
-        table_name: &String,
+        schema_name: &str,
+        table_name: &str,
     ) -> Result<Option<BoundBaseTable>> {
         if let Ok(table_catalog) =
             self.catalog
@@ -247,7 +243,7 @@ impl Binder {
         {
             let table_id = table_catalog.id();
             Ok(Some(BoundBaseTable {
-                name: table_name.clone(),
+                name: table_name.to_string(),
                 table_id,
                 table_catalog: table_catalog.clone(),
             }))
@@ -258,8 +254,8 @@ impl Binder {
 
     pub(super) fn try_bind_source(
         &mut self,
-        schema_name: &String,
-        table_name: &String,
+        schema_name: &str,
+        table_name: &str,
     ) -> Result<Option<BoundSource>> {
         if let Ok(catalog) = self
             .catalog

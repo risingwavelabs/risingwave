@@ -12,22 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt;
 use std::rc::Rc;
 
 use fixedbitset::FixedBitSet;
-use futures::SinkExt;
-use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Schema, TableDesc};
-use risingwave_common::error::Result;
+use risingwave_common::catalog::Schema;
 
 use super::{
-    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, StreamSource, StreamTableScan,
-    ToBatch, ToStream,
+    ColPrunable, LogicalProject, PlanBase, PlanNode, PlanRef, StreamSource, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
-use crate::optimizer::plan_node::BatchSeqScan;
 use crate::session::OptimizerContextRef;
 use crate::utils::ColIndexMapping;
 
@@ -90,7 +85,7 @@ impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &FixedBitSet) -> PlanRef {
         self.must_contain_columns(required_cols);
         let mapping = ColIndexMapping::with_remaining_columns(required_cols);
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        LogicalProject::with_mapping(self.clone().into(), mapping)
     }
 }
 

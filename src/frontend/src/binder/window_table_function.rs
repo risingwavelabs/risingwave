@@ -4,7 +4,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
-use super::{Binder, BoundBaseTable, Relation, Result};
+use super::{Binder, Relation, Result};
 use crate::expr::{Expr as _, ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]

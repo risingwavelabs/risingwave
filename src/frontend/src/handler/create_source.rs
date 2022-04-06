@@ -135,13 +135,10 @@ pub mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
     use tempfile::NamedTempFile;
 
-    use super::*;
-    use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 

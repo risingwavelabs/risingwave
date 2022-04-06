@@ -31,7 +31,7 @@ pub struct SourceCatalog {
 
 impl From<&ProstSource> for SourceCatalog {
     fn from(prost: &ProstSource) -> Self {
-        let id = prost.id.into();
+        let id = prost.id;
         let name = prost.name.clone();
         let (source_type, prost_columns, pk_col_ids) = match &prost.info {
             Some(Info::StreamSource(source)) => (
