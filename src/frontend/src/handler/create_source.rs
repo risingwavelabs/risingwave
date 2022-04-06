@@ -189,7 +189,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "explain create materialized view mv1 as select country from t";
+        let sql = "create materialized view mv1 as select country as c from t";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
@@ -202,15 +202,6 @@ pub mod tests {
             .unwrap()
             .clone();
         assert_eq!(source.name, "t");
-
-        // Check table exists.
-        let table = catalog_reader
-            .read_guard()
-            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "mv1")
-            .unwrap()
-            .clone();
-        println!("{:?}",table.columns);
-        assert_eq!(table.name(), "mv");
 
         // Only check stream source
         if let Info::StreamSource(info) = source.info.as_ref().unwrap() {

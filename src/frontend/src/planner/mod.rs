@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 
 use crate::binder::BoundStatement;
@@ -30,11 +33,15 @@ mod values;
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
+    map: HashMap<String, ColumnDesc>,
 }
 
 impl Planner {
     pub fn new(ctx: OptimizerContextRef) -> Planner {
-        Planner { ctx }
+        Planner {
+            ctx,
+            map: HashMap::new(),
+        }
     }
 
     /// Plan a [`BoundStatement`]. Need to bind a statement before plan.

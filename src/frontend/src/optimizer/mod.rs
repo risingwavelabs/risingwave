@@ -13,6 +13,8 @@
 // limitations under the License.
 
 pub mod plan_node;
+
+use std::collections::HashMap;
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -24,7 +26,7 @@ mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
@@ -49,6 +51,7 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     schema: Schema,
+    pub(crate) map: HashMap<String, ColumnDesc>,
 }
 
 impl PlanRoot {
@@ -73,6 +76,7 @@ impl PlanRoot {
             required_order,
             out_fields,
             schema,
+            map: HashMap::new()
         }
     }
 
@@ -128,7 +132,6 @@ impl PlanRoot {
 
         // Prune Columns
         plan = plan.prune_col(&self.out_fields);
-        println!("how");
 
         plan = {
             let rules = vec![
@@ -203,6 +206,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
+            self.map.clone()
         )
     }
 

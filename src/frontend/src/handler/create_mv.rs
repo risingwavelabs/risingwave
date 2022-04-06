@@ -46,7 +46,6 @@ pub fn gen_create_mv_plan(
     };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
-    println!("how");
     plan_root.set_required_dist(Distribution::any().clone());
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let table = materialize.table().to_prost(schema_id, database_id);
@@ -79,4 +78,107 @@ pub async fn handle_create_mv(
         vec![],
         vec![],
     ))
+}
+
+#[cfg(test)]
+pub mod tests {
+    use std::collections::HashMap;
+    use std::io::Write;
+
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+    use tempfile::NamedTempFile;
+
+    use crate::catalog::gen_row_id_column_name;
+    use crate::test_utils::LocalFrontend;
+
+    /// Returns the file.
+    /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
+    pub fn create_proto_file() -> NamedTempFile {
+        static PROTO_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
+        let temp_file = tempfile::Builder::new()
+            .prefix("temp")
+            .suffix(".proto")
+            .rand_bytes(5)
+            .tempfile()
+            .unwrap();
+        let mut file = temp_file.as_file();
+        file.write_all(PROTO_FILE_DATA.as_ref()).unwrap();
+        temp_file
+    }
+
+    #[tokio::test]
+    async fn test_create_mv_handler() {
+        let proto_file = create_proto_file();
+        let sql = format!(
+            r#"CREATE SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let sql = "create materialized view mv1 as select country as c from t";
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        // Check source exists.
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .unwrap()
+            .clone();
+        assert_eq!(source.name, "t");
+
+        // Check table exists.
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "mv1")
+            .unwrap()
+            .clone();
+        assert_eq!(table.name(), "mv1");
+
+        let mut columns = vec![];
+        // Get all column descs
+        for catalog in table.columns {
+            columns.append(&mut catalog.column_desc.get_column_descs());
+        }
+        let columns = columns
+            .iter()
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let city_type = DataType::Struct {
+            fields: vec![DataType::Varchar, DataType::Varchar].into(),
+        };
+        let expected_columns = maplit::hashmap! {
+                "country.zipcode" => DataType::Varchar,
+                "country.city.address" => DataType::Varchar,
+                "country.address" => DataType::Varchar,
+                "country.city" => city_type.clone(),
+                "country.city.zipcode" => DataType::Varchar,
+                "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            };
+        assert_eq!(columns, expected_columns);
+    }
 }

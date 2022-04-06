@@ -13,9 +13,12 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError};
+use risingwave_common::types::DataType;
 
-use crate::binder::BoundQuery;
+use crate::binder::{BoundQuery, BoundSelect, Relation};
+use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::plan_node::LogicalLimit;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
@@ -42,7 +45,37 @@ impl Planner {
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let root = PlanRoot::new(plan, dist, order, out_fields);
+        let mut root = PlanRoot::new(plan, dist, order, out_fields);
+        root.map = self.map.clone();
         Ok(root)
+    }
+
+    pub fn deal(&mut self, select: BoundSelect) -> Result<()> {
+        let table = {
+            if let Relation::BaseTable(table) = select.from.as_ref().unwrap() {
+                &table.table_desc.columns
+            } else {
+                return Ok(());
+            }
+        };
+        for i in 0..select.select_items.len() {
+            let item = &select.select_items[i];
+            let name = select.aliases[i].as_ref().unwrap();
+            if let DataType::Struct { .. } = item.return_type() {
+                if let ExprImpl::InputRef(expr) = item {
+                    self.map.insert(
+                        name.clone(),
+                        table
+                            .get(expr.index())
+                            .ok_or_else(|| {
+                                RwError::from(InternalError("not have index".to_string()))
+                            })?
+                            .clone(),
+                    );
+                }
+            }
+        }
+
+        Ok(())
     }
 }

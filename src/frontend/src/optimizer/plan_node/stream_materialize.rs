@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
@@ -59,7 +60,6 @@ impl StreamMaterialize {
 
     fn derive_schema(schema: &Schema) -> Result<Schema> {
         let mut col_names = HashSet::new();
-        println!("{:?}",schema);
         for field in schema.fields() {
             if is_row_id_column_name(&field.name) {
                 continue;
@@ -102,6 +102,7 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
+        map: HashMap<String, ColumnDesc>,
     ) -> Result<Self> {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
@@ -112,15 +113,31 @@ impl StreamMaterialize {
             .fields()
             .iter()
             .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: field.data_type.clone(),
-                    column_id: (i as i32).into(),
-                    name: field.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                },
-                is_hidden: !user_cols.contains(i),
+            .map(|(i, field)| {
+                if let DataType::Struct {..} = field.data_type{
+                    let desc = map.get(&field.name).as_ref().unwrap().clone();
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: desc.data_type.clone(),
+                            column_id: (i as i32).into(),
+                            name: desc.name.clone(),
+                            field_descs: desc.field_descs.clone(),
+                            type_name: desc.type_name.clone(),
+                        },
+                        is_hidden: !user_cols.contains(i),
+                    }
+                }else {
+                    ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: field.data_type.clone(),
+                            column_id: (i as i32).into(),
+                            name: field.name.clone(),
+                            field_descs: vec![],
+                            type_name: "".to_string(),
+                        },
+                        is_hidden: !user_cols.contains(i),
+                    }
+                }
             })
             .collect_vec();
 
