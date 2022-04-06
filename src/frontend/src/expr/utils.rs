@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprVisitor, InputRef};
+use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
@@ -37,6 +39,85 @@ pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     // TODO: extract common factors fromm the conjunctions with OR expression.
     // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
     rets
+}
+
+/// fold boolean constants in boolean exprs
+/// e.g. `(A And false) Or true` will become `True`
+pub fn fold_boolean_constant(expr: ExprImpl) -> ExprImpl {
+    let mut rewriter = BooleanConstantFolding {};
+    rewriter.rewrite_expr(expr)
+}
+
+/// Fold boolean constants in a expr
+struct BooleanConstantFolding {}
+
+impl ExprRewriter for BooleanConstantFolding {
+    /// fold boolean constants in [`FunctionCall`] and rewrite Expr
+    /// # Panics
+    /// This rewriter is based on the assumption that [`Type::And`] and [`Type::Or`] are binary
+    /// functions, i.e. they have exactly 2 inputs.
+    /// This rewriter will panic if the length of the inputs is not `2`.
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        let (func_type, inputs, ret) = func_call.decompose();
+        let inputs = inputs
+            .into_iter()
+            .map(|expr| self.rewrite_expr(expr))
+            .collect();
+        let new_func_all = FunctionCall::new_with_return_type(func_type, inputs, ret);
+        boolean_constant_folding_impl(new_func_all)
+    }
+}
+
+fn boolean_constant_folding_impl(func_call: super::FunctionCall) -> ExprImpl {
+    let get_bool_constant = |expr: &ExprImpl| {
+        if let ExprImpl::Literal(l) = expr {
+            if let Some(ScalarImpl::Bool(v)) = l.get_data() {
+                return Some(*v);
+            }
+        }
+        None
+    };
+
+    let (func_type, mut inputs, return_type) = func_call.decompose();
+    let mut bool_constant_map: Vec<Option<bool>> = inputs.iter().map(get_bool_constant).collect();
+    let contains_bool_constant = bool_constant_map.iter().any(|x| x.is_some());
+
+    if contains_bool_constant
+        && (func_type == Type::And || func_type == Type::Or)
+        && return_type == DataType::Boolean
+    {
+        // `Type::And` and `Type::Or` are binary functions
+        // Make sure that they have exactly 2 inputs
+        assert_eq!(inputs.len(), 2);
+        // Make sure that inputs[0] is always a constant
+        if bool_constant_map[1].is_some() {
+            inputs.swap(0, 1);
+            bool_constant_map.swap(0, 1);
+        }
+        let a = bool_constant_map[0].unwrap();
+        match func_type {
+            Type::And => {
+                if a {
+                    // True And A -> A
+                    return inputs[1].clone();
+                } else {
+                    // False And A -> False
+                    return ExprImpl::literal_bool(false);
+                }
+            }
+            Type::Or => {
+                if a {
+                    // True Or A -> True
+                    return ExprImpl::literal_bool(true);
+                } else {
+                    // False Or A -> A
+                    return inputs[1].clone();
+                }
+            }
+            _ => {}
+        }
+    }
+    FunctionCall::new_with_return_type(func_type, inputs, return_type).into()
 }
 
 /// give a expression, and check all columns in its `input_ref` expressions less than the input
@@ -81,5 +162,124 @@ impl CollectInputRef {
     /// Returns the collected indexes by the `CollectInputRef`.
     pub fn collect(self) -> FixedBitSet {
         self.input_bits
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_pb::expr::expr_node::Type;
+
+    use super::fold_boolean_constant;
+    use crate::expr::{ExprImpl, FunctionCall, InputRef};
+
+    #[test]
+    fn constant_boolean_folding_basic_and() {
+        // expr := A && true
+        let expr: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                InputRef::new(0, DataType::Boolean).into(),
+                ExprImpl::literal_bool(true),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let res = fold_boolean_constant(expr);
+
+        assert!(res.clone().as_input_ref().is_some());
+        let res = res.as_input_ref().unwrap();
+        assert_eq!(res.index(), 0);
+
+        // expr := A && false
+        let expr: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                InputRef::new(0, DataType::Boolean).into(),
+                ExprImpl::literal_bool(false),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let res = fold_boolean_constant(expr);
+        assert!(res.clone().as_literal().is_some());
+        let res = res.as_literal().unwrap();
+        assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(false)));
+    }
+
+    #[test]
+    fn constant_boolean_folding_basic_or() {
+        // expr := A || true
+        let expr: ExprImpl = FunctionCall::new(
+            Type::Or,
+            vec![
+                InputRef::new(0, DataType::Boolean).into(),
+                ExprImpl::literal_bool(true),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let res = fold_boolean_constant(expr);
+        assert!(res.clone().as_literal().is_some());
+        let res = res.as_literal().unwrap();
+        assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(true)));
+
+        // expr := A || false
+        let expr: ExprImpl = FunctionCall::new(
+            Type::Or,
+            vec![
+                InputRef::new(0, DataType::Boolean).into(),
+                ExprImpl::literal_bool(false),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let res = fold_boolean_constant(expr);
+
+        assert!(res.clone().as_input_ref().is_some());
+        let res = res.as_input_ref().unwrap();
+        assert_eq!(res.index(), 0);
+    }
+
+    #[test]
+    fn constant_boolean_folding_complex() {
+        // expr := (false && true) && (true || 1 == 2)
+        let expr: ExprImpl = FunctionCall::new(
+            Type::And,
+            vec![
+                FunctionCall::new(
+                    Type::And,
+                    vec![ExprImpl::literal_bool(false), ExprImpl::literal_bool(true)],
+                )
+                .unwrap()
+                .into(),
+                FunctionCall::new(
+                    Type::Or,
+                    vec![
+                        ExprImpl::literal_bool(true),
+                        FunctionCall::new(
+                            Type::Equal,
+                            vec![ExprImpl::literal_int(1), ExprImpl::literal_int(2)],
+                        )
+                        .unwrap()
+                        .into(),
+                    ],
+                )
+                .unwrap()
+                .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+
+        let res = fold_boolean_constant(expr);
+
+        assert!(res.clone().as_literal().is_some());
+        let res = res.as_literal().unwrap();
+        assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(false)));
     }
 }

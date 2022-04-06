@@ -19,7 +19,8 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    fold_boolean_constant, to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
+    FunctionCall, InputRef, Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -52,9 +53,10 @@ impl fmt::Display for Condition {
 
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
-        Self {
-            conjunctions: to_conjunctions(expr),
-        }
+        let expr = fold_boolean_constant(expr);
+        let conjunctions = to_conjunctions(expr);
+
+        Self { conjunctions }
     }
 
     pub fn true_cond() -> Self {
