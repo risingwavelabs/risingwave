@@ -169,15 +169,7 @@ pub fn serialize_pk_and_row(
         }
     }
 
-    if row.is_none() {
-        let key = [
-            pk_buf,
-            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
-
-        result.push((key, None));
-    } else if all_null {
+    if all_null {
         let key = [
             pk_buf,
             serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
@@ -195,19 +187,6 @@ pub fn serialize_pk_and_row(
         let value = serialize_cell(&datum)?;
         result.push((key, Some(value)));
     }
-    // if all_null {
-    //     // Here we use a special column id -1 to represent a row consisting of all null values.
-    //     // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
-    //     // would return null datum as it has only a single cell with column id == -1 and `get`
-    //     // gets nothing.
-    // let key = [
-    //     pk_buf,
-    //     serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-    // ]
-    // .concat();
-    // let value = serialize_cell(&None)?;
-    // result.push((key, Some(value)));
-    // }
     Ok(result)
 }
 

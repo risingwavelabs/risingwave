@@ -57,24 +57,28 @@ impl CellBasedRowDeserializer {
 
     /// When we encounter a new key, we can be sure that the previous row has been fully
     /// deserialized. Then we return the key and the value of the previous row.
-    pub fn deserialize(&mut self, pk_with_cell_id: &Bytes, cell: &Bytes) -> Result<CellType> {
+    pub fn deserialize(
+        &mut self,
+        pk_with_cell_id: &Bytes,
+        cell: &Bytes,
+    ) -> Result<Option<(Vec<u8>, Row)>> {
         let pk_with_cell_id = pk_with_cell_id.to_vec();
         let pk_vec_len = pk_with_cell_id.len();
         let cur_pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
         let mut result = None;
         let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
         let cell_id = deserialize_column_id(cell_id_bytes)?;
-
-        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes && cell_id!=NULL_ROW_SPECIAL_CELL_ID {
+        if cell_id == NULL_ROW_SPECIAL_CELL_ID {
+            return Ok(result);
+        }
+        if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
-        } else if self.pk_bytes.is_none() && cell_id!=NULL_ROW_SPECIAL_CELL_ID{
+        } else if self.pk_bytes.is_none() {
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
         }
 
-        if cell_id == NULL_ROW_SPECIAL_CELL_ID {
-            return Ok(CellType::Special(result));
-        } else if let Some((column_desc, index)) = self.columns.get(&cell_id) {
+        if let Some((column_desc, index)) = self.columns.get(&cell_id) {
             let mut de = value_encoding::Deserializer::new(cell.clone());
             if let Some(datum) = deserialize_cell(&mut de, &column_desc.data_type)? {
                 let old = self.data.get_mut(*index).unwrap().replace(datum);
@@ -84,7 +88,7 @@ impl CellBasedRowDeserializer {
             // ignore this cell
         }
 
-        Ok(CellType::Normal(result))
+        Ok(result)
     }
 
     /// Take the remaining data out of the deserializer.
@@ -106,7 +110,6 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::ordered::serialize_pk_and_row;
 
-    use super::CellType;
     use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 
     #[test]
@@ -150,13 +153,8 @@ mod tests {
             let pk_and_row = deserializer
                 .deserialize(&Bytes::from(key_bytes), &Bytes::from(value_bytes.unwrap()))
                 .unwrap();
-            match pk_and_row {
-                CellType::Normal(pk_and_row) => {
-                    if let Some(pk_and_row) = pk_and_row {
-                        result.push(pk_and_row.1);
-                    }
-                }
-                CellType::Special(_) => {}
+            if let Some(pk_and_row) = pk_and_row {
+                result.push(pk_and_row.1);
             }
         }
         let pk_and_row = deserializer.take();

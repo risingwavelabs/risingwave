@@ -143,6 +143,6 @@ mod tests {
         state.delete(Row(vec![Some(3_i32.into())]));
         state.flush(epoch).await.unwrap();
         let data = keyspace.scan(None, epoch).await.unwrap();
-        assert_eq!(data.len(), 3);
+        assert_eq!(data.len(), 4);
     }
 }

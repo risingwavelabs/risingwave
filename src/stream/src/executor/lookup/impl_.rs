@@ -18,7 +18,7 @@ use risingwave_common::array::{Row, RowRef, StreamChunk};
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
-use risingwave_storage::cell_based_row_deserializer::{CellBasedRowDeserializer, CellType};
+use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::Keyspace;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
@@ -279,7 +279,7 @@ impl<S: StateStore> LookupExecutor<S> {
         let mut all_rows = vec![];
 
         for (pk_with_cell_id, cell) in all_cells {
-            if let CellType::Normal(Some((_, row))) = self
+            if let Some((_, row)) = self
                 .arrangement
                 .deserializer
                 .deserialize(&pk_with_cell_id, &cell)?

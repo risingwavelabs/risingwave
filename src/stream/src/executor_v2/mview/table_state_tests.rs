@@ -499,3 +499,78 @@ async fn test_get_row_by_scan() {
         .unwrap();
     assert_eq!(get_no_exist_res, None);
 }
+
+#[tokio::test]
+async fn test_get_row_by_muti_get() {
+    let state_store = MemoryStateStore::new();
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+
+    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let keyspace = Keyspace::executor_root(state_store, 0x42);
+    let mut state = ManagedMViewState::new(keyspace.clone(), column_ids, order_types.clone());
+    let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
+    let epoch: u64 = 0;
+
+    state.put(
+        Row(vec![Some(1_i32.into()), Some(11_i32.into())]),
+        Row(vec![Some(1_i32.into()), None, None]),
+    );
+    state.put(
+        Row(vec![Some(2_i32.into()), Some(22_i32.into())]),
+        Row(vec![Some(2_i32.into()), None, Some(222_i32.into())]),
+    );
+    state.put(
+        Row(vec![Some(3_i32.into()), Some(33_i32.into())]),
+        Row(vec![Some(3_i32.into()), None, None]),
+    );
+    state.put(
+        Row(vec![Some(4_i32.into()), Some(44_i32.into())]),
+        Row(vec![None, None, None]),
+    );
+
+    state.delete(Row(vec![Some(2_i32.into()), Some(22_i32.into())]));
+    state.flush(epoch).await.unwrap();
+
+    let epoch = u64::MAX;
+
+    let get_row1_res = table
+        .get_row(&Row(vec![Some(1_i32.into()), Some(11_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_row1_res,
+        Some(Row(vec![Some(1_i32.into()), None, None,]))
+    );
+
+    let get_row2_res = table
+        .get_row(&Row(vec![Some(2_i32.into()), Some(22_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_row2_res, None);
+
+    let get_row3_res = table
+        .get_row(&Row(vec![Some(3_i32.into()), Some(33_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(
+        get_row3_res,
+        Some(Row(vec![Some(3_i32.into()), None, None]))
+    );
+
+    let get_row4_res = table
+        .get_row(&Row(vec![Some(4_i32.into()), Some(44_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_row4_res, Some(Row(vec![None, None, None])));
+
+    let get_no_exist_res = table
+        .get_row(&Row(vec![Some(0_i32.into()), Some(00_i32.into())]), epoch)
+        .await
+        .unwrap();
+    assert_eq!(get_no_exist_res, None);
+}

@@ -21,13 +21,13 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 use super::TableIter;
-use crate::cell_based_row_deserializer::{CellBasedRowDeserializer, CellType};
+use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
 use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::hummock::key::next_key;
 use crate::monitor::StateStoreMetrics;
@@ -119,9 +119,45 @@ impl<S: StateStore> CellBasedTable<S> {
     }
 
     // cell-based interface
-    pub async fn get_row(&self, _pk: &Row, _epoch: u64) -> Result<Option<Row>> {
-        // get row by state_store multi get
-        todo!()
+    pub async fn get_row(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
+        let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
+        let column_ids = generate_column_id(&self.column_descs);
+        let mut row = Vec::with_capacity(column_ids.len());
+        let sentinel_key = &[
+            &serialize_pk(pk, pk_serializer)?[..],
+            &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
+        ]
+        .concat();
+        let sentinel_cell = self.keyspace.get(&sentinel_key.clone(), epoch).await?;
+        if sentinel_cell.is_none() {
+            return Ok(None);
+        } else {
+            let mut de = value_encoding::Deserializer::new(sentinel_cell.unwrap());
+            let sentinel_cell_value = deserialize_cell(&mut de, &DataType::Float32)?;
+            if sentinel_cell_value != Some(ScalarImpl::from(0.1_f32)) {
+                return Ok(Some(Row::new(vec![None; self.column_descs.len()])));
+            }
+        }
+        for column_id in column_ids {
+            let key = &[
+                &serialize_pk(pk, pk_serializer)?[..],
+                &serialize_column_id(&column_id)?,
+            ]
+            .concat();
+            let state_store_get_res = self.keyspace.get(&key.clone(), epoch).await?;
+            let column_index = self
+                .column_id_to_column_index
+                .get(&column_id)
+                .expect("column id not found");
+            if let Some(state_store_get_res) = state_store_get_res {
+                let mut de = value_encoding::Deserializer::new(state_store_get_res);
+                let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)?;
+                row.push(cell);
+            } else {
+                row.push(None);
+            }
+        }
+        Ok(Some(Row::new(row)))
     }
 
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> Result<Option<Row>> {
@@ -401,11 +437,8 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
             let pk_and_row = self.cell_based_row_deserializer.deserialize(key, value)?;
             self.next_idx += 1;
             match pk_and_row {
-                CellType::Normal(pk_and_row) => match pk_and_row {
-                    Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
-                    None => {}
-                },
-                CellType::Special(_) => {}
+                Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
+                None => {}
             }
         }
     }
