@@ -5,24 +5,20 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-fail = "0.5"
-futures = { version = "0.3", default-features = false, features = ["alloc"]  }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 log = "0.4"
 paste = "1"
 risingwave_common = { path = "../common" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 tokio = { version = "1", features = [
-    "macros",
     "rt",
     "rt-multi-thread",
-    "signal",
     "sync",
+    "macros",
     "time",
+    "signal",
 ] }
 tonic = "0.7"
 tracing = { version = "0.1" }
 workspace-hack = { version = "0.1", path = "../workspace-hack" }
-
-[features]
-failpoints = []

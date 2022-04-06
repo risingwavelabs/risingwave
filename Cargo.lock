@@ -3558,7 +3558,6 @@ name = "risingwave_rpc_client"
 version = "0.1.4"
 dependencies = [
  "async-trait",
- "fail",
  "futures",
  "log",
  "paste",
