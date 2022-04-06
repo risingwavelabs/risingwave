@@ -37,7 +37,7 @@ impl Planner {
                     let name = s.aliases[i].as_ref().unwrap();
                     if let DataType::Struct { .. } = item.return_type() {
                         if let ExprImpl::InputRef(expr) = item {
-                            self.map.insert(
+                            self.name_to_column_desc.insert(
                                 name.clone(),
                                 table
                                     .get(expr.index())

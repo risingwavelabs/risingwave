@@ -50,6 +50,7 @@ pub struct Binder {
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
     upper_contexts: Vec<BindContext>,
+    /// whether is a mv query.
     is_mv_query: bool,
     next_subquery_id: usize,
 }

@@ -33,14 +33,15 @@ mod values;
 /// `Planner` converts a bound statement to a [`crate::optimizer::plan_node::PlanNode`] tree
 pub struct Planner {
     ctx: OptimizerContextRef,
-    map: HashMap<String, ColumnDesc>,
+    /// Store the struct column name and column descs which use in the field to column catalog.
+    name_to_column_desc: HashMap<String, ColumnDesc>,
 }
 
 impl Planner {
     pub fn new(ctx: OptimizerContextRef) -> Planner {
         Planner {
             ctx,
-            map: HashMap::new(),
+            name_to_column_desc: HashMap::new(),
         }
     }
 

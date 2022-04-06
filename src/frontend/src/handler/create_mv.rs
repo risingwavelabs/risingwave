@@ -89,7 +89,6 @@ pub mod tests {
     use risingwave_common::types::DataType;
     use tempfile::NamedTempFile;
 
-    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -172,13 +171,13 @@ pub mod tests {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
         let expected_columns = maplit::hashmap! {
-                "country.zipcode" => DataType::Varchar,
-                "country.city.address" => DataType::Varchar,
-                "country.address" => DataType::Varchar,
-                "country.city" => city_type.clone(),
-                "country.city.zipcode" => DataType::Varchar,
-                "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
-            };
+            "country.zipcode" => DataType::Varchar,
+            "country.city.address" => DataType::Varchar,
+            "country.address" => DataType::Varchar,
+            "country.city" => city_type.clone(),
+            "country.city.zipcode" => DataType::Varchar,
+            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+        };
         assert_eq!(columns, expected_columns);
     }
 }

@@ -145,9 +145,10 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
+                    // If cannot find table and this is a mv query, try to bind stream source to
+                    // bind context and table info.
                     let table = self.bind_table(name.clone(), alias.clone());
                     if table.is_err() && self.is_mv_query {
-                        println!("hello");
                         Ok(Relation::BaseTable(Box::new(
                             self.bind_stream_source(name, alias)?,
                         )))
@@ -204,6 +205,8 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
+    /// Bind context from stream source info, only use in create mv selection.
+    /// Have same logic and return with `bind_table`.
     pub(super) fn bind_stream_source(
         &mut self,
         name: ObjectName,
@@ -217,13 +220,15 @@ impl Binder {
         let source_id = TableId::new(source.id);
         let stream_source_info = try_match_expand!(source.get_info()?, Info::StreamSource)?;
 
+        // Transfer prost column catalog to column catalog.
         let columns: Vec<ColumnCatalog> = stream_source_info
             .columns
             .iter()
-            .filter(|c| !c.is_hidden)
             .map(|c| c.clone().into())
             .collect();
 
+        // Get all column descs under field descs and transfer to catalog.
+        // The field descs have same hidden value with catalog.
         let mut catalogs = vec![];
         for col in columns {
             catalogs.append(

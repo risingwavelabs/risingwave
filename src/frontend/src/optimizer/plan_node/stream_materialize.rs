@@ -114,8 +114,10 @@ impl StreamMaterialize {
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                if let DataType::Struct {..} = field.data_type{
-                    let desc = map.get(&field.name).as_ref().unwrap().clone();
+                // If field data type is struct, use map to get original column desc to form catalog
+                // to avoid field descs lost.
+                if let DataType::Struct { .. } = field.data_type {
+                    let desc = *map.get(&field.name).as_ref().unwrap();
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: desc.data_type.clone(),
@@ -126,7 +128,7 @@ impl StreamMaterialize {
                         },
                         is_hidden: !user_cols.contains(i),
                     }
-                }else {
+                } else {
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: field.data_type.clone(),

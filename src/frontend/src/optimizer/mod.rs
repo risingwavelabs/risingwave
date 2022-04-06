@@ -15,6 +15,7 @@
 pub mod plan_node;
 
 use std::collections::HashMap;
+
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -51,15 +52,17 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     schema: Schema,
-    pub(crate) map: HashMap<String, ColumnDesc>,
+    /// Store the struct column name and column descs which use in the field to column catalog.
+    name_to_column_desc: HashMap<String, ColumnDesc>,
 }
 
 impl PlanRoot {
-    pub fn new(
+    pub fn new_with_map(
         plan: PlanRef,
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
+        name_to_column_desc: HashMap<String, ColumnDesc>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
@@ -70,14 +73,30 @@ impl PlanRoot {
                 .map(|i| input_schema.fields()[i].clone())
                 .collect(),
         };
+
         Self {
             plan,
             required_dist,
             required_order,
             out_fields,
             schema,
-            map: HashMap::new()
+            name_to_column_desc,
         }
+    }
+
+    pub fn new(
+        plan: PlanRef,
+        required_dist: Distribution,
+        required_order: Order,
+        out_fields: FixedBitSet,
+    ) -> Self {
+        Self::new_with_map(
+            plan,
+            required_dist,
+            required_order,
+            out_fields,
+            HashMap::new(),
+        )
     }
 
     /// Change the distribution of [`PlanRoot`].
@@ -206,7 +225,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
-            self.map.clone()
+            self.name_to_column_desc.clone(),
         )
     }
 
