@@ -4,10 +4,10 @@ header:
     copyright-owner: Singularity Data
 
   paths:
-    - 'rust/**/*.rs'
+    - 'src/**/*.rs'
     # - 'legacy/**/*.java'
     # - 'legacy/**/*.kt'
     - 'dashboard/**/*.js'
-    - 'rust/**/*.html'
+    - 'src/**/*.html'
 
   comment: on-failure

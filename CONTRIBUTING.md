@@ -61,8 +61,8 @@ Then you'll be able to compile and start RisingWave!
 
 ## Code Structure
 
-- The `java` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
-- The `rust` folder contains all of the system components, where:
+- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
+- The `src` folder contains all of the system components, where:
   - `meta`: the meta service
   - `batch`: the OLAP engine
   - `stream`: the stream engine
@@ -149,7 +149,7 @@ Sometimes, developers might not need to start a full cluster to develop. `./rise
 ./risedev p # shortcut for ./risedev playground
 ```
 
-For more information, refer to `README.md` under `rust/risedevtool`.
+For more information, refer to `README.md` under `src/risedevtool`.
 
 ## Testing and Lint
 
@@ -236,7 +236,7 @@ Dashboard will be available at `http://127.0.0.1:5691/` on meta node.
 Dashboard V1 is a single HTML page. To preview and develop the web page, install Node.js, and
 
 ```shell
-cd rust/meta/src/dashboard && npx reload -b
+cd src/meta/src/dashboard && npx reload -b
 ```
 
 Dashboard V1 is bundled by default along with meta node. Without any configuration, you may use the dashboard when

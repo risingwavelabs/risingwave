@@ -13,7 +13,6 @@ import com.risingwave.proto.plan.HashJoinNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.IntStream;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelTraitSet;
@@ -49,10 +48,8 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
 
     var joinInfo = analyzeCondition();
     joinInfo.leftKeys.forEach(builder::addLeftKey);
-    IntStream.range(0, left.getRowType().getFieldCount()).forEachOrdered(builder::addLeftOutput);
 
     joinInfo.rightKeys.forEach(builder::addRightKey);
-    IntStream.range(0, right.getRowType().getFieldCount()).forEachOrdered(builder::addRightOutput);
 
     var hashJoinNode = builder.build();
 

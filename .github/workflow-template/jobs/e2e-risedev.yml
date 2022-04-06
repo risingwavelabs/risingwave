@@ -33,7 +33,7 @@ jobs:
         with:
           # Even if we might download release binary, we place it under `debug` folder to make CI scripts easier to compose.
           name: risingwave-$[<profile>]
-          path: ./rust/target/debug
+          path: ./target/debug
 
       - uses: actions/download-artifact@v2
         name: Download frontend binary
@@ -45,12 +45,12 @@ jobs:
         name: Download playground binary
         with:
           name: risedev-playground-$[<profile>]
-          path: ./rust/target/debug
+          path: ./target/debug
 
       - name: Adjust permission
         run: |
-          chmod +x ./rust/target/debug/risingwave
-          chmod +x ./rust/target/debug/risedev-playground
+          chmod +x ./target/debug/risingwave
+          chmod +x ./target/debug/risedev-playground
 
       - name: Install required components
         run: |
@@ -89,7 +89,7 @@ jobs:
       - name: e2e test w/ Rust frontend
         timeout-minutes: 2
         run: |
-          ~/cargo-make/makers ci-start ci-default
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
           sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
 
       - name: Kill cluster

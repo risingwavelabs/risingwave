@@ -1,15 +1,15 @@
 extend = [
-  {path = "rust/risedevtool/grafana.toml"},
-  {path = "rust/risedevtool/prometheus.toml"},
-  {path = "rust/risedevtool/minio.toml"},
-  {path = "rust/risedevtool/etcd.toml"},
-  {path = "rust/risedevtool/jaeger.toml"},
-  {path = "rust/risedevtool/risedev-components.toml"},
-  {path = "rust/frontend/test_runner/planner_test.toml"},
+  {path = "src/risedevtool/grafana.toml"},
+  {path = "src/risedevtool/prometheus.toml"},
+  {path = "src/risedevtool/minio.toml"},
+  {path = "src/risedevtool/etcd.toml"},
+  {path = "src/risedevtool/jaeger.toml"},
+  {path = "src/risedevtool/risedev-components.toml"},
+  {path = "src/frontend/test_runner/planner_test.toml"},
 ]
 
 env_files = [
-  "risedev-components.user.env"
+  "./risedev-components.user.env"
 ]
 
 
@@ -36,6 +36,7 @@ RISEDEV_CARGO_BUILD_FEATURES = { value = "all-in-one", condition = { env_set = [
 
 [config]
 skip_core_tasks = true
+default_to_workspace = false
 
 [tasks.clean-full]
 category = "Misc"
@@ -105,9 +106,9 @@ set -e
 rm -f "${PREFIX_BIN}/compute-node"
 rm -f "${PREFIX_BIN}/meta-node"
 rm -f "${PREFIX_BIN}/frontend-v2"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/compute-node" "${PREFIX_BIN}/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/meta-node" "${PREFIX_BIN}/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/frontend-v2" "${PREFIX_BIN}/frontend-v2"
 '''
 
 [tasks.link-all-in-one-binaries]
@@ -120,11 +121,11 @@ set -e
 
 rm -rf "${PREFIX_BIN}/risingwave"
 mkdir -p "${PREFIX_BIN}/risingwave"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/frontend-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/risectl"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_BIN}/risingwave/playground"
 '''
 
 [tasks.link-user-bin]
@@ -137,11 +138,11 @@ set -e
 
 rm -rf "${PREFIX_USR_BIN}"
 mkdir -p "${PREFIX_USR_BIN}"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
-ln -s "$(pwd)/rust/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/meta-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/compute-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/frontend-node"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/risectl"
+ln -s "$(pwd)/target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/risingwave" "${PREFIX_USR_BIN}/playground"
 '''
 
 [tasks.post-build-risingwave]
@@ -149,6 +150,12 @@ category = "RiseDev - Build"
 description = "Copy RisngWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
+
+[tasks.b]
+alias = "build-risingwave"
+
+[tasks.build]
+alias = "build-risingwave"
 
 [tasks.extract-dashboard-artifact]
 category = "RiseDev - Build"
@@ -188,7 +195,6 @@ script = '''
 
 set -e
 echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
-cd rust
 
 export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="$RUSTFLAGS"
@@ -206,7 +212,7 @@ condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 script = '''
 #!@shell
 set -e
-cd rust && cargo clean
+cargo clean
 '''
 
 [tasks.build-docs]
@@ -218,7 +224,7 @@ script = '''
 
 set -e
 
-cd rust && cargo doc --workspace --no-deps --document-private-items
+cargo doc --workspace --no-deps --document-private-items
 '''
 
 [tasks.build-frontend]
@@ -255,9 +261,9 @@ set -e
 cp "legacy/pgserver/src/main/resources/logback.xml" "${PREFIX_CONFIG}/logback.xml"
 cp "grafana/risingwave-dashboard.json" "${PREFIX_CONFIG}/grafana_dashboard.json"
 cp "grafana/aws-s3.json" "${PREFIX_CONFIG}/aws-s3.json"
-cp "rust/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
-cp "rust/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
-cp "rust/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
+cp "src/config/risingwave.toml" "${PREFIX_CONFIG}/risingwave.toml"
+cp "src/risedevtool/run_command.sh" "${PREFIX_BIN}/run_command.sh"
+cp "src/risedevtool/welcome.sh" "${PREFIX_BIN}/welcome.sh"
 '''
 
 [tasks.pre-start-playground]
@@ -290,7 +296,6 @@ script = '''
 
 set -e
 
-cd rust
 echo "Use \`./risedev d\` instead if you want to start a full cluster."
 
 set -ex
@@ -306,7 +311,7 @@ category = "RiseDev - Start"
 dependencies = [
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Start a full RisingWave dev cluster using risedev-playground"
 
@@ -383,7 +388,6 @@ script = """
 #!/bin/bash
 set -e
 
-cd rust
 export CARGO_TARGET_DIR=target/coverage
 cargo llvm-cov nextest --html
 """
@@ -396,7 +400,6 @@ script = """
 #!/bin/bash
 set -e
 
-cd rust
 cargo nextest run
 """
 description = "Run unit tests"
@@ -407,7 +410,6 @@ description = "Run cargo hakari check and attempt to fix"
 script = """
 #!@shell
 
-cd rust
 echo "Running $(tput setaf 4)cargo hakari$(tput sgr0) checks and attempting to fix"
 cargo hakari generate
 test $? -eq 0 || exit 1
@@ -419,7 +421,6 @@ description = "Run cargo sort check and attempt to fix"
 script = """
 #!@shell
 
-cd rust
 echo "Running $(tput setaf 4)cargo sort$(tput sgr0) checks and attempting to fix"
 
 # Rewriting Cargo.toml will cause a full rebuild of all crates, so we always check before fix.
@@ -433,7 +434,6 @@ description = "Run cargo fmt check and attempt to fix"
 script = """
 #!@shell
 
-cd rust
 echo "Running $(tput setaf 4)cargo fmt$(tput sgr0) checks and attempting to fix"
 cargo fmt --all
 test $? -eq 0 || exit 1
@@ -445,7 +445,6 @@ description = "Run cargo clippy check"
 script = """
 #!@shell
 
-cd rust
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --workspace --all-targets
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
@@ -506,7 +505,7 @@ dependencies = [
   "clean-data",
   "pre-start-playground"
 ]
-command = "rust/target/${BUILD_MODE_DIR}/risedev-playground"
+command = "target/${BUILD_MODE_DIR}/risedev-playground"
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-playground"
 
