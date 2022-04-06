@@ -151,15 +151,18 @@ where
 
             let dependent_table_ids = table_fragments.dependent_table_ids();
             let chain_actor_ids = table_fragments.chain_actor_ids();
+            let mut dependent_tables = Vec::with_capacity(dependent_table_ids.len());
             for dependent_table_id in dependent_table_ids {
-                let dependent_table_fragments =
-                    map.get_mut(&dependent_table_id).ok_or_else(|| {
+                let mut dependent_table = map
+                    .get(&dependent_table_id)
+                    .ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "table_fragment for {} not exist!",
                             dependent_table_id
                         )))
-                    })?;
-                for fragment in dependent_table_fragments.fragments.values_mut() {
+                    })?
+                    .clone();
+                for fragment in dependent_table.fragments.values_mut() {
                     if fragment.fragment_type == FragmentType::Sink as i32 {
                         for actor in &mut fragment.actors {
                             actor.dispatcher[0]
@@ -168,10 +171,15 @@ where
                         }
                     }
                 }
-                dependent_table_fragments.upsert_in_transaction(&mut transaction)?;
+                dependent_table.upsert_in_transaction(&mut transaction)?;
+                dependent_tables.push(dependent_table);
             }
+
             self.meta_store.txn(transaction).await?;
             map.remove(table_id);
+            for dependent_table in dependent_tables {
+                map.insert(dependent_table.table_id(), dependent_table);
+            }
         } else {
             tracing::warn!("table_fragment not exist when dropping: {}", table_id);
         }
