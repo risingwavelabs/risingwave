@@ -30,7 +30,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 matches = "0.1"
-risingwave_sqlparser_test_runner = { path = "test_runner" }
 
 [package.metadata.release]
 # Instruct `cargo release` to not run `cargo publish` locally:

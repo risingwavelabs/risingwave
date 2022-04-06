@@ -17,6 +17,7 @@ members = [
   "src/rpc_client",
   "src/source",
   "src/sqlparser",
+  "src/sqlparser/test_runner",
   "src/storage",
   "src/stream",
   "src/tests/regress",

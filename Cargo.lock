@@ -3966,7 +3966,6 @@ dependencies = [
  "log",
  "matches",
  "risingwave_common",
- "risingwave_sqlparser_test_runner",
  "serde",
  "serde_json",
  "workspace-hack",
