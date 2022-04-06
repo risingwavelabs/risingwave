@@ -182,6 +182,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             env.clone(),
             cluster_manager.clone(),
             barrier_manager.clone(),
+            catalog_manager_v2.clone(),
         )
         .await
         .unwrap(),
