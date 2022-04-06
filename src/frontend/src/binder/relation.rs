@@ -194,11 +194,11 @@ impl Binder {
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
         let (ret, columns) = if let Some(bound_table) =
-            self.try_bind_table(schema_name, table_name)?
+            self.try_bind_table_inner(schema_name, table_name)?
         {
             let columns = bound_table.table_catalog.columns.clone();
             (Relation::BaseTable(Box::new(bound_table)), columns)
-        } else if let Some(bound_source) = self.try_bind_source(schema_name, table_name)? {
+        } else if let Some(bound_source) = self.try_bind_source_inner(schema_name, table_name)? {
             let columns = bound_source.catalog.columns.clone();
             (Relation::Source(Box::new(bound_source)), columns)
         } else {
@@ -214,6 +214,35 @@ impl Binder {
             alias,
         )?;
         Ok(ret)
+    }
+
+    pub(super) fn bind_table(
+        &mut self,
+        schema_name: &str,
+        table_name: &str,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
+        let table_catalog = self
+            .catalog
+            .get_table_by_name(&self.db_name, schema_name, table_name)?
+            .clone();
+        let columns = table_catalog.columns.clone();
+
+        self.bind_context(
+            columns
+                .iter()
+                .cloned()
+                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
+            table_name.to_string(),
+            alias,
+        )?;
+
+        let table_id = table_catalog.id();
+        Ok(BoundBaseTable {
+            name: table_name.to_string(),
+            table_id,
+            table_catalog: table_catalog.clone(),
+        })
     }
 
     /// return the (`schema_name`, `table_name`)
@@ -232,7 +261,7 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    pub(super) fn try_bind_table(
+    fn try_bind_table_inner(
         &mut self,
         schema_name: &str,
         table_name: &str,
@@ -252,7 +281,7 @@ impl Binder {
         }
     }
 
-    pub(super) fn try_bind_source(
+    fn try_bind_source_inner(
         &mut self,
         schema_name: &str,
         table_name: &str,
