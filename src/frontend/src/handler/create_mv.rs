@@ -171,12 +171,12 @@ pub mod tests {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
         let expected_columns = maplit::hashmap! {
-            "country.zipcode" => DataType::Varchar,
-            "country.city.address" => DataType::Varchar,
-            "country.address" => DataType::Varchar,
-            "country.city" => city_type.clone(),
-            "country.city.zipcode" => DataType::Varchar,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "c.zipcode" => DataType::Varchar,
+            "c.city.address" => DataType::Varchar,
+            "c.address" => DataType::Varchar,
+            "c.city" => city_type.clone(),
+            "c.city.zipcode" => DataType::Varchar,
+            "c" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
         };
         assert_eq!(columns, expected_columns);
     }

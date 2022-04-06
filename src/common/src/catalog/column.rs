@@ -102,13 +102,23 @@ impl ColumnDesc {
         }
     }
 
-    // Get all column descs under field_descs
+    /// Get all column descs under field descs
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
         for desc in &self.field_descs {
             descs.append(&mut desc.get_column_descs());
         }
         descs
+    }
+
+    /// Change column and field names prefix to alias.
+    pub fn change_prefix_name(&mut self, name: String, alias: String) {
+        let regex_name = "^".to_string() + &name;
+        let regex = regex::Regex::new(regex_name.as_str()).unwrap();
+        self.name = regex.replace(&self.name, &alias).to_string();
+        for col in &mut self.field_descs{
+            col.change_prefix_name(name.clone(),alias.clone());
+        }
     }
 
     #[cfg(test)]

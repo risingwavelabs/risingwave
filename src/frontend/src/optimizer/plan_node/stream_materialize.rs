@@ -122,7 +122,7 @@ impl StreamMaterialize {
                         column_desc: ColumnDesc {
                             data_type: desc.data_type.clone(),
                             column_id: (i as i32).into(),
-                            name: desc.name.clone(),
+                            name: field.name.clone(),
                             field_descs: desc.field_descs.clone(),
                             type_name: desc.type_name.clone(),
                         },

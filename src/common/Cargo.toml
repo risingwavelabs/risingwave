@@ -24,6 +24,7 @@ prettytable-rs = "0.8"
 prost = "0.10"
 risingwave_pb = { path = "../prost" }
 rust_decimal = "1"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"

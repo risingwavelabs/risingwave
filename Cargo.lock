@@ -3557,6 +3557,7 @@ dependencies = [
  "prettytable-rs",
  "prost 0.10.0",
  "rand 0.8.5",
+ "regex",
  "risingwave_pb",
  "rust_decimal",
  "serde",
