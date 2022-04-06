@@ -35,7 +35,7 @@ use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::HummockManagerRef;
-use crate::manager::{MetaSrvEnv, INVALID_EPOCH};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -141,6 +141,8 @@ pub struct GlobalBarrierManager<S: MetaStore> {
 
     cluster_manager: ClusterManagerRef<S>,
 
+    catalog_manager: CatalogManagerRef<S>,
+
     fragment_manager: FragmentManagerRef<S>,
 
     hummock_manager: HummockManagerRef<S>,
@@ -162,6 +164,7 @@ where
     pub fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
@@ -173,6 +176,7 @@ where
         Self {
             interval,
             cluster_manager,
+            catalog_manager,
             fragment_manager,
             scheduled_barriers: ScheduledBarriers::new(),
             hummock_manager,
@@ -230,7 +234,14 @@ where
                         .into_iter()
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     // If failed, enter recovery mode.
-                    prev_epoch = self.recovery(prev_epoch, &command).await.into_inner();
+                    let (new_epoch, actors_to_finish, finished_create_mviews) =
+                        self.recovery(prev_epoch, &command).await;
+                    unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+                    for finished in finished_create_mviews {
+                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                    }
+
+                    prev_epoch = new_epoch.into_inner();
                 }
             }
         }
