@@ -87,7 +87,6 @@ pub struct MergeExecutor {
     /// Upstream channels.
     upstreams: Vec<Receiver<Message>>,
 
-    #[allow(dead_code)]
     /// Belonged actor id.
     actor_id: u32,
 
@@ -193,10 +192,16 @@ impl MergeExecutor {
             }
 
             // 2. Yield the barrier to downstream once all barriers collected from upstream.
-            yield Message::Barrier(current_barrier.unwrap());
+            let barrier = current_barrier.unwrap();
+            let to_stop = barrier.is_to_stop_actor(self.actor_id);
+            yield Message::Barrier(barrier);
 
-            // 3. Put back the upstreams.
-            upstreams = blocked;
+            // 3. Put back the upstreams, or close the stream.
+            if to_stop {
+                break;
+            } else {
+                upstreams = blocked;
+            }
         }
     }
 }
