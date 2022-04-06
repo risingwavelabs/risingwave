@@ -52,7 +52,7 @@ pub fn run_test_inner(cases: &[&TestDescAndFn], hook: impl TestHook + 'static + 
                 })),
                 TestFn::StaticBenchFn(f) => TestFn::DynTestFn(Box::new(move || {
                     let _watcher = TestWatcher::new(name, h);
-                    bench::run_once(move |b| f(b));
+                    bench::run_once(f);
                 })),
                 ref f => panic!("unexpected testfn {:?}", f),
             };

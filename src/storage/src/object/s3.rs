@@ -37,7 +37,7 @@ fn err(err: impl Into<BoxedError>) -> RwError {
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
         fail_point!("s3_upload_err", |_| Err(RwError::from(InternalError(
-            format!("s3 upload err")
+            "s3 upload err".to_string()
         ))));
         self.client
             .put_object()
@@ -53,7 +53,7 @@ impl ObjectStore for S3ObjectStore {
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Bytes> {
         fail_point!("s3_read_err", |_| Err(RwError::from(InternalError(
-            format!("s3 read err")
+            "s3 read err".to_string()
         ))));
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
@@ -94,7 +94,7 @@ impl ObjectStore for S3ObjectStore {
 
     async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
         fail_point!("s3_metadata_err", |_| Err(RwError::from(InternalError(
-            format!("s3 metadata err")
+            "s3 metadata err".to_string()
         ))));
         let resp = self
             .client
@@ -113,7 +113,7 @@ impl ObjectStore for S3ObjectStore {
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> Result<()> {
         fail_point!("s3_delete_err", |_| Err(RwError::from(InternalError(
-            format!("s3 delete err")
+            "s3 delete err".to_string()
         ))));
         self.client
             .delete_object()

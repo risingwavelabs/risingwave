@@ -248,11 +248,8 @@ mod test {
         fail::cfg(mem_read_err, "return").unwrap();
         while mi.is_valid() {
             count += 1;
-            match mi.next().await {
-                Err(_) => {
-                    assert!(count < 200 * 2);
-                }
-                Ok(_) => {}
+            if let Err(_) = mi.next().await {
+                assert!(count < 200 * 2);
             };
         }
         fail::remove(mem_read_err);

@@ -239,16 +239,8 @@ async fn test_failpoint_read_upload() {
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(Bytes::from(value), Bytes::from("111"));
-
-    // Test looking for a nonexistent key. `next()` would return the next key.
-    let value = hummock_storage
-        .get(&Bytes::from("ab"), epoch1)
-        .await
-        .unwrap();
-    assert_eq!(value, None);
-
-    // Write second batch.
+    assert_eq!(value, Bytes::from("111"));
+    // // Write second batch.
     let epoch2 = epoch1 + 1;
     hummock_storage
         .write_batch(batch2.into_iter().map(|(k, v)| (k, v.into())), epoch2)
@@ -318,9 +310,9 @@ async fn test_failpoint_read_upload() {
     fail::remove(mem_read_err);
 
     // close injection failure(read) , back to normal
-    let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
-    assert_eq!(Bytes::from(value), Bytes::from("111111"));
-    let value = hummock_storage.get(&anchor, epoch3).await.unwrap();
+    let value = hummock_storage.get(&anchor, epoch4).await.unwrap().unwrap();
+    assert_eq!(value, Bytes::from("111111"));
+    let value = hummock_storage.get(&anchor, epoch5).await.unwrap();
     assert_eq!(value, None);
 
     let mut iter = hummock_storage

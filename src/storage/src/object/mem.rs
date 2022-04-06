@@ -35,7 +35,7 @@ pub struct InMemObjectStore {
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
         fail_point!("mem_upload_err", |_| Err(RwError::from(InternalError(
-            format!("mem upload worry")
+            "mem upload worry".to_string()
         ))));
         ensure!(!obj.is_empty());
         self.objects.lock().await.insert(path.into(), obj);
@@ -44,7 +44,7 @@ impl ObjectStore for InMemObjectStore {
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
         fail_point!("mem_read_err", |_| Err(RwError::from(InternalError(
-            format!("mem read worry")
+            "mem read worry".to_string()
         ))));
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
@@ -68,7 +68,7 @@ impl ObjectStore for InMemObjectStore {
 
     async fn delete(&self, path: &str) -> Result<()> {
         fail_point!("mem_delete_err", |_| Err(RwError::from(InternalError(
-            format!("mem delete worry")
+            "mem delete worry".to_string()
         ))));
         self.objects.lock().await.remove(path);
         Ok(())
