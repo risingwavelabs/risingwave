@@ -41,7 +41,6 @@ pub enum StatementType {
     ORDER_BY,
     SET_OPTION,
     SHOW_PARAMETERS,
-    SHOW_SOURCE,
     SHOW_COMMAND,
     FLUSH,
     OTHER,
@@ -106,7 +105,6 @@ impl PgResponse {
             self.stmt_type,
             StatementType::SELECT
                 | StatementType::EXPLAIN
-                | StatementType::SHOW_SOURCE
                 | StatementType::SHOW_COMMAND
                 | StatementType::DESCRIBE_TABLE
         )
