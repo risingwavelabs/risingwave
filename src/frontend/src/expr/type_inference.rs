@@ -251,13 +251,29 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Date, T::Timestamp],
         T::Boolean,
     );
-    // Date minus and plus
+    // Date/Timestamp minus and plus
+    map.insert(
+        FuncSign::new_binary(E::Add, T::Interval, T::Date),
+        T::Timestamp,
+    );
     map.insert(
         FuncSign::new_binary(E::Add, T::Date, T::Interval),
         T::Timestamp,
     );
     map.insert(
         FuncSign::new_binary(E::Subtract, T::Date, T::Interval),
+        T::Timestamp,
+    );
+    map.insert(
+        FuncSign::new_binary(E::Add, T::Interval, T::Timestamp),
+        T::Timestamp,
+    );
+    map.insert(
+        FuncSign::new_binary(E::Add, T::Timestamp, T::Interval),
+        T::Timestamp,
+    );
+    map.insert(
+        FuncSign::new_binary(E::Subtract, T::Timestamp, T::Interval),
         T::Timestamp,
     );
 
