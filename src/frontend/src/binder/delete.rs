@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_sqlparser::ast::{Expr, ObjectName};
 
 use super::{Binder, BoundBaseTable, BoundTableSource};
+use crate::catalog::CatalogError;
 use crate::expr::ExprImpl;
 
 #[derive(Debug)]
@@ -35,12 +36,16 @@ impl Binder {
         source_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
+        let (schema_name, table_name) = Self::resolve_table_name(source_name)?;
         let delete = BoundDelete {
             table_source: self.bind_table_source(source_name.clone())?,
-            table: self.bind_table(source_name, None)?,
+            table: self
+                .try_bind_table(schema_name, table_name, None)?
+                .ok_or_else(|| {
+                    RwError::from(CatalogError::NotFound("table", source_name.to_string()))
+                })?,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
         };
-
         Ok(delete)
     }
 }

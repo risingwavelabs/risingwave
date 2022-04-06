@@ -15,14 +15,14 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::{CatalogVersion, TableId};
-use risingwave_common::error::Result;
-use risingwave_meta::manager::SourceId;
+use risingwave_common::error::{Result, RwError};
+use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{
     source, Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource,
-    Table as ProstTable,
+    StreamSourceInfo as ProstSourceInfo, Table as ProstTable,
 };
 
-use super::CatalogError;
+use super::{CatalogError, SourceId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -149,6 +149,28 @@ impl Catalog {
         self.get_schema_by_name(db_name, schema_name)?
             .get_source_by_name(source_name)
             .ok_or_else(|| CatalogError::NotFound("source", source_name.to_string()).into())
+    }
+
+    pub fn get_stream_source_by_name(
+        &self,
+        db_name: &str,
+        schema_name: &str,
+        source_name: &str,
+    ) -> Result<(SourceId, &ProstSourceInfo)> {
+        let source = self
+            .get_schema_by_name(db_name, schema_name)?
+            .get_source_by_name(source_name)
+            .ok_or_else(|| {
+                RwError::from(CatalogError::NotFound(
+                    "stream_source",
+                    source_name.to_string(),
+                ))
+            })?;
+        if let Some(Info::StreamSource(source_info)) = source.info {
+            return Ok((source.id, &source_info));
+        } else {
+            return Err(CatalogError::NotFound("stream_source", source_name.to_string()).into());
+        }
     }
 
     /// Check the name if duplicated with existing table, materialized view or source.

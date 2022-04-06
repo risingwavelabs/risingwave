@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
@@ -29,13 +30,16 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
-use crate::catalog::TableId;
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::{CatalogError, SourceId, TableId};
 use crate::expr::{Expr, ExprImpl};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
 #[derive(Debug)]
 pub enum Relation {
+    Source(Box<BoundStreamSource>),
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
@@ -54,7 +58,7 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub table_desc: TableDesc,
+    pub table_catalog: TableCatalog,
 }
 
 #[derive(Debug)]
@@ -67,6 +71,13 @@ pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
+}
+
+#[derive(Debug)]
+pub struct BoundStreamSource {
+    pub name: String,
+    pub source_id: SourceId,
+    pub info: StreamSourceInfo,
 }
 
 impl Binder {
@@ -144,7 +155,8 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
-                    Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
+                    let (schema_name, table_name) = Self::resolve_table_name(name)?;
+                    self.bind_table_or_source(schema_name, table_name, alias)
                 } else {
                     let kind =
                         WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
@@ -179,6 +191,23 @@ impl Binder {
         }
     }
 
+    pub(super) fn bind_table_or_source(
+        &mut self,
+        schema_name: String,
+        table_name: String,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        if let Some(bound_table) = self.try_bind_table(schema_name, table_name, alias)? {
+            Ok(Relation::BaseTable(Box::new(bound_table)))
+        } else if let Some(bound_source) =
+            self.try_bind_stream_source(schema_name, table_name, alias)?
+        {
+            Ok(Relation::Source(Box::new(bound_source)))
+        } else {
+            Err(CatalogError::NotFound("table or source", table_name.to_string()).into())
+        }
+    }
+
     /// return the (`schema_name`, `table_name`)
     pub fn resolve_table_name(name: ObjectName) -> Result<(String, String)> {
         let mut identifiers = name.0;
@@ -195,37 +224,58 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    pub(super) fn bind_table(
+    pub(super) fn try_bind_table(
         &mut self,
-        name: ObjectName,
+        schema_name: String,
+        table_name: String,
         alias: Option<TableAlias>,
-    ) -> Result<BoundBaseTable> {
-        let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let table_catalog =
+    ) -> Result<Option<BoundBaseTable>> {
+        if let Ok(table_catalog) =
             self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
+                .get_table_by_name(&self.db_name, &schema_name, &table_name)
+        {
+            let table_id = table_catalog.id();
+            Ok(Some(BoundBaseTable {
+                name: table_name,
+                table_id,
+                table_catalog: table_catalog.clone(),
+            }))
+        } else {
+            Ok(None)
+        }
+    }
 
-        let table_id = table_catalog.id();
-        let table_desc = table_catalog.table_desc();
-        let columns = table_catalog.columns().to_vec();
+    pub(super) fn try_bind_stream_source(
+        &mut self,
+        schema_name: String,
+        table_name: String,
+        alias: Option<TableAlias>,
+    ) -> Result<Option<BoundStreamSource>> {
+        if let Ok((source_id, source_info)) =
+            self.catalog
+                .get_stream_source_by_name(&self.db_name, &schema_name, &table_name)
+        {
+            let columns = source_info.columns.into_iter().map(ColumnCatalog::from);
+            self.bind_context(
+                columns.map(|c| {
+                    (
+                        c.column_desc.name.clone(),
+                        c.column_desc.data_type.clone(),
+                        c.is_hidden,
+                    )
+                }),
+                table_name.clone(),
+                alias,
+            )?;
 
-        self.bind_context(
-            columns.iter().map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            }),
-            table_name.clone(),
-            alias,
-        )?;
-
-        Ok(BoundBaseTable {
-            name: table_name,
-            table_desc,
-            table_id,
-        })
+            Ok(Some(BoundStreamSource {
+                name: table_name,
+                source_id,
+                info: source_info.clone(),
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
