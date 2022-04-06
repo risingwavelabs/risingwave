@@ -59,6 +59,7 @@ impl StreamMaterialize {
 
     fn derive_schema(schema: &Schema) -> Result<Schema> {
         let mut col_names = HashSet::new();
+        println!("{:?}",schema);
         for field in schema.fields() {
             if is_row_id_column_name(&field.name) {
                 continue;

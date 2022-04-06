@@ -29,6 +29,7 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::TableId;
 use crate::expr::{Expr, ExprImpl};
 
@@ -144,7 +145,15 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
-                    Ok(Relation::BaseTable(Box::new(self.bind_table(name, alias)?)))
+                    let table = self.bind_table(name.clone(), alias.clone());
+                    if table.is_err() && self.is_mv_query {
+                        println!("hello");
+                        Ok(Relation::BaseTable(Box::new(
+                            self.bind_stream_source(name, alias)?,
+                        )))
+                    } else {
+                        Ok(Relation::BaseTable(Box::new(table?)))
+                    }
                 } else {
                     let kind =
                         WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
@@ -193,6 +202,66 @@ impl Binder {
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
         Ok((schema_name, table_name))
+    }
+
+    pub(super) fn bind_stream_source(
+        &mut self,
+        name: ObjectName,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
+        let (schema_name, source_name) = Self::resolve_table_name(name)?;
+        let source = self
+            .catalog
+            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
+
+        let source_id = TableId::new(source.id);
+        let stream_source_info = try_match_expand!(source.get_info()?, Info::StreamSource)?;
+
+        let columns: Vec<ColumnCatalog> = stream_source_info
+            .columns
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.clone().into())
+            .collect();
+
+        let mut catalogs = vec![];
+        for col in columns {
+            catalogs.append(
+                &mut col
+                    .column_desc
+                    .get_column_descs()
+                    .into_iter()
+                    .map(|c| ColumnCatalog {
+                        column_desc: c,
+                        is_hidden: col.is_hidden,
+                    })
+                    .collect_vec(),
+            );
+        }
+
+        let desc = TableDesc {
+            table_id: source_id,
+            pk: vec![],
+            columns: catalogs.iter().map(|c| c.clone().column_desc).collect_vec(),
+        };
+
+        self.bind_context(
+            catalogs.iter().map(|c| {
+                (
+                    c.column_desc.name.clone(),
+                    c.column_desc.data_type.clone(),
+                    c.is_hidden,
+                )
+            }),
+            source_name.clone(),
+            alias,
+        )?;
+
+        Ok(BoundBaseTable {
+            name: source_name,
+            table_desc: desc,
+            table_id: source_id,
+        })
     }
 
     pub(super) fn bind_table(

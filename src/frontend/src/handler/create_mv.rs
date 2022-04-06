@@ -38,7 +38,7 @@ pub fn gen_create_mv_plan(
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
     let bound = {
-        let mut binder = Binder::new(
+        let mut binder = Binder::new_with_mv_query(
             session.env().catalog_reader().read_guard(),
             session.database().to_string(),
         );
@@ -46,6 +46,7 @@ pub fn gen_create_mv_plan(
     };
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
+    println!("how");
     plan_root.set_required_dist(Distribution::any().clone());
     let materialize = plan_root.gen_create_mv_plan(table_name)?;
     let table = materialize.table().to_prost(schema_id, database_id);

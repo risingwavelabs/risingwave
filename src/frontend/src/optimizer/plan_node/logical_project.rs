@@ -147,6 +147,7 @@ impl LogicalProject {
                 }
             })
             .collect();
+        println!("{:?}",input_schema);
         Schema { fields }
     }
 
