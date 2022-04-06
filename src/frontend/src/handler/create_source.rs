@@ -189,7 +189,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select country from t";
+        let sql = "explain create materialized view mv1 as select country from t";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

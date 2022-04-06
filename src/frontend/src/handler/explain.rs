@@ -65,6 +65,7 @@ pub(super) fn handle_explain(
         .lines()
         .map(|s| Row::new(vec![Some(s.into())]))
         .collect::<Vec<_>>();
+    println!("{:?}",rows);
 
     Ok(PgResponse::new(
         StatementType::EXPLAIN,
