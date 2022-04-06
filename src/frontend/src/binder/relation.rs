@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
@@ -58,6 +58,16 @@ pub struct BoundBaseTable {
     pub table_catalog: TableCatalog,
 }
 
+impl From<&TableCatalog> for BoundBaseTable {
+    fn from(t: &TableCatalog) -> Self {
+        Self {
+            name: t.name.clone(),
+            table_id: t.id.clone(),
+            table_catalog: t.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct BoundSubquery {
     pub query: BoundQuery,
@@ -74,6 +84,12 @@ pub struct BoundTableSource {
 #[derive(Debug)]
 pub struct BoundSource {
     pub catalog: SourceCatalog,
+}
+
+impl From<&SourceCatalog> for BoundSource {
+    fn from(s: &SourceCatalog) -> Self {
+        Self { catalog: s.clone() }
+    }
 }
 
 impl Binder {
@@ -193,16 +209,23 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
-        let (ret, columns) = if let Some(bound_table) =
-            self.try_bind_table_inner(schema_name, table_name)?
-        {
-            let columns = bound_table.table_catalog.columns.clone();
-            (Relation::BaseTable(Box::new(bound_table)), columns)
-        } else if let Some(bound_source) = self.try_bind_source_inner(schema_name, table_name)? {
-            let columns = bound_source.catalog.columns.clone();
-            (Relation::Source(Box::new(bound_source)), columns)
-        } else {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+        let (ret, columns) = {
+            let catalog = &self.catalog;
+
+            catalog
+                .get_table_by_name(&self.db_name, schema_name, table_name)
+                .map(|t| (Relation::BaseTable(Box::new(t.into())), t.columns.clone()))
+                .or_else(|_| {
+                    catalog
+                        .get_source_by_name(&self.db_name, schema_name, table_name)
+                        .map(|s| (Relation::Source(Box::new(s.into())), s.columns.clone()))
+                })
+                .map_err(|_| {
+                    RwError::from(CatalogError::NotFound(
+                        "table or source",
+                        table_name.to_string(),
+                    ))
+                })?
         };
 
         self.bind_context(
@@ -259,43 +282,6 @@ impl Binder {
             .unwrap_or_else(|| DEFAULT_SCHEMA_NAME.into());
 
         Ok((schema_name, table_name))
-    }
-
-    fn try_bind_table_inner(
-        &mut self,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<Option<BoundBaseTable>> {
-        if let Ok(table_catalog) =
-            self.catalog
-                .get_table_by_name(&self.db_name, schema_name, table_name)
-        {
-            let table_id = table_catalog.id();
-            Ok(Some(BoundBaseTable {
-                name: table_name.to_string(),
-                table_id,
-                table_catalog: table_catalog.clone(),
-            }))
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn try_bind_source_inner(
-        &mut self,
-        schema_name: &str,
-        table_name: &str,
-    ) -> Result<Option<BoundSource>> {
-        if let Ok(catalog) = self
-            .catalog
-            .get_source_by_name(&self.db_name, schema_name, table_name)
-        {
-            Ok(Some(BoundSource {
-                catalog: catalog.clone(),
-            }))
-        } else {
-            Ok(None)
-        }
     }
 
     pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
