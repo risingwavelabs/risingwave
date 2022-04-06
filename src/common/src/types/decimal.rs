@@ -32,8 +32,7 @@ pub enum Decimal {
 impl Debug for Decimal {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_not_null_into(&Some(ScalarImpl::Decimal(self.clone())), &mut serializer)
-            .unwrap();
+        serialize_datum_not_null_into(&Some(ScalarImpl::Decimal(*self)), &mut serializer).unwrap();
         let buf = serializer.into_inner();
         write!(f, "encoded: {:?}", buf)?;
 
