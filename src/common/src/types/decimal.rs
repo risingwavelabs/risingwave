@@ -19,12 +19,31 @@ use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, Che
 pub use rust_decimal::prelude::{FromPrimitive, FromStr, ToPrimitive};
 use rust_decimal::{Decimal as RustDecimal, Error, RoundingStrategy};
 
-#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+use super::{serialize_datum_not_null_into, ScalarImpl};
+
+#[derive(Copy, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     Normalized(RustDecimal),
     NaN,
     PositiveINF,
     NegativeINF,
+}
+
+impl Debug for Decimal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        serialize_datum_not_null_into(&Some(ScalarImpl::Decimal(self.clone())), &mut serializer)
+            .unwrap();
+        let buf = serializer.into_inner();
+        write!(f, "encoded: {:?}", buf)?;
+
+        match self {
+            Self::Normalized(d) => f.debug_tuple("Normalized").field(d).finish(),
+            Self::NaN => write!(f, "NaN"),
+            Self::PositiveINF => write!(f, "PositiveINF"),
+            Self::NegativeINF => write!(f, "NegativeINF"),
+        }
+    }
 }
 
 macro_rules! impl_from_integer {
