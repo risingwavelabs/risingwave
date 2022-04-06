@@ -1,4 +1,3 @@
-use std::collections::hash_map::Entry;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +11,8 @@ use std::collections::hash_map::Entry;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -75,9 +76,10 @@ where
         let map = &mut self.core.write().await.table_fragments;
 
         match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(_) => Err(RwError::from(InternalError(
-                "table_fragment already exist!".to_string(),
-            ))),
+            Entry::Occupied(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment already exist: id={}",
+                table_fragment.table_id()
+            )))),
             Entry::Vacant(v) => {
                 table_fragment.insert(&*self.meta_store).await?;
                 v.insert(table_fragment);
@@ -102,9 +104,10 @@ where
 
                 Ok(())
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_fragment.table_id()
+            )))),
         }
     }
 
@@ -134,9 +137,10 @@ where
 
                 Ok(())
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 
@@ -157,7 +161,7 @@ where
                     .get(&dependent_table_id)
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
-                            "table_fragment for {} not exist!",
+                            "table_fragment not exist: id={}",
                             dependent_table_id
                         )))
                     })?
@@ -180,11 +184,14 @@ where
             for dependent_table in dependent_tables {
                 map.insert(dependent_table.table_id(), dependent_table);
             }
-        } else {
-            tracing::warn!("table_fragment not exist when dropping: {}", table_id);
-        }
 
-        Ok(())
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            ))))
+        }
     }
 
     /// Used in [`crate::barrier::GlobalBarrierManager`]
@@ -253,9 +260,10 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
-            None => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            None => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 
@@ -263,9 +271,10 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.actor_ids()),
-            None => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            None => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 
@@ -273,9 +282,10 @@ where
         let map = &self.core.read().await.table_fragments;
         match map.get(table_id) {
             Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
-            None => Err(RwError::from(InternalError(
-                "table_fragment not exist!".to_string(),
-            ))),
+            None => Err(RwError::from(InternalError(format!(
+                "table_fragment not exist: id={}",
+                table_id
+            )))),
         }
     }
 
@@ -288,9 +298,10 @@ where
             let map = &self.core.blocking_read().table_fragments;
             match map.get(table_id) {
                 Some(table_fragment) => Ok(table_fragment.node_actor_ids()),
-                None => Err(RwError::from(InternalError(
-                    "table_fragment not exist!".to_string(),
-                ))),
+                None => Err(RwError::from(InternalError(format!(
+                    "table_fragment not exist: id={}",
+                    table_id
+                )))),
             }
         })
     }
@@ -301,9 +312,10 @@ where
             let map = &self.core.blocking_read().table_fragments;
             match map.get(table_id) {
                 Some(table_fragment) => Ok(table_fragment.sink_actor_ids()),
-                None => Err(RwError::from(InternalError(
-                    "table_fragment not exist!".to_string(),
-                ))),
+                None => Err(RwError::from(InternalError(format!(
+                    "table_fragment not exist: id={}",
+                    table_id
+                )))),
             }
         })
     }
