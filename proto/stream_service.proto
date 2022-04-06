@@ -9,7 +9,6 @@ option optimize_for = SPEED;
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
-import "plan.proto";
 import "stream_plan.proto";
 
 message HangingChannel {
