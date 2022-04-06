@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
 use std::io::{Error as IoError, Result};
 use std::sync::Arc;
 
@@ -91,7 +90,7 @@ where
             FeMessage::CancelQuery => {
                 self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(
                     PsqlError::cancel(),
-                )));
+                )))?;
             }
             FeMessage::Terminate => {
                 self.process_terminate();

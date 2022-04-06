@@ -83,6 +83,7 @@ impl FeStartupMessage {
             stream.read_exact(&mut payload).await?;
         }
         match protocol_num {
+            // code from: https://www.postgresql.org/docs/current/protocol-message-formats.html
             196608 => Ok(FeMessage::Startup(FeStartupMessage {})),
             80877103 => Ok(FeMessage::Ssl),
             // Cancel request code.
