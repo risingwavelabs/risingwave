@@ -101,21 +101,19 @@ where
 {
     /// An implementation of [`Executor::execute`] for [`AggExecutor`].
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
-    #[allow(clippy::unused_unit)]
     pub(crate) async fn agg_executor_execute(mut self: Box<Self>) {
         let mut input = self.input.execute();
         let first_msg = input.next().await.unwrap()?;
         self.inner.init_executor(&first_msg);
         yield first_msg;
 
-        #[for_await]
-        for msg in input {
+        while let Some(msg) = input.next().await {
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => self.inner.apply_chunk(chunk).await?,
                 Message::Barrier(barrier) if barrier.is_stop_mutation() => {
                     yield Message::Barrier(barrier);
-                    ()
+                    break;
                 }
                 Message::Barrier(barrier) => {
                     let epoch = barrier.epoch.curr;
