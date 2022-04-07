@@ -227,7 +227,7 @@ impl StateStore for HummockStorage {
             validate_epoch(version.safe_epoch(), epoch)?;
 
             // Query shared buffer. Return the value without iterating SSTs if found
-            if let Some(v) = self
+            if version.max_committed_epoch() < epoch && let Some(v) = self
                 .shared_buffer_manager
                 .get(key, (version.max_committed_epoch() + 1)..=epoch)
             {

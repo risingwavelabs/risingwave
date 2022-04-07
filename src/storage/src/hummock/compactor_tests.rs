@@ -35,7 +35,7 @@ mod tests {
     ) -> HummockStorage {
         let remote_dir = "hummock_001_test".to_string();
         let options = Arc::new(StorageConfig {
-            sstable_size: 64,
+            sstable_size: 32,
             block_size: 1 << 10,
             bloom_false_positive: 0.1,
             data_directory: remote_dir.clone(),
@@ -73,7 +73,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore]
     // TODO(soundOfDestiny): re-enable the test case
     async fn test_compaction_same_key_not_split() {
         let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
@@ -87,36 +86,30 @@ mod tests {
             options: storage.options().clone(),
             local_version_manager: storage.local_version_manager().clone(),
             sstable_store: storage.sstable_store(),
-            hummock_meta_client: storage.hummock_meta_client().clone(),
+            hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
             is_share_buffer_compact: false,
         };
 
         // 1. add sstables
+        let key = Bytes::from(&b"same_key"[..]);
+        let val = Bytes::from(&b"value"[..]);
         let kv_count = 128;
-        let epoch: u64 = 1;
+        let mut epoch: u64 = 1;
         for _ in 0..kv_count {
+            epoch += 1;
             storage
                 .ingest_batch(
-                    vec![(
-                        Bytes::from(&b"same_key"[..]),
-                        StorageValue::new_default_put(Bytes::from(&b"value"[..])),
-                    )],
+                    vec![(key.clone(), StorageValue::new_default_put(val.clone()))],
                     epoch,
                 )
                 .await
                 .unwrap();
-            storage.shared_buffer_manager().sync(Some(2)).await.unwrap();
+            storage.sync(Some(epoch)).await.unwrap();
+            hummock_meta_client.commit_epoch(epoch).await.unwrap();
         }
 
-        // 2. commit epoch
-        storage
-            .hummock_meta_client()
-            .commit_epoch(epoch)
-            .await
-            .unwrap();
-
-        // 3. get compact task
+        // 2. get compact task
         let compact_task = hummock_manager_ref
             .get_compact_task(worker_node.id)
             .await
@@ -137,15 +130,21 @@ mod tests {
             kv_count
         );
 
-        // 4. compact
+        // 3. compact
         Compactor::compact(Arc::new(compact_ctx), compact_task.clone()).await;
 
-        assert!(compact_task.task_status);
-
-        let table = compact_task.sorted_output_ssts.get(0).unwrap();
+        // 4. get the latest version and check
+        let version = hummock_manager_ref.get_current_version().await;
+        let output_table_id = *version
+            .get_levels()
+            .last()
+            .unwrap()
+            .table_ids
+            .first()
+            .unwrap();
         let table = storage
             .local_version_manager()
-            .pick_few_tables(&[table.id])
+            .pick_few_tables(&[output_table_id])
             .await
             .unwrap()
             .first()
@@ -153,9 +152,19 @@ mod tests {
             .unwrap();
         // assert that output table reaches the target size
         let target_table_size = storage.options().sstable_size;
-        assert!(table.meta.estimated_size > target_table_size);
+        assert!(
+            table.meta.estimated_size > target_table_size,
+            "table.meta.estimated_size {} <= target_table_size {}",
+            table.meta.estimated_size,
+            target_table_size
+        );
 
-        // 5. get compact task
+        // 5. storage get back the correct kv after compaction
+        storage.local_version_manager().try_set_version(version);
+        let get_val = storage.get(&key, epoch).await.unwrap().unwrap();
+        assert_eq!(get_val, val);
+
+        // 6. get compact task and there should be none
         let compact_task = hummock_manager_ref
             .get_compact_task(worker_node.id)
             .await

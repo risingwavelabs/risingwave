@@ -1336,4 +1336,14 @@ where
         tracing::debug!("Mark {:?} as orphan SSTs", marked);
         Ok(marked)
     }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn get_current_version(&self) -> HummockVersion {
+        let versioning_guard = self.versioning.read().await;
+        versioning_guard
+            .hummock_versions
+            .get(&versioning_guard.current_version_id.id())
+            .unwrap()
+            .clone()
+    }
 }
