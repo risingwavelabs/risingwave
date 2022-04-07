@@ -15,7 +15,7 @@
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 
-use super::{infer_type, Expr, ExprImpl};
+use super::{Expr, ExprImpl};
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -90,20 +90,12 @@ impl FunctionCall {
     where
         F: FnOnce(&Vec<ExprImpl>) -> RwError,
     {
-        infer_type(
-            func_type,
-            inputs.iter().map(|expr| expr.return_type()).collect(),
-        )
-        .ok_or_else(|| err_f(&inputs))
-        .map(|return_type| Self::new_with_return_type(func_type, inputs, return_type))
+        let e = err_f(&inputs);
+        Self::new(func_type, inputs).ok_or(e)
     }
 
     pub fn new(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<Self> {
-        let return_type = infer_type(
-            func_type,
-            inputs.iter().map(|expr| expr.return_type()).collect(),
-        )?; // should be derived from inputs
-        Some(Self::new_with_return_type(func_type, inputs, return_type))
+        super::new_func(func_type, inputs)
     }
 
     /// used for expressions like cast
