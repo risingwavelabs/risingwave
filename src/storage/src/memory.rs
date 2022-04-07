@@ -154,10 +154,12 @@ impl StateStore for MemoryStateStore {
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let mut inner = self.inner.lock().await;
+            let mut size: u64 = 0;
             for (key, value) in kv_pairs {
+                size += (key.len() + value.user_value.as_ref().map_or(0, |v| v.len())) as u64;
                 inner.insert((key, Reverse(epoch)), value.user_value);
             }
-            Ok(())
+            Ok(size)
         }
     }
 

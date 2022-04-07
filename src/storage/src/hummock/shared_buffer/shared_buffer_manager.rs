@@ -72,8 +72,9 @@ impl SharedBufferManager {
     }
 
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
-    pub fn write_batch(&self, batch: Vec<SharedBufferItem>, epoch: u64) -> HummockResult<()> {
+    pub fn write_batch(&self, batch: Vec<SharedBufferItem>, epoch: u64) -> HummockResult<u64> {
         let batch = SharedBufferBatch::new(batch, epoch);
+        let size = batch.size;
         self.shared_buffer
             .write()
             .entry(epoch)
@@ -81,7 +82,8 @@ impl SharedBufferManager {
             .insert(batch.end_user_key().to_vec(), batch.clone());
         self.uploader_tx
             .send(SharedBufferUploaderItem::Batch(batch))
-            .map_err(HummockError::shared_buffer_error)
+            .map_err(HummockError::shared_buffer_error)?;
+        Ok(size)
     }
 
     /// Puts a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.

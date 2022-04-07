@@ -29,13 +29,29 @@ pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub struct SharedBufferBatch {
     pub(super) inner: Arc<[SharedBufferItem]>,
     pub(super) epoch: u64,
+    pub(super) size: u64,
 }
 
 impl SharedBufferBatch {
     pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
+        // size = Sum(length of full key + length of user value)
+        let size: u64 = sorted_items
+            .iter()
+            .map(|(k, v)| {
+                let vsize = {
+                    match v {
+                        HummockValue::Put(_, val) => val.len(),
+                        HummockValue::Delete(_) => 0,
+                    }
+                };
+                (k.len() + vsize) as u64
+            })
+            .sum();
+
         Self {
             inner: sorted_items.into(),
             epoch,
+            size,
         }
     }
 

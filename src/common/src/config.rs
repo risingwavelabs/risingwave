@@ -87,6 +87,10 @@ impl Default for StreamingConfig {
 /// Currently all configurations are server before they can be specified with DDL syntaxes.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
+    /// Size of state store shared buffer (MB)
+    #[serde(default = "default::shared_buffer_size_mb")]
+    pub shared_buffer_threshold_mb: u32,
+
     /// Target size of the SSTable.
     #[serde(default = "default::sst_size")]
     pub sstable_size: u32,
@@ -161,6 +165,10 @@ impl FrontendConfig {
 }
 
 mod default {
+    pub fn shared_buffer_size_mb() -> u32 {
+        256
+    }
+
     pub fn heartbeat_interval() -> u32 {
         1000
     }

@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -21,6 +23,7 @@ use risingwave_rpc_client::HummockMetaClient;
 
 use super::{HummockStateStoreIter, HummockStorage, StateStore};
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
+use crate::hummock::key::Epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
@@ -169,6 +172,100 @@ async fn test_basic() {
         .await
         .unwrap();
     assert!(value.is_none());
+}
+
+#[tokio::test]
+async fn test_state_store_flusher() {
+    let object_client = Arc::new(InMemObjectStore::new());
+    let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
+    let hummock_options = Arc::new(default_config_for_test());
+    let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
+        MockHummockMetaService::new(),
+    )));
+    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+
+    let mut metrics = StateStoreMetrics::unused();
+    metrics.shared_buffer_threshold_size = 64; // 64 bytes
+    let state_store_stats = Arc::new(metrics);
+
+    let hummock_storage = HummockStorage::with_default_stats(
+        hummock_options,
+        sstable_store,
+        local_version_manager,
+        meta_client.clone(),
+        state_store_stats.clone(),
+    )
+    .await
+    .unwrap();
+
+    let mut time_interval = tokio::time::interval(Duration::from_millis(100));
+    let mut epoch: Epoch = 1;
+
+    // ingest 16B batch
+    let mut batch1 = vec![
+        (Bytes::from("aaaa"), StorageValue::new_default_put("1111")),
+        (Bytes::from("bbbb"), StorageValue::new_default_put("2222")),
+    ];
+
+    // Make sure the batch is sorted.
+    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch1, epoch).await.unwrap();
+
+    time_interval.tick().await;
+
+    // check sync state store metrics
+    // Note: epoch(8B) will be appended to keys, thus the ingested batch
+    // cost additional 16B in the shared buffer that is 32B in total.
+    assert_eq!(
+        32,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+
+    // ingest 16B batch
+    let mut batch2 = vec![
+        (Bytes::from("cccc"), StorageValue::new_default_put("3333")),
+        (Bytes::from("dddd"), StorageValue::new_default_put("4444")),
+    ];
+    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch2, epoch).await.unwrap();
+
+    time_interval.tick().await;
+
+    // shared buffer threshold size have been reached
+    // and sync worker should have been triggered
+    assert_eq!(
+        0,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+
+    epoch += 1;
+
+    // ingest 8B and trigger a sync
+    let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_default_put("5555"))];
+    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+    hummock_storage.ingest_batch(batch3, epoch).await.unwrap();
+
+    // 16B in total with 8B epoch appended to the key
+    assert_eq!(
+        16,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
+
+    // triger a sync
+    hummock_storage.sync(Some(epoch)).await.unwrap();
+
+    assert_eq!(
+        0,
+        state_store_stats
+            .shared_buffer_cur_size
+            .load(Ordering::SeqCst)
+    );
 }
 
 async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {

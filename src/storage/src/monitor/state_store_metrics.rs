@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic;
+
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
     histogram_opts, register_histogram_with_registry, register_int_counter_with_registry,
     Histogram, Registry,
 };
+use risingwave_common::config::StorageConfig;
 
 pub const DEFAULT_BUCKETS: &[f64; 11] = &[
     0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0,
@@ -86,6 +89,8 @@ macro_rules! define_state_store_metrics {
         /// job or an executor should be collected by views like `StateStats` and `JobStats`.
         #[derive(Debug)]
         pub struct StateStoreMetrics {
+            pub shared_buffer_cur_size: atomic::AtomicU64,
+            pub shared_buffer_threshold_size: u64,
             $( pub $name: $type, )*
         }
     }
@@ -94,7 +99,11 @@ macro_rules! define_state_store_metrics {
 for_all_metrics! { define_state_store_metrics }
 
 impl StateStoreMetrics {
-    pub fn new(registry: Registry) -> Self {
+    pub fn new(config: &StorageConfig, registry: Registry) -> Self {
+        // Set hummock shared buffer metrics
+        let shared_buffer_cur_size = atomic::AtomicU64::new(0);
+        let shared_buffer_threshold_size = (config.shared_buffer_threshold_mb * (1 << 20)) as u64;
+
         // ----- get -----
         let buckets = DEFAULT_BUCKETS.map(|x| x * GET_KEY_SIZE_SCALE).to_vec();
         let opts = histogram_opts!(
@@ -289,6 +298,8 @@ impl StateStoreMetrics {
         .unwrap();
 
         Self {
+            shared_buffer_cur_size,
+            shared_buffer_threshold_size,
             get_duration,
             get_key_size,
             get_value_size,
@@ -321,6 +332,6 @@ impl StateStoreMetrics {
 
     /// Creates a new `StateStoreMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
-        Self::new(Registry::new())
+        Self::new(&StorageConfig::default(), Registry::new())
     }
 }
