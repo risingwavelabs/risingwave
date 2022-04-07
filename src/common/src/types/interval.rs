@@ -123,7 +123,7 @@ impl IntervalUnit {
         .map_err(|e| RwError::from(IoError(e)))
     }
 
-    /// Multiple IntervalUnit by an integer with overflow check.
+    /// Multiple [`IntervalUnit`] by an integer with overflow check.
     pub fn checked_mul_int<I>(&self, rhs: I) -> Option<Self>
     where
         I: TryInto<i32>,
