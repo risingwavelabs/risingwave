@@ -90,7 +90,7 @@ RiseDev can help you compile and start a dev cluster. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566
 ```
 
 The default dev cluster only includes meta-node, compute-node and frontend-node. No data will be persisted, and everything will be in-memory. This should be very useful when developing and debugging.
@@ -203,7 +203,7 @@ To run end-to-end test, you will need to start a full cluster first:
 Then run some e2e tests:
 
 ```shell
-./risedev slt -p 4566 -d dev './e2e_test/v2/**/*.slt'
+./risedev slt -p 4566 './e2e_test/v2/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.
