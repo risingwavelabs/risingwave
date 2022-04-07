@@ -40,7 +40,6 @@ impl Executor for ProjectionExecutor {
         let child_output = self.child.next().await?;
         match child_output {
             Some(child_chunk) => {
-                let child_chunk = child_chunk.compact()?;
                 let arrays: Vec<Column> = self
                     .expr
                     .iter_mut()

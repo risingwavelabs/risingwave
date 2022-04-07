@@ -14,12 +14,14 @@
 
 use std::convert::TryFrom;
 
+use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::ensure;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
+use std::sync::Arc;
 
 use crate::expr::Expression;
 
@@ -36,7 +38,27 @@ impl Expression for InputRefExpression {
     }
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        Ok(input.column_at(self.idx).array())
+        let array = input.column_at(self.idx).array();
+        // TODO(yuhao): This is a workaround to let `InputRefExpression` visibility aware. We should
+        // compact chunks before using expressions.
+        let mut output_array = array.create_builder(input.capacity())?;
+        let bitmap = input.visibility();
+        Ok(Arc::new(match bitmap {
+            Some(bitmap) => {
+                for (datum, visible) in array.iter().zip_eq(bitmap.iter()) {
+                    if visible {
+                        output_array.append_datum_ref(datum)?;
+                    }
+                }
+                output_array.finish()?.into()
+            }
+            None => {
+                for datum in array.iter() {
+                    output_array.append_datum_ref(datum)?;
+                }
+                output_array.finish()?.into()
+            }
+        }))
     }
 }
 
