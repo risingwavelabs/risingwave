@@ -74,7 +74,7 @@ in the Postgres shell.
 
 ### Connecting to an External Source
 
-Please refer to he full [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/).
+Please refer to the full [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/).
 
 ## Documentation
 
