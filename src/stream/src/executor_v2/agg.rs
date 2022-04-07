@@ -100,12 +100,6 @@ where
             let msg = msg?;
             match msg {
                 Message::Chunk(chunk) => self.inner.apply_chunk(chunk, epoch).await?,
-                Message::Barrier(barrier) if barrier.is_stop_mutation() => {
-                    yield Message::Barrier(barrier);
-                    // FIXME: `break` should be added here after stopping mutation. But, current
-                    // actors does not stop correctly.
-                    // break;
-                }
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
                     if let Some(chunk) = self.inner.flush_data(epoch).await? {
