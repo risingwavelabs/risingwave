@@ -38,8 +38,8 @@ impl Planner {
         // TODO: Support other relation type.
         let table = Self::extract_source(select.from.as_ref().unwrap())?;
 
-        // For every struct select item, store its alias name or column name
-        // and column desc in the map. This map will be used in StreamMaterialize::create.
+        // For every struct select item, store its `alias_name`
+        // and `column_desc` in the map. This map will be used in `StreamMaterialize::create`.
         for i in 0..select.select_items.len() {
             let item = &select.select_items[i];
             if let DataType::Struct { .. } = item.return_type() {
@@ -54,13 +54,14 @@ impl Planner {
                             RwError::from(InternalError("index out of range".to_string()))
                         })? {
                             Some(name) => {
+                                // Change struct column desc and field descs prefix names to alias.
                                 column.change_prefix_name(column.name.clone(), name.clone());
                                 name.clone()
                             }
                             None => column.name.clone(),
                         }
                     };
-                    self.name_to_column_desc.insert(name, column);
+                    self.column_name_to_desc.insert(name, column);
                 }
             }
         }

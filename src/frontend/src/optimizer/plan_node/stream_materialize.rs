@@ -114,37 +114,31 @@ impl StreamMaterialize {
             .iter()
             .enumerate()
             .map(|(i, field)| {
-                // If field data type is struct, use map to get original column desc to form catalog
-                // to avoid field descs lost.
-                if let DataType::Struct { .. } = field.data_type {
-                    let desc = map.get(&field.name).ok_or_else(|| {
-                        RwError::from(InternalError(format!(
-                            "not found field name in map {}",
-                            field.name
-                        )))
-                    })?;
-                    Ok(ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: desc.data_type.clone(),
-                            column_id: (i as i32).into(),
-                            name: field.name.clone(),
-                            field_descs: desc.field_descs.clone(),
-                            type_name: desc.type_name.clone(),
-                        },
-                        is_hidden: !user_cols.contains(i),
-                    })
-                } else {
-                    Ok(ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: field.data_type.clone(),
-                            column_id: (i as i32).into(),
-                            name: field.name.clone(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        },
-                        is_hidden: !user_cols.contains(i),
-                    })
-                }
+                // If field `data_type` is struct, there are `field_descs` not include in the field,
+                // so use map to get `field_descs` in `column_desc`.
+                let descs = {
+                    if let DataType::Struct { .. } = field.data_type {
+                        let desc = map.get(&field.name).ok_or_else(|| {
+                            RwError::from(InternalError(format!(
+                                "not found field name in map {}",
+                                field.name
+                            )))
+                        })?;
+                        desc.field_descs.clone()
+                    } else {
+                        vec![]
+                    }
+                };
+                Ok(ColumnCatalog {
+                    column_desc: ColumnDesc {
+                        data_type: field.data_type.clone(),
+                        column_id: (i as i32).into(),
+                        name: field.name.clone(),
+                        field_descs: descs,
+                        type_name: "".to_string(),
+                    },
+                    is_hidden: !user_cols.contains(i),
+                })
             })
             .collect::<Result<Vec<_>>>()?;
 

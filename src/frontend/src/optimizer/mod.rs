@@ -52,8 +52,8 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     schema: Schema,
-    /// Store the struct column name and column descs which use in the field to column catalog.
-    name_to_column_desc: HashMap<String, ColumnDesc>,
+    /// Store struct `column_name` and `column_desc`.
+    column_name_to_desc: HashMap<String, ColumnDesc>,
 }
 
 impl PlanRoot {
@@ -62,7 +62,7 @@ impl PlanRoot {
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
-        name_to_column_desc: HashMap<String, ColumnDesc>,
+        column_name_to_desc: HashMap<String, ColumnDesc>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
@@ -80,7 +80,7 @@ impl PlanRoot {
             required_order,
             out_fields,
             schema,
-            name_to_column_desc,
+            column_name_to_desc,
         }
     }
 
@@ -225,7 +225,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
-            self.name_to_column_desc.clone(),
+            self.column_name_to_desc.clone(),
         )
     }
 

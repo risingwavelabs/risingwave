@@ -47,7 +47,7 @@ impl Planner {
             dist,
             order,
             out_fields,
-            self.name_to_column_desc.clone(),
+            self.column_name_to_desc.clone(),
         );
         Ok(root)
     }
