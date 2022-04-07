@@ -41,7 +41,7 @@ If you want to start a full cluster, enable metrics, and persist data, you may a
 To connect to the RisingWave server, you will need to install Postgres client in advance.
 
 ```shell
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566 # Use psql to connect Risingwave cluster
 ```
 
 ```sql
