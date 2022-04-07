@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableId;
@@ -265,7 +265,7 @@ where
     pub async fn all_node_actors(
         &self,
         include_inactive: bool,
-    ) -> Result<HashMap<WorkerId, Vec<StreamActor>>> {
+    ) -> HashMap<WorkerId, Vec<StreamActor>> {
         let mut actor_maps = HashMap::new();
 
         let map = &self.core.read().await.table_fragments;
@@ -276,7 +276,15 @@ where
             }
         }
 
-        Ok(actor_maps)
+        actor_maps
+    }
+
+    pub async fn all_chain_actor_ids(&self) -> HashSet<ActorId> {
+        let map = &self.core.read().await.table_fragments;
+
+        map.values()
+            .flat_map(|table_fragment| table_fragment.chain_actor_ids())
+            .collect::<HashSet<_>>()
     }
 
     pub async fn table_node_actors(
