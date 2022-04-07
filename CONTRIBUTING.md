@@ -93,7 +93,7 @@ RiseDev can help you compile and start a dev cluster. It is as simple as:
 psql -h localhost -p 4566
 ```
 
-The default dev cluster only includes meta-node, compute-node and frontend-node. No data will be persisted, and everything will be in-memory. This should be very useful when developing and debugging.
+The default dev cluster includes meta-node, compute-node and frontend-node processes and an embedded volatile in-memory state storage. No data will be persisted. This should be very useful when developing and debugging.
 
 To stop the cluster,
 
@@ -107,7 +107,7 @@ To view the logs,
 ./risedev l # shortcut for ./risedev logs
 ```
 
-To clean data,
+To clean local data and logs,
 
 ```shell
 ./risedev clean-data
@@ -257,7 +257,7 @@ RiseDev supports several observability components in RisingWave cluster.
 
 ### Monitoring
 
-Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics.
+Uncomment `grafana` and `prometheus` services in `risedev.yml`, and you can view the metrics through a built-in Grafana dashboard.
 
 ### Tracing
 
