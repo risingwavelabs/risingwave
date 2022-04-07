@@ -811,7 +811,6 @@ impl LocalStreamManagerCore {
             )?;
             for upstream_actor_id in &merge.upstream_actor_id {
                 if !self.actor_infos.contains_key(upstream_actor_id) {
-                    println!("{:#?}", self.actor_infos);
                     return Err(ErrorCode::InternalError(format!(
                         "chain upstream actor {} not exists",
                         upstream_actor_id
