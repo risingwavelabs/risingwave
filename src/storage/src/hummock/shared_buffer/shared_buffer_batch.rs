@@ -110,15 +110,12 @@ impl<const DIRECTION: usize> SharedBufferBatchIterator<DIRECTION> {
 impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIRECTION> {
     async fn next(&mut self) -> HummockResult<()> {
         assert!(self.is_valid());
-        println!("next {:?}", self.current_idx);
         self.current_idx += 1;
         Ok(())
     }
 
     fn key(&self) -> &[u8] {
-        let k = &self.current_item().0;
-        println!("key {:?}", k);
-        k
+        &self.current_item().0
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -141,7 +138,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
             .inner
             .binary_search_by(|probe| key::user_key(&probe.0).cmp(key::user_key(key)));
         let seek_key_epoch = key::get_epoch(key);
-        match DIRECTION  {
+        match DIRECTION {
             FORWARD => {
                 match partition_point {
                     Ok(i) => {
@@ -149,13 +146,14 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
                         // The user key part must be the same if we reach here.
                         let current_key_epoch = key::get_epoch(&self.inner[i].0);
                         if current_key_epoch > seek_key_epoch {
-                            // Move onto the next key for forward iteration if the current key has a larger epoch
+                            // Move onto the next key for forward iteration if the current key has a
+                            // larger epoch
                             self.current_idx += 1;
                         }
-                    },
+                    }
                     Err(i) => self.current_idx = i,
                 }
-            },
+            }
             BACKWARD => {
                 match partition_point {
                     Ok(i) => {
@@ -163,17 +161,16 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
                         // The user key part must be the same if we reach here.
                         let current_key_epoch = key::get_epoch(&self.inner[i].0);
                         if current_key_epoch < seek_key_epoch {
-                            // Move onto the prev key for backward iteration if the current key has a smaller epoch
+                            // Move onto the prev key for backward iteration if the current key has
+                            // a smaller epoch
                             self.current_idx += 1;
                         }
-                    },
+                    }
                     Err(i) => self.current_idx = self.inner.len() - i - 1,
                 }
-            },
-            _ => unreachable!()
+            }
+            _ => unreachable!(),
         }
-
-        println!("seek key {:?} idx {}", key, self.current_idx);
 
         Ok(())
     }

@@ -20,7 +20,6 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::RwError;
 use risingwave_common::storage::compact::compact_task_to_string;
 use risingwave_common::storage::key::{get_epoch, Epoch, FullKey};
 use risingwave_common::storage::key_range::KeyRange;
@@ -463,7 +462,7 @@ impl Compactor {
                     Err(e) => {
                         tracing::warn!(
                             "Subsribing to compaction tasks failed with error: {}. Will retry.",
-                            RwError::from(e)
+                            e
                         );
                         continue 'start_stream;
                     }

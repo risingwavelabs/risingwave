@@ -84,10 +84,7 @@ impl<'a> ReverseUserIterator<'a> {
 
     fn out_of_range(&self, key: &[u8]) -> bool {
         match &self.key_range.0 {
-            Included(begin_key) => {
-                println!("begin: {:?} {:?}", begin_key, key);
-                key < begin_key.as_slice()
-            }
+            Included(begin_key) => key < begin_key.as_slice(),
             Excluded(begin_key) => key <= begin_key.as_slice(),
             Unbounded => false,
         }
@@ -139,7 +136,6 @@ impl<'a> ReverseUserIterator<'a> {
             let key = to_user_key(full_key);
 
             if epoch <= self.read_epoch {
-                println!("{:?} {} {}", key, epoch, self.read_epoch);
                 if self.just_met_new_key {
                     self.last_key.clear();
                     self.last_key.extend_from_slice(key);
@@ -213,7 +209,6 @@ impl<'a> ReverseUserIterator<'a> {
         match &self.key_range.1 {
             Included(end_key) => {
                 let full_key = &key_with_epoch(end_key.clone(), 0);
-                println!("end_key: {:?}", full_key);
                 self.iterator.seek(full_key).await?;
             }
             Excluded(_) => unimplemented!("excluded begin key is not supported"),

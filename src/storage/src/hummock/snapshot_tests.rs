@@ -46,10 +46,7 @@ macro_rules! assert_count_reverse_range_scan {
         let mut count = 0;
         loop {
             match it.next().await.unwrap() {
-                Some(v) => {
-                    println!("print {:?}", v);
-                    count += 1;
-                }
+                Some(_) => count += 1,
                 None => break,
             }
         }
