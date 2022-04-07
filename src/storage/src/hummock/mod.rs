@@ -43,6 +43,7 @@ mod snapshot_tests;
 mod sstable_store;
 #[cfg(test)]
 mod state_store_tests;
+pub mod test_runner;
 #[cfg(test)]
 mod test_utils;
 mod utils;

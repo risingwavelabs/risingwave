@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::env;
 
-use super::test::*;
+use crate::test::*;
 /// general tests function
 pub fn run_general_test(cases: &[&TestDescAndFn]) {
     run_test_inner(cases, TestGeneralStates)

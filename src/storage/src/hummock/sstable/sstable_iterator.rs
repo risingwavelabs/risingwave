@@ -22,7 +22,6 @@ use super::super::{HummockResult, HummockValue};
 use super::Sstable;
 use crate::hummock::iterator::variants::FORWARD;
 use crate::hummock::iterator::HummockIterator;
-use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{BlockIterator, SstableStoreRef};
 
 pub trait SSTableIteratorBase: HummockIterator {}
@@ -271,7 +270,7 @@ mod tests {
 
         // We should close buffer, so that table iterator must read in object_stores
         let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::Put(test_value_of(i))));
+            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
         let table = Sstable { id: 0, meta };
         sstable_store
@@ -314,7 +313,7 @@ mod tests {
         .unwrap();
 
         let kv_iter =
-            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::Put(test_value_of(i))));
+            (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
         let (data, meta) = gen_test_sstable_data(default_builder_opt_for_test(), kv_iter);
         let table = Sstable { id: 0, meta };
         let result = sstable_store
@@ -338,7 +337,7 @@ mod tests {
             let key = sstable_iter.key();
             let value = sstable_iter.value();
             assert_bytes_eq!(key, test_key_of(cnt));
-            assert_bytes_eq!(value.into_put_value().unwrap(), test_value_of(cnt));
+            assert_bytes_eq!(value.into_user_value().unwrap(), test_value_of(cnt));
             cnt += 1;
             sstable_iter.next().await.unwrap();
         }
