@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    fold_boolean_constant, to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor,
-    FunctionCall, InputRef, Literal,
+    fold_boolean_constant, to_conjunctions, try_get_bool_constant, ExprImpl, ExprRewriter,
+    ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -254,6 +254,25 @@ impl Condition {
         self.conjunctions
             .iter()
             .for_each(|expr| visitor.visit_expr(expr))
+    }
+
+    /// Simplify conditions
+    /// It assume that all elements in the `conjunctions` are already simplified. Therefore, it only
+    /// does simplification across elements. It remove all `false` elements from `conjunctions`,
+    /// and set `conjunctions` to `vec![true]` if there is a `true` in `conjunctions`.
+    fn simplify(self) -> Self {
+        let mut conjunctions: Vec<ExprImpl> = Vec::new();
+        for i in &self.conjunctions {
+            if let Some(v) = try_get_bool_constant(i) {
+                if v {
+                    conjunctions.clear();
+                    break;
+                }
+            } else {
+                conjunctions.push(i.clone());
+            }
+        }
+        Self { conjunctions }
     }
 }
 

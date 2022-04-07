@@ -64,7 +64,7 @@ impl ExprRewriter for BooleanConstantFolding {
             .map(|expr| self.rewrite_expr(expr))
             .collect();
         let bool_constant_values: Vec<Option<bool>> =
-            inputs.iter().map(get_bool_constant).collect();
+            inputs.iter().map(try_get_bool_constant).collect();
         let contains_bool_constant = bool_constant_values.iter().any(|x| x.is_some());
         // Take elements from inputs, and reorder them to make sure lhs is a constant value
         let prepare_binary_function_inputs = |mut inputs: Vec<ExprImpl>| -> (ExprImpl, ExprImpl) {
@@ -95,7 +95,10 @@ impl ExprRewriter for BooleanConstantFolding {
     }
 }
 
-fn get_bool_constant(expr: &ExprImpl) -> Option<bool> {
+/// Try to get bool constant from a [`ExprImpl`].
+/// If `expr` is not a [`ExprImpl::Literal`], or the Literal is not a boolean, this function will
+/// return None. Otherwise it will return the boolean value.
+pub fn try_get_bool_constant(expr: &ExprImpl) -> Option<bool> {
     if let ExprImpl::Literal(l) = expr {
         if let Some(ScalarImpl::Bool(v)) = l.get_data() {
             return Some(*v);
@@ -104,20 +107,20 @@ fn get_bool_constant(expr: &ExprImpl) -> Option<bool> {
     None
 }
 
-/// [`boolean_constant_fold_and`] takes the left hand side and right hands side of a [`Type::And`] operator.
-/// It is required that the the lhs should always be a constant
+/// [`boolean_constant_fold_and`] takes the left hand side and right hands side of a [`Type::And`]
+/// operator. It is required that the the lhs should always be a constant.
 fn boolean_constant_fold_and(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
-    if get_bool_constant(&constant_lhs).unwrap() {
+    if try_get_bool_constant(&constant_lhs).unwrap() {
         rhs
     } else {
         constant_lhs
     }
 }
 
-/// [`boolean_constant_fold_or`] takes the left hand side and right hands side of a [`Type::Or`] operator.
-/// It is required that the the lhs should always be a constant
+/// [`boolean_constant_fold_or`] takes the left hand side and right hands side of a [`Type::Or`]
+/// operator. It is required that the the lhs should always be a constant.
 fn boolean_constant_fold_or(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
-    if get_bool_constant(&constant_lhs).unwrap() {
+    if try_get_bool_constant(&constant_lhs).unwrap() {
         constant_lhs
     } else {
         rhs
