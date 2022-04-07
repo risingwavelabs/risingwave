@@ -8,7 +8,7 @@ use risingwave_pb::plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdPro
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 use super::stage::StageEvent;
 use crate::meta_client::FrontendMetaClient;
@@ -66,11 +66,14 @@ pub struct QueryExecution {
 struct QueryRunner {
     query: Arc<Query>,
     stage_executions: Arc<HashMap<StageId, Arc<StageExecution>>>,
+    scheduled_stages_count: usize,
     // Query messages receiver. For example, stage state change events, query commands.
     msg_receiver: Receiver<QueryMessage>,
     // Sender of above message receiver. We need to keep it so that we can pass it to stages.
     msg_sender: Sender<QueryMessage>,
-    root_stage_sender: oneshot::Sender<QueryResultFetcher>,
+
+    // Will be set to `None` after all stage scheduled.
+    root_stage_sender: Option<oneshot::Sender<QueryResultFetcher>>,
 
     epoch: u64,
     meta_client: Arc<dyn FrontendMetaClient>,
@@ -116,8 +119,9 @@ impl QueryExecution {
             query: query.clone(),
             stage_executions: stage_executions.clone(),
             msg_receiver: receiver,
-            root_stage_sender,
+            root_stage_sender: Some(root_stage_sender),
             msg_sender: sender,
+            scheduled_stages_count: 0,
 
             epoch,
             meta_client: meta_client.clone(),
@@ -153,6 +157,11 @@ impl QueryExecution {
                     .await
                     .map_err(|_e| InternalError("Starting query execution failed!".to_string()))?;
 
+                debug!(
+                    "Received root stage query result fetcher: {:?}, query id: {:?}",
+                    root_stage, self.query.query_id
+                );
+
                 *state = QueryState::Running {
                     msg_sender,
                     task_handle,
@@ -179,21 +188,40 @@ impl QueryRunner {
         // Start leaf stages.
         for stage_id in &self.query.leaf_stages() {
             // TODO: We should not return error here, we should abort query.
+            info!(
+                "Starting query stage: {:?}-{:?}",
+                self.query.query_id, stage_id
+            );
             self.stage_executions
                 .get(stage_id)
                 .as_ref()
                 .unwrap()
                 .start()
                 .await?;
+            info!(
+                "Query stage {:?}-{:?} started.",
+                self.query.query_id, stage_id
+            );
         }
 
         // Schedule stages when leaf stages all scheduled
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
-                    for parent in self.query.get_parents(&stage_id) {
-                        if self.all_children_scheduled(parent).await {
-                            self.get_stage_execution_unchecked(parent).start().await?;
+                    debug!(
+                        "Query stage {:?}-{:?} scheduled.",
+                        self.query.query_id, stage_id
+                    );
+                    self.scheduled_stages_count += 1;
+
+                    if self.scheduled_stages_count == self.stage_executions.len() {
+                        // Now all stages schedules, send root stage info.
+                        self.send_root_stage_info().await;
+                    } else {
+                        for parent in self.query.get_parents(&stage_id) {
+                            if self.all_children_scheduled(parent).await {
+                                self.get_stage_execution_unchecked(parent).start().await?;
+                            }
                         }
                     }
                 }
@@ -203,7 +231,10 @@ impl QueryRunner {
             }
         }
 
-        // Now all stages schedules, send root stage info.
+        Ok(())
+    }
+
+    async fn send_root_stage_info(&mut self) {
         let root_task_status = self.stage_executions[&self.query.root_stage_id()]
             .get_task_status_unchecked(ROOT_TASK_ID);
 
@@ -227,11 +258,15 @@ impl QueryRunner {
             root_task_status.task_host_unchecked(),
         );
 
-        if let Err(e) = self.root_stage_sender.send(root_stage_result) {
-            warn!("Query execution dropped: {:?}", e);
-        };
+        // Consume sender here.
+        let mut tmp_sender = None;
+        swap(&mut self.root_stage_sender, &mut tmp_sender);
 
-        Ok(())
+        if let Err(e) = tmp_sender.unwrap().send(root_stage_result) {
+            warn!("Query execution dropped: {:?}", e);
+        } else {
+            debug!("Root stage for {:?} sent.", self.query.query_id);
+        }
     }
 
     async fn all_children_scheduled(&self, stage_id: &StageId) -> bool {

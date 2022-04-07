@@ -1,0 +1,32 @@
+query B
+SELECT true AS true;
+----
+t
+
+query BB
+select true AND NULL, false OR NULL;
+----
+NULL NULL
+
+query BB
+select false AND NULL, true OR NULL;
+----
+f t
+
+query BB
+select NULL AND NULL, NULL OR NULL;
+----
+NULL NULL
+
+query BB
+select not TRUE, not NULL;
+----
+f NULL
+
+query BBBB
+select 'true'::bool is true,
+       'true'::bool IS NOT TRUE,
+       'true'::bool IS FALSE,
+       'true'::bool is not false
+----
+t f f t

@@ -15,11 +15,12 @@
 use std::rc::Rc;
 
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::types::DataType;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject, LogicalScan, PlanRef};
 use crate::planner::Planner;
 
@@ -83,12 +84,11 @@ impl Planner {
                     ))));
                     expr_aliases.push(None);
                 }
-                let time_col_data_type = time_col.return_type();
                 let window_start =
                     ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                         ExprType::TumbleStart,
                         vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
-                        time_col_data_type.clone(),
+                        DataType::Timestamp,
                     )));
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
@@ -97,11 +97,10 @@ impl Planner {
                     ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
                         ExprType::Add,
                         vec![window_start.clone(), window_size],
-                        time_col_data_type,
+                        DataType::Timestamp,
                     )));
                 exprs.push(window_start);
                 exprs.push(window_end);
-                // TODO: check if the names `window_[start|end]` is valid.
                 expr_aliases.push(Some("window_start".to_string()));
                 expr_aliases.push(Some("window_end".to_string()));
                 let base = self.plan_base_table(input)?;

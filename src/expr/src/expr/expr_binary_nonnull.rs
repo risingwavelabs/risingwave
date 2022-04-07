@@ -124,16 +124,6 @@ macro_rules! gen_binary_expr_cmp {
                     $l, $r, $ret, $str_f,
                 ))
             }
-            (DataType::Varchar, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
-            (DataType::Char, DataType::Char) => {
-                Box::new(BinaryExpression::<Utf8Array, Utf8Array, BoolArray, _>::new(
-                    $l, $r, $ret, $str_f,
-                ))
-            }
             _ => {
                 $macro! {
                     [$l, $r, $ret],
@@ -200,6 +190,8 @@ macro_rules! gen_binary_expr_atm {
         {
             $(General => $general_f:ident,)?
             $((Timestamp, Timestamp) => $timestamp_timestamp_f:ident,)?
+            $((Timestamp, Interval) => $timestamp_interval_f:ident,)?
+            $((Interval, Timestamp) => $interval_timestamp_f:ident,)?
             $((Date, Date) => $date_date_f:ident,)?
             $((Interval, Date) => $interval_date_f:ident,)?
             $((Date, Interval) => $date_interval_f:ident,)?
@@ -245,6 +237,8 @@ macro_rules! gen_binary_expr_atm {
             $({ float32, decimal, float64, $general_f },)?
             $({ float64, decimal, float64, $general_f },)?
             $({ timestamp, timestamp, interval, $timestamp_timestamp_f },)?
+            $({ timestamp, interval, timestamp, $timestamp_interval_f },)?
+            $({ interval, timestamp, timestamp, $interval_timestamp_f },)?
             $({ date, date, int32, $date_date_f },)?
             $({ date, interval, timestamp, $date_interval_f },)?
             $({ interval, date, timestamp, $interval_date_f },)?
@@ -307,6 +301,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 {
                     General => general_add,
+                    (Timestamp, Interval) => timestamp_interval_add,
+                    (Interval, Timestamp) => interval_timestamp_add,
                     (Interval, Date) => interval_date_add,
                     (Date, Interval) => date_interval_add,
                     (Interval, Interval) => general_add,
@@ -320,6 +316,7 @@ pub fn new_binary_expr(
                 {
                     General => general_sub,
                     (Timestamp, Timestamp) => timestamp_timestamp_sub,
+                    (Timestamp, Interval) => timestamp_interval_sub,
                     (Date, Date) => date_date_sub,
                     (Date, Interval) => date_interval_sub,
                     (Interval, Interval) => general_sub,
@@ -384,7 +381,7 @@ fn new_tumble_start(
         DataType::Date => Box::new(BinaryExpression::<
             NaiveDateArray,
             IntervalArray,
-            NaiveDateArray,
+            NaiveDateTimeArray,
             _,
         >::new(
             expr_ia1, expr_ia2, return_type, tumble_start_date

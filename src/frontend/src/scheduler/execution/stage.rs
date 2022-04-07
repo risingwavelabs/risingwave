@@ -222,9 +222,17 @@ impl StageRunner {
         let worker_node = self.worker_node_manager.next_random();
         let compute_client = ComputeClient::new(worker_node.host.as_ref().unwrap().into()).await?;
 
+        let t_id = task_id.task_id;
         compute_client
             .create_task2(task_id, plan_fragment, self.epoch)
-            .await
+            .await?;
+
+        self.tasks[&t_id].inner.store(Arc::new(TaskStatus {
+            task_id: t_id,
+            location: Some(worker_node.host.unwrap()),
+        }));
+
+        Ok(())
     }
 
     fn create_plan_fragment(&self, task_id: TaskId) -> PlanFragment {

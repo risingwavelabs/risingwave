@@ -23,7 +23,6 @@ use risingwave_pb::hummock::SstableInfo;
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
-use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -101,12 +100,6 @@ impl SharedBufferUploader {
         };
 
         // Compact buffers into SSTs
-        let merge_iters = {
-            let iters = buffers
-                .into_iter()
-                .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
-            MergeIterator::new(iters, self.stats.clone())
-        };
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
@@ -116,8 +109,12 @@ impl SharedBufferUploader {
             is_share_buffer_compact: true,
         };
 
-        let tables =
-            Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), merge_iters).await?;
+        let tables = Compactor::compact_shared_buffer(
+            Arc::new(mem_compactor_ctx),
+            buffers,
+            self.stats.clone(),
+        )
+        .await?;
 
         // Add all tables at once.
         let version = self

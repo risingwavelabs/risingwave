@@ -242,7 +242,7 @@ impl SourceParser for ProtobufParser {
                 }
                 DataType::Int16 => {
                     protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
-                },
+                }
                 DataType::Int32 => {
                     protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
                 }
@@ -258,7 +258,7 @@ impl SourceParser for ProtobufParser {
                 DataType::Decimal => {
                     protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
                 }
-                DataType::Char | DataType::Varchar => {
+                DataType::Varchar => {
                     protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
                 }
                 DataType::Date => {
@@ -427,13 +427,13 @@ mod tests {
             },
             SourceColumnDesc {
                 name: "address".to_string(),
-                data_type: DataType::Char,
+                data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
-                data_type: DataType::Char,
+                data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
             },
