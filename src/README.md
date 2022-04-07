@@ -2,7 +2,7 @@
 
 Almost all components of RisingWave are developed in rust, and they are split to several crates:
 
-1. `config` contains default configurations for servers, e.g. logging configuration.
+1. `config` contains default configurations for servers.
 2. `proto` contains generated protobuf rust code, e.g. grpc definition and message definition.
 3. `stream` contains our stream compute engine, read [Stream Engine][stream-engine] for more details.
 4. `batch` contains our batch compute engine for queries against materialized views.
