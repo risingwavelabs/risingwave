@@ -1,5 +1,12 @@
 # Data Model and Encoding
 
+- [Data Model and Encoding](#data-model-and-encoding)
+  - [Data Model](#data-model)
+  - [In-Memory Encoding](#in-memory-encoding)
+  - [On-Disk Encoding](#on-disk-encoding)
+
+<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+
 ## Data Model
 
 > Source files: `common/src/types`

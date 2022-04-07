@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -20,8 +20,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
-use risingwave_pb::plan::TableRefId;
-use risingwave_pb::stream_plan::StreamActor;
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::cluster::WorkerId;
@@ -46,7 +46,7 @@ pub struct TableFragments {
 
 impl MetadataModel for TableFragments {
     type ProstType = ProstTableFragments;
-    type KeyType = TableRefId;
+    type KeyType = u32;
 
     fn cf_name() -> String {
         TABLE_FRAGMENTS_CF_NAME.to_string()
@@ -54,7 +54,7 @@ impl MetadataModel for TableFragments {
 
     fn to_protobuf(&self) -> Self::ProstType {
         Self::ProstType {
-            table_ref_id: Some(TableRefId::from(&self.table_id)),
+            table_id: self.table_id.table_id(),
             fragments: self.fragments.clone().into_iter().collect(),
             actor_status: self.actor_status.clone().into_iter().collect(),
         }
@@ -62,14 +62,14 @@ impl MetadataModel for TableFragments {
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
         Self {
-            table_id: TableId::from(&prost.table_ref_id),
+            table_id: TableId::new(prost.table_id),
             fragments: prost.fragments.into_iter().collect(),
             actor_status: prost.actor_status.into_iter().collect(),
         }
     }
 
     fn key(&self) -> Result<Self::KeyType> {
-        Ok(Self::KeyType::from(&self.table_id))
+        Ok(self.table_id.table_id())
     }
 }
 
@@ -136,6 +136,56 @@ impl TableFragments {
     /// Returns sink actor ids.
     pub fn sink_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, FragmentType::Sink)
+    }
+
+    fn contains_chain(stream_node: &StreamNode) -> bool {
+        if let Some(Node::ChainNode(_)) = stream_node.node {
+            return true;
+        }
+
+        for child in &stream_node.input {
+            if Self::contains_chain(child) {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Returns actors that contains Chain node.
+    pub fn chain_actor_ids(&self) -> Vec<ActorId> {
+        self.fragments
+            .values()
+            .flat_map(|fragment| {
+                fragment
+                    .actors
+                    .iter()
+                    .filter(|actor| Self::contains_chain(actor.nodes.as_ref().unwrap()))
+                    .map(|actor| actor.actor_id)
+            })
+            .collect()
+    }
+
+    /// Resolve dependent table
+    fn resolve_dependent_table(stream_node: &StreamNode, table_ids: &mut HashSet<TableId>) {
+        if let Some(Node::ChainNode(chain)) = stream_node.node.as_ref() {
+            table_ids.insert(TableId::from(&chain.table_ref_id));
+        }
+
+        for child in &stream_node.input {
+            Self::resolve_dependent_table(child, table_ids);
+        }
+    }
+
+    /// Returns dependent table ids.
+    pub fn dependent_table_ids(&self) -> HashSet<TableId> {
+        let mut table_ids = HashSet::new();
+        self.fragments.values().for_each(|fragment| {
+            let actor = &fragment.actors[0];
+            Self::resolve_dependent_table(actor.nodes.as_ref().unwrap(), &mut table_ids);
+        });
+
+        table_ids
     }
 
     /// Returns status of actors group by node id.

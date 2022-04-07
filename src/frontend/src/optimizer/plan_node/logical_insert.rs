@@ -20,7 +20,7 @@ use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
 use super::{BatchInsert, ColPrunable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatch, ToStream};
-use crate::catalog::{ColumnId, TableId};
+use crate::catalog::TableId;
 
 /// `LogicalInsert` iterates on input relation and insert the data into specified table.
 ///
@@ -31,18 +31,12 @@ pub struct LogicalInsert {
     pub base: PlanBase,
     table_source_name: String, // explain-only
     source_id: TableId,        // TODO: use SourceId
-    columns: Vec<ColumnId>,
     input: PlanRef,
 }
 
 impl LogicalInsert {
     /// Create a [`LogicalInsert`] node. Used internally by optimizer.
-    pub fn new(
-        input: PlanRef,
-        table_source_name: String,
-        source_id: TableId,
-        columns: Vec<ColumnId>,
-    ) -> Self {
+    pub fn new(input: PlanRef, table_source_name: String, source_id: TableId) -> Self {
         let ctx = input.ctx();
         let schema = Schema::new(vec![Field::unnamed(DataType::Int64)]);
         let base = PlanBase::new_logical(ctx, schema, vec![]);
@@ -50,19 +44,13 @@ impl LogicalInsert {
             base,
             table_source_name,
             source_id,
-            columns,
             input,
         }
     }
 
     /// Create a [`LogicalInsert`] node. Used by planner.
-    pub fn create(
-        input: PlanRef,
-        table_source_name: String,
-        source_id: TableId,
-        columns: Vec<ColumnId>,
-    ) -> Result<Self> {
-        Ok(Self::new(input, table_source_name, source_id, columns))
+    pub fn create(input: PlanRef, table_source_name: String, source_id: TableId) -> Result<Self> {
+        Ok(Self::new(input, table_source_name, source_id))
     }
 
     pub(super) fn fmt_with_name(&self, f: &mut fmt::Formatter, name: &str) -> fmt::Result {
@@ -82,12 +70,7 @@ impl PlanTreeNodeUnary for LogicalInsert {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            input,
-            self.table_source_name.clone(),
-            self.source_id,
-            self.columns.clone(),
-        )
+        Self::new(input, self.table_source_name.clone(), self.source_id)
     }
 }
 
