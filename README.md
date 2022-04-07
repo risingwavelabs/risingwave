@@ -4,7 +4,7 @@
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/singularity-data/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/singularity-data/risingwave)
 
-RisingWave is a cloud-native streaming database that uses SQL as the interface language. It is designed to reduce the complexity and cost of building real-time applications. RisingWave consumes streaming data, performs continuous queries, and updates results dynamically. As a database system, RisingWave maintains results inside its own storage and allows users to access data concurrency.
+RisingWave is a cloud-native streaming database that uses SQL as the interface language. It is designed to reduce the complexity and cost of building real-time applications. RisingWave consumes streaming data, performs continuous queries, and updates results dynamically. As a database system, RisingWave maintains results inside its own storage and allows users to access data efficiently.
 
 RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
@@ -35,16 +35,16 @@ git clone https://github.com/singularity-data/risingwave.git && cd risingwave
 ./risedev playground
 ```
 
-To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
-You may launch a RisingWave cluster and process streaming data in a distributed manner. Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+You may launch a RisingWave cluster and process streaming data in a distributed manner, or enable other features like metrics collection and data persistence. Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
 ### Your First Query
 
 To connect to the RisingWave server, you will need to install PostgreSQL terminal (`psql`) in advance.
 
 ```shell
-# Use psql to connect Risingwave cluster
+# Use psql to connect RisingWave cluster
 psql -h localhost -p 4566
 ```
 
