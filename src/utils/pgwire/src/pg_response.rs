@@ -91,6 +91,10 @@ impl PgResponse {
         }
     }
 
+    pub fn empty_result(stmt_type: StatementType) -> Self {
+        Self::new(stmt_type, 0, vec![], vec![])
+    }
+
     pub fn get_stmt_type(&self) -> StatementType {
         self.stmt_type
     }
