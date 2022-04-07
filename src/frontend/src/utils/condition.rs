@@ -120,11 +120,8 @@ impl Condition {
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
         ret.conjunctions
-            .reserve(ret.conjunctions.len() + other.conjunctions.len());
-        for expr in other.conjunctions {
-            ret.conjunctions.push(expr);
-        }
-        ret
+            .extend(other.conjunctions.into_iter().map(fold_boolean_constant));
+        ret.simplify()
     }
 
     #[must_use]
@@ -258,14 +255,15 @@ impl Condition {
 
     /// Simplify conditions
     /// It assume that all elements in the `conjunctions` are already simplified. Therefore, it only
-    /// does simplification across elements. It remove all `false` elements from `conjunctions`,
-    /// and set `conjunctions` to `vec![true]` if there is a `true` in `conjunctions`.
+    /// does simplification across elements. It remove all `true` elements from `conjunctions`,
+    /// and set `conjunctions` to `vec![false]` if there is a `false` in `conjunctions`.
     fn simplify(self) -> Self {
         let mut conjunctions: Vec<ExprImpl> = Vec::new();
         for i in &self.conjunctions {
             if let Some(v) = try_get_bool_constant(i) {
-                if v {
+                if !v {
                     conjunctions.clear();
+                    conjunctions.push(ExprImpl::literal_bool(false));
                     break;
                 }
             } else {
