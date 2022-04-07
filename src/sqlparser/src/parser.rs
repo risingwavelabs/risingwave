@@ -1364,9 +1364,10 @@ impl Parser {
             .is_some();
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_create_table(or_replace, temporary)
-        } else if self.parse_keyword(Keyword::MATERIALIZED) || self.parse_keyword(Keyword::VIEW) {
-            self.prev_token();
-            self.parse_create_view(or_replace)
+        } else if self.parse_keyword(Keyword::VIEW) {
+            self.parse_create_view(false, or_replace)
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            self.parse_create_view(true, or_replace)
         } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_create_source(false, or_replace)
         } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
@@ -1396,9 +1397,11 @@ impl Parser {
         })
     }
 
-    pub fn parse_create_view(&mut self, or_replace: bool) -> Result<Statement, ParserError> {
-        let materialized = self.parse_keyword(Keyword::MATERIALIZED);
-        self.expect_keyword(Keyword::VIEW)?;
+    pub fn parse_create_view(
+        &mut self,
+        materialized: bool,
+        or_replace: bool,
+    ) -> Result<Statement, ParserError> {
         // Many dialects support `OR ALTER` right after `CREATE`, but we don't (yet).
         // ANSI SQL and Postgres support RECURSIVE here, but we don't support it either.
         let name = self.parse_object_name()?;
