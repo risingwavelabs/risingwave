@@ -40,7 +40,7 @@ select count(*) from t;
 ----
 3
 
-query I
+query I rowsort
 select count(*), v1 from t group by v1;
 ----
 1 810
