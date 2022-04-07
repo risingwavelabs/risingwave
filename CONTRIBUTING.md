@@ -69,6 +69,7 @@ Then you'll be able to compile and start RisingWave!
 
 - The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
 - The `src` folder contains all of the kernal components, read [src/README.md][https://github.com/singularity-data/risingwave/blob/main/src/README.md] for more details.
+- The `docker` folder contains Dockerfiles to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
 - The `dashbaord` folder contains RisingWave dashboard v2.
