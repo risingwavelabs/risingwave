@@ -190,10 +190,6 @@ where
 
                 // Drop fragment info in meta store.
                 self.fragment_manager.drop_table_fragments(table_id).await?;
-
-                // TODO: delete downstream actor infos from upstream actors:
-                // 1. resolve chain nodes, find upstream actors and table id.
-                // 2. delete downstream actor infos from upstream actors in depended table.
             }
 
             Command::CreateMaterializedView {
@@ -223,7 +219,7 @@ where
                         })
                         .collect::<HashMap<ActorId, Vec<ActorId>>>();
                     self.fragment_manager
-                        .update_table_fragments_downstream(table_id, &downstream_actors)
+                        .add_table_fragments_downstream(table_id, &downstream_actors)
                         .await?;
                 }
             }

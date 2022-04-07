@@ -23,6 +23,7 @@ use crate::session::{OptimizerContext, SessionImpl};
 pub mod create_mv;
 mod create_source;
 pub mod create_table;
+mod describe;
 pub mod drop_mv;
 pub mod drop_table;
 mod explain;
@@ -30,7 +31,7 @@ mod flush;
 #[allow(dead_code)]
 mod query;
 mod query_single;
-mod show_source;
+mod show;
 pub mod util;
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
@@ -43,9 +44,12 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
-        // Since table and source both have source info, use show_source handler can get column info
-        Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
-        Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
+        Statement::Describe { name } => describe::handle_describe(context, name).await,
+        // TODO: support complex sql for `show columns from <table>`
+        Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
+        Statement::ShowCommand(show_object) => {
+            show::handle_show_command(context, show_object).await
+        }
         Statement::Drop(DropStatement {
             object_type: ObjectType::Table,
             name,

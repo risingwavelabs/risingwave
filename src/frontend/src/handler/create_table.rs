@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -26,10 +28,12 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use crate::binder::expr::bind_data_type;
 use crate::binder::Binder;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ROWID_PREFIX};
-use crate::optimizer::plan_node::StreamSource;
+use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+// FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
+pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
 
 pub fn gen_create_table_plan(
     session: &SessionImpl,
@@ -49,7 +53,7 @@ pub fn gen_create_table_plan(
         // Put the hidden row id column in the first column. This is used for PK.
         column_descs.push(ColumnDesc {
             data_type: DataType::Int64,
-            column_id: ColumnId::new(0),
+            column_id: TABLE_SOURCE_PK_COLID,
             name: gen_row_id_column_name(0),
             field_descs: vec![],
             type_name: "".to_string(),
@@ -97,12 +101,8 @@ pub fn gen_create_table_plan(
 
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef = StreamSource::create(
-            context,
-            vec![0], // row id column as pk
-            source.clone(),
-        )
-        .into();
+        let source_node: PlanRef =
+            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         required_cols.toggle(0);

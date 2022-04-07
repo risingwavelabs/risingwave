@@ -1,5 +1,18 @@
 # An Overview of RisingWave Streaming Engine
 
+- [An Overview of RisingWave Streaming Engine](#an-overview-of-risingwave-streaming-engine)
+  - [Overview](#overview)
+  - [Architecture](#architecture)
+  - [Actors, executors, and states](#actors-executors-and-states)
+    - [Actors](#actors)
+    - [Executors](#executors)
+  - [Checkpoint, Consistency, and Fault tolerance](#checkpoint-consistency-and-fault-tolerance)
+    - [Barrier based checkpoint](#barrier-based-checkpoint)
+    - [Fault tolerance](#fault-tolerance)
+  - [Advanced features](#advanced-features)
+
+<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+
 ## Overview
 
 RisingWave provides real time analytical results to serve user’s need. This is done by defining materialized views (MV). All materialized views will be automatically refreshed according to recent updates, such that querying materialized views will reflect real time analytical results. Such refreshing is carried out by our RisingWave streaming engine. 

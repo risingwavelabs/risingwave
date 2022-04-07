@@ -58,8 +58,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install components in Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
-sudo apt install postgresql-client
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -201,10 +200,10 @@ To run end-to-end test, you will need to start a full cluster first:
 ./risedev d
 ```
 
-Then, use `sqllogictest` command to run some e2e tests:
+Then run some e2e tests:
 
 ```shell
-sqllogictest -p 4567 -d dev './e2e_test/v2/**/*.slt'
+./risedev slt -p 4566 -d dev './e2e_test/v2/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.
