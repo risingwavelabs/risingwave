@@ -21,7 +21,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, Datum, ScalarImpl};
+use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
@@ -128,17 +128,12 @@ impl<S: StateStore> CellBasedTable<S> {
             &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
         ]
         .concat();
-        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
+        let mut get_res = Vec::new();
+        let sentinel_cell = self.keyspace.get(&sentinel_key.clone(), epoch).await?;
+
         if sentinel_cell.is_none() {
             return Ok(None);
-        } else {
-            let mut de = value_encoding::Deserializer::new(sentinel_cell.unwrap());
-            let sentinel_cell_value = deserialize_cell(&mut de, &DataType::Float32)?;
-            if sentinel_cell_value != Some(ScalarImpl::from(0.1_f32)) {
-                return Ok(Some(Row::new(vec![None; self.column_descs.len()])));
-            }
         }
-        let mut get_res = Vec::new();
         for column_id in column_ids {
             let key = &[
                 &serialize_pk(pk, pk_serializer)?[..],
@@ -149,6 +144,9 @@ impl<S: StateStore> CellBasedTable<S> {
             if let Some(state_store_get_res) = state_store_get_res {
                 get_res.push((key.clone(), state_store_get_res));
             }
+        }
+        if get_res.is_empty() {
+            return Ok(Some(Row::new(vec![None; self.column_descs.len()])));
         }
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());

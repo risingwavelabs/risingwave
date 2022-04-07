@@ -26,8 +26,7 @@ use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::hash::VIRTUAL_KEY_COUNT;
 use crate::types::{
-    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType, Datum,
-    ScalarImpl,
+    deserialize_datum_from, serialize_datum_into, serialize_datum_ref_into, DataType,
 };
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
@@ -145,7 +144,6 @@ pub fn serialize_pk_and_row(
         assert_eq!(values.0.len(), column_ids.len());
     }
     let mut result = vec![];
-    let mut all_null = true;
     for (index, column_id) in column_ids.iter().enumerate() {
         let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
         match row {
@@ -155,7 +153,6 @@ pub fn serialize_pk_and_row(
                     // we serialize this null row specially by only using one cell encoding.
                 }
                 datum => {
-                    all_null = false;
                     let value = serialize_cell(datum)?;
                     result.push((key, Some(value)));
                 }
@@ -163,30 +160,19 @@ pub fn serialize_pk_and_row(
             None => {
                 // A `None` of row means deleting that row, while the a `None` of datum represents a
                 // null.
-                all_null = false;
                 result.push((key, None));
             }
         }
     }
 
-    if all_null {
-        let key = [
-            pk_buf,
-            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
-        let value = serialize_cell(&None)?;
-        result.push((key, Some(value)));
-    } else {
-        let key = [
-            pk_buf,
-            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
-        let datum: Datum = Some(ScalarImpl::from(0.1_f32));
-        let value = serialize_cell(&datum)?;
-        result.push((key, Some(value)));
-    }
+    let key = [
+        pk_buf,
+        serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
+    ]
+    .concat();
+    let value = serialize_cell(&None)?;
+    result.push((key, Some(value)));
+
     Ok(result)
 }
 
