@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
@@ -69,6 +69,11 @@ impl<S: StateStore> std::fmt::Debug for CellBasedTable<S> {
             .finish()
     }
 }
+
+fn err(rw: impl Into<RwError>) -> StorageError {
+    StorageError::CellBasedTable(rw.into())
+}
+
 impl<S: StateStore> CellBasedTable<S> {
     pub fn new(
         keyspace: Keyspace<S>,
@@ -130,7 +135,7 @@ impl<S: StateStore> CellBasedTable<S> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let start_key = self
             .keyspace
-            .prefixed_key(&serialize_pk(pk, pk_serializer).map_err(StorageError::CellBasedTable)?);
+            .prefixed_key(&serialize_pk(pk, pk_serializer).map_err(err)?);
         let end_key = next_key(&start_key);
 
         let state_store_range_scan_res = self
@@ -143,7 +148,7 @@ impl<S: StateStore> CellBasedTable<S> {
         for (key, value) in state_store_range_scan_res {
             cell_based_row_deserializer
                 .deserialize(&key, &value)
-                .map_err(StorageError::CellBasedTable)?;
+                .map_err(err)?;
         }
         let pk_and_row = cell_based_row_deserializer.take();
         match pk_and_row {
@@ -181,12 +186,12 @@ impl<S: StateStore> CellBasedTable<S> {
         let mut batch = self.keyspace.state_store().start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         for (pk, cell_values) in rows {
-            let arrange_key_buf = serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())
-                .map_err(StorageError::CellBasedTable)?;
+            let arrange_key_buf =
+                serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?;
             let bytes = self
                 .cell_based_row_serializer
                 .serialize(&arrange_key_buf, cell_values, &self.column_ids)
-                .map_err(StorageError::CellBasedTable)?;
+                .map_err(err)?;
             for (key, value) in bytes {
                 match value {
                     Some(val) => local.put(key, StorageValue::new_default_put(val)),
@@ -229,9 +234,8 @@ impl<S: StateStore> CellBasedTable<S> {
             .keyspace
             .get(
                 &[
-                    &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap())
-                        .map_err(StorageError::CellBasedTable)?[..],
-                    &serialize_column_id(&column_id).map_err(StorageError::CellBasedTable)?,
+                    &serialize_pk(&pk, self.pk_serializer.as_ref().unwrap()).map_err(err)?[..],
+                    &serialize_column_id(&column_id).map_err(err)?,
                 ]
                 .concat(),
                 epoch,
@@ -241,7 +245,7 @@ impl<S: StateStore> CellBasedTable<S> {
         if let Some(buf) = buf {
             let mut de = value_encoding::Deserializer::new(buf);
             let cell = deserialize_cell(&mut de, &self.schema.fields[*column_index].data_type)
-                .map_err(StorageError::CellBasedTable)?;
+                .map_err(err)?;
             Ok(Some(cell))
         } else {
             Ok(None)
@@ -335,16 +339,18 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         &mut self,
         cell_based_table: &CellBasedTable<S>,
         chunk_size: Option<usize>,
-    ) -> Result<Option<DataChunk>> {
+    ) -> StorageResult<Option<DataChunk>> {
         let schema = &cell_based_table.schema;
-        let mut builders = schema.create_array_builders(chunk_size.unwrap_or(0))?;
+        let mut builders = schema
+            .create_array_builders(chunk_size.unwrap_or(0))
+            .map_err(err)?;
 
         let mut row_count = 0;
         for _ in 0..chunk_size.unwrap_or(usize::MAX) {
             match self.next().await? {
                 Some(row) => {
                     for (datum, builder) in row.0.into_iter().zip_eq(builders.iter_mut()) {
-                        builder.append_datum(&datum)?;
+                        builder.append_datum(&datum).map_err(err)?;
                     }
                     row_count += 1;
                 }
@@ -360,7 +366,8 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
             let columns: Vec<Column> = builders
                 .into_iter()
                 .map(|builder| builder.finish().map(|a| Column::new(Arc::new(a))))
-                .try_collect()?;
+                .try_collect()
+                .map_err(err)?;
             DataChunk::builder().columns(columns).build()
         };
 
@@ -411,7 +418,7 @@ impl<S: StateStore> TableIter for CellBasedTableRowIter<S> {
             let pk_and_row = self
                 .cell_based_row_deserializer
                 .deserialize(key, value)
-                .map_err(StorageError::CellBasedTable)?;
+                .map_err(err)?;
             self.next_idx += 1;
             match pk_and_row {
                 Some(_) => return Ok(pk_and_row.map(|(_pk, row)| row)),
