@@ -251,7 +251,7 @@ where
 #[inline(always)]
 pub fn int_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
 where
-    T1: TryInto<i32> + Debug
+    T1: TryInto<i32> + Debug,
 {
     interval_int_mul::<T2, T1, T3>(r, l)
 }
