@@ -21,7 +21,7 @@ use futures::channel::mpsc::{channel, Receiver};
 use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -217,16 +217,6 @@ impl LocalStreamManager {
             core.drop_actor(*id);
         }
         tracing::debug!(actors = ?actors, "drop actors");
-        Ok(())
-    }
-
-    pub async fn drop_materialized_view(
-        &self,
-        _table_id: &TableId,
-        _env: StreamEnvironment,
-    ) -> Result<()> {
-        // TODO(august): the data in StateStore should also be dropped directly/through unpin or
-        // some other way.
         Ok(())
     }
 

@@ -452,7 +452,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
         { Float64, F64Array },
         { Float32, F32Array },
         { Decimal, DecimalArray },
-        { Char | Varchar, Utf8Array },
+        { Varchar, Utf8Array },
         { Interval, IntervalArray },
     )
 }

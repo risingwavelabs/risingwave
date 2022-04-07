@@ -12,29 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use chrono::{NaiveDateTime, NaiveTime};
+use chrono::NaiveDateTime;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-// FIXME: This implementation is very crude and likely wrong. fix it later.
-#[inline(always)]
-pub fn tumble_start_date(time: NaiveDateWrapper, window: IntervalUnit) -> Result<NaiveDateWrapper> {
-    let diff = NaiveDateTime::new(time.0, NaiveTime::from_hms(0, 0, 0)).timestamp();
-    if window.get_months() != 0 {
-        return Err(RwError::from(InternalError(
-            "unimplemented: tumble_start only support days".to_string(),
-        )));
-    }
-    let window = window.get_days() as i64 * 24 * 60 * 60 + window.get_ms() / 1000;
-    let offset = diff / window;
-    let window_start = window * offset;
+use super::cast::date_to_timestamp;
 
-    Ok(NaiveDateWrapper(
-        NaiveDateTime::from_timestamp(window_start, 0).date(),
-    ))
+#[inline(always)]
+pub fn tumble_start_date(
+    time: NaiveDateWrapper,
+    window: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
+    tumble_start_date_time(date_to_timestamp(time)?, window)
 }
 
+// FIXME: This implementation is very crude and likely wrong. fix it later.
 #[inline(always)]
 pub fn tumble_start_date_time(
     time: NaiveDateTimeWrapper,

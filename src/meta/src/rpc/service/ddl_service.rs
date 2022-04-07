@@ -317,7 +317,7 @@ where
 
         // 2. drop mv in stream manager
         self.stream_manager
-            .drop_materialized_view(&TableRefId::from(&TableId::new(table_id)))
+            .drop_materialized_view(&TableId::new(table_id))
             .await
             .map_err(tonic_err)?;
 
@@ -519,7 +519,7 @@ where
         // 2. Drop source and mv separately.
         self.source_manager.drop_source(source_id).await?;
         self.stream_manager
-            .drop_materialized_view(&TableRefId::from(&TableId::new(table_id)))
+            .drop_materialized_view(&TableId::new(table_id))
             .await?;
 
         Ok(version)

@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, Relation, Result};
@@ -77,8 +78,6 @@ impl Binder {
             .into());
         };
 
-        let time_col_data_type = time_col.return_type();
-
         self.pop_context();
 
         let table_catalog =
@@ -107,12 +106,8 @@ impl Binder {
             })
             .chain(
                 [
-                    (
-                        "window_start".to_string(),
-                        time_col_data_type.clone(),
-                        false,
-                    ),
-                    ("window_end".to_string(), time_col_data_type, false),
+                    ("window_start".to_string(), DataType::Timestamp, false),
+                    ("window_end".to_string(), DataType::Timestamp, false),
                 ]
                 .into_iter(),
             );

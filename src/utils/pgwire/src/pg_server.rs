@@ -74,8 +74,8 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
                 }
             }
             Err(e) => {
-                tracing::error!("Connection closed by error {:?}!", e);
-                break;
+                // Execution error should not break current connection.
+                tracing::error!("error {:?}!", e);
             }
         }
     }

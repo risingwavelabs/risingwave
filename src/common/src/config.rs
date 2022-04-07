@@ -99,6 +99,10 @@ pub struct StorageConfig {
     #[serde(default = "default::bloom_false_positive")]
     pub bloom_false_positive: f64,
 
+    /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
+    #[serde(default = "default::share_buffers_sync_parallelism")]
+    pub share_buffers_sync_parallelism: u32,
+
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::data_directory")]
     pub data_directory: String,
@@ -176,6 +180,10 @@ mod default {
 
     pub fn bloom_false_positive() -> f64 {
         0.1
+    }
+
+    pub fn share_buffers_sync_parallelism() -> u32 {
+        2
     }
 
     pub fn data_directory() -> String {

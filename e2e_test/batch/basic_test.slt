@@ -208,7 +208,7 @@ drop table t
 
 # String related
 statement ok
-create table t (v1 int not null, v2 char(8) not null)
+create table t (v1 int not null, v2 varchar(8) not null)
 
 statement ok
 insert into t values (1,'1'), (2,'22'), (3,'333'), (4,'4444')

@@ -112,7 +112,7 @@ where
 
         match self
             .global_stream_manager
-            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
+            .drop_materialized_view(&TableId::from(&req.table_ref_id))
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),

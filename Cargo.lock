@@ -2726,6 +2726,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "thiserror",
  "tokio",
  "tracing",
  "workspace-hack",
