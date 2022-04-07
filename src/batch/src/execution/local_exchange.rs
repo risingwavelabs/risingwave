@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
+
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_rpc_client::ExchangeSource;
@@ -33,6 +35,14 @@ impl LocalExchangeSource {
             task_output,
             task_id,
         })
+    }
+}
+
+impl Debug for LocalExchangeSource {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalExchangeSource")
+            .field("task_output_id", self.task_output.id())
+            .finish()
     }
 }
 
