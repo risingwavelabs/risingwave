@@ -122,6 +122,19 @@ impl IntervalUnit {
         }
         .map_err(|e| RwError::from(IoError(e)))
     }
+
+    /// Multiple [`IntervalUnit`] by an integer with overflow check.
+    pub fn checked_mul_int<I>(&self, rhs: I) -> Option<Self>
+    where
+        I: TryInto<i32>,
+    {
+        let rhs = rhs.try_into().ok()?;
+        let months = self.months.checked_mul(rhs)?;
+        let days = self.days.checked_mul(rhs)?;
+        let ms = self.ms.checked_mul(rhs as i64)?;
+
+        Some(IntervalUnit { months, days, ms })
+    }
 }
 
 impl Add for IntervalUnit {

@@ -14,9 +14,9 @@
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_hummock_sdk::key::{Epoch, FullKey};
 
 use super::SstableMeta;
-use crate::hummock::key::{Epoch, FullKey};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableBuilder};
 

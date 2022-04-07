@@ -14,9 +14,9 @@
 
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
-use crate::hummock::key::next_key;
 use crate::StateStore;
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.

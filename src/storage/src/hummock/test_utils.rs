@@ -19,12 +19,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
 
 use super::{CompressionAlgorithm, SstableMeta, DEFAULT_RESTART_INTERVAL};
 use crate::hummock::iterator::test_utils::mock_sstable_store;
-use crate::hummock::key::key_with_epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
@@ -46,14 +47,18 @@ pub fn default_config_for_test() -> StorageConfig {
 }
 
 pub async fn mock_hummock_storage() -> HummockStorage {
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let sstable_store = mock_sstable_store();
     HummockStorage::with_default_stats(
         Arc::new(StorageConfig::default()),
         sstable_store.clone(),
         Arc::new(LocalVersionManager::new(sstable_store.clone())),
-        Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        ))),
+        mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
     )
     .await
