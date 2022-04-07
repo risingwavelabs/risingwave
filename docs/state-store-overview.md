@@ -108,7 +108,7 @@ The list of all SSTs along with some metadata forms a ***version***. When Hummoc
 
 ### Read Path
 
-To read from Hummock, we need a ***version*** (a consistent state of list of SSTs we can read) and and ***epoch*** to generate a consistent read snapshot. To avoid RPC with Hummock manager in every user read, the Hummock client will cache a most recent ***version*** locally. Local version will be updated when 1) client initiates a write batch and 2) background refresher triggers.
+To read from Hummock, we need a ***version*** (a consistent state of list of SSTs we can read) and ***epoch*** to generate a consistent read snapshot. To avoid RPC with Hummock manager in every user read, the Hummock client will cache a most recent ***version*** locally. Local version will be updated when 1) client initiates a write batch and 2) background refresher triggers.
 
 For every read operation (scan, get), we will first select SSTs that might contain a key.
 
@@ -144,7 +144,7 @@ Currently, there is only one checkpoint happening in the system at the same time
 
 As mentioned in [Read Path](#read-path), reads are performed on a ***version*** based on a given ***epoch***. During the whole read process, data from the specified read epoch cannot be removed by compaction, which is guaranteed by ***pinning an snapshot***; SSTs within a ***version*** cannot be vacuumed by compaction, which is guaranteed by ***pinning a version***.
 
-The SQL frontend will get the latest epoch from meta service. Then, it will embed the epoch number into SQL plans, so that all compute nodes will read from that epoch (***Snapshot Isolation***). In theory, both SQL frontend and compute nodes will ***pin the snapshot***, to handle the case that frontend goes down and the compute nodes are still reading from Hummock (#622). However, to simplify the process, currently we *only pin on the frontend side**.*
+The SQL frontend will get the latest epoch from meta service. Then, it will embed the epoch number into SQL plans, so that all compute nodes will read from that epoch. In theory, both SQL frontend and compute nodes will ***pin the snapshot***, to handle the case that frontend goes down and the compute nodes are still reading from Hummock (#622). However, to simplify the process, currently we *only pin on the frontend side**.*
 
 ![Hummock Service](images/state-store-overview/state-store-overview-04.svg)
 
