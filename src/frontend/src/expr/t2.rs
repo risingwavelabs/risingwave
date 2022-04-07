@@ -43,6 +43,20 @@ fn build_type_derive_map() -> HashMap<ExprType, (DataType, Vec<DataType>)> {
     m
 }
 
+pub fn new_simple(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    let (return_type, operand_types) = FUNC_SIG_MAP.get(&func_type)?;
+    let args = inputs
+        .into_iter()
+        .zip_eq(operand_types)
+        .map(|(e, t)| e.ensure_type(t.clone()))
+        .collect();
+    Some(FunctionCall::new_with_return_type(
+        func_type,
+        args,
+        return_type.clone(),
+    ))
+}
+
 type H = fn(ExprType, Vec<ExprImpl>) -> Option<FunctionCall>;
 lazy_static::lazy_static! {
     static ref FUNC_H_MAP: HashMap<ExprType, H> = {
@@ -109,20 +123,6 @@ fn as_binary(inputs: Vec<ExprImpl>) -> Option<(ExprImpl, ExprImpl)> {
 }
 
 pub fn new_func(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
-    if let Some((return_type, operand_types)) = FUNC_SIG_MAP.get(&func_type) {
-        let args = inputs
-            .into_iter()
-            .zip_eq(operand_types)
-            .map(|(e, t)| e.ensure_type(t.clone()))
-            .collect();
-        return Some(FunctionCall::new_with_return_type(
-            func_type,
-            args,
-            return_type.clone(),
-        ));
-    }
-    if let Some(f) = FUNC_H_MAP.get(&func_type) {
-        return f(func_type, inputs);
-    }
-    None
+    let f = FUNC_H_MAP.get(&func_type).unwrap_or(&(new_simple as H));
+    f(func_type, inputs)
 }
