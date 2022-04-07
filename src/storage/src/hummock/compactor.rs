@@ -20,22 +20,23 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::RwError;
+use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
 use super::iterator::{BoxedHummockIterator, ConcatIterator, HummockIterator, MergeIterator};
-use super::key::{get_epoch, Epoch, FullKey};
-use super::key_range::KeyRange;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
-use super::version_cmp::VersionedComparator;
 use super::{
-    HummockMetaClient, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
+    HummockError, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
     SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
@@ -182,7 +183,7 @@ impl Compactor {
     pub async fn compact(context: Arc<CompactorContext>, compact_task: CompactTask) {
         tracing::debug!(
             "Ready to handle compaction task: \n{}",
-            Compactor::compact_task_to_string(compact_task.clone())
+            compact_task_to_string(compact_task.clone())
         );
 
         // Number of splits (key ranges) is equal to number of compaction tasks
@@ -287,7 +288,12 @@ impl Compactor {
 
         // NOTICE: should be user_key overlap, NOT full_key overlap!
         let mut builder = CapacitySplitTableBuilder::new(|| async {
-            let table_id = self.context.hummock_meta_client.get_new_table_id().await?;
+            let table_id = self
+                .context
+                .hummock_meta_client
+                .get_new_table_id()
+                .await
+                .map_err(HummockError::meta_error)?;
             let builder = HummockStorage::get_builder(&self.context.options);
             Ok((table_id, builder))
         });
@@ -456,7 +462,7 @@ impl Compactor {
                     Err(e) => {
                         tracing::warn!(
                             "Subsribing to compaction tasks failed with error: {}. Will retry.",
-                            RwError::from(e)
+                            e
                         );
                         continue 'start_stream;
                     }
@@ -574,38 +580,5 @@ impl Compactor {
             iter.next().await?;
         }
         Ok(())
-    }
-
-    pub fn compact_task_to_string(compact_task: CompactTask) -> String {
-        let mut s = String::new();
-        s.push_str(&format!(
-            "Compaction task id: {:?}, target level: {:?}\n",
-            compact_task.task_id, compact_task.target_level
-        ));
-        s.push_str(&format!(
-            "Compaction watermark: {:?} \n",
-            compact_task.watermark
-        ));
-        s.push_str(&format!(
-            "Compaction # splits: {:?} \n",
-            compact_task.splits.len()
-        ));
-        s.push_str(&format!(
-            "Compaction task status: {:?} \n",
-            compact_task.task_status
-        ));
-        s.push_str("Compaction SSTables structure: \n");
-        for level_entry in &compact_task.input_ssts {
-            s.push_str(&format!(
-                "Level {:?}: {:?} \n",
-                level_entry.level_idx, level_entry.level
-            ));
-        }
-        s.push_str(&format!(
-            "Compaction task output: {:?} \n",
-            compact_task.sorted_output_ssts
-        ));
-
-        s
     }
 }
