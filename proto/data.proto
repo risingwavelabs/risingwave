@@ -152,8 +152,12 @@ message AddMutation {
   map<uint32, Actors> actors = 1;
 }
 
+message Splits {
+  repeated bytes splits = 1;
+}
+
 message SplitAssignMutation {
-  map<uint32, bytes> splits = 1;
+  map<uint32, Splits> splits = 1;
 }
 
 message Epoch {
@@ -168,8 +172,9 @@ message Barrier {
     StopMutation stop = 3;
     UpdateMutation update = 4;
     AddMutation add = 5;
+    SplitAssignMutation split_assign = 6;
   }
-  bytes span = 6;
+  bytes span = 7;
 }
 
 message Terminate {}
