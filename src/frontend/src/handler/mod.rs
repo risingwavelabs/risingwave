@@ -84,6 +84,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
-        _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
+        _ => {
+            Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
+        }
     }
 }

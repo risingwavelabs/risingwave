@@ -60,10 +60,10 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
+                return Err(ErrorCode::NotImplemented(format!(
                     "CAST({:?} AS {:?}) not supported yet!",
                     $child.return_type(), $ret
-                ))
+                ), 1632.into())
                 .into());
             }
         }
@@ -159,10 +159,10 @@ macro_rules! gen_neg_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
+                return Err(ErrorCode::NotImplemented(format!(
                     "Neg is not supported on {:?}",
                     $child.return_type()
-                ))
+                ), 112.into())
                 .into());
             }
         }
@@ -251,10 +251,10 @@ pub fn new_unary_expr(
         (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
 
         (expr, ret, child) => {
-            return Err(ErrorCode::NotImplementedError(format!(
+            return Err(ErrorCode::NotImplemented(format!(
                 "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
                 expr, child, ret
-            ))
+            ), 112.into())
             .into());
         }
     };

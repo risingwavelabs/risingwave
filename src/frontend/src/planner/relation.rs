@@ -70,8 +70,9 @@ impl Planner {
                 table_function.time_col,
                 table_function.args,
             ),
-            Hop => Err(ErrorCode::NotImplementedError(
+            Hop => Err(ErrorCode::NotImplemented(
                 "HOP window function is not implemented yet".to_string(),
+                1191.into(),
             )
             .into()),
         }

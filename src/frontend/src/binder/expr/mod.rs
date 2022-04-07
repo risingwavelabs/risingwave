@@ -93,9 +93,11 @@ impl Binder {
                 self.bind_between(*expr, negated, *low, *high)?,
             ))),
             Expr::Extract { field, expr } => self.bind_extract(field, *expr),
-            _ => Err(
-                ErrorCode::NotImplementedError(format!("unsupported expression {:?}", expr)).into(),
-            ),
+            _ => Err(ErrorCode::NotImplemented(
+                format!("unsupported expression {:?}", expr),
+                112.into(),
+            )
+            .into()),
         }
     }
 
@@ -107,11 +109,14 @@ impl Binder {
                 self.bind_expr(expr)?,
             ],
             |inputs| {
-                ErrorCode::NotImplementedError(format!(
-                    "function extract({} from {:?}) doesn't exist",
-                    field,
-                    inputs[1].return_type()
-                ))
+                ErrorCode::NotImplemented(
+                    format!(
+                        "function extract({} from {:?}) doesn't exist",
+                        field,
+                        inputs[1].return_type()
+                    ),
+                    112.into(),
+                )
                 .into()
             },
         )?
@@ -126,10 +131,10 @@ impl Binder {
                 return self.rewrite_positive(expr);
             }
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
-                    "unsupported unary expression: {:?}",
-                    op
-                ))
+                return Err(ErrorCode::NotImplemented(
+                    format!("unsupported unary expression: {:?}", op),
+                    112.into(),
+                )
                 .into())
             }
         };
@@ -137,10 +142,10 @@ impl Binder {
         let return_type = expr.return_type();
         FunctionCall::new(func_type, vec![expr])
             .ok_or_else(|| {
-                ErrorCode::NotImplementedError(format!(
-                    "unsupported unary expression {:?} {:?}",
-                    op, return_type
-                ))
+                ErrorCode::NotImplemented(
+                    format!("unsupported unary expression {:?} {:?}", op, return_type),
+                    112.into(),
+                )
                 .into()
             })
             .map(|f| f.into())
@@ -287,8 +292,9 @@ impl Binder {
         expr: Expr,
     ) -> Result<FunctionCall> {
         let expr = self.bind_expr(expr)?;
-        FunctionCall::new(func_type, vec![expr])
-            .ok_or_else(|| ErrorCode::NotImplementedError(format!("{:?}", &func_type)).into())
+        FunctionCall::new(func_type, vec![expr]).ok_or_else(|| {
+            ErrorCode::NotImplemented(format!("{:?}", &func_type), None.into()).into()
+        })
     }
 
     pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
@@ -319,10 +325,10 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
             datatype: Box::new(bind_data_type(datatype)?),
         },
         _ => {
-            return Err(ErrorCode::NotImplementedError(format!(
-                "unsupported data type: {:?}",
-                data_type
-            ))
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported data type: {:?}", data_type),
+                None.into(),
+            )
             .into())
         }
     };
