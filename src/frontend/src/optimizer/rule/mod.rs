@@ -15,7 +15,7 @@
 //! Define all [`Rule`]
 
 use super::PlanRef;
-use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, InputRef, Expr};
+use crate::expr::{CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
 
 /// A one-to-one transform for the [`PlanNode`](super::plan_node::PlanNode), every [`Rule`] should
 /// downcast and check if the node matches the rule.

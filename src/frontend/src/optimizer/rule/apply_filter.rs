@@ -26,6 +26,11 @@ impl Rule for ApplyFilterRule {
 
         println!("ApplyFilterRule is used");
 
+        // For correlated_input_ref, we should NOT change its index, because it actually points to
+        // the left child of LogicalApply,
+        // while for uncorrelated_input_ref, we should shift it with the offset.
+        // Therefore, we can firstly shift the input_ref's index, and then
+        // lift correlated_input_ref with depth equal to 1 to input_ref keeping its index unchanged.
         let mut lift_correlated_input_ref = LiftCorrelatedInputRef {};
         let mut shift_input_ref = ColIndexMapping::with_shift_offset(
             filter.schema().len(),
@@ -34,8 +39,8 @@ impl Rule for ApplyFilterRule {
         let predicate = filter
             .predicate()
             .clone()
-            .rewrite_expr(&mut lift_correlated_input_ref)
-            .rewrite_expr(&mut shift_input_ref);
+            .rewrite_expr(&mut shift_input_ref)
+            .rewrite_expr(&mut lift_correlated_input_ref);
 
         let new_apply = apply.clone_with_left_right(apply.left(), new_right);
         let lifted_filter: PlanRef = LogicalFilter::new(new_apply.into(), predicate).into();

@@ -69,7 +69,7 @@ impl Planner {
     }
 
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
-    /// It is represented by `Project([$0 >= 1]) - Agg(count(*)) - input`
+    /// It is represented by `Project([$0 >= 1]) -> Agg(count(*)) -> input`
     fn create_exists(&self, input: PlanRef) -> Result<PlanRef> {
         let count_star =
             LogicalAgg::new(vec![PlanAggCall::count_star()], vec![None], vec![], input);
