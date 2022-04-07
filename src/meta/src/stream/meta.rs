@@ -72,22 +72,6 @@ where
         })
     }
 
-    pub async fn add_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
-        let map = &mut self.core.write().await.table_fragments;
-
-        match map.entry(table_fragment.table_id()) {
-            Entry::Occupied(_) => Err(RwError::from(InternalError(format!(
-                "table_fragment already exist: id={}",
-                table_fragment.table_id()
-            )))),
-            Entry::Vacant(v) => {
-                table_fragment.insert(&*self.meta_store).await?;
-                v.insert(table_fragment);
-                Ok(())
-            }
-        }
-    }
-
     pub async fn list_table_fragments(&self) -> Result<Vec<TableFragments>> {
         let map = &self.core.read().await.table_fragments;
 
@@ -111,18 +95,52 @@ where
         }
     }
 
-    /// Add table fragments with downstream actor ids in sink actors.
-    pub async fn add_table_fragments_downstream(
+    /// Start create a new `TableFragments` and insert it into meta store, currently the actors'
+    /// state is `ActorState::Inactive`.
+    pub async fn start_create_table_fragments(&self, table_fragment: TableFragments) -> Result<()> {
+        let map = &mut self.core.write().await.table_fragments;
+
+        match map.entry(table_fragment.table_id()) {
+            Entry::Occupied(_) => Err(RwError::from(InternalError(format!(
+                "table_fragment already exist: id={}",
+                table_fragment.table_id()
+            )))),
+            Entry::Vacant(v) => {
+                table_fragment.insert(&*self.meta_store).await?;
+                v.insert(table_fragment);
+                Ok(())
+            }
+        }
+    }
+
+    /// Finish create a new `TableFragments` and update the actors' state to `ActorState::Running`,
+    /// besides also update all dependent tables' downstream actors info.
+    pub async fn finish_create_table_fragments(
         &self,
         table_id: &TableId,
-        extra_downstream_actors: &HashMap<ActorId, Vec<ActorId>>,
+        dependent_table_actors: &[(TableId, HashMap<ActorId, Vec<ActorId>>)],
     ) -> Result<()> {
         let map = &mut self.core.write().await.table_fragments;
 
-        match map.entry(*table_id) {
-            Entry::Occupied(mut entry) => {
-                let table_fragment = entry.get_mut();
-                for fragment in table_fragment.fragments.values_mut() {
+        if let Some(table_fragments) = map.get(table_id) {
+            let mut transaction = Transaction::default();
+
+            let mut table_fragments = table_fragments.clone();
+            table_fragments.update_actors_state(ActorState::Running);
+            table_fragments.upsert_in_transaction(&mut transaction)?;
+
+            let mut dependent_tables = Vec::with_capacity(dependent_table_actors.len());
+            for (dependent_table_id, extra_downstream_actors) in dependent_table_actors {
+                let mut dependent_table = map
+                    .get(dependent_table_id)
+                    .ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "table_fragment not exist: id={}",
+                            dependent_table_id
+                        )))
+                    })?
+                    .clone();
+                for fragment in dependent_table.fragments.values_mut() {
                     for actor in &mut fragment.actors {
                         if let Some(downstream_actors) =
                             extra_downstream_actors.get(&actor.actor_id)
@@ -133,14 +151,22 @@ where
                         }
                     }
                 }
-                table_fragment.insert(&*self.meta_store).await?;
-
-                Ok(())
+                dependent_table.upsert_in_transaction(&mut transaction)?;
+                dependent_tables.push(dependent_table);
             }
-            Entry::Vacant(_) => Err(RwError::from(InternalError(format!(
+
+            self.meta_store.txn(transaction).await?;
+            map.insert(*table_id, table_fragments);
+            for dependent_table in dependent_tables {
+                map.insert(dependent_table.table_id(), dependent_table);
+            }
+
+            Ok(())
+        } else {
+            Err(RwError::from(InternalError(format!(
                 "table_fragment not exist: id={}",
                 table_id
-            )))),
+            ))))
         }
     }
 

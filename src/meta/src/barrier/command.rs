@@ -20,7 +20,6 @@ use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::barrier::Mutation;
 use risingwave_pb::data::{Actors, AddMutation, NothingMutation, StopMutation};
-use risingwave_pb::meta::table_fragments::ActorState;
 use risingwave_pb::stream_service::DropActorsRequest;
 use uuid::Uuid;
 
@@ -197,13 +196,7 @@ where
                 dispatches,
                 table_sink_map,
             } => {
-                // TODO: all related updates should be done in one transaction.
-                let mut table_fragments = table_fragments.clone();
-                table_fragments.update_actors_state(ActorState::Running);
-                self.fragment_manager
-                    .update_table_fragments(table_fragments)
-                    .await?;
-
+                let mut dependent_table_actors = Vec::with_capacity(table_sink_map.len());
                 for (table_id, actors) in table_sink_map {
                     let downstream_actors = dispatches
                         .iter()
@@ -218,10 +211,14 @@ where
                             )
                         })
                         .collect::<HashMap<ActorId, Vec<ActorId>>>();
-                    self.fragment_manager
-                        .add_table_fragments_downstream(table_id, &downstream_actors)
-                        .await?;
+                    dependent_table_actors.push((*table_id, downstream_actors));
                 }
+                self.fragment_manager
+                    .finish_create_table_fragments(
+                        &table_fragments.table_id(),
+                        &dependent_table_actors,
+                    )
+                    .await?;
             }
         }
 
