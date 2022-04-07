@@ -13,4 +13,4 @@
 // limitations under the License.
 
 mod message;
-mod reader;
+pub mod reader;

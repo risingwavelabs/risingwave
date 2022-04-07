@@ -29,12 +29,13 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::PulsarSplitEnumerator;
-use crate::{kafka, pulsar};
+use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::{kafka, kinesis, pulsar};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
+const PULSAR_SOURCE: &str = "pulsar";
 
 pub trait SourceMessage {
     fn payload(&self) -> Result<Option<&[u8]>>;
@@ -65,8 +66,8 @@ pub struct ConnectorState {
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
     async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
-    where
-        Self: Sized;
+        where
+            Self: Sized;
 }
 
 #[async_trait]
@@ -76,14 +77,16 @@ pub trait SplitEnumerator {
 }
 
 pub enum SplitEnumeratorImpl {
-    Kafka(KafkaSplitEnumerator),
+    Kafka(kafka::enumerator::KafkaSplitEnumerator),
     Pulsar(pulsar::enumerator::PulsarSplitEnumerator),
+    Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(kafka::KafkaSplit),
     Pulsar(pulsar::PulsarSplit),
+    Kinesis(kinesis::split::KinesisSplit),
 }
 
 impl SplitImpl {
@@ -91,6 +94,7 @@ impl SplitImpl {
         match self {
             SplitImpl::Kafka(k) => k.id(),
             SplitImpl::Pulsar(p) => p.id(),
+            SplitImpl::Kinesis(k) => k.id(),
         }
     }
 }
@@ -106,6 +110,10 @@ impl SplitEnumeratorImpl {
                 .list_splits()
                 .await
                 .map(|ss| ss.into_iter().map(SplitImpl::Pulsar).collect_vec()),
+            SplitEnumeratorImpl::Kinesis(k) => k
+                .list_splits()
+                .await
+                .map(|ss| ss.into_iter().map(SplitImpl::Kinesis).collect_vec()),
         }
     }
 }
@@ -119,8 +127,9 @@ pub fn extract_split_enumerator(
     };
 
     match source_type.as_ref() {
-        "kafka" => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-        "pulsar" => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
+        KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
+        PULSAR_SOURCE => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
+        KINESIS_SOURCE => todo!(),
         _ => Err(anyhow!("unsupported source type: {}", source_type)),
     }
 }
@@ -139,6 +148,10 @@ pub async fn new_connector(
             let kinesis = KinesisSplitReader::new(config, state).await?;
             Box::new(kinesis)
         }
+        // PULSAR_SOURCE => {
+        //     let pulsar = PulsarSplitReader::new(config, state).await?;
+        //     Box::new(pulsar)
+        // }
         _other => {
             todo!()
         }

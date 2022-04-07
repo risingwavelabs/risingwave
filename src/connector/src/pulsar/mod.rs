@@ -14,7 +14,7 @@
 
 mod admin;
 pub(crate) mod enumerator;
-mod source;
+pub mod source;
 mod split;
 mod topic;
 
