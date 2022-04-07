@@ -95,6 +95,16 @@ jobs:
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
+      - name: e2e test, batch, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
+          sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
+
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+
       # - name: e2e test w/ Rust frontend with distributed batch query
       #   timeout-minutes: 2
       #   run: |
