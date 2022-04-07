@@ -19,7 +19,8 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    to_conjunctions, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    fold_boolean_constant, to_conjunctions, try_get_bool_constant, ExprImpl, ExprRewriter,
+    ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -43,18 +44,23 @@ impl fmt::Display for Condition {
         if let Some(expr) = conjunctions.next() {
             write!(f, "{:?}", expr)?;
         }
-        for expr in conjunctions {
-            write!(f, " AND {:?}", expr)?;
+        if self.always_true() {
+            write!(f, "always")?;
+        } else {
+            for expr in conjunctions {
+                write!(f, " AND {:?}", expr)?;
+            }
         }
+
         Ok(())
     }
 }
 
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
-        Self {
-            conjunctions: to_conjunctions(expr),
-        }
+        let conjunctions = to_conjunctions(expr);
+
+        Self { conjunctions }.simplify()
     }
 
     pub fn true_cond() -> Self {
@@ -117,12 +123,8 @@ impl Condition {
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
-        ret.conjunctions
-            .reserve(ret.conjunctions.len() + other.conjunctions.len());
-        for expr in other.conjunctions {
-            ret.conjunctions.push(expr);
-        }
-        ret
+        ret.conjunctions.extend(other.conjunctions);
+        ret.simplify()
     }
 
     #[must_use]
@@ -252,6 +254,33 @@ impl Condition {
         self.conjunctions
             .iter()
             .for_each(|expr| visitor.visit_expr(expr))
+    }
+
+    /// Simplify conditions
+    /// It simplify conditions by applying constant folding and removing unnecessary conjunctions
+    fn simplify(self) -> Self {
+        // boolean constant folding
+        let conjunctions: Vec<_> = self
+            .conjunctions
+            .into_iter()
+            .map(fold_boolean_constant)
+            .flat_map(to_conjunctions)
+            .collect();
+
+        let mut res: Vec<ExprImpl> = Vec::new();
+        for i in conjunctions {
+            if let Some(v) = try_get_bool_constant(&i) {
+                if !v {
+                    // if there is a `false` in conjunctions, the whole condition will be `false`
+                    res.clear();
+                    res.push(ExprImpl::literal_bool(false));
+                    break;
+                }
+            } else {
+                res.push(i);
+            }
+        }
+        Self { conjunctions: res }
     }
 }
 

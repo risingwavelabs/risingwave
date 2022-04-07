@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
@@ -51,7 +52,7 @@ pub trait Expr: Into<ExprImpl> {
     fn to_protobuf(&self) -> ExprNode;
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, EnumAsInner)]
 pub enum ExprImpl {
     // ColumnRef(Box<BoundColumnRef>), might be used in binder.
     InputRef(Box<InputRef>),
@@ -112,27 +113,6 @@ impl ExprImpl {
         }
     }
 }
-
-/// Implement downcast functions, e.g., `as_subquery(self) -> Option<Subquery>`
-macro_rules! impl_as_variant {
-    ( $($variant:ident),* ) => {
-        paste! {
-            impl ExprImpl {
-                $(
-                    pub fn [<as_ $variant:snake>](self) -> Option<$variant> {
-                        if let ExprImpl::$variant(expr) = self {
-                            Some(*expr)
-                        } else {
-                            None
-                        }
-                    }
-                )*
-            }
-        }
-    };
-}
-
-impl_as_variant! {InputRef, Literal, FunctionCall, AggCall, Subquery, CorrelatedInputRef}
 
 /// Implement helper functions which recursively checks whether an variant is included in the
 /// expression. e.g., `has_subquery(&self) -> bool`

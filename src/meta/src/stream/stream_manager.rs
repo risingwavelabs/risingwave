@@ -255,7 +255,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .add_table_fragments(table_fragments.clone())
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {

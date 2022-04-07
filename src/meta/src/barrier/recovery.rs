@@ -89,7 +89,7 @@ where
             debug!("recovery success");
             return (
                 new_epoch,
-                Default::default(), // TODO: replace with all chain actors.
+                self.fragment_manager.all_chain_actor_ids().await,
                 responses
                     .unwrap()
                     .into_iter()
@@ -164,7 +164,7 @@ where
             }));
         }
 
-        let node_actors = self.fragment_manager.all_node_actors(false).await?;
+        let node_actors = self.fragment_manager.all_node_actors(false).await;
         for (node_id, actors) in &info.actor_map {
             let node = info.node_map.get(node_id).unwrap();
             let client = self.env.stream_clients().get(node).await?;

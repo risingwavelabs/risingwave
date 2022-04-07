@@ -22,6 +22,7 @@ pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
+pub(crate) mod source_catalog;
 pub(crate) mod table_catalog;
 
 #[allow(dead_code)]
@@ -54,6 +55,8 @@ pub fn gen_row_id_column_name(idx: usize) -> String {
 pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
 }
+
+pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
 
 /// Creates a row ID column (for implicit primary key).
 pub fn row_id_column_desc() -> ColumnDesc {

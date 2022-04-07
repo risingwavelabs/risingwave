@@ -2,7 +2,7 @@
     select (select 1);
   logical_plan: |
     LogicalProject { exprs: [$0], expr_alias: [ ] }
-      LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftOuter, on: always }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -11,7 +11,7 @@
     select (select x from t), 1 from t;
   logical_plan: |
     LogicalProject { exprs: [$2, 1:Int32], expr_alias: [ ,  ] }
-      LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftOuter, on: always }
         LogicalScan { table: t, columns: [_row_id#0, x] }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
@@ -20,7 +20,7 @@
     select (select x from t) + 1 from t;
   logical_plan: |
     LogicalProject { exprs: [($2 + 1:Int32)], expr_alias: [ ] }
-      LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftOuter, on: always }
         LogicalScan { table: t, columns: [_row_id#0, x] }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
@@ -29,8 +29,8 @@
     select (select x from t), (select 1);
   logical_plan: |
     LogicalProject { exprs: [$0, $1], expr_alias: [ ,  ] }
-      LogicalJoin { type: LeftOuter, on: true:Boolean }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftOuter, on: always }
+        LogicalJoin { type: LeftOuter, on: always }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalProject { exprs: [$1], expr_alias: [x] }
             LogicalScan { table: t, columns: [_row_id#0, x] }
@@ -41,10 +41,10 @@
     select x + (select x + (select x as v1 from t) as v2 from t) as v3 from t;
   logical_plan: |
     LogicalProject { exprs: [($1 + $2)], expr_alias: [v3] }
-      LogicalJoin { type: LeftOuter, on: true:Boolean }
+      LogicalJoin { type: LeftOuter, on: always }
         LogicalScan { table: t, columns: [_row_id#0, x] }
         LogicalProject { exprs: [($1 + $2)], expr_alias: [v2] }
-          LogicalJoin { type: LeftOuter, on: true:Boolean }
+          LogicalJoin { type: LeftOuter, on: always }
             LogicalScan { table: t, columns: [_row_id#0, x] }
             LogicalProject { exprs: [$1], expr_alias: [v1] }
               LogicalScan { table: t, columns: [_row_id#0, x] }
@@ -56,13 +56,13 @@
     select 1 where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalJoin { type: LeftSemi, on: true:Boolean }
+      LogicalJoin { type: LeftSemi, on: always }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalJoin { type: LeftSemi, on: true:Boolean }
+      LogicalJoin { type: LeftSemi, on: always }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalScan { table: t, columns: [] }
 - sql: |
@@ -70,13 +70,13 @@
     select 1 where not exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalJoin { type: LeftAnti, on: true:Boolean }
+      LogicalJoin { type: LeftAnti, on: always }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
   optimized_logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
-      LogicalJoin { type: LeftAnti, on: true:Boolean }
+      LogicalJoin { type: LeftAnti, on: always }
         LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         LogicalScan { table: t, columns: [] }
 - sql: |
@@ -85,7 +85,7 @@
     select x from t1 where exists (select x from t2);
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
-      LogicalJoin { type: LeftSemi, on: true:Boolean }
+      LogicalJoin { type: LeftSemi, on: always }
         LogicalScan { table: t1, columns: [_row_id#0, x] }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t2, columns: [_row_id#0, x] }
@@ -94,7 +94,7 @@
     select x from t where exists (select * from t);
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
-      LogicalJoin { type: LeftSemi, on: true:Boolean }
+      LogicalJoin { type: LeftSemi, on: always }
         LogicalScan { table: t, columns: [_row_id#0, x] }
         LogicalProject { exprs: [$1], expr_alias: [x] }
           LogicalScan { table: t, columns: [_row_id#0, x] }
@@ -105,7 +105,7 @@
   logical_plan: |
     LogicalProject { exprs: [$1], expr_alias: [x] }
       LogicalFilter { predicate: ($1 > $2) }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
+        LogicalJoin { type: LeftOuter, on: always }
           LogicalScan { table: t1, columns: [_row_id#0, x] }
           LogicalProject { exprs: [$1], expr_alias: [x] }
             LogicalScan { table: t2, columns: [_row_id#0, x] }
@@ -114,7 +114,7 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
       LogicalFilter { predicate: (1:Int32 > 0:Int32) }
-        LogicalJoin { type: LeftSemi, on: true:Boolean }
+        LogicalJoin { type: LeftSemi, on: always }
           LogicalValues { rows: [[]], schema: Schema { fields: [] } }
           LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
 - sql: |
@@ -122,8 +122,8 @@
   logical_plan: |
     LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
       LogicalFilter { predicate: ((1:Int32 > 0:Int32) OR $0) }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
-          LogicalJoin { type: LeftAnti, on: true:Boolean }
+        LogicalJoin { type: LeftOuter, on: always }
+          LogicalJoin { type: LeftAnti, on: always }
             LogicalValues { rows: [[]], schema: Schema { fields: [] } }
             LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [:Int32] } }
           LogicalProject { exprs: [($0 >= 1:Int32)], expr_alias: [ ] }

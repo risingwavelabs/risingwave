@@ -1,12 +1,55 @@
 statement ok
 create table t3 (v1 int not null, v2 int not null, v3 int not null);
 
+statement ok
+create materialized view mv3 as select sum(v1) as sum_v1 from t3;
+
 query TT
-show table t3;
+describe t3;
 ----
 v1 Int32
 v2 Int32
 v3 Int32
+
+query TT
+show columns from t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+
+query T
+show databases;
+----
+dev
+
+query T
+show schemas;
+----
+dev
+
+query T
+show tables;
+----
+t3
+
+query T
+show tables from dev;
+----
+t3
+
+query T
+show materialized views from dev;
+----
+mv3
+
+query T
+show materialized views;
+----
+mv3
+
+statement ok
+drop materialized view mv3;
 
 statement ok
 drop table t3;

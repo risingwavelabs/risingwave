@@ -24,6 +24,7 @@ pub use batch_query::*;
 pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
+use enum_as_inner::EnumAsInner;
 pub use filter::*;
 use futures::Stream;
 pub use global_simple_agg::*;
@@ -176,10 +177,6 @@ impl Barrier {
         Self { span, ..self }
     }
 
-    pub fn is_stop_mutation(&self) -> bool {
-        self.mutation.as_ref().map(|m| m.is_stop()).unwrap_or(false)
-    }
-
     pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
@@ -193,13 +190,11 @@ impl PartialEq for Barrier {
 
 impl Mutation {
     /// Return true if the mutation is stop.
+    ///
+    /// Note that this does not mean we will stop the current actor.
+    #[cfg(test)]
     pub fn is_stop(&self) -> bool {
         matches!(self, Mutation::Stop(_))
-    }
-
-    /// Return true if the mutation is add output.
-    pub fn is_add_output(&self) -> bool {
-        matches!(self, Mutation::AddOutput(_))
     }
 }
 
@@ -290,7 +285,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -310,13 +305,16 @@ impl<'a> TryFrom<&'a Message> for &'a Barrier {
 impl Message {
     /// Return true if the message is a stop barrier, meaning the stream
     /// will not continue, false otherwise.
-    pub fn is_terminate(&self) -> bool {
+    ///
+    /// Note that this does not mean we will stop the current actor.
+    #[cfg(test)]
+    pub fn is_stop(&self) -> bool {
         matches!(
             self,
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_deref().unwrap().is_stop()
+            }) if mutation.as_ref().unwrap().is_stop()
         )
     }
 
@@ -344,20 +342,6 @@ impl Message {
             }
         };
         Ok(res)
-    }
-
-    pub fn as_chunk(&self) -> Option<&StreamChunk> {
-        match self {
-            Self::Chunk(chunk) => Some(chunk),
-            _ => None,
-        }
-    }
-
-    pub fn as_barrier(&self) -> Option<&Barrier> {
-        match self {
-            Self::Barrier(barrier) => Some(barrier),
-            _ => None,
-        }
     }
 }
 

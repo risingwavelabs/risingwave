@@ -1,5 +1,19 @@
 # An Overview of RisingWave State Store
 
+- [An Overview of RisingWave State Store](#an-overview-of-risingwave-state-store)
+  - [Overview](#overview)
+  - [Architecture](#architecture)
+  - [The Hummock User API](#the-hummock-user-api)
+  - [Hummock Internals](#hummock-internals)
+    - [Storage Format](#storage-format)
+    - [Write Path](#write-path)
+    - [Read Path](#read-path)
+    - [Compaction](#compaction)
+    - [Hummock Manager](#hummock-manager)
+    - [Checkpointing in Streaming](#checkpointing-in-streaming)
+
+<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+
 ## Overview
 
 In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, a cloud-native LSM-tree based storage engine. Hummock provides KV API, and stores all data on S3-compatible service. However, it is not a key-value store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.

@@ -34,6 +34,7 @@ use std::fmt::Debug;
 
 use async_trait::async_trait;
 use connector_source::ConnectorSource;
+use enum_as_inner::EnumAsInner;
 pub use high_level_kafka::*;
 pub use manager::*;
 pub use parser::*;
@@ -68,20 +69,11 @@ pub enum SourceFormat {
     Avro,
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum SourceImpl {
     HighLevelKafka(HighLevelKafkaSource),
     TableV2(TableSourceV2),
     Connector(ConnectorSource),
-}
-
-impl SourceImpl {
-    pub fn as_table_v2(&self) -> &TableSourceV2 {
-        match self {
-            SourceImpl::TableV2(table) => table,
-            _ => panic!("not a table source v2"),
-        }
-    }
 }
 
 #[async_trait]

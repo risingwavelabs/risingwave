@@ -14,6 +14,7 @@
 
 use std::error::Error;
 use std::io;
+use std::io::ErrorKind;
 use std::result::Result;
 use std::sync::Arc;
 
@@ -76,6 +77,9 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
             Err(e) => {
                 // Execution error should not break current connection.
                 tracing::error!("error {:?}!", e);
+                if matches!(e.kind(), ErrorKind::UnexpectedEof) {
+                    break;
+                }
             }
         }
     }

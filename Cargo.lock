@@ -1328,6 +1328,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-as-inner"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21cdad81446a7f7dc43f6a77409efeb9733d2fa65553efef6018ef257c959b73"
+dependencies = [
+ "heck 0.4.0",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "enum-iterator"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3509,6 +3521,8 @@ dependencies = [
  "prometheus 0.13.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
@@ -3742,6 +3756,7 @@ dependencies = [
  "clap 3.1.8",
  "downcast-rs",
  "dyn-clone",
+ "enum-as-inner",
  "fixedbitset",
  "futures 0.3.21",
  "futures-async-stream",
@@ -3789,6 +3804,17 @@ dependencies = [
  "tokio",
  "walkdir",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_hummock_sdk"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "log",
+ "prost 0.10.0",
+ "risingwave_pb",
+ "tokio",
 ]
 
 [[package]]
@@ -3843,9 +3869,9 @@ dependencies = [
  "prost 0.10.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
- "risingwave_storage",
  "serde",
  "serde_derive",
  "serde_json",
@@ -3903,6 +3929,7 @@ dependencies = [
  "log",
  "paste",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "tokio",
  "tonic 0.7.0",
@@ -3923,6 +3950,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "itertools",
@@ -4006,6 +4034,7 @@ dependencies = [
  "crossbeam",
  "dashmap",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "hyper",
@@ -4023,6 +4052,8 @@ dependencies = [
  "prost 0.10.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
+ "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",
  "rocksdb",
@@ -4055,6 +4086,7 @@ dependencies = [
  "crc32fast",
  "dyn-clone",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "futures-async-stream",
@@ -5572,6 +5604,7 @@ dependencies = [
  "parking_lot 0.12.0",
  "parking_lot_core 0.9.2",
  "petgraph",
+ "prometheus 0.13.0",
  "prost 0.9.0",
  "prost-types 0.9.0",
  "rand 0.8.5",

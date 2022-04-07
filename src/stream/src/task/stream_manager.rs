@@ -310,8 +310,9 @@ pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCa
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
-                return Err(RwError::from(ErrorCode::NotImplementedError(
+                return Err(RwError::from(ErrorCode::NotImplemented(
                     "multiple aggregation args".to_string(),
+                    None.into(),
                 )))
             }
         }
