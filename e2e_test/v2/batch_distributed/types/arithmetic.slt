@@ -20,5 +20,5 @@ select interval '1' second * 59;
 
 query T
 select 61 * interval '1' second;
----
+----
 00:01:01
