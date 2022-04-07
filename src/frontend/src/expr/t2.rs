@@ -5,10 +5,9 @@ use risingwave_common::types::DataType;
 
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
-lazy_static::lazy_static! {
-    static ref FUNC_SIG_MAP: HashMap<ExprType, (DataType, Vec<DataType>)> = {
-        build_type_derive_map()
-    };
+pub fn new_func(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    let f = FUNC_H_MAP.get(&func_type).unwrap_or(&(new_simple as H));
+    f(func_type, inputs)
 }
 
 fn build_type_derive_map() -> HashMap<ExprType, (DataType, Vec<DataType>)> {
@@ -45,41 +44,6 @@ fn build_type_derive_map() -> HashMap<ExprType, (DataType, Vec<DataType>)> {
     m
 }
 
-fn implicit_cast(e: ExprImpl, t: &DataType) -> Option<ExprImpl> {
-    let tt = e.return_type();
-    if tt == *t {
-        return Some(e);
-    }
-    if tt.is_string() || t.is_string() {
-        return None;
-    }
-    Some(e.ensure_type(t.clone()))
-}
-
-pub fn new_simple(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
-    let (return_type, operand_types) = FUNC_SIG_MAP.get(&func_type)?;
-    if inputs.len() != operand_types.len() {
-        return None;
-    }
-    let args = inputs
-        .into_iter()
-        .zip_eq(operand_types)
-        .map(|(e, t)| implicit_cast(e, t))
-        .collect::<Option<_>>()?;
-    Some(FunctionCall::new_with_return_type(
-        func_type,
-        args,
-        return_type.clone(),
-    ))
-}
-
-type H = fn(ExprType, Vec<ExprImpl>) -> Option<FunctionCall>;
-lazy_static::lazy_static! {
-    static ref FUNC_H_MAP: HashMap<ExprType, H> = {
-        build_fh_map()
-    };
-}
-
 fn build_fh_map() -> HashMap<ExprType, H> {
     let mut m = HashMap::<_, H>::new();
     // comparison
@@ -101,6 +65,25 @@ fn build_fh_map() -> HashMap<ExprType, H> {
     // temporal
     m.insert(ExprType::Extract, new_extract);
     m
+}
+
+type H = fn(ExprType, Vec<ExprImpl>) -> Option<FunctionCall>;
+
+pub fn new_simple(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    let (return_type, operand_types) = FUNC_SIG_MAP.get(&func_type)?;
+    if inputs.len() != operand_types.len() {
+        return None;
+    }
+    let args = inputs
+        .into_iter()
+        .zip_eq(operand_types)
+        .map(|(e, t)| implicit_cast(e, t))
+        .collect::<Option<_>>()?;
+    Some(FunctionCall::new_with_return_type(
+        func_type,
+        args,
+        return_type.clone(),
+    ))
 }
 
 fn new_cmp_unary(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
@@ -210,6 +193,29 @@ fn new_extract(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCal
     None
 }
 
+lazy_static::lazy_static! {
+    static ref FUNC_SIG_MAP: HashMap<ExprType, (DataType, Vec<DataType>)> = {
+        build_type_derive_map()
+    };
+}
+
+fn implicit_cast(e: ExprImpl, t: &DataType) -> Option<ExprImpl> {
+    let tt = e.return_type();
+    if tt == *t {
+        return Some(e);
+    }
+    if tt.is_string() || t.is_string() {
+        return None;
+    }
+    Some(e.ensure_type(t.clone()))
+}
+
+lazy_static::lazy_static! {
+    static ref FUNC_H_MAP: HashMap<ExprType, H> = {
+        build_fh_map()
+    };
+}
+
 fn new_num_atm(func_type: ExprType, lhs: ExprImpl, rhs: ExprImpl) -> Option<FunctionCall> {
     let return_type =
         crate::binder::Binder::find_compat(lhs.return_type(), rhs.return_type()).ok()?;
@@ -231,9 +237,4 @@ fn as_binary(inputs: Vec<ExprImpl>) -> Option<(ExprImpl, ExprImpl)> {
     let lhs = iter.next()?;
     let rhs = iter.next()?;
     Some((lhs, rhs))
-}
-
-pub fn new_func(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
-    let f = FUNC_H_MAP.get(&func_type).unwrap_or(&(new_simple as H));
-    f(func_type, inputs)
 }
