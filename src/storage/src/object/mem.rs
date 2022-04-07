@@ -31,9 +31,12 @@ pub struct InMemObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        assert!(!obj.is_empty());
-        self.objects.lock().await.insert(path.into(), obj);
-        Ok(())
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            self.objects.lock().await.insert(path.into(), obj);
+            Ok(())
+        }
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
@@ -84,8 +87,11 @@ impl InMemObjectStore {
 }
 
 fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
-    assert!(block.offset + block.size <= obj.len());
-    Ok(obj.slice(block.offset..(block.offset + block.size)))
+    if block.offset + block.size > obj.len() {
+        Err(ObjectError::internal("bad block offset and size"))
+    } else {
+        Ok(obj.slice(block.offset..(block.offset + block.size)))
+    }
 }
 
 #[cfg(test)]
