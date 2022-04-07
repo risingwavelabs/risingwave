@@ -16,13 +16,13 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use super::{StreamClients, StreamClientsRef};
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 use crate::manager::MemEpochGenerator;
 use crate::manager::{
     EpochGenerator, EpochGeneratorRef, IdGeneratorManager, IdGeneratorManagerRef,
     NotificationManager, NotificationManagerRef,
 };
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
 
@@ -45,7 +45,7 @@ where
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    /// stream clients memoization.
+    /// stream clients memorization.
     stream_clients: StreamClientsRef,
 }
 
@@ -109,7 +109,7 @@ where
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 impl MetaSrvEnv<MemStore> {
     // Instance for test.
     pub async fn for_test() -> Self {

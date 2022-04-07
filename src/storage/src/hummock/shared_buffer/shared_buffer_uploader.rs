@@ -19,10 +19,10 @@ use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
+use risingwave_rpc_client::HummockMetaClient;
 
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -133,7 +133,8 @@ impl SharedBufferUploader {
                     })
                     .collect(),
             )
-            .await?;
+            .await
+            .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);

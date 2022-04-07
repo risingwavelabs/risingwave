@@ -20,7 +20,8 @@ mod utils;
 use clap::Parser;
 use operations::*;
 use risingwave_common::config::StorageConfig;
-use risingwave_storage::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
+use risingwave_meta::hummock::test_utils::setup_compute_env;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -130,9 +131,12 @@ async fn main() {
         meta_cache_capacity: 64 << 20,
     });
 
-    let mock_hummock_meta_service = Arc::new(MockHummockMetaService::new());
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(mock_hummock_meta_service));
-
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let state_store = StateStoreImpl::new(
         &opts.store,
         config,
