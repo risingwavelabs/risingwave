@@ -138,6 +138,7 @@ impl ToBatchProst for BatchHashJoin {
                 .into_iter()
                 .map(|a| a as i32)
                 .collect(),
+            condition: None,
         })
     }
 }

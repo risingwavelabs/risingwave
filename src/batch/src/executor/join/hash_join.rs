@@ -21,7 +21,7 @@ use risingwave_common::error::Result;
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DEFAULT_CHUNK_BUFFER_SIZE;
-use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan::plan_node::NodeBody;
 
 use crate::executor::join::hash_join_state::{BuildTable, ProbeTable};
@@ -368,11 +368,17 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
 
         let join_type = JoinType::from_prost(hash_join_node.get_join_type()?);
 
+        let cond = match hash_join_node.get_condition() {
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
+            Err(_) => None,
+        };
+
         let full_schema_fields = [
             left_child.schema().fields.clone(),
             right_child.schema().fields.clone(),
         ]
         .concat();
+
         let schema_fields = if join_type.keep_all() {
             full_schema_fields.clone()
         } else if join_type.keep_left() {
@@ -394,6 +400,7 @@ impl BoxedExecutorBuilder for HashJoinExecutorBuilder {
             right_col_len: right_child.schema().len(),
             full_data_types,
             batch_size: DEFAULT_CHUNK_BUFFER_SIZE,
+            cond,
             ..Default::default()
         };
 
@@ -792,6 +799,28 @@ mod tests {
             DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
 
         test_fixture.do_test(expected_chunk, false).await;
+    }
+
+    /// Sql:
+    /// ```sql
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
+    /// ```
+    #[tokio::test]
+    async fn test_inner_join_with_non_equi_condition() {
+        let test_fixture = TestFixture::with_join_type(JoinType::Inner);
+
+        let column1 = Column::new(Arc::new(
+            array! {F32Array, [
+            Some(6.6f32)]}
+            .into(),
+        ));
+
+        let column2 = Column::new(Arc::new(array! {F64Array, [Some(7.5f64)]}.into()));
+
+        let expected_chunk =
+            DataChunk::try_from(vec![column1, column2]).expect("Failed to create chunk!");
+
+        test_fixture.do_test(expected_chunk, true).await;
     }
 
     /// Sql:
