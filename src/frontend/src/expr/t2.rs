@@ -227,8 +227,11 @@ fn new_num_atm(func_type: ExprType, lhs: ExprImpl, rhs: ExprImpl) -> Option<Func
 }
 
 fn as_unary(inputs: Vec<ExprImpl>) -> Option<ExprImpl> {
-    let mut iter = inputs.into_iter();
+    let mut iter = inputs.into_iter().fuse();
     let arg = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
     Some(arg)
 }
 
@@ -236,5 +239,8 @@ fn as_binary(inputs: Vec<ExprImpl>) -> Option<(ExprImpl, ExprImpl)> {
     let mut iter = inputs.into_iter().fuse();
     let lhs = iter.next()?;
     let rhs = iter.next()?;
+    if iter.next().is_some() {
+        return None;
+    }
     Some((lhs, rhs))
 }
