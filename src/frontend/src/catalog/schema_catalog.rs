@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
@@ -59,6 +60,24 @@ impl SchemaCatalog {
     pub fn drop_source(&mut self, id: SourceId) {
         let name = self.source_name_by_id.remove(&id).unwrap();
         self.source_by_name.remove(&name).unwrap();
+    }
+
+    // Use associated source to filter table.
+    pub fn get_all_table_names(&self) -> Vec<String> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_some())
+            .map(|(k, _)| k.clone())
+            .collect_vec()
+    }
+
+    // Use associated source to filter mv.
+    pub fn get_all_mv_names(&self) -> Vec<String> {
+        self.table_by_name
+            .iter()
+            .filter(|(_, v)| v.associated_source_id.is_none())
+            .map(|(k, _)| k.clone())
+            .collect_vec()
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
