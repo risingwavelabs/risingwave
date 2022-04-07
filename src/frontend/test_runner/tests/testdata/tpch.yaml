@@ -232,7 +232,7 @@
                       BatchHashJoin { type: Inner, predicate: $0 = $2 }
                         BatchProject { exprs: [$0], expr_alias: [ ] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
                         BatchExchange { order: [], dist: HashShard([1]) }
                           BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -253,7 +253,7 @@
                     StreamHashJoin { type: Inner, predicate: $0 = $3 }
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                             StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
                       StreamExchange { dist: HashShard([1]) }
                         StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -362,8 +362,7 @@
                                       BatchExchange { order: [], dist: HashShard([2]) }
                                         BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                           BatchExchange { order: [], dist: HashShard([0]) }
-                                            BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                                            BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
                                           BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -398,8 +397,7 @@
                                     StreamExchange { dist: HashShard([3]) }
                                       StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                         StreamExchange { dist: HashShard([0]) }
-                                          StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                            StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
+                                          StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
                                         StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -523,8 +521,7 @@
                                         BatchExchange { order: [], dist: HashShard([2]) }
                                           BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                             BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                                BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                                 BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate] }
@@ -557,8 +554,7 @@
                                       StreamExchange { dist: HashShard([3]) }
                                         StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                           StreamExchange { dist: HashShard([0]) }
-                                            StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
+                                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                               StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [5] }
