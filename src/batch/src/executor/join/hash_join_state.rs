@@ -232,7 +232,9 @@ impl<K: HashKey> ProbeTable<K> {
     pub(super) fn set_probe_data(&mut self, probe_data_chunk: DataChunk) -> Result<()> {
         self.build_data_chunk()?;
         let probe_data_chunk = probe_data_chunk.compact()?;
-        ensure!(probe_data_chunk.cardinality() > 0);
+        // TODO(yuhao): We should make sure the output chunk of upstream executor 
+        // has cardinality > 0.
+        // ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
         if self.params.join_type().need_probe() && self.params.has_non_equi_cond() {
             if let Some(list) = self.probe_matched_list.as_mut() {
@@ -246,7 +248,7 @@ impl<K: HashKey> ProbeTable<K> {
             };
         }
         self.cur_probe_row_id = 0;
-        self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
+        self.cur_joined_build_row_id = probe_keys.first().and_then(|key| self.first_joined_row_id(key));
         self.cur_probe_data = Some(ProbeData::<K> {
             probe_data_chunk,
             probe_keys,

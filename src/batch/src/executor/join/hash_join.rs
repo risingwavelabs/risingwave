@@ -161,19 +161,19 @@ impl<K: HashKey + Send + Sync> Executor for HashJoinExecutor<K> {
             match take(&mut self.state) {
                 HashJoinState::FirstProbe(probe_table) => {
                     let ret = self.probe(true, probe_table).await?;
-                    if let Some(data_chunk) = ret {
+                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
                         return Ok(Some(data_chunk));
                     }
                 }
                 HashJoinState::Probe(probe_table) => {
                     let ret = self.probe(false, probe_table).await?;
-                    if let Some(data_chunk) = ret {
+                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
                         return Ok(Some(data_chunk));
                     }
                 }
                 HashJoinState::ProbeRemaining(probe_table) => {
                     let ret = self.probe_remaining(probe_table).await?;
-                    if let Some(data_chunk) = ret {
+                    if let Some(data_chunk) = ret && data_chunk.cardinality() > 0 {
                         return Ok(Some(data_chunk));
                     }
                 }

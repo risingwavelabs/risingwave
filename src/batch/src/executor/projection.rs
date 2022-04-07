@@ -88,8 +88,6 @@ impl BoxedExecutorBuilder for ProjectionExecutor {
             .map(build_from_prost)
             .collect::<Result<Vec<BoxedExpression>>>()?;
 
-        debug!{"project exprs:{:?}", project_exprs};
-
         let fields = project_exprs
             .iter()
             .map(|expr| Field::unnamed(expr.return_type()))

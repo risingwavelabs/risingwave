@@ -50,13 +50,13 @@ impl Expression for InputRefExpression {
                         output_array.append_datum_ref(datum)?;
                     }
                 }
-                output_array.finish()?.into()
+                output_array.finish()?
             }
             None => {
                 for datum in array.iter() {
                     output_array.append_datum_ref(datum)?;
                 }
-                output_array.finish()?.into()
+                output_array.finish()?
             }
         }))
     }
