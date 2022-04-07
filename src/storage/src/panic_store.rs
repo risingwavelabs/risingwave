@@ -124,7 +124,7 @@ pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
     fn next(&'_ mut self) -> Self::NextFuture<'_> {
         async move { unreachable!() }
     }

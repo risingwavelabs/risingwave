@@ -44,6 +44,7 @@ pub mod panic_store;
 pub mod storage_value;
 #[macro_use]
 pub mod store;
+pub mod error;
 pub mod store_impl;
 pub mod table;
 pub mod write_batch;

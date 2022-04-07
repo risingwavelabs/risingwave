@@ -130,6 +130,7 @@ impl std::fmt::Debug for TracedHummockError {
     }
 }
 
+// TODO: remove this
 impl From<TracedHummockError> for RwError {
     fn from(h: TracedHummockError) -> Self {
         ErrorCode::StorageError(Box::new(h)).into()

@@ -552,7 +552,7 @@ impl<'a> HummockStateStoreIter<'a> {
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
-    type NextFuture<'b> = impl Future<Output = Result<Option<Self::Item>>> where Self:'b;
+    type NextFuture<'b> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'b;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let iter = &mut self.inner;
