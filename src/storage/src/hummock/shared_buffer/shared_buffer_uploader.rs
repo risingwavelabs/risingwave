@@ -20,6 +20,7 @@ use risingwave_common::config::StorageConfig;
 use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 
+use crate::error::StorageResult;
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
@@ -141,7 +142,7 @@ impl SharedBufferUploader {
         Ok(())
     }
 
-    async fn handle(&mut self, item: SharedBufferUploaderItem) -> Result<()> {
+    async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
         match item {
             SharedBufferUploaderItem::Batch(m) => {
                 if let Some(detector) = &self.write_conflict_detector {
@@ -190,7 +191,7 @@ impl SharedBufferUploader {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> StorageResult<()> {
         while let Some(m) = self.rx.recv().await {
             if let Err(e) = self.handle(m).await {
                 return Err(e);

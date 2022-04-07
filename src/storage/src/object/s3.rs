@@ -19,7 +19,9 @@ use itertools::Itertools;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
 
-use super::{BlockLocation, ObjectMetadata};
+use super::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult};
+use crate::error::StorageResult;
+use crate::hummock::{HummockError, HummockResult};
 use crate::object::{Bytes, ObjectStore};
 
 /// Object store with S3 backend
@@ -28,13 +30,13 @@ pub struct S3ObjectStore {
     bucket: String,
 }
 
-fn err(err: impl Into<BoxedError>) -> RwError {
-    ErrorCode::StorageError(err.into()).into()
+fn err(err: impl Into<BoxedError>) -> ObjectError {
+    ObjectError::S3(err.into())
 }
 
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -47,7 +49,7 @@ impl ObjectStore for S3ObjectStore {
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Bytes> {
+    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
         let range = match block_loc.as_ref() {
@@ -66,18 +68,18 @@ impl ObjectStore for S3ObjectStore {
         let val = resp.body.collect().await.map_err(err)?.into_bytes();
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-            return Err(RwError::from(InternalError(format!(
+            return Err(ObjectError::Internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 block_loc.as_ref().unwrap().size,
                 val.len(),
                 path,
                 block_loc.as_ref().unwrap()
-            ))));
+            )));
         }
         Ok(val)
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
         let futures = block_locs
             .into_iter()
             .map(|block_loc| self.read(path, Some(block_loc)))
@@ -85,7 +87,7 @@ impl ObjectStore for S3ObjectStore {
         try_join_all(futures).await
     }
 
-    async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let resp = self
             .client
             .head_object()
@@ -101,7 +103,7 @@ impl ObjectStore for S3ObjectStore {
 
     /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
-    async fn delete(&self, path: &str) -> Result<()> {
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
         self.client
             .delete_object()
             .bucket(&self.bucket)

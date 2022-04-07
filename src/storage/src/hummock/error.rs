@@ -14,8 +14,9 @@
 
 use std::backtrace::Backtrace;
 
-use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
+
+use crate::object::ObjectError;
 
 #[derive(Error, Debug)]
 pub enum HummockError {
@@ -34,7 +35,7 @@ pub enum HummockError {
     #[error("Mock error {0}.")]
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
-    ObjectIoError(String),
+    ObjectIoError(ObjectError),
     #[error("Meta error {0}.")]
     MetaError(String),
     #[error("Invalid WriteBatch.")]
@@ -50,8 +51,8 @@ pub enum HummockError {
 }
 
 impl HummockError {
-    pub fn object_io_error(error: impl ToString) -> TracedHummockError {
-        Self::ObjectIoError(error.to_string()).into()
+    pub fn object_io_error(error: ObjectError) -> TracedHummockError {
+        Self::ObjectIoError(error).into()
     }
 
     pub fn invalid_block() -> TracedHummockError {
@@ -127,13 +128,6 @@ impl std::fmt::Debug for TracedHummockError {
             )?;
         }
         Ok(())
-    }
-}
-
-// TODO: remove this
-impl From<TracedHummockError> for RwError {
-    fn from(h: TracedHummockError) -> Self {
-        ErrorCode::StorageError(Box::new(h)).into()
     }
 }
 

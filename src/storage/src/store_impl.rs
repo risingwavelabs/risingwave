@@ -17,8 +17,8 @@ use std::sync::Arc;
 
 use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::{Result, RwError};
 
+use crate::error::StorageResult;
 use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStorage, SstableStore};
@@ -89,7 +89,7 @@ impl StateStoreImpl {
         config: Arc<StorageConfig>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         state_store_stats: Arc<StateStoreMetrics>,
-    ) -> Result<Self> {
+    ) -> StorageResult<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
                 let object_store = Arc::new(match hummock {
@@ -127,8 +127,7 @@ impl StateStoreImpl {
                     hummock_meta_client,
                     state_store_stats.clone(),
                 )
-                .await
-                .map_err(RwError::from)?;
+                .await?;
                 StateStoreImpl::HummockStateStore(inner.monitored(state_store_stats))
             }
 

@@ -456,7 +456,7 @@ impl Compactor {
                     Err(e) => {
                         tracing::warn!(
                             "Subsribing to compaction tasks failed with error: {}. Will retry.",
-                            RwError::from(e)
+                            e
                         );
                         continue 'start_stream;
                     }
