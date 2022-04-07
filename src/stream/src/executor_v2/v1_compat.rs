@@ -23,15 +23,16 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::hash::HashKey;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
-pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use super::{
-    ChainExecutor, Executor, ExecutorInfo, FilterExecutor, HashAggExecutor, LocalSimpleAggExecutor,
-    MaterializeExecutor,
+    BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
+    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor,
 };
+pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::task::FinishCreateMviewNotifier;
@@ -40,8 +41,11 @@ use crate::task::FinishCreateMviewNotifier;
 ///
 /// With this wrapper, we can migrate our executors from v1 to v2 step by step.
 pub struct StreamExecutorV1 {
+    /// The wrapped uninited executor.
+    pub(super) executor_v2: Option<BoxedExecutor>,
+
     /// The wrapped stream.
-    pub(super) stream: BoxedMessageStream,
+    pub(super) stream: Option<BoxedMessageStream>,
 
     pub(super) info: ExecutorInfo,
 }
@@ -57,7 +61,12 @@ impl fmt::Debug for StreamExecutorV1 {
 #[async_trait]
 impl ExecutorV1 for StreamExecutorV1 {
     async fn next(&mut self) -> Result<Message> {
-        self.stream.next().await.unwrap().map_err(RwError::from)
+        let stream = self.stream.as_mut().expect("not inited");
+
+        match stream.next().await {
+            Some(result) => result.map_err(RwError::from),
+            None => Err(ErrorCode::Eof.into()), // we use `Eof` to represent end of stream in v1
+        }
     }
 
     fn schema(&self) -> &Schema {
@@ -75,6 +84,12 @@ impl ExecutorV1 for StreamExecutorV1 {
     fn logical_operator_info(&self) -> &str {
         // FIXME: use identity temporally.
         &self.info.identity
+    }
+
+    fn init(&mut self, epoch: u64) -> Result<()> {
+        let executor = self.executor_v2.take().expect("already inited");
+        self.stream = Some(executor.execute_with_epoch(epoch));
+        Ok(())
     }
 }
 
@@ -240,5 +255,23 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             executor_id,
             key_indices,
         )
+    }
+}
+
+impl<S: StateStore> BatchQueryExecutor<S> {
+    pub fn new_from_v1(
+        table: CellBasedTable<S>,
+        pk_indices: PkIndices,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Self {
+        let schema = table.schema().clone();
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: "BatchQuery".to_owned(),
+        };
+
+        Self::new(table, Self::DEFAULT_BATCH_SIZE, info, key_indices)
     }
 }
