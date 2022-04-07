@@ -7,8 +7,8 @@ use risingwave_common::error::Result;
 use risingwave_pb::common::HostAddress;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::{
-    ExchangeNode, ExchangeSource, PlanFragment, PlanNode as PlanNodeProst, TaskId as TaskIdProst,
-    TaskOutputId,
+    ExchangeNode, ExchangeSource, MergeSortExchangeNode, PlanFragment, PlanNode as PlanNodeProst,
+    TaskId as TaskIdProst, TaskOutputId,
 };
 use risingwave_rpc_client::ComputeClient;
 use tokio::spawn;
@@ -262,14 +262,33 @@ impl StageRunner {
                     .map(|child_stage| child_stage.all_exchange_sources_for(task_id))
                     .unwrap();
 
-                PlanNodeProst {
-                    children: vec![],
-                    // TODO: Generate meaningful identify
-                    identity: Uuid::new_v4().to_string(),
-                    node_body: Some(NodeBody::Exchange(ExchangeNode {
-                        sources: exchange_sources,
-                        input_schema: execution_plan_node.schema.clone(),
-                    })),
+                match &execution_plan_node.node {
+                    NodeBody::Exchange(_exchange_node) => {
+                        PlanNodeProst {
+                            children: vec![],
+                            // TODO: Generate meaningful identify
+                            identity: Uuid::new_v4().to_string(),
+                            node_body: Some(NodeBody::Exchange(ExchangeNode {
+                                sources: exchange_sources,
+                                input_schema: execution_plan_node.schema.clone(),
+                            })),
+                        }
+                    }
+                    NodeBody::MergeSortExchange(sort_merge_exchange_node) => {
+                        PlanNodeProst {
+                            children: vec![],
+                            // TODO: Generate meaningful identify
+                            identity: Uuid::new_v4().to_string(),
+                            node_body: Some(NodeBody::MergeSortExchange(MergeSortExchangeNode {
+                                exchange_node: Some(ExchangeNode {
+                                    sources: exchange_sources,
+                                    input_schema: execution_plan_node.schema.clone(),
+                                }),
+                                column_orders: sort_merge_exchange_node.column_orders.clone(),
+                            })),
+                        }
+                    }
+                    _ => unreachable!(),
                 }
             }
             _ => {
