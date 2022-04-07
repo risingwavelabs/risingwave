@@ -152,6 +152,10 @@ message AddMutation {
   map<uint32, Actors> actors = 1;
 }
 
+message SplitAssignMutation {
+  map<uint32, bytes> splits = 1;
+}
+
 message Epoch {
   uint64 curr = 1;
   uint64 prev = 2;
