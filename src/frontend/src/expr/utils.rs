@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
 use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
@@ -59,65 +59,69 @@ impl ExprRewriter for BooleanConstantFolding {
     /// This rewriter will panic if the length of the inputs is not `2`.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
         let (func_type, inputs, ret) = func_call.decompose();
-        let inputs = inputs
+        let inputs: Vec<_> = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
-        let new_func_all = FunctionCall::new_with_return_type(func_type, inputs, ret);
-        boolean_constant_folding_impl(new_func_all)
+        let bool_constant_values: Vec<Option<bool>> =
+            inputs.iter().map(get_bool_constant).collect();
+        let contains_bool_constant = bool_constant_values.iter().any(|x| x.is_some());
+        // Take elements from inputs, and reorder them to make sure lhs is a constant value
+        let prepare_binary_function_inputs = |mut inputs: Vec<ExprImpl>| -> (ExprImpl, ExprImpl) {
+            // Make sure that binary functions have exactly 2 inputs
+            assert_eq!(inputs.len(), 2);
+            let rhs = inputs.pop().unwrap();
+            let lhs = inputs.pop().unwrap();
+            if bool_constant_values[0].is_some() {
+                (lhs, rhs)
+            } else {
+                (rhs, lhs)
+            }
+        };
+        if contains_bool_constant {
+            match func_type {
+                Type::And => {
+                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                    return boolean_constant_fold_and(constant_lhs, rhs);
+                }
+                Type::Or => {
+                    let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
+                    return boolean_constant_fold_or(constant_lhs, rhs);
+                }
+                _ => {}
+            }
+        }
+        FunctionCall::new_with_return_type(func_type, inputs, ret).into()
     }
 }
 
-fn boolean_constant_folding_impl(func_call: super::FunctionCall) -> ExprImpl {
-    let get_bool_constant = |expr: &ExprImpl| {
-        if let ExprImpl::Literal(l) = expr {
-            if let Some(ScalarImpl::Bool(v)) = l.get_data() {
-                return Some(*v);
-            }
-        }
-        None
-    };
-
-    let (func_type, mut inputs, return_type) = func_call.decompose();
-    let mut bool_constant_map: Vec<Option<bool>> = inputs.iter().map(get_bool_constant).collect();
-    let contains_bool_constant = bool_constant_map.iter().any(|x| x.is_some());
-
-    if contains_bool_constant
-        && (func_type == Type::And || func_type == Type::Or)
-        && return_type == DataType::Boolean
-    {
-        // `Type::And` and `Type::Or` are binary functions
-        // Make sure that they have exactly 2 inputs
-        assert_eq!(inputs.len(), 2);
-        // Make sure that inputs[0] is always a constant
-        if bool_constant_map[1].is_some() {
-            inputs.swap(0, 1);
-            bool_constant_map.swap(0, 1);
-        }
-        let a = bool_constant_map[0].unwrap();
-        match func_type {
-            Type::And => {
-                if a {
-                    // True And A -> A
-                    return inputs[1].clone();
-                } else {
-                    // False And A -> False
-                    return ExprImpl::literal_bool(false);
-                }
-            }
-            Type::Or => {
-                if a {
-                    // True Or A -> True
-                    return ExprImpl::literal_bool(true);
-                } else {
-                    // False Or A -> A
-                    return inputs[1].clone();
-                }
-            }
-            _ => {}
+fn get_bool_constant(expr: &ExprImpl) -> Option<bool> {
+    if let ExprImpl::Literal(l) = expr {
+        if let Some(ScalarImpl::Bool(v)) = l.get_data() {
+            return Some(*v);
         }
     }
-    FunctionCall::new_with_return_type(func_type, inputs, return_type).into()
+    None
+}
+
+/// [`boolean_constant_fold_and`] takes the left hand side and right hands side of a [`Type::And`] operator.
+/// It is required that the the lhs should always be a constant
+fn boolean_constant_fold_and(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
+    if get_bool_constant(&constant_lhs).unwrap() {
+        rhs
+    } else {
+        constant_lhs
+    }
+}
+
+/// [`boolean_constant_fold_or`] takes the left hand side and right hands side of a [`Type::Or`] operator.
+/// It is required that the the lhs should always be a constant
+fn boolean_constant_fold_or(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
+    if get_bool_constant(&constant_lhs).unwrap() {
+        constant_lhs
+    } else {
+        rhs
+    }
 }
 
 /// give a expression, and check all columns in its `input_ref` expressions less than the input
