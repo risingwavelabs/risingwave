@@ -56,7 +56,7 @@ impl Condition {
         let expr = fold_boolean_constant(expr);
         let conjunctions = to_conjunctions(expr);
 
-        Self { conjunctions }
+        Self { conjunctions }.simplify()
     }
 
     pub fn true_cond() -> Self {
@@ -259,15 +259,15 @@ impl Condition {
     /// and set `conjunctions` to `vec![false]` if there is a `false` in `conjunctions`.
     fn simplify(self) -> Self {
         let mut conjunctions: Vec<ExprImpl> = Vec::new();
-        for i in &self.conjunctions {
-            if let Some(v) = try_get_bool_constant(i) {
+        for i in self.conjunctions {
+            if let Some(v) = try_get_bool_constant(&i) {
                 if !v {
                     conjunctions.clear();
                     conjunctions.push(ExprImpl::literal_bool(false));
                     break;
                 }
             } else {
-                conjunctions.push(i.clone());
+                conjunctions.push(i);
             }
         }
         Self { conjunctions }
