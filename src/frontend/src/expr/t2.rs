@@ -97,7 +97,7 @@ fn new_cmp_unary(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionC
 
 fn new_cmp(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
-    crate::binder::Binder::find_compat(lhs.return_type(), rhs.return_type()).ok()?;
+    least_restrictive(lhs.return_type(), rhs.return_type())?;
     Some(FunctionCall::new_with_return_type(
         func_type,
         vec![lhs, rhs],
@@ -108,7 +108,7 @@ fn new_cmp(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_neg(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let arg = as_unary(inputs)?;
     let t = arg.return_type();
-    if !(t.is_numeric() || t == DataType::Interval) {
+    if !(t.is_number() || t == DataType::Interval) {
         return None;
     }
     Some(FunctionCall::new_with_return_type(func_type, vec![arg], t))
@@ -117,17 +117,17 @@ fn new_neg(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_add(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_numeric() && rt.is_numeric() {
+    if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
-    if lt.is_date_or_timestamp() && rt == DataType::Interval {
+    if lt.is_instant() && rt == DataType::Interval {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
             DataType::Timestamp,
         ));
     }
-    if rt.is_date_or_timestamp() && lt == DataType::Interval {
+    if rt.is_instant() && lt == DataType::Interval {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
@@ -140,10 +140,10 @@ fn new_add(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_sub(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_numeric() && rt.is_numeric() {
+    if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
-    if lt.is_date_or_timestamp() && rt == DataType::Interval {
+    if lt.is_instant() && rt == DataType::Interval {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
@@ -156,7 +156,7 @@ fn new_sub(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_mul(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_numeric() && rt.is_numeric() {
+    if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
     None
@@ -165,7 +165,7 @@ fn new_mul(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_div(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_numeric() && rt.is_numeric() {
+    if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
     None
@@ -174,7 +174,7 @@ fn new_div(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_mod(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_numeric() && rt.is_numeric() {
+    if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
     None
@@ -183,7 +183,7 @@ fn new_mod(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 fn new_extract(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_string() && rt.is_date_or_timestamp() {
+    if lt.is_string() && rt.is_instant() {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
@@ -201,13 +201,49 @@ lazy_static::lazy_static! {
 
 fn implicit_cast(e: ExprImpl, t: &DataType) -> Option<ExprImpl> {
     let tt = e.return_type();
-    if tt == *t {
-        return Some(e);
-    }
-    if tt.is_string() || t.is_string() {
+    if least_restrictive(tt, t.clone()) != Some(t.clone()) {
         return None;
     }
     Some(e.ensure_type(t.clone()))
+}
+
+pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Option<DataType> {
+    if lhs == rhs {
+        return Some(lhs);
+    }
+    let (l, r) = match (get_rank(&lhs), get_rank(&rhs)) {
+        (Some(Rank::Number(l)), Some(Rank::Number(r))) => (l, r),
+        (Some(Rank::Instant(l)), Some(Rank::Instant(r))) => (l, r),
+        (Some(Rank::Interval(l)), Some(Rank::Interval(r))) => (l, r),
+        _ => return None,
+    };
+    match l >= r {
+        true => Some(lhs),
+        false => Some(rhs),
+    }
+}
+
+enum Rank {
+    Number(u8),
+    Instant(u8),
+    Interval(u8),
+}
+
+fn get_rank(t: &DataType) -> Option<Rank> {
+    match t {
+        DataType::Int16 => Some(Rank::Number(0)),
+        DataType::Int32 => Some(Rank::Number(1)),
+        DataType::Int64 => Some(Rank::Number(2)),
+        DataType::Decimal => Some(Rank::Number(3)),
+        DataType::Float32 => Some(Rank::Number(4)),
+        DataType::Float64 => Some(Rank::Number(5)),
+        DataType::Date => Some(Rank::Instant(0)),
+        DataType::Timestamp => Some(Rank::Instant(1)),
+        DataType::Timestampz => Some(Rank::Instant(2)),
+        DataType::Time => Some(Rank::Interval(0)),
+        DataType::Interval => Some(Rank::Interval(1)),
+        _ => None,
+    }
 }
 
 lazy_static::lazy_static! {
@@ -217,8 +253,7 @@ lazy_static::lazy_static! {
 }
 
 fn new_num_atm(func_type: ExprType, lhs: ExprImpl, rhs: ExprImpl) -> Option<FunctionCall> {
-    let return_type =
-        crate::binder::Binder::find_compat(lhs.return_type(), rhs.return_type()).ok()?;
+    let return_type = least_restrictive(lhs.return_type(), rhs.return_type())?;
     Some(FunctionCall::new_with_return_type(
         func_type,
         vec![lhs, rhs],

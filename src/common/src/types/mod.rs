@@ -187,7 +187,7 @@ impl DataType {
         }
     }
 
-    pub fn is_numeric(&self) -> bool {
+    pub fn is_number(&self) -> bool {
         matches!(
             self,
             DataType::Int16
@@ -203,8 +203,11 @@ impl DataType {
         matches!(self, DataType::Varchar)
     }
 
-    pub fn is_date_or_timestamp(&self) -> bool {
-        matches!(self, DataType::Date | DataType::Timestamp)
+    pub fn is_instant(&self) -> bool {
+        matches!(
+            self,
+            DataType::Date | DataType::Timestamp | DataType::Timestampz
+        )
     }
 
     /// Type index is used to find the least restrictive type that is of the larger index.

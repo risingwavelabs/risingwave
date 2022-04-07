@@ -92,22 +92,12 @@ impl Binder {
 
     /// Find compatible type for `left` and `right`.
     pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
-        if (left == right || left.is_numeric() && right.is_numeric())
-            || (left.is_string() && right.is_string()
-                || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
-        {
-            if left.type_index() > right.type_index() {
-                Ok(left)
-            } else {
-                Ok(right)
-            }
-        } else {
-            Err(ErrorCode::InternalError(format!(
-                "Can not find compatible type for {:?} and {:?}",
-                left, right
-            ))
-            .into())
-        }
+        let s = format!(
+            "Can not find compatible type for {:?} and {:?}",
+            left, right
+        );
+        crate::expr::least_restrictive(left, right)
+            .ok_or_else(|| ErrorCode::InternalError(s).into())
     }
 }
 

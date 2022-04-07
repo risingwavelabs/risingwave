@@ -43,7 +43,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 mod t2;
 use paste::paste;
-pub use t2::new_func;
+pub use t2::{least_restrictive, new_func};
 
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {

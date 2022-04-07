@@ -155,7 +155,7 @@ impl Binder {
     fn rewrite_positive(&mut self, expr: Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr(expr)?;
         let return_type = expr.return_type();
-        if return_type.is_numeric() {
+        if return_type.is_number() {
             return Ok(expr);
         }
         return Err(ErrorCode::InvalidInputSyntax(format!("+ {:?}", return_type)).into());
