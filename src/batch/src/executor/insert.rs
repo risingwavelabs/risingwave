@@ -83,7 +83,7 @@ impl Executor for InsertExecutor {
         }
 
         let source_desc = self.source_manager.get_source(&self.table_id)?;
-        let source = source_desc.source.as_table_v2();
+        let source = source_desc.source.as_table_v2().expect("not table source");
 
         let mut notifiers = Vec::new();
 
@@ -244,7 +244,7 @@ mod tests {
 
         // Create reader
         let source_desc = source_manager.get_source(&table_id)?;
-        let source = source_desc.source.as_table_v2();
+        let source = source_desc.source.as_table_v2().unwrap();
         let mut reader =
             source.stream_reader(TableV2ReaderContext, vec![0.into(), 1.into(), 2.into()])?;
 

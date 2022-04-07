@@ -24,6 +24,7 @@ pub use batch_query::*;
 pub use chain::*;
 pub use debug::*;
 pub use dispatch::*;
+use enum_as_inner::EnumAsInner;
 pub use filter::*;
 use futures::Stream;
 pub use global_simple_agg::*;
@@ -284,7 +285,7 @@ impl Barrier {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, EnumAsInner)]
 pub enum Message {
     Chunk(StreamChunk),
     Barrier(Barrier),
@@ -341,20 +342,6 @@ impl Message {
             }
         };
         Ok(res)
-    }
-
-    pub fn as_chunk(&self) -> Option<&StreamChunk> {
-        match self {
-            Self::Chunk(chunk) => Some(chunk),
-            _ => None,
-        }
-    }
-
-    pub fn as_barrier(&self) -> Option<&Barrier> {
-        match self {
-            Self::Barrier(barrier) => Some(barrier),
-            _ => None,
-        }
     }
 }
 

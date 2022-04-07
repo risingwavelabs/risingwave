@@ -70,14 +70,14 @@ impl<T: Array> StreamingSingleValueAgg<T> {
         let mut row_cnt = 0;
         if let Some(cnt) = datum {
             match cnt {
-        ScalarImpl::Int64(num) => {
-          row_cnt = num;
-        }
-        other => panic!(
-          "type mismatch in streaming aggregator StreamingSingleValueAgg init: expected i64, get {}",
-          other.get_ident()
-        ),
-      }
+                ScalarImpl::Int64(num) => {
+                    row_cnt = num;
+                }
+                other => panic!(
+                    "type mismatch in streaming aggregator StreamingSingleValueAgg init: expected i64, get {}",
+                    other.get_ident()
+                ),
+            }
         }
         Self {
             row_cnt,
@@ -89,9 +89,9 @@ impl<T: Array> StreamingSingleValueAgg<T> {
         self.row_cnt += 1;
         if self.row_cnt > 1 {
             Err(ErrorCode::InternalError(
-        "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
-      )
-        .into())
+                "SingleValue aggregation can only accept exactly one value. But there is more than one.".to_string(),
+            )
+            .into())
         } else {
             self.result = option_to_owned_scalar(&input);
             Ok(())
@@ -101,9 +101,9 @@ impl<T: Array> StreamingSingleValueAgg<T> {
     fn retract(&mut self, _input: Option<T::RefItem<'_>>) -> Result<()> {
         if self.row_cnt != 1 {
             Err(ErrorCode::InternalError(
-        format!("SingleValue aggregation can only retract exactly one value. But there are {} values.", self.row_cnt)
-      )
-        .into())
+                format!("SingleValue aggregation can only retract exactly one value. But there are {} values.", self.row_cnt)
+            )
+            .into())
         } else {
             self.row_cnt -= 1;
             self.result = None;

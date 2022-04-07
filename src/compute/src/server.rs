@@ -114,7 +114,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
-    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+    if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
             hummock.inner().local_version_manager().clone(),
