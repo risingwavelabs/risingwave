@@ -16,12 +16,9 @@ use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{BoxedError, ErrorCode, Result, RwError};
+use risingwave_common::error::BoxedError;
 
 use super::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult};
-use crate::error::StorageResult;
-use crate::hummock::{HummockError, HummockResult};
 use crate::object::{Bytes, ObjectStore};
 
 /// Object store with S3 backend

@@ -20,7 +20,6 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::RwError;
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };

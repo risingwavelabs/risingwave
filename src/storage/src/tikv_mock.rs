@@ -16,7 +16,6 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
 
 use super::StateStore;
 use crate::storage_value::StorageValue;

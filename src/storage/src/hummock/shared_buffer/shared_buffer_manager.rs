@@ -19,7 +19,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
 use tokio::task::JoinHandle;
 
 use crate::error::StorageResult;

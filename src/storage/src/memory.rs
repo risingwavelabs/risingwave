@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use risingwave_common::error::Result;
 use tokio::sync::Mutex;
 
 use crate::storage_value::StorageValue;

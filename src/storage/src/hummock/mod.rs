@@ -26,7 +26,7 @@ use itertools::Itertools;
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
-use risingwave_common::error::Result;
+
 pub use sstable::*;
 pub mod compactor;
 mod conflict_detector;

@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::error::StorageResult;
