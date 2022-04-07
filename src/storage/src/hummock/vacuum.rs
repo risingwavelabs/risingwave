@@ -64,12 +64,12 @@ mod tests {
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
     use crate::monitor::StateStoreMetrics;
-    use crate::object::InMemObjectStore;
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     #[tokio::test]
     async fn test_vacuum_tracked_data() {
         let sstable_store = Arc::new(SstableStore::new(
-            Arc::new(InMemObjectStore::new()),
+            Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new())),
             String::from("test_dir"),
             Arc::new(StateStoreMetrics::unused()),
             64 << 20,

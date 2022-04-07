@@ -25,10 +25,10 @@ use crate::hummock::test_utils::{
     default_builder_opt_for_test, default_config_for_test, gen_test_sstable,
 };
 use crate::hummock::value::HummockValue;
-use crate::object::{InMemObjectStore, ObjectStore};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 async fn gen_and_upload_table(
-    object_store: Arc<dyn ObjectStore>,
+    object_store: ObjectStoreRef,
     remote_dir: &str,
     vm: Arc<LocalVersionManager>,
     hummock_meta_client: &dyn HummockMetaClient,
@@ -150,7 +150,7 @@ macro_rules! assert_count_reverse_range_scan {
 #[tokio::test]
 async fn test_snapshot() {
     let remote_dir = "hummock_001";
-    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
         remote_dir.to_string(),
@@ -228,7 +228,7 @@ async fn test_snapshot() {
 
 #[tokio::test]
 async fn test_snapshot_range_scan() {
-    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let remote_dir = "hummock_001";
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),
@@ -286,7 +286,7 @@ async fn test_snapshot_range_scan() {
 
 #[tokio::test]
 async fn test_snapshot_reverse_range_scan() {
-    let object_store = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let remote_dir = "/test";
     let sstable_store = Arc::new(SstableStore::new(
         object_store.clone(),

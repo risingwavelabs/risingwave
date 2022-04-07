@@ -387,7 +387,7 @@ mod tests {
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
-    use crate::object::InMemObjectStore;
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, HummockValue<Bytes>)> {
         vec![(
@@ -398,7 +398,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_cleanup() {
-        let object_store = Arc::new(InMemObjectStore::new());
+        let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
         let sstable_store = mock_sstable_store_with_object_store(object_store);
         let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
         let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
