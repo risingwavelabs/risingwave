@@ -78,7 +78,7 @@ Please refer to the full [getting started guide](https://singularity-data.com/ri
 
 ## Documentation
 
-Visit [RisingWave Docs](https://singularity-data.com/risingwave-docs/) for more information.
+Visit [RisingWave Docs](https://singularity-data.com/risingwave-docs/) and [Developer Docs](https://github.com/singularity-data/risingwave/tree/main/docs) for more information.
 
 ## License
 
