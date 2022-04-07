@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
@@ -117,8 +117,13 @@ impl StreamMaterialize {
                 // If field data type is struct, use map to get original column desc to form catalog
                 // to avoid field descs lost.
                 if let DataType::Struct { .. } = field.data_type {
-                    let desc = *map.get(&field.name).as_ref().unwrap();
-                    ColumnCatalog {
+                    let desc = map.get(&field.name).ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "not found field name in map {}",
+                            field.name
+                        )))
+                    })?;
+                    Ok(ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: desc.data_type.clone(),
                             column_id: (i as i32).into(),
@@ -127,9 +132,9 @@ impl StreamMaterialize {
                             type_name: desc.type_name.clone(),
                         },
                         is_hidden: !user_cols.contains(i),
-                    }
+                    })
                 } else {
-                    ColumnCatalog {
+                    Ok(ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: field.data_type.clone(),
                             column_id: (i as i32).into(),
@@ -138,10 +143,10 @@ impl StreamMaterialize {
                             type_name: "".to_string(),
                         },
                         is_hidden: !user_cols.contains(i),
-                    }
+                    })
                 }
             })
-            .collect_vec();
+            .collect::<Result<Vec<_>>>()?;
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];
