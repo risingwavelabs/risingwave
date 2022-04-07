@@ -239,6 +239,23 @@ pub fn timestamp_interval_sub<T1, T2, T3>(
     interval_timestamp_add::<T1, T2, T3>(r.negative(), l)
 }
 
+#[inline(always)]
+pub fn interval_int_mul<T1, T2, T3>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
+where
+    T2: TryInto<i32> + Debug,
+{
+    l.checked_mul_int(r)
+        .ok_or_else(|| NumericValueOutOfRange.into())
+}
+
+#[inline(always)]
+pub fn int_interval_mul<T1, T2, T3>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
+where
+    T1: TryInto<i32> + Debug,
+{
+    interval_int_mul::<T2, T1, T3>(r, l)
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;

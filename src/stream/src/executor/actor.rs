@@ -18,7 +18,7 @@ use risingwave_common::error::Result;
 use tokio::sync::oneshot;
 use tracing_futures::Instrument;
 
-use super::{Mutation, StreamConsumer};
+use super::StreamConsumer;
 use crate::task::{ActorId, SharedContext};
 
 /// `Actor` is the basic execution unit in the streaming framework.
@@ -57,6 +57,7 @@ impl Actor {
             next = "Outbound",
             epoch = -1
         );
+
         // Drive the streaming task with an infinite loop
         loop {
             tokio::select! {
@@ -73,11 +74,10 @@ impl Actor {
                                 .collect(self.id, &barrier)?;
 
                             // then stop this actor if asked
-                            if let Some(Mutation::Stop(actors)) = barrier.mutation.as_deref() {
-                                if actors.contains(&self.id) {
-                                    tracing::trace!(actor_id = self.id, "actor exit");
-                                    break;
-                                }
+                            let to_stop = barrier.is_to_stop_actor(self.id);
+                            if to_stop {
+                                tracing::trace!(actor_id = self.id, "actor exit");
+                                break;
                             }
 
                             // tracing related work

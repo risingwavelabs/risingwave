@@ -23,6 +23,7 @@ use crate::session::{OptimizerContext, SessionImpl};
 pub mod create_mv;
 mod create_source;
 pub mod create_table;
+mod describe;
 pub mod drop_mv;
 pub mod drop_table;
 mod explain;
@@ -30,7 +31,7 @@ mod flush;
 #[allow(dead_code)]
 mod query;
 mod query_single;
-mod show_source;
+mod show;
 pub mod util;
 
 pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result<PgResponse> {
@@ -46,9 +47,12 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
-        // Since table and source both have source info, use show_source handler can get column info
-        Statement::ShowTable { name } => show_source::handle_show_source(context, name).await,
-        Statement::ShowSource { name } => show_source::handle_show_source(context, name).await,
+        Statement::Describe { name } => describe::handle_describe(context, name).await,
+        // TODO: support complex sql for `show columns from <table>`
+        Statement::ShowColumn { name } => describe::handle_describe(context, name).await,
+        Statement::ShowCommand(show_object) => {
+            show::handle_show_command(context, show_object).await
+        }
         Statement::Drop(DropStatement {
             object_type, name, ..
         }) => {
@@ -69,7 +73,13 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
                 .into()),
             }
         }
-        Statement::Query(_) => query_single::handle_query_single(context, stmt).await,
+        Statement::Query(_) => {
+            if context.session_ctx.env().query_manager().dist_query() {
+                query::handle_query(context, stmt).await
+            } else {
+                query_single::handle_query_single(context, stmt).await
+            }
+        }
         Statement::Insert { .. } | Statement::Delete { .. } => {
             query_single::handle_query_single(context, stmt).await
         }
@@ -81,6 +91,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
-        _ => Err(ErrorCode::NotImplementedError(format!("Unhandled ast: {:?}", stmt)).into()),
+        _ => {
+            Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
+        }
     }
 }

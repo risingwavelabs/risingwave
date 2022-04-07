@@ -20,12 +20,12 @@ use prost::Message;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::error::Result;
+use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, Level, LevelEntry, LevelType, TableSetStatistics,
 };
-use risingwave_storage::hummock::key::{user_key, FullKey};
-use risingwave_storage::hummock::key_range::KeyRange;
-use risingwave_storage::hummock::{HummockEpoch, HummockSSTableId};
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;

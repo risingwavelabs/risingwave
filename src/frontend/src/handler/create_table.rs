@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::rc::Rc;
+
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -25,10 +27,11 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 use super::create_source::make_prost_source;
 use crate::binder::expr::bind_data_type;
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
-use crate::optimizer::plan_node::StreamSource;
+use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+// FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
 pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
@@ -86,12 +89,8 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef = StreamSource::create(
-            context,
-            vec![0], // row id column as pk
-            source.clone(),
-        )
-        .into();
+        let source_node: PlanRef =
+            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         required_cols.toggle(0);

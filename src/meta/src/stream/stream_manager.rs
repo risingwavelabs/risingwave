@@ -133,8 +133,21 @@ where
         table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
-        let actor_infos = locations.actor_infos();
+        // Actors on each stream node will need to know where their upstream lies. `actor_info`
+        // includes such information. It contains: 1. actors in the current create
+        // materialized view request. 2. all upstream actors.
+        let mut actor_infos_to_broadcast = locations.actor_infos();
+        actor_infos_to_broadcast.extend(ctx.upstream_node_actors.iter().flat_map(
+            |(node_id, upstreams)| {
+                upstreams.iter().map(|up_id| ActorInfo {
+                    actor_id: *up_id,
+                    host: locations.node_locations.get(node_id).unwrap().host.clone(),
+                })
+            },
+        ));
+
         let actor_host_infos = locations.actor_info_map();
+
         let node_actors = locations.node_actors();
 
         let dispatches = ctx
@@ -194,7 +207,7 @@ where
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos.clone(),
+                    info: actor_infos_to_broadcast.clone(),
                 })
                 .await
                 .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
@@ -255,7 +268,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .add_table_fragments(table_fragments.clone())
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {

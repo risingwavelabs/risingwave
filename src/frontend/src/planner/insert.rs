@@ -29,7 +29,6 @@ impl Planner {
             input,
             insert.table_source.name,
             insert.table_source.source_id,
-            vec![],
         )?
         .into();
         let order = Order::any().clone();

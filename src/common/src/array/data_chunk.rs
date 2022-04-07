@@ -242,14 +242,19 @@ impl DataChunk {
     }
 
     pub fn from_protobuf(proto: &ProstDataChunk) -> Result<Self> {
-        let mut columns = vec![];
-        for any_col in proto.get_columns() {
-            let cardinality = proto.get_cardinality() as usize;
-            columns.push(Column::from_protobuf(any_col, cardinality)?);
-        }
+        if proto.columns.is_empty() {
+            // Dummy chunk, we should deserialize cardinality
+            Ok(DataChunk::new_dummy(proto.cardinality as usize))
+        } else {
+            let mut columns = vec![];
+            for any_col in proto.get_columns() {
+                let cardinality = proto.get_cardinality() as usize;
+                columns.push(Column::from_protobuf(any_col, cardinality)?);
+            }
 
-        let chunk = DataChunk::new(columns, None);
-        Ok(chunk)
+            let chunk = DataChunk::new(columns, None);
+            Ok(chunk)
+        }
     }
 
     /// `rechunk` creates a new vector of data chunk whose size is `each_size_limit`.
@@ -556,5 +561,9 @@ mod tests {
     fn test_no_column_chunk() {
         let chunk = DataChunk::new_dummy(10);
         assert_eq!(chunk.rows().count(), 10);
+
+        let chunk_after_serde = DataChunk::from_protobuf(&chunk.to_protobuf()).unwrap();
+        assert_eq!(chunk_after_serde.rows().count(), 10);
+        assert_eq!(chunk_after_serde.cardinality(), 10);
     }
 }

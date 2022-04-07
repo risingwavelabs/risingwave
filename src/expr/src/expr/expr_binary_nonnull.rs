@@ -196,6 +196,8 @@ macro_rules! gen_binary_expr_atm {
             $((Interval, Date) => $interval_date_f:ident,)?
             $((Date, Interval) => $date_interval_f:ident,)?
             $((Interval, Interval) => $interval_interval_f:ident,)?
+            $((Interval, Int) => $interval_int_f:ident,)?
+            $((Int, Interval) => $int_interval_f:ident,)?
         } $(,)?
     ) => {
         $macro! {
@@ -242,6 +244,12 @@ macro_rules! gen_binary_expr_atm {
             $({ date, date, int32, $date_date_f },)?
             $({ date, interval, timestamp, $date_interval_f },)?
             $({ interval, date, timestamp, $interval_date_f },)?
+            $({ interval, int16, interval, $interval_int_f },)?
+            $({ interval, int32, interval, $interval_int_f },)?
+            $({ interval, int64, interval, $interval_int_f },)?
+            $({ int16, interval, interval, $int_interval_f },)?
+            $({ int32, interval, interval, $int_interval_f },)?
+            $({ int64, interval, interval, $int_interval_f },)?
         }
     };
 }
@@ -329,6 +337,8 @@ pub fn new_binary_expr(
                 l, r, ret,
                 {
                     General => general_mul,
+                    (Interval, Int) => interval_int_mul,
+                    (Int, Interval) => int_interval_mul,
                 },
             }
         }

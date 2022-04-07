@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -146,7 +147,7 @@ impl ComputeClient {
 
 /// Each ExchangeSource maps to one task, it takes the execution result from task chunk by chunk.
 #[async_trait::async_trait]
-pub trait ExchangeSource: Send {
+pub trait ExchangeSource: Send + Debug {
     async fn take_data(&mut self) -> Result<Option<DataChunk>>;
 }
 
@@ -162,6 +163,14 @@ impl GrpcExchangeSource {
     pub async fn create(addr: HostAddr, output_id: TaskOutputId) -> Result<Self> {
         let client = ComputeClient::new(addr).await?;
         client.get_data(output_id).await
+    }
+}
+
+impl Debug for GrpcExchangeSource {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GrpcExchangeSource")
+            .field("task_output_id", &self.output_id)
+            .finish()
     }
 }
 

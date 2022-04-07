@@ -19,6 +19,7 @@ members = [
   "src/sqlparser",
   "src/sqlparser/test_runner",
   "src/storage",
+  "src/storage/hummock_sdk",
   "src/stream",
   "src/tests/regress",
   "src/utils/logging",
@@ -37,3 +38,6 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
+
+[profile.release]
+debug = true

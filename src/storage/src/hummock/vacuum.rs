@@ -15,8 +15,8 @@
 use std::sync::Arc;
 
 use risingwave_pb::hummock::VacuumTask;
+use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::SstableStoreRef;
 
 pub struct Vacuum {}
@@ -56,20 +56,21 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_meta::hummock::test_utils::setup_compute_env;
+    use risingwave_meta::hummock::MockHummockMetaClient;
     use risingwave_pb::hummock::VacuumTask;
 
     use crate::hummock::iterator::test_utils::default_builder_opt_for_test;
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::test_utils::gen_default_test_sstable;
     use crate::hummock::vacuum::Vacuum;
     use crate::hummock::SstableStore;
     use crate::monitor::StateStoreMetrics;
-    use crate::object::InMemObjectStore;
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     #[tokio::test]
     async fn test_vacuum_tracked_data() {
         let sstable_store = Arc::new(SstableStore::new(
-            Arc::new(InMemObjectStore::new()),
+            Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new())),
             String::from("test_dir"),
             Arc::new(StateStoreMetrics::unused()),
             64 << 20,
@@ -98,14 +99,14 @@ mod tests {
                 .chain(iter::once(nonexistent_id))
                 .collect_vec(),
         };
-        Vacuum::vacuum(
-            sstable_store,
-            vacuum_task,
-            Arc::new(MockHummockMetaClient::new(Arc::new(
-                MockHummockMetaService::new(),
-            ))),
-        )
-        .await
-        .unwrap();
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref.clone(),
+            worker_node.id,
+        ));
+        Vacuum::vacuum(sstable_store, vacuum_task, mock_hummock_meta_client)
+            .await
+            .unwrap();
     }
 }

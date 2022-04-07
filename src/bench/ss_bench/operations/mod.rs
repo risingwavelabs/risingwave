@@ -18,7 +18,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use rand::prelude::StdRng;
 use rand::SeedableRng;
-use risingwave_storage::hummock::mock::MockHummockMetaClient;
+use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::StateStore;
 
 use crate::utils::display_stats::*;

@@ -35,12 +35,14 @@ impl Binder {
         source_name: ObjectName,
         selection: Option<Expr>,
     ) -> Result<BoundDelete> {
+        let (schema_name, table_name) = Self::resolve_table_name(source_name.clone())?;
+        let table_source = self.bind_table_source(source_name)?;
+        let table = self.bind_table(&schema_name, &table_name, None)?;
         let delete = BoundDelete {
-            table_source: self.bind_table_source(source_name.clone())?,
-            table: self.bind_table(source_name, None)?,
+            table_source,
+            table,
             selection: selection.map(|expr| self.bind_expr(expr)).transpose()?,
         };
-
         Ok(delete)
     }
 }

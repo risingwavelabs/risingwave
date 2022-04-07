@@ -310,8 +310,9 @@ pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCa
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
-                return Err(RwError::from(ErrorCode::NotImplementedError(
+                return Err(RwError::from(ErrorCode::NotImplemented(
                     "multiple aggregation args".to_string(),
+                    None.into(),
                 )))
             }
         }
@@ -772,9 +773,9 @@ impl LocalStreamManagerCore {
     ) -> Result<()> {
         for actor in req.get_info() {
             let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
+            if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
+                    "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()
                 ))
                 .into());
