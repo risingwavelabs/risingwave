@@ -142,3 +142,16 @@ impl AwsConfigInfo {
         })
     }
 }
+
+pub fn kinesis_demo_properties(properties: &mut HashMap<String, String>) {
+    macro_rules! insert_hashmap {
+        ($($key: expr => $value: expr), *) => {
+            $(properties.insert($key.to_string(), $value.to_string());)*
+        }
+    }
+
+    insert_hashmap!(
+        "kinesis.stream.name" => "kinesis_test_stream",
+        "kinesis.stream.region" => "cn-north-1", 
+        "connector" => "kinesis");
+}

@@ -32,7 +32,7 @@ pub enum SourceOffset {
 use crate::pulsar::PulsarSplitEnumerator;
 use crate::{kafka, pulsar};
 
-const UPSTREAM_SOURCE_KEY: &str = "upstream.source";
+const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
 const KINESIS_SOURCE: &str = "kinesis";
 
