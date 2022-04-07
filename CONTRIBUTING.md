@@ -58,8 +58,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install components in Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
-sudo apt install postgresql-client
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
