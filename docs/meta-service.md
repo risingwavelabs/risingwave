@@ -1,5 +1,15 @@
 # Meta Service
 
+- [Meta Service](#meta-service)
+  - [Background](#background)
+  - [Meta Store](#meta-store)
+  - [Types of Metadata](#types-of-metadata)
+    - [Catalog](#catalog)
+    - [Storage](#storage)
+  - [Push on Updates](#push-on-updates)
+
+<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+
 ## Background
 
 RisingWave provides both real-time analytical query as well as high-concurrent access to Materialized Views. Therefore, both the front-end and compute nodes are designed to be scalable, and they may share the same set of host machines or not, depending on cluster size and whether the user cares about resource isolation.
