@@ -221,20 +221,21 @@ impl Binder {
                         .get_source_by_name(&self.db_name, schema_name, table_name)
                         .map(|s| {
                             let mut catalogs = vec![];
-                            for col in &s.columns {
+                            let mut source = s.clone();
+                            for col in source.columns {
+                                // Extract `field_descs` and form `column_catalogs`.
                                 catalogs.append(
                                     &mut col
                                         .column_desc
                                         .get_column_descs()
-                                        .iter()
+                                        .into_iter()
                                         .map(|c| ColumnCatalog {
-                                            column_desc: c.clone(),
+                                            column_desc: c,
                                             is_hidden: col.is_hidden,
                                         })
                                         .collect_vec(),
                                 )
                             }
-                            let mut source = s.clone();
                             source.columns = catalogs.clone();
                             (Relation::Source(Box::new((&source).into())), catalogs)
                         })

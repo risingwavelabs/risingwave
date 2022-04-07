@@ -166,9 +166,6 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select country as c from t";
-        frontend.run_sql(sql).await.unwrap();
-
         let session = frontend.session_ref();
         let catalog_reader = session.env().catalog_reader();
 

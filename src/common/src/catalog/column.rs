@@ -111,13 +111,13 @@ impl ColumnDesc {
         descs
     }
 
-    /// Change column and field names prefix to alias.
-    pub fn change_prefix_name(&mut self, name: String, alias: String) {
-        let regex_name = "^".to_string() + &name;
-        let regex = regex::Regex::new(regex_name.as_str()).unwrap();
+    /// Change prefix column and field names to alias,
+    /// e.g. from `v1.field1` change to `c.field1`
+    pub fn change_prefix_name(&mut self, prefix: String, alias: String) {
+        let regex = regex::Regex::new(("^".to_string() + &prefix).as_str()).unwrap();
         self.name = regex.replace(&self.name, &alias).to_string();
         for col in &mut self.field_descs {
-            col.change_prefix_name(name.clone(), alias.clone());
+            col.change_prefix_name(prefix.clone(), alias.clone());
         }
     }
 
