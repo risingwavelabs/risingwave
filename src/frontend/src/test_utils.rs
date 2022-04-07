@@ -233,3 +233,46 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::io::Write;
+
+    use tempfile::{Builder, NamedTempFile};
+
+    pub static PROTO_FILE_DATA: &str = r#"
+    syntax = "proto3";
+    package test;
+    message TestRecord {
+      int32 id = 1;
+      Country country = 3;
+      int64 zipcode = 4;
+      float rate = 5;
+    }
+    message Country {
+      string address = 1;
+      City city = 2;
+      string zipcode = 3;
+    }
+    message City {
+      string address = 1;
+      string zipcode = 2;
+    }"#;
+
+    /// Returns the file.
+    /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
+    #[cfg(test)]
+    pub fn create_proto_file(proto_data: &str) -> NamedTempFile {
+        let temp_file = Builder::new()
+            .prefix("temp")
+            .suffix(".proto")
+            .rand_bytes(5)
+            .tempfile()
+            .unwrap();
+
+        let mut file = temp_file.as_file();
+        file.write_all(proto_data.as_ref())
+            .expect("writing binary to test file");
+        temp_file
+    }
+}

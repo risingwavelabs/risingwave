@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -24,22 +26,24 @@ use crate::optimizer::plan_node::PlanRef;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_set_expr(&mut self, set_expr: BoundSetExpr) -> Result<PlanRef> {
+    pub(super) fn plan_set_expr(
+        &mut self,
+        set_expr: BoundSetExpr,
+    ) -> Result<(PlanRef, HashMap<String, ColumnDesc>)> {
         match set_expr {
             BoundSetExpr::Select(s) => {
-                self.store_struct_column(&s)?;
-                self.plan_select(*s)
+                let column_name_to_desc = self.store_struct_column(&s)?;
+                Ok((self.plan_select(*s)?, column_name_to_desc))
             }
-            BoundSetExpr::Values(v) => self.plan_values(*v),
+            BoundSetExpr::Values(v) => Ok((self.plan_values(*v)?, HashMap::new())),
         }
     }
 
-    fn store_struct_column(&mut self, select: &BoundSelect) -> Result<()> {
-        // TODO: Support other relation type.
-        let table = Self::extract_source(select.from.as_ref().unwrap())?;
+    /// For every struct select item, store its `alias_name` and `column_desc` in the map.
+    fn store_struct_column(&mut self, select: &BoundSelect) -> Result<HashMap<String, ColumnDesc>> {
+        let table = Self::extract_column_descs(select.from.as_ref().unwrap())?;
+        let mut column_name_to_desc = HashMap::new();
 
-        // For every struct select item, store its `alias_name`
-        // and `column_desc` in the map. This map will be used in `StreamMaterialize::create`.
         for i in 0..select.select_items.len() {
             let item = &select.select_items[i];
             if let DataType::Struct { .. } = item.return_type() {
@@ -61,14 +65,16 @@ impl Planner {
                             None => column.name.clone(),
                         }
                     };
-                    self.column_name_to_desc.insert(name, column);
+                    column_name_to_desc.insert(name, column);
                 }
             }
         }
-        Ok(())
+        Ok(column_name_to_desc)
     }
 
-    fn extract_source(relation: &Relation) -> Result<Vec<ColumnDesc>> {
+    /// Extract `column_descs` from relation.
+    fn extract_column_descs(relation: &Relation) -> Result<Vec<ColumnDesc>> {
+        // TODO: Support other relation type.
         match relation {
             Relation::Source(source) => Ok(source
                 .catalog
