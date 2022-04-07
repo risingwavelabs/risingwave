@@ -17,9 +17,7 @@ use std::path::Path;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use risingwave_common::array::Op;
-use risingwave_common::error::ErrorCode::{
-    InternalError, ItemNotFound, NotImplementedError, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_pb::plan::ColumnDesc;
@@ -194,7 +192,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
     let is_repeated = f.is_repeated();
     let field_type = &f.field_type(descriptors);
     if is_repeated {
-        return Err(NotImplementedError("repeated field is not supported".to_string()).into());
+        return Err(ErrorCode::NotImplemented(
+            "repeated field is not supported".to_string(),
+            None.into(),
+        )
+        .into());
     }
     let t = match field_type {
         FieldType::Double => DataType::Float64,
@@ -212,9 +214,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
             DataType::Struct { fields: vec.into() }
         }
         actual_type => {
-            return Err(
-                NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
-            );
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported field type: {:?}", actual_type),
+                None.into(),
+            )
+            .into());
         }
     };
     Ok(t)

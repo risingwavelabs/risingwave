@@ -144,7 +144,7 @@ impl Binder {
         Ok(match constraint {
             JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
-                return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
+                return Err(ErrorCode::NotImplemented("Natural join".into(), 1633.into()).into())
             }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
@@ -158,7 +158,7 @@ impl Binder {
                 bound_expr
             }
             JoinConstraint::Using(_columns) => {
-                return Err(ErrorCode::NotImplementedError("USING".into()).into())
+                return Err(ErrorCode::NotImplemented("USING".into(), 1636.into()).into())
             }
         })
     }
@@ -172,10 +172,10 @@ impl Binder {
                 } else {
                     let kind =
                         WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
-                            ErrorCode::NotImplementedError(format!(
-                                "unknown window function kind: {}",
-                                name.0[0].value
-                            ))
+                            ErrorCode::NotImplemented(
+                                format!("unknown window function kind: {}", name.0[0].value),
+                                1191.into(),
+                            )
                         })?;
                     Ok(Relation::WindowTableFunction(Box::new(
                         self.bind_window_table_function(kind, args)?,
@@ -188,17 +188,17 @@ impl Binder {
                 alias,
             } => {
                 if lateral {
-                    Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
+                    Err(ErrorCode::NotImplemented("unsupported lateral".into(), None.into()).into())
                 } else {
                     Ok(Relation::Subquery(Box::new(
                         self.bind_subquery_relation(*subquery, alias)?,
                     )))
                 }
             }
-            _ => Err(ErrorCode::NotImplementedError(format!(
-                "unsupported table factor {:?}",
-                table_factor
-            ))
+            _ => Err(ErrorCode::NotImplemented(
+                format!("unsupported table factor {:?}", table_factor),
+                None.into(),
+            )
             .into()),
         }
     }

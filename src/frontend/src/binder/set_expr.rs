@@ -61,7 +61,7 @@ impl Binder {
         match set_expr {
             SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
             SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
-            _ => Err(ErrorCode::NotImplementedError(format!("{:?}", set_expr)).into()),
+            _ => Err(ErrorCode::NotImplemented(format!("{:?}", set_expr), None.into()).into()),
         }
     }
 }

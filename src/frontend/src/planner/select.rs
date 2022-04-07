@@ -121,9 +121,11 @@ impl Planner {
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftSemi,
                 SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             };
             let right = self.plan_query(subquery.query)?.as_subplan();
@@ -140,9 +142,11 @@ impl Planner {
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftAnti,
                 SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             };
             let right = self.plan_query(subquery.query)?.as_subplan();
@@ -209,9 +213,11 @@ impl Planner {
                     right = self.create_exists(right)?;
                 }
                 SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             }
 
