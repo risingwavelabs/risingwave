@@ -125,7 +125,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers dev ci-1node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} './e2e_test/source/**/*.slt'
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
 
       - name: Kill cluster
         run: |
@@ -137,7 +137,7 @@ jobs:
         run: |
           ~/cargo-make/makers clean-data
           ~/cargo-make/makers dev ci-3node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} './e2e_test/source_distributed/**/*.slt'
+          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
 
       - name: Kill cluster
         run: |
