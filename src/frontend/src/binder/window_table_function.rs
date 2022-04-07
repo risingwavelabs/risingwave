@@ -6,7 +6,7 @@ use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
 use super::{Binder, Relation, Result};
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {

@@ -21,7 +21,7 @@ use crate::binder::{
     BoundBaseTable, BoundJoin, BoundSource, BoundWindowTableFunction, Relation,
     WindowTableFunctionKind,
 };
-use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalJoin, LogicalProject, LogicalScan, LogicalSource, PlanRef,
 };
