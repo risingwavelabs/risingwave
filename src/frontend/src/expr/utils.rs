@@ -199,7 +199,7 @@ mod tests {
 
         let res = fold_boolean_constant(expr);
 
-        assert!(res.clone().as_input_ref().is_some());
+        assert!(res.as_input_ref().is_some());
         let res = res.as_input_ref().unwrap();
         assert_eq!(res.index(), 0);
 
@@ -215,7 +215,7 @@ mod tests {
         .into();
 
         let res = fold_boolean_constant(expr);
-        assert!(res.clone().as_literal().is_some());
+        assert!(res.as_literal().is_some());
         let res = res.as_literal().unwrap();
         assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(false)));
     }
@@ -234,7 +234,7 @@ mod tests {
         .into();
 
         let res = fold_boolean_constant(expr);
-        assert!(res.clone().as_literal().is_some());
+        assert!(res.as_literal().is_some());
         let res = res.as_literal().unwrap();
         assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(true)));
 
@@ -251,7 +251,7 @@ mod tests {
 
         let res = fold_boolean_constant(expr);
 
-        assert!(res.clone().as_input_ref().is_some());
+        assert!(res.as_input_ref().is_some());
         let res = res.as_input_ref().unwrap();
         assert_eq!(res.index(), 0);
     }
@@ -289,7 +289,7 @@ mod tests {
 
         let res = fold_boolean_constant(expr);
 
-        assert!(res.clone().as_literal().is_some());
+        assert!(res.as_literal().is_some());
         let res = res.as_literal().unwrap();
         assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(false)));
     }
