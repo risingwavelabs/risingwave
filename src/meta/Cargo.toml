@@ -15,7 +15,7 @@ chrono = "0.4"
 clap = { version = "3", features = ["derive"] }
 crc32fast = "1"
 either = "1"
-etcd-client = "0.8"
+etcd-client = "0.9"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
 hyper = "0.14"
