@@ -433,6 +433,9 @@ jobs:
       - name: Build Rust components
         run: |
           cargo build --profile dev --features=all-in-one
+      - name: Compress RisingWave debug info
+        run: |
+          objcopy --compress-debug-sections=zlib-gnu target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-dev

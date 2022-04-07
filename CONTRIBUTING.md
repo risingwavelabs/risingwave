@@ -10,6 +10,7 @@
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
     - [Unit Tests](#unit-tests)
+    - [Planner Tests](#planner-tests)
     - [End-to-End Testing](#end-to-end-testing)
     - [End-to-End Testing on CI](#end-to-end-testing-on-ci)
   - [Developing Dashboard](#developing-dashboard)
@@ -183,6 +184,10 @@ If you want to see the coverage report,
 ```shell
 ./risedev test-cov
 ```
+
+### Planner Tests
+
+RisingWave's SQL frontend has some tests for plans of specific SQLs. See [Planner Test Guide](src/frontend/test_runner/README.md) for more information.
 
 ### End-to-End Testing
 

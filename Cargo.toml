@@ -37,3 +37,6 @@ incremental = false
 debug-assertions = false
 overflow-checks = false
 rpath = false
+
+[profile.release]
+debug = true
