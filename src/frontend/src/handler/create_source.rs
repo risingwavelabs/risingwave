@@ -117,7 +117,6 @@ pub mod tests {
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
-    use risingwave_pb::catalog::source::Info;
     use tempfile::NamedTempFile;
 
     use crate::catalog::gen_row_id_column_name;

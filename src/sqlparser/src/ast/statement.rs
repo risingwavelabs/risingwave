@@ -150,12 +150,6 @@ impl fmt::Display for ProtobufSchema {
     }
 }
 
-impl ParseTo for ObjectName {
-    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
-        p.parse_object_name()
-    }
-}
-
 impl ParseTo for CreateSourceStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
