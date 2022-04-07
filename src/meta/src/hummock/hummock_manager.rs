@@ -177,11 +177,11 @@ where
                 levels: vec![
                     Level {
                         level_type: LevelType::Overlapping as i32,
-                        table_ids: vec![],
+                        table_infos: vec![],
                     },
                     Level {
                         level_type: LevelType::Nonoverlapping as i32,
-                        table_ids: vec![],
+                        table_infos: vec![],
                     },
                 ],
                 uncommitted_epochs: vec![],
@@ -722,7 +722,15 @@ where
         let input_sst_ids = compact_task
             .input_ssts
             .iter()
-            .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+            .flat_map(|v| {
+                v.level
+                    .as_ref()
+                    .unwrap()
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.id)
+                    .collect_vec()
+            })
             .collect_vec();
         let output_sst_ids = compact_task
             .sorted_output_ssts
@@ -771,16 +779,38 @@ where
                     .map(|level_handler| match level_handler {
                         LevelHandler::Overlapping(l_n, _) => Level {
                             level_type: LevelType::Overlapping as i32,
-                            table_ids: l_n
+                            table_infos: l_n
                                 .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
+                                .map(
+                                    |SSTableStat {
+                                         table_id,
+                                         key_range,
+                                         ..
+                                     }| {
+                                        SstableInfo {
+                                            id: *table_id,
+                                            key_range: Some(key_range.clone().into()),
+                                        }
+                                    },
+                                )
                                 .collect(),
                         },
                         LevelHandler::Nonoverlapping(l_n, _) => Level {
                             level_type: LevelType::Nonoverlapping as i32,
-                            table_ids: l_n
+                            table_infos: l_n
                                 .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
+                                .map(
+                                    |SSTableStat {
+                                         table_id,
+                                         key_range,
+                                         ..
+                                     }| {
+                                        SstableInfo {
+                                            id: *table_id,
+                                            key_range: Some(key_range.clone().into()),
+                                        }
+                                    },
+                                )
                                 .collect(),
                         },
                     })
@@ -895,7 +925,7 @@ where
                     uncommitted_epoch
                         .tables
                         .iter()
-                        .for_each(|t| version_first_level.table_ids.push(t.id));
+                        .for_each(|t| version_first_level.table_infos.push(t.clone()));
                 }
                 LevelType::Nonoverlapping => {
                     unimplemented!()

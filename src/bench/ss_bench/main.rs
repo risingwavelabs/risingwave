@@ -22,6 +22,7 @@ use operations::*;
 use risingwave_common::config::StorageConfig;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_storage::hummock::compactor::CompactorContext;
 use risingwave_storage::monitor::StateStoreMetrics;
 use risingwave_storage::{dispatch_state_store, StateStoreImpl};
 
@@ -91,6 +92,10 @@ pub(crate) struct Opts {
 
     #[clap(long)]
     calibrate_histogram: bool,
+
+    // 0 represent do nothing because all files will be synced to L0.
+    #[clap(long, default_value_t = 0)]
+    compact_level_after_write: u32,
 }
 
 fn preprocess_options(opts: &mut Opts) {
@@ -139,15 +144,26 @@ async fn main() {
     ));
     let state_store = StateStoreImpl::new(
         &opts.store,
-        config,
+        config.clone(),
         mock_hummock_meta_client.clone(),
         state_store_stats.clone(),
     )
     .await
     .expect("Failed to get state_store");
+    let mut context = None;
+    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+        context = Some(Arc::new(CompactorContext {
+            options: config.clone(),
+            local_version_manager: hummock.inner().local_version_manager().clone(),
+            hummock_meta_client: mock_hummock_meta_client.clone(),
+            sstable_store: hummock.inner().sstable_store(),
+            stats: state_store_stats.clone(),
+            is_share_buffer_compact: false,
+        }));
+    }
 
     dispatch_state_store!(state_store, store, {
-        Operations::run(store, mock_hummock_meta_client, &opts).await
+        Operations::run(store, mock_hummock_meta_client, context, &opts).await
     });
 
     if opts.statistics {
