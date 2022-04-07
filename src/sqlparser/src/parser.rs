@@ -2483,9 +2483,9 @@ impl Parser {
         }
     }
 
-    /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show.
-    /// Return Statement::ShowCommand or Statement::ShowColumn.
-    /// If not, return Statement::ShowVariable.
+    /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show,
+    /// return `Statement::ShowCommand` or `Statement::ShowColumn`,
+    /// otherwise, return `Statement::ShowVariable`.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let index = self.index;
         if let Token::Word(w) = self.next_token() {
