@@ -157,6 +157,12 @@ impl fmt::Display for ObjectName {
     }
 }
 
+impl ParseTo for ObjectName {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        p.parse_object_name()
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types

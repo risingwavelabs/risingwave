@@ -40,7 +40,9 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
         Statement::Explain {
             statement, verbose, ..
         } => explain::handle_explain(context, *statement, verbose),
-        Statement::CreateSource(stmt) => create_source::handle_create_source(context, stmt).await,
+        Statement::CreateSource(stmt) => {
+            create_source::handle_create_source(context, false, stmt).await
+        }
         Statement::CreateTable { name, columns, .. } => {
             create_table::handle_create_table(context, name, columns).await
         }
