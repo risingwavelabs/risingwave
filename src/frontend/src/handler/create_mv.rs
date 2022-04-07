@@ -86,6 +86,7 @@ pub mod tests {
     use risingwave_common::types::DataType;
     use tempfile::NamedTempFile;
 
+    use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
     /// Returns the file.
@@ -167,7 +168,9 @@ pub mod tests {
         let city_type = DataType::Struct {
             fields: vec![DataType::Varchar, DataType::Varchar].into(),
         };
+        let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
+            row_id_col_name.as_str() => DataType::Int64,
             "c.zipcode" => DataType::Varchar,
             "c.city.address" => DataType::Varchar,
             "c.address" => DataType::Varchar,
