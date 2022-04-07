@@ -20,6 +20,7 @@ crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
+enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
@@ -37,16 +38,17 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
+risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
-rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
-    "encryption",
-    "static_libcpp",
-], optional = true }
+# rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
+#     "encryption",
+#     "static_libcpp",
+# ], optional = true }
 serde = { version = "1", features = ["derive"] }
 smallvec = "1"
 thiserror = "1"
-tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
+# tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
 tokio = { version = "1", features = [
     "fs",
     "rt",
@@ -66,11 +68,12 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = "0.3"
+risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
 
-[features]
-rocksdb-local = ["rocksdb"]
-tikv = ["tikv-client"]
+# [features]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
 
 [[bench]]
 name = "bench_block_iter"

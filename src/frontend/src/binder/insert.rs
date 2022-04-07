@@ -58,7 +58,11 @@ impl Binder {
             // TODO: insert type cast for select exprs
             SetExpr::Select(_) => self.bind_query(source)?,
 
-            _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", source.body)).into()),
+            _ => {
+                return Err(
+                    ErrorCode::NotImplemented(format!("{:?}", source.body), None.into()).into(),
+                )
+            }
         };
 
         let insert = BoundInsert {

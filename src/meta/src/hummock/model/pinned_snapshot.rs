@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use prost::Message;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{HummockContextRefId, HummockPinnedSnapshot};
-use risingwave_storage::hummock::HummockEpoch;
 
 use crate::model::MetadataModel;
 

@@ -170,6 +170,9 @@ impl Parser {
                 Keyword::COPY => Ok(self.parse_copy()?),
                 Keyword::SET => Ok(self.parse_set()?),
                 Keyword::SHOW => Ok(self.parse_show()?),
+                Keyword::DESCRIBE => Ok(Statement::Describe {
+                    name: self.parse_object_name()?,
+                }),
                 Keyword::GRANT => Ok(self.parse_grant()?),
                 Keyword::REVOKE => Ok(self.parse_revoke()?),
                 Keyword::START => Ok(self.parse_start_transaction()?),
@@ -2480,20 +2483,41 @@ impl Parser {
         }
     }
 
-    // If first word is table or source, return show table or show source
+    /// If have `databases`,`tables`,`columns`,`schemas` and `materialized views` after show,
+    /// return `Statement::ShowCommand` or `Statement::ShowColumn`,
+    /// otherwise, return `Statement::ShowVariable`.
     pub fn parse_show(&mut self) -> Result<Statement, ParserError> {
         let index = self.index;
         if let Token::Word(w) = self.next_token() {
             match w.keyword {
-                Keyword::TABLE => {
-                    return Ok(Statement::ShowTable {
-                        name: self.parse_object_name()?,
-                    });
+                Keyword::TABLES => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Table(
+                        self.parse_from_and_identifier()?,
+                    )));
                 }
-                Keyword::SOURCE => {
-                    return Ok(Statement::ShowSource {
-                        name: self.parse_object_name()?,
-                    });
+                Keyword::DATABASES => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Database));
+                }
+                Keyword::SCHEMAS => {
+                    return Ok(Statement::ShowCommand(ShowCommandObject::Schema));
+                }
+                Keyword::MATERIALIZED => {
+                    if self.parse_keyword(Keyword::VIEWS) {
+                        return Ok(Statement::ShowCommand(ShowCommandObject::MaterializedView(
+                            self.parse_from_and_identifier()?,
+                        )));
+                    } else {
+                        return self.expected("views after materialized", self.peek_token());
+                    }
+                }
+                Keyword::COLUMNS => {
+                    if self.parse_keyword(Keyword::FROM) {
+                        return Ok(Statement::ShowColumn {
+                            name: self.parse_object_name()?,
+                        });
+                    } else {
+                        return self.expected("from after columns", self.peek_token());
+                    }
                 }
                 _ => {}
             }
@@ -2502,6 +2526,16 @@ impl Parser {
         Ok(Statement::ShowVariable {
             variable: self.parse_identifiers()?,
         })
+    }
+
+    /// Parser `from schema` after `show tables` and `show materialized views`, if not conclude
+    /// `from` then use default schema name.
+    pub fn parse_from_and_identifier(&mut self) -> Result<Option<Ident>, ParserError> {
+        if self.parse_keyword(Keyword::FROM) {
+            Ok(Some(self.parse_identifier()?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn parse_table_and_joins(&mut self) -> Result<TableWithJoins, ParserError> {

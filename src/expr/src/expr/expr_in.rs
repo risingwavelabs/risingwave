@@ -92,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_search_expr() {
-        let input_ref = Box::new(InputRefExpression::new(DataType::Char, 0));
+        let input_ref = Box::new(InputRefExpression::new(DataType::Varchar, 0));
         let data = vec![
             Some(ScalarImpl::Utf8("abc".to_string())),
             Some(ScalarImpl::Utf8("def".to_string())),

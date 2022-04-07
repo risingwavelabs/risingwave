@@ -1,4 +1,4 @@
-use risingwave_common::error::{Result, ToRwResult};
+use risingwave_common::error::Result;
 use risingwave_pb::hummock::{HummockSnapshot, PinSnapshotRequest, UnpinSnapshotRequest};
 use risingwave_rpc_client::MetaClient;
 
@@ -30,8 +30,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 // retrying this RPC.
                 last_pinned: u64::MAX,
             })
-            .await
-            .to_rw_result()?;
+            .await?;
         Ok(resp.get_snapshot()?.epoch)
     }
 
@@ -46,8 +45,7 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 context_id: 0,
                 snapshots: vec![HummockSnapshot { epoch }],
             })
-            .await
-            .to_rw_result()?;
+            .await?;
         Ok(())
     }
 }

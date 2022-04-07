@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use futures::Stream;
 use futures_async_stream::try_stream;
+use log::debug;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::common::HostAddress;
@@ -95,7 +96,7 @@ impl QueryManager {
     pub async fn schedule(
         &self,
         context: ExecutionContextRef,
-        _query: Query,
+        query: Query,
     ) -> Result<impl DataChunkStream> {
         // Cheat compiler to resolve type
         let session = context.session();
@@ -106,7 +107,7 @@ impl QueryManager {
         let epoch = meta_client.pin_snapshot().await?;
 
         let query_execution = QueryExecution::new(
-            _query,
+            query,
             epoch,
             meta_client,
             session.env().worker_node_manager_ref(),
@@ -135,6 +136,10 @@ impl QueryResultFetcher {
 
     #[try_stream(ok = DataChunk, error = RwError)]
     async fn run(self) {
+        debug!(
+            "Starting to run query result fetcher, task output id: {:?}, task_host: {:?}",
+            self.task_output_id, self.task_host
+        );
         let compute_client: ComputeClient = ComputeClient::new((&self.task_host).into()).await?;
 
         let mut source = compute_client.get_data(self.task_output_id).await?;

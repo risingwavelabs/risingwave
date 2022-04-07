@@ -393,10 +393,10 @@ mod tests {
         let project = plan.as_logical_project().unwrap();
         assert_eq!(project.exprs().len(), 2);
         assert_eq_input_ref!(&project.exprs()[0], 1);
-        match project.exprs()[1].clone() {
-            ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
-            _ => panic!("Expected function call"),
-        }
+
+        let expr = project.exprs()[1].clone();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
 
         let values = project.input();
         let values = values.as_logical_values().unwrap();

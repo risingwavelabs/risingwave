@@ -40,7 +40,7 @@ impl Distribution {
                 Distribution::Broadcast => DistributionMode::Broadcast,
                 Distribution::HashShard(_) => DistributionMode::Hash,
                 // TODO: Should panic if AnyShard or Any
-                _ => DistributionMode::Hash,
+                _ => DistributionMode::Single,
             } as i32,
             distribution: match self {
                 Distribution::Single => None,
@@ -52,7 +52,7 @@ impl Distribution {
                     keys: keys.iter().map(|num| *num as u32).collect(),
                 })),
                 // TODO: Should panic if AnyShard or Any
-                Distribution::AnyShard | Distribution::Any => None,
+                _ => None,
             },
         }
     }
@@ -115,13 +115,11 @@ impl Distribution {
         matches!(self, Distribution::Any)
     }
 
-    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
-    /// valid.
+    /// Get distribution column indices.
     pub fn dist_column_indices(&self) -> &[usize] {
         match self {
-            Distribution::Single => Default::default(),
             Distribution::HashShard(dists) => dists,
-            _ => unreachable!(),
+            _ => &[],
         }
     }
 }

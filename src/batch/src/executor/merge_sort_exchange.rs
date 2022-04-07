@@ -241,7 +241,7 @@ impl<CS: 'static + CreateSource> BoxedExecutorBuilder for MergeSortExchangeExecu
 
 #[cfg(test)]
 mod tests {
-
+    use std::fmt::Debug;
     use std::sync::Arc;
 
     use risingwave_common::array::column::Column;
@@ -254,6 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
+        #[derive(Debug)]
         struct FakeExchangeSource {
             chunk: Option<DataChunk>,
         }
@@ -266,6 +267,7 @@ mod tests {
             }
         }
 
+        #[derive(Debug)]
         struct FakeCreateSource {}
 
         #[async_trait::async_trait]

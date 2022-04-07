@@ -22,6 +22,6 @@ impl Binder {
             return Ok(Subquery::new(query, kind).into());
         }
 
-        Err(ErrorCode::NotImplementedError("correlated subquery".to_string()).into())
+        Err(ErrorCode::NotImplemented("correlated subquery".to_string(), 1343.into()).into())
     }
 }

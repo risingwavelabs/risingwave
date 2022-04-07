@@ -35,7 +35,7 @@ fn get_return_type_and_children(prost: &ExprNode) -> Result<(Vec<ExprNode>, Data
     if let RexNode::FuncCall(func_call) = prost.get_rex_node()? {
         Ok((func_call.get_children().to_vec(), ret_type))
     } else {
-        Err(RwError::from(ErrorCode::NotImplementedError(
+        Err(RwError::from(ErrorCode::InternalError(
             "expects a function call".to_string(),
         )))
     }

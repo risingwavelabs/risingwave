@@ -23,7 +23,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -256,7 +255,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .add_table_fragments(table_fragments.clone())
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {
@@ -271,10 +270,9 @@ where
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
-        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
         self.barrier_manager
-            .run_command(Command::DropMaterializedView(table_id.clone()))
+            .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
         Ok(())
@@ -309,6 +307,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::plan::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,

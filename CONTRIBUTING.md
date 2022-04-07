@@ -10,6 +10,7 @@
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
     - [Unit Tests](#unit-tests)
+    - [Planner Tests](#planner-tests)
     - [End-to-End Testing](#end-to-end-testing)
     - [End-to-End Testing on CI](#end-to-end-testing-on-ci)
   - [Developing Dashboard](#developing-dashboard)
@@ -58,8 +59,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 To install components in Debian-based Linux systems, run:
 
 ```shell
-sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
-sudo apt install postgresql-client
+sudo apt install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config postgresql-client
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
@@ -68,13 +68,8 @@ Then you'll be able to compile and start RisingWave!
 ## Code Structure
 
 - The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
-- The `src` folder contains all of the system components, where:
-  - `meta`: the meta service
-  - `batch`: the OLAP engine
-  - `stream`: the stream engine
-  - `storage`: the cloud-native storage engine
-  - `frontend`: SQL frontend
-  - `risedevtool`: the devtool for RisingWave
+- The `src` folder contains all of the kernal components, read [src/README.md][https://github.com/singularity-data/risingwave/blob/main/src/README.md] for more details.
+- The `docker` folder contains Dockerfiles to build and start RisingWave.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
 - The `dashbaord` folder contains RisingWave dashboard v2.
@@ -95,7 +90,7 @@ RiseDev can help you compile and start a dev cluster. It is as simple as:
 
 ```shell
 ./risedev d                        # shortcut for ./risedev dev
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566
 ```
 
 The default dev cluster only includes meta-node, compute-node and frontend-node. No data will be persisted, and everything will be in-memory. This should be very useful when developing and debugging.
@@ -185,6 +180,10 @@ If you want to see the coverage report,
 ./risedev test-cov
 ```
 
+### Planner Tests
+
+RisingWave's SQL frontend has some tests for plans of specific SQLs. See [Planner Test Guide](src/frontend/test_runner/README.md) for more information.
+
 ### End-to-End Testing
 
 Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run our e2e tests.
@@ -197,14 +196,14 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 
 To run end-to-end test, you will need to start a full cluster first:
 
-```
-./risedev d
+```shell
+RW_IMPLICIT_FLUSH=1 ./risedev d
 ```
 
-Then, use `sqllogictest` command to run some e2e tests:
+Then run some e2e tests:
 
 ```shell
-sqllogictest -p 4567 -d dev './e2e_test/v2/**/*.slt'
+./risedev slt -p 4566 './e2e_test/v2/**/*.slt'
 ```
 
 After running e2e tests, you may kill the cluster and clean data.

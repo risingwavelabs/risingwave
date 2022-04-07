@@ -25,7 +25,7 @@ TODO: Find a suitable testing framework
 Start the system (run the following script at ./risingwave)
 ```bash
 ./risedev d
-sqllogictest -p 4567 -d dev './e2e_test/streaming/tpch/tpch.slt'
+sqllogictest -p 4567 './e2e_test/streaming/tpch/tpch.slt'
 ```
 Install Dependencies
 ```bash

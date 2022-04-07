@@ -17,11 +17,11 @@ use std::collections::{BinaryHeap, LinkedList};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use super::variants::*;
 use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::HummockResult;
 use crate::monitor::StateStoreMetrics;
 

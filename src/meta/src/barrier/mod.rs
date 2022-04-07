@@ -236,6 +236,7 @@ where
                     // If failed, enter recovery mode.
                     let (new_epoch, actors_to_finish, finished_create_mviews) =
                         self.recovery(prev_epoch, &command).await;
+                    unfinished = UnfinishedNotifiers::default();
                     unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
                     for finished in finished_create_mviews {
                         unfinished.finish_actors(finished.epoch, once(finished.actor_id));
