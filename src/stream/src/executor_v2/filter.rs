@@ -273,6 +273,6 @@ mod tests {
             unreachable!();
         }
 
-        assert!(filter.next().await.unwrap().unwrap().is_terminate());
+        assert!(filter.next().await.unwrap().unwrap().is_stop());
     }
 }
