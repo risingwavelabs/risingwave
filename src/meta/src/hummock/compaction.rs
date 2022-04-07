@@ -20,9 +20,9 @@ use prost::Message;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
 use risingwave_common::error::Result;
-use risingwave_common::storage::key::{user_key, FullKey};
-use risingwave_common::storage::key_range::KeyRange;
-use risingwave_common::storage::{HummockEpoch, HummockSSTableId};
+use risingwave_hummock_sdk::key::{user_key, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, Level, LevelEntry, LevelType, TableSetStatistics,
 };

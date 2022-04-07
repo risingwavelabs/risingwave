@@ -20,10 +20,10 @@ use futures::stream::{self, StreamExt};
 use futures::Future;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::storage::compact::compact_task_to_string;
-use risingwave_common::storage::key::{get_epoch, Epoch, FullKey};
-use risingwave_common::storage::key_range::KeyRange;
-use risingwave_common::storage::VersionedComparator;
+use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::key::{get_epoch, Epoch, FullKey};
+use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::VersionedComparator;
 use risingwave_pb::hummock::{
     CompactTask, LevelEntry, LevelType, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };

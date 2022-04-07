@@ -16,7 +16,7 @@ use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::storage::VersionedComparator;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::variants::BACKWARD;
 use crate::hummock::iterator::HummockIterator;
@@ -150,7 +150,7 @@ impl SSTableIteratorType for ReverseSSTableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
-    use risingwave_common::storage::key::key_with_epoch;
+    use risingwave_hummock_sdk::key::key_with_epoch;
 
     use super::*;
     use crate::assert_bytes_eq;

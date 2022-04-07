@@ -17,7 +17,7 @@ use itertools::Itertools;
 use rand::distributions::Uniform;
 use rand::rngs::StdRng;
 use rand::Rng;
-use risingwave_common::storage::key::next_key;
+use risingwave_hummock_sdk::key::next_key;
 
 use crate::Opts;
 

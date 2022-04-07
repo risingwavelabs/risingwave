@@ -224,7 +224,7 @@ impl SharedBufferManager {
 mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
-    use risingwave_common::storage::key::{key_with_epoch, user_key};
+    use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
     use risingwave_meta::hummock::test_utils::setup_compute_env;
     use risingwave_meta::hummock::MockHummockMetaClient;
 

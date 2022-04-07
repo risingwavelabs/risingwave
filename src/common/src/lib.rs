@@ -44,7 +44,6 @@ pub mod catalog;
 pub mod collection;
 pub mod config;
 pub mod hash;
-pub mod storage;
 #[cfg(test)]
 pub mod test_utils;
 pub mod types;

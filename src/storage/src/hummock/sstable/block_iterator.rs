@@ -17,7 +17,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use bytes::BytesMut;
-use risingwave_common::storage::VersionedComparator;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use super::{Block, KeyPrefix};
 

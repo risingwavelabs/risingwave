@@ -19,9 +19,9 @@ use paste::paste;
 use risingwave_common::catalog::{CatalogVersion, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
-use risingwave_common::storage::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_common::try_match_expand;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
 };

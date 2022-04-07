@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use bytes::{BufMut, Bytes, BytesMut};
-use risingwave_common::storage::key::user_key;
+use risingwave_hummock_sdk::key::user_key;
 
 use super::bloom::Bloom;
 use super::utils::CompressionAlgorithm;

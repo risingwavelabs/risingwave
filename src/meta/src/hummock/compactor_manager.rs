@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::error::{ErrorCode, Result, ToErrorStr};
-use risingwave_common::storage::HummockContextId;
+use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::{CompactTask, SubscribeCompactTasksResponse, VacuumTask};
 use tokio::sync::mpsc::{Receiver, Sender};
 

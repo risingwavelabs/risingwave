@@ -15,7 +15,7 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use risingwave_common::storage::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
 use crate::hummock::local_version_manager::ScopedLocalVersion;
@@ -265,8 +265,8 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
-    use risingwave_common::storage::key::{prev_key, user_key};
-    use risingwave_common::storage::VersionedComparator;
+    use risingwave_hummock_sdk::key::{prev_key, user_key};
+    use risingwave_hummock_sdk::VersionedComparator;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{

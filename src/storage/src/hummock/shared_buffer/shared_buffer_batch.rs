@@ -180,7 +180,7 @@ impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIREC
 mod tests {
 
     use itertools::Itertools;
-    use risingwave_common::storage::key::user_key;
+    use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, iterator_test_key_of_epoch};

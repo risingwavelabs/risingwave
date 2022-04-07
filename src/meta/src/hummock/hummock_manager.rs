@@ -22,7 +22,7 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::storage::{
+use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
     INVALID_EPOCH,
 };
@@ -341,7 +341,7 @@ where
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
         let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
-            risingwave_common::storage::key_range::KeyRange,
+            risingwave_hummock_sdk::key_range::KeyRange,
             u64,
             u64,
         )>| {

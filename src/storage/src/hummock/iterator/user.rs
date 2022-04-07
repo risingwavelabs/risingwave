@@ -15,7 +15,7 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
-use risingwave_common::storage::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 
 use super::{HummockIterator, MergeIterator};
 use crate::hummock::iterator::ReverseUserIterator;
@@ -249,7 +249,7 @@ mod tests {
     use std::ops::Bound::*;
     use std::sync::Arc;
 
-    use risingwave_common::storage::key::user_key;
+    use risingwave_hummock_sdk::key::user_key;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{

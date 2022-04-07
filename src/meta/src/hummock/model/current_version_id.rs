@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
-use risingwave_common::storage::{HummockVersionId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{HummockVersionId, FIRST_VERSION_ID};
 use risingwave_pb::hummock::HummockVersionRefId;
 
 use crate::hummock::model::HUMMOCK_DEFAULT_CF_NAME;

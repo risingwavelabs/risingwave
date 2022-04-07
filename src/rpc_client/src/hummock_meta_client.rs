@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use risingwave_common::error::Result;
-use risingwave_common::storage::{HummockEpoch, HummockSSTableId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
     CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };

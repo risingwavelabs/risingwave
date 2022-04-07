@@ -257,7 +257,7 @@ impl StateStoreIter for TikvStateStoreIter {
 mod tests {
 
     use bytes::Bytes;
-    use risingwave_common::storage::key::next_key;
+    use risingwave_hummock_sdk::key::next_key;
 
     use super::{TikvStateStore, *};
     use crate::StateStore;

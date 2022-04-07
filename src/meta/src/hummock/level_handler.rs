@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::storage::key_range::KeyRange;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_pb::hummock::level_handler::KeyRangeTaskId;
 use risingwave_pb::hummock::SstableInfo;
 

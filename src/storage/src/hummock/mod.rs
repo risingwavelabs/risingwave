@@ -52,7 +52,7 @@ pub mod value;
 
 pub use error::*;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::storage::{VersionedComparator, *};
+use risingwave_hummock_sdk::{VersionedComparator, *};
 use risingwave_pb::hummock::LevelType;
 use value::*;
 

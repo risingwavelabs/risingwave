@@ -21,11 +21,11 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Row};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::storage::key::next_key;
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
+use risingwave_hummock_sdk::key::next_key;
 
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;

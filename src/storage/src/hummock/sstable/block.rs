@@ -18,7 +18,7 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
-use risingwave_common::storage::VersionedComparator;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use super::utils::{
     bytes_diff, var_u32_len, xxhash64_verify, BufExt, BufMutExt, CompressionAlgorithm,

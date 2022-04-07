@@ -3521,6 +3521,7 @@ dependencies = [
  "prometheus 0.13.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",
@@ -3806,6 +3807,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_hummock_sdk"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "log",
+ "prost 0.10.0",
+ "risingwave_pb",
+ "tokio",
+]
+
+[[package]]
 name = "risingwave_logging"
 version = "0.1.0"
 dependencies = [
@@ -3857,6 +3869,7 @@ dependencies = [
  "prost 0.10.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "risingwave_rpc_client",
  "serde",
@@ -3916,6 +3929,7 @@ dependencies = [
  "log",
  "paste",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_pb",
  "tokio",
  "tonic 0.7.0",
@@ -4038,6 +4052,7 @@ dependencies = [
  "prost 0.10.0",
  "rand 0.8.5",
  "risingwave_common",
+ "risingwave_hummock_sdk",
  "risingwave_meta",
  "risingwave_pb",
  "risingwave_rpc_client",

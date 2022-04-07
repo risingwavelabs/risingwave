@@ -17,7 +17,7 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
-use risingwave_common::storage::key::{key_with_epoch, Epoch};
+use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
 pub use crate::hummock::test_utils::default_builder_opt_for_test;

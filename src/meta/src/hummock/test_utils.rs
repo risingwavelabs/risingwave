@@ -16,8 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::storage::key::key_with_epoch;
-use risingwave_common::storage::{HummockContextId, HummockEpoch, HummockSSTableId};
+use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
 

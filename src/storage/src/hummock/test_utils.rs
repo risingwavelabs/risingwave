@@ -19,7 +19,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::storage::key::key_with_epoch;
+use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 

@@ -15,7 +15,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
-use risingwave_common::storage::key::next_key;
+use risingwave_hummock_sdk::key::next_key;
 
 use crate::StateStore;
 

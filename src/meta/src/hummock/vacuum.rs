@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::storage::HummockSSTableId;
+use risingwave_hummock_sdk::HummockSSTableId;
 use risingwave_pb::hummock::VacuumTask;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
