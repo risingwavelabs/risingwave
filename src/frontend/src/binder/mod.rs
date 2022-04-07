@@ -50,8 +50,6 @@ pub struct Binder {
     ///
     /// See [`Binder::bind_subquery_expr`] for details.
     upper_contexts: Vec<BindContext>,
-    /// whether is a mv query.
-    is_mv_query: bool,
     next_subquery_id: usize,
 }
 
@@ -62,18 +60,6 @@ impl Binder {
             db_name,
             context: BindContext::new(),
             upper_contexts: vec![],
-            is_mv_query: false,
-            next_subquery_id: 0,
-        }
-    }
-
-    pub fn new_with_mv_query(catalog: CatalogReadGuard, db_name: String) -> Binder {
-        Binder {
-            catalog,
-            db_name,
-            context: BindContext::new(),
-            upper_contexts: vec![],
-            is_mv_query: true,
             next_subquery_id: 0,
         }
     }

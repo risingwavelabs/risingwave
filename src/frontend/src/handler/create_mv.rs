@@ -38,7 +38,7 @@ pub fn gen_create_mv_plan(
         .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
 
     let bound = {
-        let mut binder = Binder::new_with_mv_query(
+        let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
             session.database().to_string(),
         );

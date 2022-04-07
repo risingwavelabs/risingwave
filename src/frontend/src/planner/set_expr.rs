@@ -66,18 +66,19 @@ impl Planner {
         Ok(())
     }
 
-    fn extract_source(relation: &Relation) -> Result<Vec<ColumnDesc>> {
-        match relation {
-            // Relation::BaseTable(table) => Ok(table.table_catalog.columns.clone()),
-            // Relation::Join(join) => {
-            //     let mut left_table = Self::extract_table(&join.left)?;
-            //     let mut right_table = Self::extract_table(&join.left)?;
-            //     left_table.append(&mut right_table);
-            //     Ok(left_table)
-            // }
-            _ => {
-                unimplemented!()
-            }
-        }
+    fn extract_source(_relation: &Relation) -> Result<Vec<ColumnDesc>> {
+        unimplemented!()
+        // match relation {
+        //     // Relation::BaseTable(table) => Ok(table.table_catalog.columns.clone()),
+        //     // Relation::Join(join) => {
+        //     //     let mut left_table = Self::extract_table(&join.left)?;
+        //     //     let mut right_table = Self::extract_table(&join.left)?;
+        //     //     left_table.append(&mut right_table);
+        //     //     Ok(left_table)
+        //     // }
+        //     _ => {
+        //         unimplemented!()
+        //     }
+        // }
     }
 }
