@@ -53,7 +53,6 @@ impl fmt::Display for Condition {
 
 impl Condition {
     pub fn with_expr(expr: ExprImpl) -> Self {
-        let expr = fold_boolean_constant(expr);
         let conjunctions = to_conjunctions(expr);
 
         Self { conjunctions }.simplify()
@@ -119,8 +118,7 @@ impl Condition {
     #[must_use]
     pub fn and(self, other: Self) -> Self {
         let mut ret = self;
-        ret.conjunctions
-            .extend(other.conjunctions.into_iter().map(fold_boolean_constant));
+        ret.conjunctions.extend(other.conjunctions);
         ret.simplify()
     }
 
@@ -254,23 +252,30 @@ impl Condition {
     }
 
     /// Simplify conditions
-    /// It assume that all elements in the `conjunctions` are already simplified. Therefore, it only
-    /// does simplification across elements. It remove all `true` elements from `conjunctions`,
-    /// and set `conjunctions` to `vec![false]` if there is a `false` in `conjunctions`.
+    /// It simplify conditions by applying constant folding and removing unnecessary conjunctions
     fn simplify(self) -> Self {
-        let mut conjunctions: Vec<ExprImpl> = Vec::new();
-        for i in self.conjunctions {
+        // boolean constant folding
+        let conjunctions: Vec<_> = self
+            .conjunctions
+            .into_iter()
+            .map(fold_boolean_constant)
+            .flat_map(to_conjunctions)
+            .collect();
+
+        let mut res: Vec<ExprImpl> = Vec::new();
+        for i in conjunctions {
             if let Some(v) = try_get_bool_constant(&i) {
                 if !v {
-                    conjunctions.clear();
-                    conjunctions.push(ExprImpl::literal_bool(false));
+                    // if there is a `false` in conjunctions, the whole condition will be `false`
+                    res.clear();
+                    res.push(ExprImpl::literal_bool(false));
                     break;
                 }
             } else {
-                conjunctions.push(i);
+                res.push(i);
             }
         }
-        Self { conjunctions }
+        Self { conjunctions: res }
     }
 }
 

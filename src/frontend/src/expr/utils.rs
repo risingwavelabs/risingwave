@@ -111,8 +111,10 @@ pub fn try_get_bool_constant(expr: &ExprImpl) -> Option<bool> {
 /// operator. It is required that the the lhs should always be a constant.
 fn boolean_constant_fold_and(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
     if try_get_bool_constant(&constant_lhs).unwrap() {
+        // true And rhs <=> rhs
         rhs
     } else {
+        // false And rhs <=> false
         constant_lhs
     }
 }
@@ -121,8 +123,10 @@ fn boolean_constant_fold_and(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl 
 /// operator. It is required that the the lhs should always be a constant.
 fn boolean_constant_fold_or(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
     if try_get_bool_constant(&constant_lhs).unwrap() {
+        // true Or rhs <=> true
         constant_lhs
     } else {
+        // false Or rhs <=> false
         rhs
     }
 }
