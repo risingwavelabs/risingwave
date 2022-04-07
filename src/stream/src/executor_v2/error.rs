@@ -91,7 +91,7 @@ impl std::fmt::Debug for TracedStreamExecutorError {
 
 impl From<StorageError> for TracedStreamExecutorError {
     fn from(s: StorageError) -> Self {
-        StreamExecutorError::storage(s).into()
+        StreamExecutorError::storage(s)
     }
 }
 
