@@ -74,11 +74,11 @@ in the Postgres shell.
 
 ### Connecting to an External Source
 
-Please refer to he full [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/).
+Please refer to the full [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/).
 
 ## Documentation
 
-Visit [RisingWave Docs](https://singularity-data.com/risingwave-docs/) for more information.
+Visit [RisingWave Docs](https://singularity-data.com/risingwave-docs/) and [Developer Docs](https://github.com/singularity-data/risingwave/tree/main/docs) for more information.
 
 ## License
 
