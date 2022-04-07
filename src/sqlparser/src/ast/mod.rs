@@ -735,7 +735,10 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource(CreateSourceStatement),
+    CreateSource {
+        is_materialized: bool,
+        stmt: CreateSourceStatement,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
@@ -1060,7 +1063,19 @@ impl fmt::Display for Statement {
                 table_name = table_name,
                 columns = display_separated(columns, ",")
             ),
-            Statement::CreateSource(stmt) => write!(f, "CREATE SOURCE {}", stmt),
+            Statement::CreateSource {
+                is_materialized,
+                stmt,
+            } => write!(
+                f,
+                "CREATE {materialized}SOURCE {}",
+                stmt,
+                materialized = if *is_materialized {
+                    "MATERIALIZED "
+                } else {
+                    ""
+                }
+            ),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1447,6 +1462,8 @@ pub enum ObjectType {
     MaterializedView,
     Index,
     Schema,
+    Source,
+    MaterializedSource,
 }
 
 impl fmt::Display for ObjectType {
@@ -1457,6 +1474,8 @@ impl fmt::Display for ObjectType {
             ObjectType::MaterializedView => "MATERIALIZED VIEW",
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
+            ObjectType::Source => "SOURCE",
+            ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
         })
     }
 }
@@ -1469,13 +1488,17 @@ impl ParseTo for ObjectType {
             ObjectType::View
         } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             ObjectType::MaterializedView
+        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
+            ObjectType::MaterializedSource
+        } else if parser.parse_keyword(Keyword::SOURCE) {
+            ObjectType::Source
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX or SCHEMA after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
                 parser.peek_token(),
             );
         };

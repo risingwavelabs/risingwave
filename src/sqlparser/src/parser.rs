@@ -1368,7 +1368,9 @@ impl Parser {
             self.prev_token();
             self.parse_create_view(or_replace)
         } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_create_source(or_replace)
+            self.parse_create_source(false, or_replace)
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
+            self.parse_create_source(true, or_replace)
         } else if or_replace {
             self.expected(
                 "[EXTERNAL] TABLE or [MATERIALIZED] VIEW after CREATE OR REPLACE",
@@ -1416,17 +1418,22 @@ impl Parser {
     }
 
     // CREATE [OR REPLACE]?
-    // SOURCE
+    // [MATERIALIZED] SOURCE
     // [IF NOT EXISTS]?
     // <source_name: Ident>
     // [COLUMNS]?
     // [WITH (properties)]?
     // ROW FORMAT <row_format: Ident>
     // [ROW SCHEMA LOCATION <row_schema_location: String>]?
-    pub fn parse_create_source(&mut self, _or_replace: bool) -> Result<Statement, ParserError> {
-        Ok(Statement::CreateSource(CreateSourceStatement::parse_to(
-            self,
-        )?))
+    pub fn parse_create_source(
+        &mut self,
+        is_materialized: bool,
+        _or_replace: bool,
+    ) -> Result<Statement, ParserError> {
+        Ok(Statement::CreateSource {
+            is_materialized,
+            stmt: CreateSourceStatement::parse_to(self)?,
+        })
     }
 
     fn parse_with_properties(&mut self) -> Result<Vec<SqlOption>, ParserError> {
