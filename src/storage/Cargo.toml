@@ -20,8 +20,8 @@ crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
-fail = "0.5"
 enum-as-inner = "0.4"
+fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
