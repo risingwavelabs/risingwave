@@ -41,7 +41,12 @@ impl Planner {
 
     /// For every struct select item, store its `alias_name` and `column_desc` in the map.
     fn store_struct_column(&mut self, select: &BoundSelect) -> Result<HashMap<String, ColumnDesc>> {
-        let table = Self::extract_column_descs(select.from.as_ref().unwrap())?;
+        let table: Vec<ColumnDesc> = {
+            match &select.from {
+                Some(relation) => Self::extract_column_descs(relation)?,
+                None => vec![],
+            }
+        };
         let mut column_name_to_desc = HashMap::new();
 
         for i in 0..select.select_items.len() {
@@ -82,9 +87,7 @@ impl Planner {
                 .iter()
                 .map(|c| c.column_desc.clone())
                 .collect_vec()),
-            _ => {
-                unimplemented!()
-            }
+            _ => Ok(vec![]),
         }
     }
 }
