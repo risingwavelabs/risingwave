@@ -144,6 +144,13 @@ fn new_add(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
             DataType::Timestamp,
         ));
     }
+    if rt.is_date_or_timestamp() && lt == DataType::Interval {
+        return Some(FunctionCall::new_with_return_type(
+            func_type,
+            vec![lhs, rhs],
+            DataType::Timestamp,
+        ));
+    }
     None
 }
 
