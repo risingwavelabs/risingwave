@@ -62,7 +62,11 @@ impl fmt::Debug for StreamExecutorV1 {
 impl ExecutorV1 for StreamExecutorV1 {
     async fn next(&mut self) -> Result<Message> {
         let stream = self.stream.as_mut().expect("not inited");
-        stream.next().await.unwrap().map_err(RwError::from)
+
+        match stream.next().await {
+            Some(result) => result.map_err(RwError::from),
+            None => Err(ErrorCode::Eof.into()), // we use `Eof` to represent end of stream in v1
+        }
     }
 
     fn schema(&self) -> &Schema {
@@ -255,8 +259,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 }
 
 impl<S: StateStore> BatchQueryExecutor<S> {
-    const DEFAULT_BATCH_SIZE: usize = 100;
-
     pub fn new_from_v1(
         table: CellBasedTable<S>,
         pk_indices: PkIndices,
