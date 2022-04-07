@@ -16,26 +16,48 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog, ColumnDesc, RowFormatType};
+use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ProtobufSchema, SourceSchema};
+use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
 
-use crate::binder::expr::bind_data_type;
-use crate::catalog::gen_row_id_column_name;
-use crate::session::OptimizerContext;
+use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
+use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::session::{OptimizerContext, SessionImpl};
 
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
+pub(crate) fn make_prost_source(
+    session: &SessionImpl,
+    name: ObjectName,
+    source_info: Info,
+) -> Result<ProstSource> {
+    let (schema_name, name) = Binder::resolve_table_name(name)?;
+
+    let (database_id, schema_id) = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+
+    Ok(ProstSource {
+        id: 0,
+        schema_id,
+        database_id,
+        name,
+        info: Some(source_info),
+    })
+}
+
+/// Map a protobuf schema to a relational schema.
+fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
         .into_iter()
-        .map(|col| ColumnCatalog {
+        .map(|col| ProstColumnCatalog {
             column_desc: Some(col),
             is_hidden: false,
         })
@@ -44,90 +66,48 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCa
 
 pub(super) async fn handle_create_source(
     context: OptimizerContext,
+    is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let session = context.session_ctx;
-
-    let schema_name = DEFAULT_SCHEMA_NAME;
-    let source_name = stmt.source_name.value.clone();
-
-    // pre add row_id catalog
-    let mut column_catalogs = vec![ColumnCatalog {
-        column_desc: Some(ColumnDesc {
-            column_id: 0,
-            name: gen_row_id_column_name(0),
-            column_type: Some(DataType::Int32.to_protobuf()),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        }),
-        is_hidden: true,
-    }];
-
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), schema_name, &source_name)?;
-
     let source = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            column_catalogs.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
+            let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
+            columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
                 properties: HashMap::from(stmt.with_properties),
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                 row_id_index: 0,
-                columns: column_catalogs,
+                columns,
                 pk_column_ids: vec![0],
             }
         }
-        SourceSchema::Json => {
-            column_catalogs.append(
-                &mut stmt
-                    .columns
-                    .into_iter()
-                    .enumerate()
-                    .map(|(idx, col)| {
-                        Ok(ColumnCatalog {
-                            column_desc: Some(ColumnDesc {
-                                column_id: (idx + 1) as i32,
-                                name: col.name.to_string(),
-                                column_type: Some(bind_data_type(&col.data_type)?.to_protobuf()),
-                                field_descs: vec![],
-                                type_name: "".to_string(),
-                            }),
-                            is_hidden: false,
-                        })
-                    })
-                    .collect::<Result<Vec<ColumnCatalog>>>()?,
-            );
-            StreamSourceInfo {
-                properties: HashMap::from(stmt.with_properties),
-                row_format: RowFormatType::Json as i32,
-                row_schema_location: "".to_string(),
-                row_id_index: 0,
-                columns: column_catalogs,
-                pk_column_ids: vec![0],
-            }
-        }
+        SourceSchema::Json => StreamSourceInfo {
+            properties: HashMap::from(stmt.with_properties),
+            row_format: RowFormatType::Json as i32,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            columns: bind_sql_columns(stmt.columns)?,
+            pk_column_ids: vec![0],
+        },
     };
-    let catalog_writer = session.env().catalog_writer();
-    catalog_writer
-        .create_source(ProstSource {
-            id: 0,
-            schema_id,
-            database_id,
-            name: source_name.clone(),
-            info: Some(Info::StreamSource(source)),
-        })
-        .await?;
 
-    Ok(PgResponse::new(
-        StatementType::CREATE_SOURCE,
-        0,
-        vec![],
-        vec![],
-    ))
+    let session = context.session_ctx.clone();
+    let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
+    let catalog_writer = session.env().catalog_writer();
+    if is_materialized {
+        let (plan, table) = {
+            let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
+            let plan = plan.to_stream_prost();
+            (plan, table)
+        };
+        catalog_writer
+            .create_materialized_source(source, table, plan)
+            .await?;
+    } else {
+        catalog_writer.create_source(source).await?;
+    }
+    Ok(PgResponse::empty_result(StatementType::CREATE_SOURCE))
 }
 
 #[cfg(test)]
@@ -138,9 +118,9 @@ pub mod tests {
     use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
+    use risingwave_pb::catalog::source::Info;
     use tempfile::NamedTempFile;
 
-    use super::*;
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
@@ -223,7 +203,7 @@ pub mod tests {
             };
             let row_id_col_name = gen_row_id_column_name(0);
             let expected_columns = maplit::hashmap! {
-                row_id_col_name.as_str() => DataType::Int32,
+                row_id_col_name.as_str() => DataType::Int64,
                 "id" => DataType::Int32,
                 "country.zipcode" => DataType::Varchar,
                 "zipcode" => DataType::Int64,

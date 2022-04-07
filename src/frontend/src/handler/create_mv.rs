@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pgwire::pg_response::PgResponse;
+use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
@@ -72,10 +72,7 @@ pub async fn handle_create_mv(
         .create_materialized_view(table, stream_plan)
         .await?;
 
-    Ok(PgResponse::new(
-        pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW,
-        0,
-        vec![],
-        vec![],
+    Ok(PgResponse::empty_result(
+        StatementType::CREATE_MATERIALIZED_VIEW,
     ))
 }
