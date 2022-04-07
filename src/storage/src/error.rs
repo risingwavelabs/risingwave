@@ -19,7 +19,7 @@ use crate::hummock::TracedHummockError;
 
 #[derive(Error, Debug)]
 pub enum StorageError {
-    #[error("hummock error: {0}")]
+    #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]
         #[source]
@@ -27,8 +27,12 @@ pub enum StorageError {
         TracedHummockError,
     ),
 
-    #[error("storage error: {0}")]
-    Other(#[from] RwError),
+    #[error("Cell-based table error: {0}")]
+    CellBasedTable(
+        #[backtrace]
+        #[source]
+        RwError,
+    ),
 }
 
 pub type StorageResult<T> = std::result::Result<T, StorageError>;
