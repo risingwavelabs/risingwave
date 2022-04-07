@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
@@ -32,15 +33,9 @@ impl Planner {
         }
     }
 
-    pub fn store_struct_column(&mut self, select: &BoundSelect) -> Result<()> {
+    fn store_struct_column(&mut self, select: &BoundSelect) -> Result<()> {
         // TODO: Support other relation type.
-        let table = {
-            if let Relation::BaseTable(table) = select.from.as_ref().unwrap() {
-                &table.table_desc.columns
-            } else {
-                return Ok(());
-            }
-        };
+        let table = Self::extract_table(select.from.as_ref().unwrap())?;
 
         // For every struct select item, store its alias name or column name
         // and column desc in the map. This map will be used in StreamMaterialize::create.
@@ -69,5 +64,20 @@ impl Planner {
             }
         }
         Ok(())
+    }
+
+    fn extract_table(relation: &Relation) -> Result<Vec<ColumnDesc>> {
+        match relation {
+            Relation::BaseTable(table) => Ok(table.table_desc.columns.clone()),
+            Relation::Join(join) => {
+                let mut left_table = Self::extract_table(&join.left)?;
+                let mut right_table = Self::extract_table(&join.left)?;
+                left_table.append(&mut right_table);
+                Ok(left_table)
+            }
+            _ => {
+                unimplemented!()
+            }
+        }
     }
 }

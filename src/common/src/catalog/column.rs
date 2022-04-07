@@ -116,8 +116,8 @@ impl ColumnDesc {
         let regex_name = "^".to_string() + &name;
         let regex = regex::Regex::new(regex_name.as_str()).unwrap();
         self.name = regex.replace(&self.name, &alias).to_string();
-        for col in &mut self.field_descs{
-            col.change_prefix_name(name.clone(),alias.clone());
+        for col in &mut self.field_descs {
+            col.change_prefix_name(name.clone(), alias.clone());
         }
     }
 

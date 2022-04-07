@@ -127,7 +127,7 @@ pub mod tests {
     async fn test_create_mv_handler() {
         let proto_file = create_proto_file();
         let sql = format!(
-            r#"CREATE SOURCE t
+            r#"CREATE SOURCE t1
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
@@ -135,7 +135,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select country as c from t";
+        let sql = "create materialized view mv1 as select t1.country as c from t1";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
@@ -144,10 +144,10 @@ pub mod tests {
         // Check source exists.
         let source = catalog_reader
             .read_guard()
-            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t")
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t1")
             .unwrap()
             .clone();
-        assert_eq!(source.name, "t");
+        assert_eq!(source.name, "t1");
 
         // Check table exists.
         let table = catalog_reader
