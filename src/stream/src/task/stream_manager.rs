@@ -773,9 +773,9 @@ impl LocalStreamManagerCore {
     ) -> Result<()> {
         for actor in req.get_info() {
             let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
+            if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
+                    "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()
                 ))
                 .into());
