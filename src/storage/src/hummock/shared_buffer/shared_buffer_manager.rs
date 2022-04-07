@@ -234,10 +234,10 @@ mod tests {
     use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
-    use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     fn new_shared_buffer_manager() -> SharedBufferManager {
-        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
         let remote_dir = "/test";
         let sstable_store = Arc::new(SstableStore::new(
             obj_client,

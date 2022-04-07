@@ -23,13 +23,13 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
 use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
-use crate::object::InMemObjectStore;
+use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
 use crate::StateStoreIter;
 
 #[tokio::test]
 async fn test_basic() {
-    let object_client = Arc::new(InMemObjectStore::new());
+    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
@@ -179,7 +179,7 @@ async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
 /// Fix this when we finished epoch management.
 #[ignore]
 async fn test_reload_storage() {
-    let object_store = Arc::new(InMemObjectStore::new());
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
     let hummock_options = Arc::new(default_config_for_test());
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
