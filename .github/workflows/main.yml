@@ -270,18 +270,19 @@ jobs:
           sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend ci-3node
+      - name: e2e test w/ Rust frontend ci-3node streaming
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node-frontend-v2
-          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3node-frontend-v2
+          sqllogictest -p 4566 -d dev './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend with distributed batch query
+      - name: e2e test w/ Rust frontend with distributed batch
         timeout-minutes: 2
         run: |
           RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
           sqllogictest -p 4566 -d dev './e2e_test/v2/batch_distributed/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/v2/ddl/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test w/ Rust frontend ci-3node batch distributed query
@@ -396,18 +397,19 @@ jobs:
           sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend ci-3node
+      - name: e2e test w/ Rust frontend ci-3node streaming
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node-frontend-v2
-          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3node-frontend-v2
+          sqllogictest -p 4566 -d dev './e2e_test/v2/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test w/ Rust frontend with distributed batch query
+      - name: e2e test w/ Rust frontend with distributed batch
         timeout-minutes: 2
         run: |
           RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
           sqllogictest -p 4566 -d dev './e2e_test/v2/batch_distributed/**/*.slt'
+          sqllogictest -p 4566 -d dev './e2e_test/v2/ddl/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test w/ Rust frontend ci-3node batch distributed query
