@@ -67,13 +67,7 @@ Then you'll be able to compile and start RisingWave!
 ## Code Structure
 
 - The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
-- The `src` folder contains all of the system components, where:
-  - `meta`: the meta service
-  - `batch`: the OLAP engine
-  - `stream`: the stream engine
-  - `storage`: the cloud-native storage engine
-  - `frontend`: SQL frontend
-  - `risedevtool`: the devtool for RisingWave
+- The `src` folder contains all of the kernal components, read [src/README.md][https://github.com/singularity-data/risingwave/blob/main/src/README.md] for more details.
 - The `e2e_test` folder contains the latest end-to-end test cases.
 - The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
 - The `dashbaord` folder contains RisingWave dashboard v2.
