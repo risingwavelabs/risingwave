@@ -266,6 +266,7 @@ mod tests {
             }
         }
 
+        #[derive(Debug)]
         struct FakeCreateSource {}
 
         #[async_trait::async_trait]

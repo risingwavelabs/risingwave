@@ -139,7 +139,12 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
             .await;
         timer.observe_duration();
 
-        result
+        if let Ok(Some(r)) = result {
+            debug!("Cardinality of chunk: {}, data: {:?}", r.cardinality(), &r);
+            Ok(Some(r))
+        } else {
+            result
+        }
     }
 
     async fn close(&mut self) -> Result<()> {

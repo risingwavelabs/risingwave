@@ -137,7 +137,10 @@ impl<CS: CreateSource> Executor for GenericExchangeExecutor<CS> {
                     self.source_idx += 1;
                 }
                 Some(res) => {
-                    assert_ne!(res.cardinality(), 0);
+                    if res.cardinality() == 0 {
+                        debug!("Exchange source {:?} output empty chunk.", source);
+                        assert_ne!(res.cardinality(), 0);
+                    }
                     self.current_source = Some(source);
                     return Ok(Some(res));
                 }
@@ -172,6 +175,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_exchange_multiple_sources() {
+        #[derive(Debug)]
         struct FakeExchangeSource {
             chunk: Option<DataChunk>,
         }
