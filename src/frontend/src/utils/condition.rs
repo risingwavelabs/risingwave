@@ -44,9 +44,14 @@ impl fmt::Display for Condition {
         if let Some(expr) = conjunctions.next() {
             write!(f, "{:?}", expr)?;
         }
-        for expr in conjunctions {
-            write!(f, " AND {:?}", expr)?;
+        if self.always_true() {
+            write!(f, "always")?;
+        } else {
+            for expr in conjunctions {
+                write!(f, " AND {:?}", expr)?;
+            }
         }
+
         Ok(())
     }
 }
