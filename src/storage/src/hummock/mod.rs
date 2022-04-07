@@ -37,7 +37,6 @@ mod error;
 pub mod hummock_meta_client;
 mod iterator;
 pub mod local_version_manager;
-pub mod mock;
 mod shared_buffer;
 #[cfg(test)]
 mod snapshot_tests;
