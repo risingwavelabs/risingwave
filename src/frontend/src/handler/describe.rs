@@ -60,23 +60,22 @@ pub async fn handle_describe(
 
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let columns: Vec<ColumnDesc> = {
-        match catalog_reader
+        let catalogs = match catalog_reader
             .get_schema_by_name(session.database(), &schema_name)?
             .get_table_by_name(&table_name)
         {
-            Some(table) => table
-                .columns
-                .iter()
-                .filter(|c| !c.is_hidden)
-                .map(|c| c.column_desc.clone())
-                .collect(),
-            None => catalog_reader
-                .get_source_by_name(session.database(), &schema_name, &table_name)?
-                .get_column_descs()
-                .iter()
-                .map(|c| c.into())
-                .collect_vec(),
-        }
+            Some(table) => &table.columns,
+            None => {
+                &catalog_reader
+                    .get_source_by_name(session.database(), &schema_name, &table_name)?
+                    .columns
+            }
+        };
+        catalogs
+            .iter()
+            .filter(|c| !c.is_hidden)
+            .map(|c| c.column_desc.clone())
+            .collect()
     };
 
     // Convert all column descs to rows
