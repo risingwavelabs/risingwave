@@ -118,7 +118,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
-        self.subscribe_compact_tasks().await
+        self.meta_client.subscribe_compact_tasks().await
     }
 
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
