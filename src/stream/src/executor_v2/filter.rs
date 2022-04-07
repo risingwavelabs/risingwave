@@ -17,7 +17,7 @@ use std::fmt::{Debug, Formatter};
 use async_trait::async_trait;
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
 
