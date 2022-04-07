@@ -36,9 +36,10 @@ pub async fn handle_show_source(
     // Get prost column_descs from source info and into column_descs
     let columns: Vec<ColumnDesc> = catalog_reader
         .get_source_by_name(session.database(), &schema_name, &source_name)?
-        .get_column_descs()
+        .columns
         .iter()
-        .map(|c| c.into())
+        .filter(|c| !c.is_hidden)
+        .map(|c| c.column_desc.clone())
         .collect_vec();
 
     // Convert all column_descs to rows

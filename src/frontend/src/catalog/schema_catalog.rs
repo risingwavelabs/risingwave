@@ -18,6 +18,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 
+use super::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
 
@@ -28,7 +29,7 @@ pub struct SchemaCatalog {
     name: String,
     table_by_name: HashMap<String, TableCatalog>,
     table_name_by_id: HashMap<TableId, String>,
-    source_by_name: HashMap<String, ProstSource>,
+    source_by_name: HashMap<String, SourceCatalog>,
     source_name_by_id: HashMap<SourceId, String>,
 }
 
@@ -50,7 +51,9 @@ impl SchemaCatalog {
         let name = prost.name.clone();
         let id = prost.id;
 
-        self.source_by_name.try_insert(name.clone(), prost).unwrap();
+        self.source_by_name
+            .try_insert(name.clone(), SourceCatalog::from(&prost))
+            .unwrap();
         self.source_name_by_id.try_insert(id, name).unwrap();
     }
     pub fn drop_source(&mut self, id: SourceId) {
@@ -61,7 +64,7 @@ impl SchemaCatalog {
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
     }
-    pub fn get_source_by_name(&self, source_name: &str) -> Option<&ProstSource> {
+    pub fn get_source_by_name(&self, source_name: &str) -> Option<&SourceCatalog> {
         self.source_by_name.get(source_name)
     }
 
