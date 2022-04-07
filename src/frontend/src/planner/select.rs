@@ -115,7 +115,7 @@ impl Planner {
                 .unwrap();
 
         for expr in subquery_conjunctions {
-            let subquery = expr.as_subquery().unwrap();
+            let subquery = expr.into_subquery().unwrap();
             let is_correlated = subquery.is_correlated();
 
             let join_type = match subquery.kind {
@@ -132,9 +132,9 @@ impl Planner {
         }
 
         for expr in not_subquery_conjunctions {
-            let not = expr.as_function_call().unwrap();
+            let not = expr.into_function_call().unwrap();
             let (_, subquery) = not.decompose_as_unary();
-            let subquery = subquery.as_subquery().unwrap();
+            let subquery = subquery.into_subquery().unwrap();
             let is_correlated = subquery.is_correlated();
 
             let join_type = match subquery.kind {

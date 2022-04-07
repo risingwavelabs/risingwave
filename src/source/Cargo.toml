@@ -12,6 +12,7 @@ bytes = "1"
 chrono = "0.4"
 crc32fast = "1"
 either = "1"
+enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"

@@ -1328,6 +1328,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-as-inner"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21cdad81446a7f7dc43f6a77409efeb9733d2fa65553efef6018ef257c959b73"
+dependencies = [
+ "heck 0.4.0",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "enum-iterator"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3742,6 +3754,7 @@ dependencies = [
  "clap 3.1.8",
  "downcast-rs",
  "dyn-clone",
+ "enum-as-inner",
  "fixedbitset",
  "futures 0.3.21",
  "futures-async-stream",
@@ -3923,6 +3936,7 @@ dependencies = [
  "chrono",
  "crc32fast",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "itertools",
@@ -4006,6 +4020,7 @@ dependencies = [
  "crossbeam",
  "dashmap",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "hyper",
@@ -4055,6 +4070,7 @@ dependencies = [
  "crc32fast",
  "dyn-clone",
  "either",
+ "enum-as-inner",
  "farmhash",
  "futures 0.3.21",
  "futures-async-stream",

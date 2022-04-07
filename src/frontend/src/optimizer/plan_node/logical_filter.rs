@@ -212,10 +212,9 @@ mod tests {
         assert_eq!(filter.schema().fields()[1], fields[2]);
         assert_eq!(filter.id().0, 3);
 
-        match filter.predicate.clone().to_expr() {
-            ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
-            _ => panic!("Expected function call"),
-        }
+        let expr = filter.predicate.clone().to_expr();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
         let values = filter.input();
         let values = values.as_logical_values().unwrap();
         assert_eq!(values.schema().fields().len(), 2);
@@ -282,10 +281,9 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        match filter.predicate.clone().to_expr() {
-            ExprImpl::FunctionCall(call) => assert_eq_input_ref!(&call.inputs()[0], 0),
-            _ => panic!("Expected function call"),
-        }
+        let expr = filter.predicate.clone().to_expr();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
 
         let values = filter.input();
         let values = values.as_logical_values().unwrap();

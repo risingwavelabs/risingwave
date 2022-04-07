@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::{Result, RwError};
 
@@ -29,7 +30,7 @@ use crate::tikv::TikvStateStore;
 use crate::StateStore;
 
 /// The type erased [`StateStore`].
-#[derive(Clone)]
+#[derive(Clone, EnumAsInner)]
 pub enum StateStoreImpl {
     /// The Hummock state store, which operates on an S3-like service. URLs beginning with
     /// `hummock` will be automatically recognized as Hummock state store.
