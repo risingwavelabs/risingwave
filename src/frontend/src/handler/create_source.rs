@@ -195,7 +195,7 @@ pub mod tests {
         };
         let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int32,
+            row_id_col_name.as_str() => DataType::Int64,
             "id" => DataType::Int32,
             "country.zipcode" => DataType::Varchar,
             "zipcode" => DataType::Int64,
