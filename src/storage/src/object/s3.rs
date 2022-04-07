@@ -27,10 +27,6 @@ pub struct S3ObjectStore {
     bucket: String,
 }
 
-fn err(err: impl Into<BoxedError>) -> ObjectError {
-    ObjectError::S3(err.into())
-}
-
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
@@ -60,8 +56,7 @@ impl ObjectStore for S3ObjectStore {
         };
 
         let resp = req.send().await?;
-
-        let val = resp.body.collect().await.map_err(err)?.into_bytes();
+        let val = resp.body.collect().await?.into_bytes();
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
             return Err(ObjectError::internal(format!(

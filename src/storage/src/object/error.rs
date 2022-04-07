@@ -44,8 +44,14 @@ impl<E> From<aws_smithy_http::result::SdkError<E>> for ObjectError
 where
     E: std::error::Error + Sync + Send + 'static,
 {
-    fn from(s3_error: aws_smithy_http::result::SdkError<E>) -> Self {
-        Self::S3(s3_error.into())
+    fn from(e: aws_smithy_http::result::SdkError<E>) -> Self {
+        Self::S3(e.into())
+    }
+}
+
+impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
+    fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
+        Self::S3(e.into())
     }
 }
 
