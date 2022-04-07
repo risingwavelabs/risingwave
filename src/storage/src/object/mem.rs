@@ -78,7 +78,7 @@ impl InMemObjectStore {
             .lock()
             .await
             .get(path)
-            .ok_or_else(|| ObjectError::Internal(format!("no object at path '{}'", path)))
+            .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
     }
 }

@@ -40,8 +40,7 @@ impl ObjectStore for S3ObjectStore {
             .body(SdkBody::from(obj).into())
             .key(path)
             .send()
-            .await
-            .map_err(err)?;
+            .await?;
         Ok(())
     }
 
@@ -60,12 +59,12 @@ impl ObjectStore for S3ObjectStore {
             req
         };
 
-        let resp = req.send().await.map_err(err)?;
+        let resp = req.send().await?;
 
         let val = resp.body.collect().await.map_err(err)?.into_bytes();
 
         if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-            return Err(ObjectError::Internal(format!(
+            return Err(ObjectError::internal(format!(
                 "mismatched size: expected {}, found {} when reading {} at {:?}",
                 block_loc.as_ref().unwrap().size,
                 val.len(),
@@ -91,8 +90,7 @@ impl ObjectStore for S3ObjectStore {
             .bucket(&self.bucket)
             .key(path)
             .send()
-            .await
-            .map_err(err)?;
+            .await?;
         Ok(ObjectMetadata {
             total_size: resp.content_length as usize,
         })
@@ -106,8 +104,7 @@ impl ObjectStore for S3ObjectStore {
             .bucket(&self.bucket)
             .key(path)
             .send()
-            .await
-            .map_err(err)?;
+            .await?;
         Ok(())
     }
 }

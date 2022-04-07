@@ -15,8 +15,6 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::error::BoxedError;
-use thiserror::Error;
 
 pub mod mem;
 pub use mem::*;
@@ -24,16 +22,8 @@ pub use mem::*;
 pub mod s3;
 pub use s3::*;
 
-#[derive(Error, Debug)]
-pub enum ObjectError {
-    #[error(transparent)]
-    S3(BoxedError),
-
-    #[error("Internal error: {0}")]
-    Internal(String),
-}
-
-pub type ObjectResult<T> = std::result::Result<T, ObjectError>;
+pub mod error;
+pub use error::*;
 
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocation {
