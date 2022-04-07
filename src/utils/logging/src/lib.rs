@@ -146,23 +146,23 @@ pub fn oneshot_common() {
             default_hook(info);
             std::process::abort();
         }));
-    }
 
-    // TODO: remove this in release mode
-    std::thread::spawn(move || loop {
-        std::thread::sleep(Duration::from_secs(3));
-        let deadlocks = parking_lot::deadlock::check_deadlock();
-        if deadlocks.is_empty() {
-            continue;
-        }
-
-        println!("{} deadlocks detected", deadlocks.len());
-        for (i, threads) in deadlocks.iter().enumerate() {
-            println!("Deadlock #{}", i);
-            for t in threads {
-                println!("Thread Id {:#?}", t.thread_id());
-                println!("{:#?}", t.backtrace());
+        // TODO: deadlock detection as a feature insetad of always enabling
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(3));
+            let deadlocks = parking_lot::deadlock::check_deadlock();
+            if deadlocks.is_empty() {
+                continue;
             }
-        }
-    });
+
+            println!("{} deadlocks detected", deadlocks.len());
+            for (i, threads) in deadlocks.iter().enumerate() {
+                println!("Deadlock #{}", i);
+                for t in threads {
+                    println!("Thread Id {:#?}", t.thread_id());
+                    println!("{:#?}", t.backtrace());
+                }
+            }
+        });
+    }
 }

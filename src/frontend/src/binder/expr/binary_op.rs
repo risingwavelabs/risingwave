@@ -43,7 +43,7 @@ impl Binder {
             BinaryOperator::Or => ExprType::Or,
             BinaryOperator::Like => ExprType::Like,
             BinaryOperator::NotLike => return self.bind_not_like(bound_left, bound_right),
-            _ => return Err(ErrorCode::NotImplementedError(format!("{:?}", op)).into()),
+            _ => return Err(ErrorCode::NotImplemented(format!("{:?}", op), 112.into()).into()),
         };
         FunctionCall::new_or_else(func_type, vec![bound_left, bound_right], |inputs| {
             Self::err_unsupported_binary_op(op, inputs)
@@ -73,6 +73,6 @@ impl Binder {
             op,
             bound_right.return_type(),
         );
-        ErrorCode::NotImplementedError(desc).into()
+        ErrorCode::NotImplemented(desc, 112.into()).into()
     }
 }

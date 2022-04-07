@@ -19,7 +19,7 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::ObjectType;
+use super::{ObjectName, ObjectType};
 use crate::ast::{display_comma_separated, ColumnDef, Ident, SqlOption, TableConstraint};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
@@ -73,7 +73,7 @@ pub struct CreateSourceStatement {
     pub if_not_exists: bool,
     pub columns: Vec<ColumnDef>,
     pub constraints: Vec<TableConstraint>,
-    pub source_name: Ident,
+    pub source_name: ObjectName,
     pub with_properties: WithProperties,
     pub source_schema: SourceSchema,
 }
@@ -151,7 +151,7 @@ impl fmt::Display for ProtobufSchema {
 impl ParseTo for CreateSourceStatement {
     fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
-        impl_parse_to!(source_name: Ident, p);
+        impl_parse_to!(source_name: ObjectName, p);
 
         // parse columns
         let (columns, constraints) = p.parse_columns()?;

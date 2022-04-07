@@ -35,7 +35,7 @@ impl Planner {
 
     fn store_struct_column(&mut self, select: &BoundSelect) -> Result<()> {
         // TODO: Support other relation type.
-        let table = Self::extract_table(select.from.as_ref().unwrap())?;
+        let table = Self::extract_source(select.from.as_ref().unwrap())?;
 
         // For every struct select item, store its alias name or column name
         // and column desc in the map. This map will be used in StreamMaterialize::create.
@@ -66,15 +66,15 @@ impl Planner {
         Ok(())
     }
 
-    fn extract_table(relation: &Relation) -> Result<Vec<ColumnDesc>> {
+    fn extract_source(relation: &Relation) -> Result<Vec<ColumnDesc>> {
         match relation {
-            Relation::BaseTable(table) => Ok(table.table_desc.columns.clone()),
-            Relation::Join(join) => {
-                let mut left_table = Self::extract_table(&join.left)?;
-                let mut right_table = Self::extract_table(&join.left)?;
-                left_table.append(&mut right_table);
-                Ok(left_table)
-            }
+            // Relation::BaseTable(table) => Ok(table.table_catalog.columns.clone()),
+            // Relation::Join(join) => {
+            //     let mut left_table = Self::extract_table(&join.left)?;
+            //     let mut right_table = Self::extract_table(&join.left)?;
+            //     left_table.append(&mut right_table);
+            //     Ok(left_table)
+            // }
             _ => {
                 unimplemented!()
             }

@@ -16,11 +16,9 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, TableDesc, DEFAULT_SCHEMA_NAME};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::try_match_expand;
+use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::source::Info;
 use risingwave_pb::plan::JoinType;
 use risingwave_sqlparser::ast::{
     JoinConstraint, JoinOperator, ObjectName, Query, TableAlias, TableFactor, TableWithJoins,
@@ -29,14 +27,16 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
-use crate::catalog::column_catalog::ColumnCatalog;
-use crate::catalog::TableId;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableCatalog;
+use crate::catalog::{CatalogError, TableId};
 use crate::expr::{Expr, ExprImpl};
 
 /// A validated item that refers to a table-like entity, including base table, subquery, join, etc.
 /// It is usually part of the `from` clause.
 #[derive(Debug)]
 pub enum Relation {
+    Source(Box<BoundSource>),
     BaseTable(Box<BoundBaseTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
@@ -55,7 +55,17 @@ pub struct BoundJoin {
 pub struct BoundBaseTable {
     pub name: String, // explain-only
     pub table_id: TableId,
-    pub table_desc: TableDesc,
+    pub table_catalog: TableCatalog,
+}
+
+impl From<&TableCatalog> for BoundBaseTable {
+    fn from(t: &TableCatalog) -> Self {
+        Self {
+            name: t.name.clone(),
+            table_id: t.id,
+            table_catalog: t.clone(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -63,11 +73,23 @@ pub struct BoundSubquery {
     pub query: BoundQuery,
 }
 
+/// `BoundTableSource` is used by DML statement on table source like insert, updata
 #[derive(Debug)]
 pub struct BoundTableSource {
     pub name: String,       // explain-only
     pub source_id: TableId, // TODO: refactor to source id
     pub columns: Vec<ColumnDesc>,
+}
+
+#[derive(Debug)]
+pub struct BoundSource {
+    pub catalog: SourceCatalog,
+}
+
+impl From<&SourceCatalog> for BoundSource {
+    fn from(s: &SourceCatalog) -> Self {
+        Self { catalog: s.clone() }
+    }
 }
 
 impl Binder {
@@ -122,7 +144,7 @@ impl Binder {
         Ok(match constraint {
             JoinConstraint::None => ExprImpl::literal_bool(true),
             JoinConstraint::Natural => {
-                return Err(ErrorCode::NotImplementedError("Natural join".into()).into())
+                return Err(ErrorCode::NotImplemented("Natural join".into(), 1633.into()).into())
             }
             JoinConstraint::On(expr) => {
                 let bound_expr = self.bind_expr(expr)?;
@@ -136,7 +158,7 @@ impl Binder {
                 bound_expr
             }
             JoinConstraint::Using(_columns) => {
-                return Err(ErrorCode::NotImplementedError("USING".into()).into())
+                return Err(ErrorCode::NotImplemented("USING".into(), 1636.into()).into())
             }
         })
     }
@@ -145,23 +167,15 @@ impl Binder {
         match table_factor {
             TableFactor::Table { name, alias, args } => {
                 if args.is_empty() {
-                    // If cannot find table and this is a mv query, try to bind stream source to
-                    // bind context and table info.
-                    let table = self.bind_table(name.clone(), alias.clone());
-                    if table.is_err() && self.is_mv_query {
-                        Ok(Relation::BaseTable(Box::new(
-                            self.bind_stream_source(name, alias)?,
-                        )))
-                    } else {
-                        Ok(Relation::BaseTable(Box::new(table?)))
-                    }
+                    let (schema_name, table_name) = Self::resolve_table_name(name)?;
+                    self.bind_table_or_source(&schema_name, &table_name, alias)
                 } else {
                     let kind =
                         WindowTableFunctionKind::from_str(&name.0[0].value).map_err(|_| {
-                            ErrorCode::NotImplementedError(format!(
-                                "unknown window function kind: {}",
-                                name.0[0].value
-                            ))
+                            ErrorCode::NotImplemented(
+                                format!("unknown window function kind: {}", name.0[0].value),
+                                1191.into(),
+                            )
                         })?;
                     Ok(Relation::WindowTableFunction(Box::new(
                         self.bind_window_table_function(kind, args)?,
@@ -174,19 +188,84 @@ impl Binder {
                 alias,
             } => {
                 if lateral {
-                    Err(ErrorCode::NotImplementedError("unsupported lateral".into()).into())
+                    Err(ErrorCode::NotImplemented("unsupported lateral".into(), None.into()).into())
                 } else {
                     Ok(Relation::Subquery(Box::new(
                         self.bind_subquery_relation(*subquery, alias)?,
                     )))
                 }
             }
-            _ => Err(ErrorCode::NotImplementedError(format!(
-                "unsupported table factor {:?}",
-                table_factor
-            ))
+            _ => Err(ErrorCode::NotImplemented(
+                format!("unsupported table factor {:?}", table_factor),
+                None.into(),
+            )
             .into()),
         }
+    }
+
+    pub(super) fn bind_table_or_source(
+        &mut self,
+        schema_name: &str,
+        table_name: &str,
+        alias: Option<TableAlias>,
+    ) -> Result<Relation> {
+        let (ret, columns) = {
+            let catalog = &self.catalog;
+
+            catalog
+                .get_table_by_name(&self.db_name, schema_name, table_name)
+                .map(|t| (Relation::BaseTable(Box::new(t.into())), t.columns.clone()))
+                .or_else(|_| {
+                    catalog
+                        .get_source_by_name(&self.db_name, schema_name, table_name)
+                        .map(|s| (Relation::Source(Box::new(s.into())), s.columns.clone()))
+                })
+                .map_err(|_| {
+                    RwError::from(CatalogError::NotFound(
+                        "table or source",
+                        table_name.to_string(),
+                    ))
+                })?
+        };
+
+        self.bind_context(
+            columns
+                .iter()
+                .cloned()
+                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
+            table_name.to_string(),
+            alias,
+        )?;
+        Ok(ret)
+    }
+
+    pub(super) fn bind_table(
+        &mut self,
+        schema_name: &str,
+        table_name: &str,
+        alias: Option<TableAlias>,
+    ) -> Result<BoundBaseTable> {
+        let table_catalog = self
+            .catalog
+            .get_table_by_name(&self.db_name, schema_name, table_name)?
+            .clone();
+        let columns = table_catalog.columns.clone();
+
+        self.bind_context(
+            columns
+                .iter()
+                .cloned()
+                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
+            table_name.to_string(),
+            alias,
+        )?;
+
+        let table_id = table_catalog.id();
+        Ok(BoundBaseTable {
+            name: table_name.to_string(),
+            table_id,
+            table_catalog,
+        })
     }
 
     /// return the (`schema_name`, `table_name`)
@@ -205,103 +284,6 @@ impl Binder {
         Ok((schema_name, table_name))
     }
 
-    /// Bind context from stream source info, only use in create mv selection.
-    /// Have same logic and return with `bind_table`.
-    pub(super) fn bind_stream_source(
-        &mut self,
-        name: ObjectName,
-        alias: Option<TableAlias>,
-    ) -> Result<BoundBaseTable> {
-        let (schema_name, source_name) = Self::resolve_table_name(name)?;
-        let source = self
-            .catalog
-            .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
-
-        let source_id = TableId::new(source.id);
-        let stream_source_info = try_match_expand!(source.get_info()?, Info::StreamSource)?;
-
-        // Transfer prost column catalog to column catalog.
-        let columns: Vec<ColumnCatalog> = stream_source_info
-            .columns
-            .iter()
-            .map(|c| c.clone().into())
-            .collect();
-
-        // Get all column descs under field descs and transfer to catalog.
-        // The field descs have same hidden value with catalog.
-        let mut catalogs = vec![];
-        for col in columns {
-            catalogs.append(
-                &mut col
-                    .column_desc
-                    .get_column_descs()
-                    .into_iter()
-                    .map(|c| ColumnCatalog {
-                        column_desc: c,
-                        is_hidden: col.is_hidden,
-                    })
-                    .collect_vec(),
-            );
-        }
-
-        let desc = TableDesc {
-            table_id: source_id,
-            pk: vec![],
-            columns: catalogs.iter().map(|c| c.clone().column_desc).collect_vec(),
-        };
-
-        self.bind_context(
-            catalogs.iter().map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            }),
-            source_name.clone(),
-            alias,
-        )?;
-
-        Ok(BoundBaseTable {
-            name: source_name,
-            table_desc: desc,
-            table_id: source_id,
-        })
-    }
-
-    pub(super) fn bind_table(
-        &mut self,
-        name: ObjectName,
-        alias: Option<TableAlias>,
-    ) -> Result<BoundBaseTable> {
-        let (schema_name, table_name) = Self::resolve_table_name(name)?;
-        let table_catalog =
-            self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
-
-        let table_id = table_catalog.id();
-        let table_desc = table_catalog.table_desc();
-        let columns = table_catalog.columns().to_vec();
-
-        self.bind_context(
-            columns.iter().map(|c| {
-                (
-                    c.column_desc.name.clone(),
-                    c.column_desc.data_type.clone(),
-                    c.is_hidden,
-                )
-            }),
-            table_name.clone(),
-            alias,
-        )?;
-
-        Ok(BoundBaseTable {
-            name: table_name,
-            table_desc,
-            table_id,
-        })
-    }
-
     pub(super) fn bind_table_source(&mut self, name: ObjectName) -> Result<BoundTableSource> {
         let (schema_name, source_name) = Self::resolve_table_name(name)?;
         let source = self
@@ -309,13 +291,12 @@ impl Binder {
             .get_source_by_name(&self.db_name, &schema_name, &source_name)?;
 
         let source_id = TableId::new(source.id);
-        let table_source_info = try_match_expand!(source.get_info()?, Info::TableSource)?;
 
-        let columns: Vec<ColumnDesc> = table_source_info
+        let columns = source
             .columns
             .iter()
             .filter(|c| !c.is_hidden)
-            .map(|c| c.column_desc.as_ref().cloned().unwrap().into())
+            .map(|c| c.column_desc.clone())
             .collect();
 
         // Note(bugen): do not bind context here.

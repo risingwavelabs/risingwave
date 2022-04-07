@@ -15,16 +15,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_hummock_sdk::key::key_with_epoch;
+use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId};
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::{HummockVersion, KeyRange, SstableInfo};
-use risingwave_storage::hummock::key::key_with_epoch;
-use risingwave_storage::hummock::value::HummockValue;
-use risingwave_storage::hummock::{
-    CompressionAlgorithm, HummockContextId, HummockEpoch, HummockSSTableId, SSTableBuilder,
-    SSTableBuilderOptions, SstableMeta,
-};
 
 use crate::cluster::{ClusterManager, ClusterManagerRef};
 use crate::hummock::{HummockManager, HummockManagerRef};
@@ -46,7 +41,7 @@ where
         hummock_manager.get_new_table_id().await.unwrap(),
         hummock_manager.get_new_table_id().await.unwrap(),
     ];
-    let (test_tables, _) = generate_test_tables(epoch, table_ids);
+    let test_tables = generate_test_tables(epoch, table_ids);
     hummock_manager
         .add_tables(context_id, test_tables.clone(), epoch)
         .await
@@ -60,7 +55,7 @@ where
         .await
         .unwrap()
         .unwrap();
-    let (test_tables_2, _) = generate_test_tables(
+    let test_tables_2 = generate_test_tables(
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
@@ -75,7 +70,7 @@ where
 
     // Increase version by 1.
     epoch += 1;
-    let (test_tables_3, _) = generate_test_tables(
+    let test_tables_3 = generate_test_tables(
         epoch,
         vec![hummock_manager.get_new_table_id().await.unwrap()],
     );
@@ -88,42 +83,19 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_tables(
-    epoch: u64,
-    table_ids: Vec<u64>,
-) -> (Vec<SstableInfo>, Vec<(SstableMeta, Bytes)>) {
-    // Tables to add
-    let opt = SSTableBuilderOptions {
-        capacity: 64 * 1024 * 1024,
-        block_capacity: 4096,
-        restart_interval: 16,
-        bloom_false_positive: 0.1,
-        compression_algorithm: CompressionAlgorithm::None,
-    };
-
+pub fn generate_test_tables(epoch: u64, table_ids: Vec<u64>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
-    let mut sst_data = vec![];
     for (i, table_id) in table_ids.into_iter().enumerate() {
-        let mut b = SSTableBuilder::new(opt.clone());
-        let kv_pairs = vec![
-            (i + 1, HummockValue::put(b"test".as_slice())),
-            ((i + 1) * 10, HummockValue::put(b"test".as_slice())),
-        ];
-        for kv in kv_pairs {
-            b.add(&iterator_test_key_of_epoch(table_id, kv.0, epoch), kv.1);
-        }
-        let (data, meta) = b.finish();
-        sst_data.push((meta.clone(), data));
         sst_info.push(SstableInfo {
             id: table_id,
             key_range: Some(KeyRange {
-                left: meta.smallest_key,
-                right: meta.largest_key,
+                left: iterator_test_key_of_epoch(table_id, i + 1, epoch),
+                right: iterator_test_key_of_epoch(table_id, (i + 1) * 10, epoch),
                 inf: false,
             }),
         });
     }
-    (sst_info, sst_data)
+    sst_info
 }
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.

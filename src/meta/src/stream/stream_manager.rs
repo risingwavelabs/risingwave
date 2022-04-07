@@ -23,7 +23,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::plan::TableRefId;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -134,8 +133,21 @@ where
         table_fragments.set_actor_status(actor_info);
         let actor_map = table_fragments.actor_map();
 
-        let actor_infos = locations.actor_infos();
+        // Actors on each stream node will need to know where their upstream lies. `actor_info`
+        // includes such information. It contains: 1. actors in the current create
+        // materialized view request. 2. all upstream actors.
+        let mut actor_infos_to_broadcast = locations.actor_infos();
+        actor_infos_to_broadcast.extend(ctx.upstream_node_actors.iter().flat_map(
+            |(node_id, upstreams)| {
+                upstreams.iter().map(|up_id| ActorInfo {
+                    actor_id: *up_id,
+                    host: locations.node_locations.get(node_id).unwrap().host.clone(),
+                })
+            },
+        ));
+
         let actor_host_infos = locations.actor_info_map();
+
         let node_actors = locations.node_actors();
 
         let dispatches = ctx
@@ -195,7 +207,7 @@ where
             client
                 .to_owned()
                 .broadcast_actor_info_table(BroadcastActorInfoTableRequest {
-                    info: actor_infos.clone(),
+                    info: actor_infos_to_broadcast.clone(),
                 })
                 .await
                 .to_rw_result_with(|| format!("failed to connect to {}", node_id))?;
@@ -256,7 +268,7 @@ where
 
         // Add table fragments to meta store with state: `State::Creating`.
         self.fragment_manager
-            .add_table_fragments(table_fragments.clone())
+            .start_create_table_fragments(table_fragments.clone())
             .await?;
         self.barrier_manager
             .run_command(Command::CreateMaterializedView {
@@ -271,10 +283,9 @@ where
 
     /// Dropping materialized view is done by barrier manager. Check
     /// [`Command::DropMaterializedView`] for details.
-    pub async fn drop_materialized_view(&self, table_id: &TableRefId) -> Result<()> {
-        // TODO: maybe we should refactor this and use catalog_v2's TableId (u32)
+    pub async fn drop_materialized_view(&self, table_id: &TableId) -> Result<()> {
         self.barrier_manager
-            .run_command(Command::DropMaterializedView(table_id.clone()))
+            .run_command(Command::DropMaterializedView(*table_id))
             .await?;
 
         Ok(())
@@ -309,6 +320,7 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerType};
     use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
     use risingwave_pb::meta::table_fragments::Fragment;
+    use risingwave_pb::plan::TableRefId;
     use risingwave_pb::stream_plan::*;
     use risingwave_pb::stream_service::stream_service_server::{
         StreamService, StreamServiceServer,

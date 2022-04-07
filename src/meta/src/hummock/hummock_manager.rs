@@ -22,14 +22,14 @@ use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_hummock_sdk::{
+    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
+    INVALID_EPOCH,
+};
 use risingwave_pb::hummock::{
     CompactMetrics, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
     HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
     SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
-};
-use risingwave_storage::hummock::{
-    HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
-    INVALID_EPOCH,
 };
 use tokio::sync::{Mutex, RwLock};
 
@@ -341,7 +341,7 @@ where
 
     fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
         let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
-            risingwave_storage::hummock::key_range::KeyRange,
+            risingwave_hummock_sdk::key_range::KeyRange,
             u64,
             u64,
         )>| {
@@ -1335,5 +1335,15 @@ where
 
         tracing::debug!("Mark {:?} as orphan SSTs", marked);
         Ok(marked)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn get_current_version(&self) -> HummockVersion {
+        let versioning_guard = self.versioning.read().await;
+        versioning_guard
+            .hummock_versions
+            .get(&versioning_guard.current_version_id.id())
+            .unwrap()
+            .clone()
     }
 }

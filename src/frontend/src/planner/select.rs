@@ -115,15 +115,17 @@ impl Planner {
                 .unwrap();
 
         for expr in subquery_conjunctions {
-            let subquery = expr.as_subquery().unwrap();
+            let subquery = expr.into_subquery().unwrap();
             let is_correlated = subquery.is_correlated();
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftSemi,
                 SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             };
             let right = self.plan_query(subquery.query)?.as_subplan();
@@ -132,17 +134,19 @@ impl Planner {
         }
 
         for expr in not_subquery_conjunctions {
-            let not = expr.as_function_call().unwrap();
+            let not = expr.into_function_call().unwrap();
             let (_, subquery) = not.decompose_as_unary();
-            let subquery = subquery.as_subquery().unwrap();
+            let subquery = subquery.into_subquery().unwrap();
             let is_correlated = subquery.is_correlated();
 
             let join_type = match subquery.kind {
                 SubqueryKind::Existential => JoinType::LeftAnti,
                 SubqueryKind::Scalar | SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             };
             let right = self.plan_query(subquery.query)?.as_subplan();
@@ -209,9 +213,11 @@ impl Planner {
                     right = self.create_exists(right)?;
                 }
                 SubqueryKind::SetComparison => {
-                    return Err(
-                        ErrorCode::NotImplementedError(format!("{:?}", subquery.kind)).into(),
+                    return Err(ErrorCode::NotImplemented(
+                        format!("{:?}", subquery.kind),
+                        1343.into(),
                     )
+                    .into())
                 }
             }
 

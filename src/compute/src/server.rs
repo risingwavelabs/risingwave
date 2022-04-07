@@ -31,7 +31,7 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
-use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
+use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
@@ -104,7 +104,7 @@ pub async fn compute_node_serve(
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
-        Arc::new(RpcHummockMetaClient::new(
+        Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             hummock_metrics.clone(),
         )),
@@ -114,7 +114,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
-    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+    if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
             hummock.inner().local_version_manager().clone(),

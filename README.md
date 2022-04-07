@@ -32,16 +32,16 @@ git clone https://github.com/singularity-data/risingwave.git && cd risingwave  #
 ./risedev playground                                                           # Compile and start the playground
 ```
 
-Building from source requires several tools to be installed in the system. You may also use `./risedev configure` to adjust compile settings. See [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+Building from source requires several tools to be installed in the system. You may also use `./risedev configure` to adjust compile settings. See [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
-If you want to start a full cluster, enable metrics, and persist data, you may also refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+If you want to start a full cluster, enable metrics, and persist data, you may also refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
 
 ### The First Query
 
 To connect to the RisingWave server, you will need to install Postgres client in advance.
 
 ```shell
-psql -h localhost -p 4566 -d dev
+psql -h localhost -p 4566 # Use psql to connect Risingwave cluster
 ```
 
 ```sql
@@ -72,9 +72,13 @@ If everything works, you will see
 
 in the Postgres shell.
 
+### Connecting to an External Source
+
+Please refer to the full [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/).
+
 ## Documentation
 
-You may refer to [RisingWave Docs](https://singularity-data.com/risingwave-docs/) for more information, such as architecture overview, how to create streaming source, etc.
+Visit [RisingWave Docs](https://singularity-data.com/risingwave-docs/) and [Developer Docs](https://github.com/singularity-data/risingwave/tree/main/docs) for more information.
 
 ## License
 
@@ -82,4 +86,4 @@ RisingWave is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for 
 
 ## Contributing
 
-Thanks for your interest in contributing to the project, please refer to [CONTRIBUTING.md](CONTRIBUTING.md) for more information.
+Thanks for your interest in contributing to the project, please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.

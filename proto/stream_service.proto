@@ -9,7 +9,6 @@ option optimize_for = SPEED;
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
-import "plan.proto";
 import "stream_plan.proto";
 
 message HangingChannel {
@@ -45,8 +44,7 @@ message BuildActorsResponse {
 
 message DropActorsRequest {
   string request_id = 1;
-  plan.TableRefId table_ref_id = 2;
-  repeated uint32 actor_ids = 3;
+  repeated uint32 actor_ids = 2;
 }
 
 message DropActorsResponse {

@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use itertools::Itertools;
 use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
@@ -41,6 +42,10 @@ impl DatabaseCatalog {
     pub fn drop_schema(&mut self, schema_id: SchemaId) {
         let name = self.schema_name_by_id.remove(&schema_id).unwrap();
         self.schema_by_name.remove(&name).unwrap();
+    }
+
+    pub fn get_all_schema_names(&self) -> Vec<String> {
+        self.schema_by_name.keys().cloned().collect_vec()
     }
 
     pub fn get_schema_by_name(&self, name: &str) -> Option<&SchemaCatalog> {
