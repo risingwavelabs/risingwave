@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use itertools::enumerate;
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
@@ -62,9 +63,24 @@ pub fn trigger_sst_stat(metrics: &MetaMetrics, compact_status: &CompactStatus) {
             .set(compact_cnt as i64);
     }
 
-    static CALLS_AFTER_LAST_OBSERVATION: AtomicUsize = AtomicUsize::new(0);
-    let previous_value = CALLS_AFTER_LAST_OBSERVATION.fetch_add(1, Ordering::Relaxed);
-    if (previous_value & 0b1111) == 0 {
+    use std::sync::atomic::AtomicU64;
+
+    static TIME_AFTER_LAST_OBSERVATION: AtomicU64 = AtomicU64::new(0);
+    let previous_time = TIME_AFTER_LAST_OBSERVATION.load(Ordering::Relaxed);
+    let current_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if current_time - previous_time > 600
+        && TIME_AFTER_LAST_OBSERVATION
+            .compare_exchange(
+                previous_time,
+                current_time,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+    {
         for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
             let (sst_num, compact_cnt) = match level_handler {
                 LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
