@@ -21,7 +21,6 @@ use risingwave_common::array::*;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::*;
 use risingwave_expr::expr::*;
-use tokio::sync::oneshot;
 
 use super::*;
 use crate::executor::test_utils::create_in_memory_keyspace;
@@ -29,7 +28,7 @@ use crate::executor_v2::receiver::ReceiverExecutor;
 use crate::executor_v2::{
     Executor as ExecutorV2, LocalSimpleAggExecutor, MergeExecutor, SimpleAggExecutor,
 };
-use crate::task::{ActorHandle, SharedContext};
+use crate::task::SharedContext;
 
 pub struct MockConsumer {
     input: Box<dyn Executor>,
@@ -216,7 +215,7 @@ async fn test_merger_sum_aggr() {
 
     // wait for all actors
     for handle in handles {
-        handle.handle.await.unwrap();
+        handle.await.unwrap().unwrap();
     }
 
     let data = items.lock().unwrap();

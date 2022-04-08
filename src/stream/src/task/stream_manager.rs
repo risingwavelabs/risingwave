@@ -18,7 +18,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::channel::mpsc::{channel, Receiver};
-use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
 use risingwave_common::catalog::{Field, Schema};
@@ -29,7 +28,6 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_expr::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::data::StopMutation;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
@@ -268,7 +266,7 @@ impl LocalStreamManager {
     pub async fn wait_actors(&self, actor_ids: &[ActorId]) -> Result<()> {
         let handles = self.core.lock().remove_actor_handles(actor_ids)?;
         for handle in handles {
-            handle.handle.await.unwrap();
+            handle.await.unwrap();
         }
         Ok(())
     }

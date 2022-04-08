@@ -15,7 +15,6 @@
 use std::sync::Arc;
 
 use risingwave_common::error::Result;
-use tokio::sync::oneshot;
 use tracing_futures::Instrument;
 
 use super::StreamConsumer;
