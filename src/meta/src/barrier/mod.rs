@@ -221,6 +221,7 @@ where
 
         loop {
             tokio::select! {
+                biased;
                 // Shutdown
                 _ = shutdown_rx.recv() => {
                     tracing::info!("Barrier manager is shutting down");
