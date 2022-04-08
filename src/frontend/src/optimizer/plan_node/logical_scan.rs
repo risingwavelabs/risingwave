@@ -99,6 +99,7 @@ impl LogicalScan {
             .map(|f| f.name.clone())
             .collect()
     }
+
     pub fn table_name(&self) -> &str {
         &self.table_name
     }

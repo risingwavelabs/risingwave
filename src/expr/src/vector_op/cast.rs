@@ -45,14 +45,6 @@ pub fn float_up(n: OrderedF32) -> Result<OrderedF64> {
     Ok((n.0 as f64).into())
 }
 
-/// Cast between different precision and scale.
-/// Eg. Decimal(10,5) -> Decimal(20,10)
-/// Currently no-op.
-#[inline(always)]
-pub fn dec_to_dec(n: Decimal) -> Result<Decimal> {
-    Ok(n)
-}
-
 /// Cast between different precision/length.
 /// Eg. Char(5) -> Char(10)
 /// Currently no-op. TODO: implement padding and overflow check (#2137)

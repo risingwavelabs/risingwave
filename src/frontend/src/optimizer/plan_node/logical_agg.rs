@@ -127,8 +127,9 @@ impl ExprHandler {
                     expr_index.insert(expr.clone(), index);
                     Ok(())
                 } else {
-                    Err(ErrorCode::NotImplementedError(
+                    Err(ErrorCode::NotImplemented(
                         "GROUP BY only supported on input column names!".into(),
+                        1637.into(),
                     ))
                 }
             })?;

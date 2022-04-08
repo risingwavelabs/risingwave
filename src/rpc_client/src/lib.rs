@@ -31,3 +31,5 @@ mod meta_client;
 pub use meta_client::{GrpcMetaClient, MetaClient, NotificationStream};
 mod compute_client;
 pub use compute_client::{ComputeClient, ExchangeSource, GrpcExchangeSource};
+mod hummock_meta_client;
+pub use hummock_meta_client::HummockMetaClient;

@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
 
+use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
 use crate::{Keyspace, StateStore};
@@ -58,7 +58,7 @@ where
     }
 
     /// Preprocesses the batch to make it sorted. It returns `false` if duplicate keys are found.
-    pub fn preprocess(&mut self) -> Result<()> {
+    pub fn preprocess(&mut self) -> StorageResult<()> {
         if self.is_empty() {
             return Ok(());
         }
@@ -80,14 +80,14 @@ where
     }
 
     /// Ingests this batch into the associated state store.
-    pub async fn ingest(mut self, epoch: u64) -> Result<()> {
+    pub async fn ingest(mut self, epoch: u64) -> StorageResult<()> {
         self.preprocess()?;
         self.store.ingest_batch(self.batch, epoch).await?;
         Ok(())
     }
 
     /// Ingests this batch into the associated state store, without being persisted.
-    pub async fn replicate_remote(mut self, epoch: u64) -> Result<()> {
+    pub async fn replicate_remote(mut self, epoch: u64) -> StorageResult<()> {
         self.preprocess()?;
         self.store.replicate_batch(self.batch, epoch).await?;
         Ok(())

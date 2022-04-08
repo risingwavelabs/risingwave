@@ -252,6 +252,6 @@ mod tests {
             unreachable!();
         }
 
-        assert!(project.next().await.unwrap().is_terminate());
+        assert!(project.next().await.unwrap().is_stop());
     }
 }

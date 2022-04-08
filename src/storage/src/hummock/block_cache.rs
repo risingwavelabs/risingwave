@@ -55,7 +55,7 @@ impl BlockCache {
         self.inner
             .try_get_with(Self::key(sst_id, block_idx), f)
             .await
-            .map_err(|e| HummockError::Other(e.to_string()).into())
+            .map_err(HummockError::other)
     }
 
     fn key(sst_id: u64, block_idx: u64) -> Bytes {

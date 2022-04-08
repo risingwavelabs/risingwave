@@ -18,3 +18,7 @@ mod frontend_gen;
 pub use frontend_gen::*;
 mod grafana_gen;
 pub use grafana_gen::*;
+mod zookeeper_gen;
+pub use zookeeper_gen::*;
+mod kafka_gen;
+pub use kafka_gen::*;

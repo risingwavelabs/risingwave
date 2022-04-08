@@ -162,7 +162,7 @@ message TableFragments {
     FragmentDistributionType distribution_type = 3;
     repeated stream_plan.StreamActor actors = 4;
   }
-  plan.TableRefId table_ref_id = 1;
+  uint32 table_id = 1;
   map<uint32, Fragment> fragments = 2;
   map<uint32, ActorStatus> actor_status = 3;
 }
@@ -272,10 +272,6 @@ message MetaSnapshot {
   repeated catalog.VirtualTable view = 6;
 }
 
-message SourceSnapshot {
-  repeated catalog.Source sources = 1;
-}
-
 message SubscribeResponse {
   enum Operation {
     INVALID = 0;
@@ -300,7 +296,6 @@ message SubscribeResponse {
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
     MetaSnapshot fe_snapshot = 12;
-    SourceSnapshot be_snapshot = 13;
   }
 }
 

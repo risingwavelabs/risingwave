@@ -13,18 +13,25 @@
 // limitations under the License.
 
 mod error;
+
 use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
+mod agg;
+mod batch_query;
 #[allow(dead_code)]
 mod chain;
 mod filter;
+mod global_simple_agg;
+mod hash_agg;
+mod local_simple_agg;
 pub mod merge;
 pub(crate) mod mview;
 mod rearranged_chain;
@@ -34,7 +41,11 @@ mod simple;
 mod test_utils;
 mod v1_compat;
 
+pub use batch_query::BatchQueryExecutor;
 pub use filter::FilterExecutor;
+pub use global_simple_agg::SimpleAggExecutor;
+pub use hash_agg::HashAggExecutor;
+pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
@@ -88,7 +99,7 @@ pub trait Executor: Send + 'static {
         }
     }
 
-    /// Return an Executor which satisfied [`ExecutorV1`].
+    /// Return an executor which implements [`ExecutorV1`].
     fn v1(self: Box<Self>) -> StreamExecutorV1
     where
         Self: Sized,
@@ -97,6 +108,30 @@ pub trait Executor: Send + 'static {
         let stream = self.execute();
         let stream = Box::pin(stream);
 
-        StreamExecutorV1 { stream, info }
+        StreamExecutorV1 {
+            executor_v2: None,
+            stream: Some(stream),
+            info,
+        }
+    }
+
+    /// Return an executor which implements [`ExecutorV1`] and requires [`ExecutorV1::init`] to be
+    /// called before executing.
+    fn v1_uninited(self: Box<Self>) -> StreamExecutorV1
+    where
+        Self: Sized,
+    {
+        let info = self.info();
+
+        StreamExecutorV1 {
+            executor_v2: Some(self),
+            stream: None,
+            info,
+        }
+    }
+
+    /// Clears the in-memory cache of the executor. It's no-op by default.
+    fn clear_cache(&mut self) -> Result<()> {
+        Ok(())
     }
 }

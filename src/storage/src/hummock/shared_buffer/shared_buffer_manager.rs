@@ -19,10 +19,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
+use crate::error::StorageResult;
 use crate::hummock::iterator::variants::*;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -42,7 +42,7 @@ pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
     shared_buffer: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
-    uploader_handle: JoinHandle<Result<()>>,
+    uploader_handle: JoinHandle<StorageResult<()>>,
 }
 
 impl SharedBufferManager {
@@ -201,7 +201,7 @@ impl SharedBufferManager {
     }
 
     /// This function was called while [`SharedBufferManager`] exited.
-    pub async fn wait(self) -> Result<()> {
+    pub async fn wait(self) -> StorageResult<()> {
         self.uploader_handle.await.unwrap()
     }
 
@@ -224,20 +224,21 @@ impl SharedBufferManager {
 mod tests {
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_hummock_sdk::key::{key_with_epoch, user_key};
+    use risingwave_meta::hummock::test_utils::setup_compute_env;
+    use risingwave_meta::hummock::MockHummockMetaClient;
 
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
     use crate::hummock::iterator::{
         BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
     };
-    use crate::hummock::key::{key_with_epoch, user_key};
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
-    use crate::object::{InMemObjectStore, ObjectStore};
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
-    fn new_shared_buffer_manager() -> SharedBufferManager {
-        let obj_client = Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>;
+    async fn new_shared_buffer_manager() -> SharedBufferManager {
+        let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
         let remote_dir = "/test";
         let sstable_store = Arc::new(SstableStore::new(
             obj_client,
@@ -247,9 +248,12 @@ mod tests {
             64 << 20,
         ));
         let vm = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        )));
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref,
+            worker_node.id,
+        ));
         SharedBufferManager::new(
             Arc::new(default_config_for_test()),
             vm,
@@ -292,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_manager_get() {
-        let shared_buffer_manager = new_shared_buffer_manager();
+        let shared_buffer_manager = new_shared_buffer_manager().await;
 
         let mut keys = Vec::new();
         for i in 0..4 {
@@ -379,7 +383,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_manager_iter() {
-        let shared_buffer_manager = new_shared_buffer_manager();
+        let shared_buffer_manager = new_shared_buffer_manager().await;
 
         let mut keys = Vec::new();
         for i in 0..4 {
@@ -514,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_manager_reverse_iter() {
-        let shared_buffer_manager = new_shared_buffer_manager();
+        let shared_buffer_manager = new_shared_buffer_manager().await;
 
         let mut keys = Vec::new();
         for i in 0..4 {
@@ -651,7 +655,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_manager_reset() {
-        let mut shared_buffer_manager = new_shared_buffer_manager();
+        let mut shared_buffer_manager = new_shared_buffer_manager().await;
 
         let mut keys = Vec::new();
         for i in 0..4 {

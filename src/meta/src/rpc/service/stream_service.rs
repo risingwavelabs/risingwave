@@ -22,9 +22,7 @@ use crate::cluster::ClusterManagerRef;
 use crate::manager::MetaSrvEnv;
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
-use crate::stream::{
-    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
-};
+use crate::stream::{FragmentManagerRef, GlobalStreamManagerRef, StreamFragmenter};
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
 
@@ -33,11 +31,11 @@ pub struct StreamServiceImpl<S>
 where
     S: MetaStore,
 {
+    env: MetaSrvEnv<S>,
+
     global_stream_manager: GlobalStreamManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
-
-    env: MetaSrvEnv<S>,
 }
 
 impl<S> StreamServiceImpl<S>
@@ -45,17 +43,16 @@ where
     S: MetaStore,
 {
     pub fn new(
+        env: MetaSrvEnv<S>,
         global_stream_manager: GlobalStreamManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
-        _source_manager: SourceManagerRef<S>,
-        env: MetaSrvEnv<S>,
     ) -> Self {
         StreamServiceImpl {
+            env,
             global_stream_manager,
             fragment_manager,
             cluster_manager,
-            env,
         }
     }
 }
@@ -115,7 +112,7 @@ where
 
         match self
             .global_stream_manager
-            .drop_materialized_view(req.get_table_ref_id().map_err(tonic_err)?)
+            .drop_materialized_view(&TableId::from(&req.table_ref_id))
             .await
         {
             Ok(()) => Ok(Response::new(DropMaterializedViewResponse { status: None })),

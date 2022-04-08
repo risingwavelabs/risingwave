@@ -171,10 +171,10 @@
       LogicalProject { exprs: [$16, $12, $26, $1, $3, $13, $15, $17], expr_alias: [s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment] }
         LogicalFilter { predicate: ($1 = $19) AND ($11 = $20) AND ($6 = 4:Int32) AND Like($5, '%TIN':Varchar) AND ($14 = $25) AND ($27 = $30) AND ($31 = 'AFRICA':Varchar) AND ($22 = $33) }
           LogicalApply { type: LeftOuter }
-            LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
+            LogicalJoin { type: Inner, on: always }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
                     LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                     LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                   LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
@@ -184,9 +184,9 @@
               LogicalAgg { group_keys: [], agg_calls: [min($0)] }
                 LogicalProject { exprs: [$4], expr_alias: [ ] }
                   LogicalFilter { predicate: (CorrelatedInputRef { index: 1, depth: 1 } = $1) AND ($7 = $2) AND ($10 = $15) AND ($17 = $20) AND ($21 = 'AFRICA':Varchar) }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalJoin { type: Inner, on: true:Boolean }
+                    LogicalJoin { type: Inner, on: always }
+                      LogicalJoin { type: Inner, on: always }
+                        LogicalJoin { type: Inner, on: always }
                           LogicalScan { table: partsupp, columns: [_row_id#0, ps_partkey, ps_suppkey, ps_availqty, ps_supplycost, ps_comment] }
                           LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                         LogicalScan { table: nation, columns: [_row_id#0, n_nationkey, n_name, n_regionkey, n_comment] }
@@ -232,7 +232,7 @@
                       BatchHashJoin { type: Inner, predicate: $0 = $2 }
                         BatchProject { exprs: [$0], expr_alias: [ ] }
                           BatchExchange { order: [], dist: HashShard([0]) }
-                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                            BatchFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                               BatchScan { table: customer, columns: [c_custkey, c_mktsegment] }
                         BatchExchange { order: [], dist: HashShard([1]) }
                           BatchFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -253,7 +253,7 @@
                     StreamHashJoin { type: Inner, predicate: $0 = $3 }
                       StreamProject { exprs: [$0, $2], expr_alias: [ ,  ] }
                         StreamExchange { dist: HashShard([0]) }
-                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) AND true:Boolean AND true:Boolean }
+                          StreamFilter { predicate: ($1 = 'FURNITURE':Varchar) }
                             StreamTableScan { table: customer, columns: [c_custkey, c_mktsegment, _row_id#0], pk_indices: [2] }
                       StreamExchange { dist: HashShard([1]) }
                         StreamFilter { predicate: ($2 < '1995-03-29':Varchar::Date) }
@@ -330,11 +330,11 @@
       LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
         LogicalProject { exprs: [$46, ($25 * (1:Int32 - $26))], expr_alias: [ ,  ] }
           LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($22 = $37) AND ($4 = $40) AND ($40 = $45) AND ($47 = $50) AND ($51 = 'MIDDLE EAST':Varchar) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
-            LogicalJoin { type: Inner, on: true:Boolean }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
+            LogicalJoin { type: Inner, on: always }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: always }
                       LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
                       LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
                     LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -362,8 +362,7 @@
                                       BatchExchange { order: [], dist: HashShard([2]) }
                                         BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                           BatchExchange { order: [], dist: HashShard([0]) }
-                                            BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
+                                            BatchScan { table: customer, columns: [c_custkey, c_nationkey] }
                                           BatchProject { exprs: [$0, $1], expr_alias: [ ,  ] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -398,8 +397,7 @@
                                     StreamExchange { dist: HashShard([3]) }
                                       StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                         StreamExchange { dist: HashShard([0]) }
-                                          StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                            StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
+                                          StreamTableScan { table: customer, columns: [c_custkey, c_nationkey, _row_id#0], pk_indices: [2] }
                                         StreamProject { exprs: [$0, $1, $3], expr_alias: [ ,  ,  ] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($2 >= '1994-01-01':Varchar::Date) AND ($2 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) }
@@ -490,11 +488,11 @@
         LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
           LogicalProject { exprs: [$46, $51, Extract('YEAR':Varchar, $19), ($14 * (1:Int32 - $15))], expr_alias: [supp_nation, cust_nation, l_year, volume] }
             LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($36 = $27) AND ($4 = $45) AND ($39 = $50) AND ((($46 = 'ROMANIA':Varchar) AND ($51 = 'IRAN':Varchar)) OR (($46 = 'IRAN':Varchar) AND ($51 = 'ROMANIA':Varchar))) AND ($19 >= '1983-01-01':Varchar::Date) AND ($19 <= '2000-12-31':Varchar::Date) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: always }
+                      LogicalJoin { type: Inner, on: always }
                         LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                         LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                       LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
@@ -523,8 +521,7 @@
                                         BatchExchange { order: [], dist: HashShard([2]) }
                                           BatchHashJoin { type: Inner, predicate: $0 = $3 }
                                             BatchExchange { order: [], dist: HashShard([0]) }
-                                              BatchFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                                BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
+                                              BatchScan { table: supplier, columns: [s_suppkey, s_nationkey] }
                                             BatchExchange { order: [], dist: HashShard([1]) }
                                               BatchFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                                 BatchScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate] }
@@ -557,8 +554,7 @@
                                       StreamExchange { dist: HashShard([3]) }
                                         StreamHashJoin { type: Inner, predicate: $0 = $4 }
                                           StreamExchange { dist: HashShard([0]) }
-                                            StreamFilter { predicate: true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean AND true:Boolean }
-                                              StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
+                                            StreamTableScan { table: supplier, columns: [s_suppkey, s_nationkey, _row_id#0], pk_indices: [2] }
                                           StreamExchange { dist: HashShard([1]) }
                                             StreamFilter { predicate: ($4 >= '1983-01-01':Varchar::Date) AND ($4 <= '2000-12-31':Varchar::Date) }
                                               StreamTableScan { table: lineitem, columns: [l_orderkey, l_suppkey, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [5] }
@@ -617,13 +613,13 @@
         LogicalProject { exprs: [$0, Case(($2 = 'IRAN':Varchar), $1, 0:Int32::Decimal), $1], expr_alias: [ ,  ,  ] }
           LogicalProject { exprs: [Extract('YEAR':Varchar, $40), ($24 * (1:Int32 - $25)), $61], expr_alias: [o_year, volume, nation] }
             LogicalFilter { predicate: ($1 = $20) AND ($11 = $21) AND ($19 = $36) AND ($37 = $46) AND ($49 = $55) AND ($57 = $65) AND ($66 = 'ASIA':Varchar) AND ($14 = $60) AND ($40 >= '1995-01-01':Varchar::Date) AND ($40 <= '1996-12-31':Varchar::Date) AND ($5 = 'PROMO ANODIZED STEEL':Varchar) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
-                        LogicalJoin { type: Inner, on: true:Boolean }
-                          LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: always }
+                      LogicalJoin { type: Inner, on: always }
+                        LogicalJoin { type: Inner, on: always }
+                          LogicalJoin { type: Inner, on: always }
                             LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                             LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                           LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -674,11 +670,11 @@
         LogicalProject { exprs: [$0, $1, $2], expr_alias: [ ,  ,  ] }
           LogicalProject { exprs: [$53, Extract('YEAR':Varchar, $46), (($24 * (1:Int32 - $25)) - ($39 * $23))], expr_alias: [nation, o_year, amount] }
             LogicalFilter { predicate: ($11 = $21) AND ($37 = $21) AND ($36 = $20) AND ($1 = $20) AND ($42 = $19) AND ($14 = $52) AND Like($2, '%yellow%':Varchar) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
-                    LogicalJoin { type: Inner, on: true:Boolean }
-                      LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
+                    LogicalJoin { type: Inner, on: always }
+                      LogicalJoin { type: Inner, on: always }
                         LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
                         LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
                       LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -727,9 +723,9 @@
         LogicalAgg { group_keys: [0, 1, 2, 3, 4, 5, 6], agg_calls: [sum($7)] }
           LogicalProject { exprs: [$1, $2, $6, $5, $38, $3, $8, ($25 * (1.00:Decimal - $26))], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ] }
             LogicalFilter { predicate: ($1 = $11) AND ($20 = $10) AND ($14 >= '1994-01-01':Varchar::Date) AND ($14 < ('1994-01-01':Varchar::Date + '3 mons 00:00:00':Interval)) AND ($28 = 'R':Varchar) AND ($4 = $37) }
-              LogicalJoin { type: Inner, on: true:Boolean }
-                LogicalJoin { type: Inner, on: true:Boolean }
-                  LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: always }
+                LogicalJoin { type: Inner, on: always }
+                  LogicalJoin { type: Inner, on: always }
                     LogicalScan { table: customer, columns: [_row_id#0, c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment] }
                     LogicalScan { table: orders, columns: [_row_id#0, o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment] }
                   LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
@@ -766,7 +762,7 @@
         l_shipmode
     order by
         l_shipmode;
-  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "l_shipmode", quote_style: None }), list: [Value(SingleQuotedString("FOB")), Value(SingleQuotedString("SHIP"))], negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "l_shipmode", quote_style: None }), list: [Value(SingleQuotedString("FOB")), Value(SingleQuotedString("SHIP"))], negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: tpch_q13
   before:
     - create_tables
@@ -850,7 +846,7 @@
       LogicalAgg { group_keys: [], agg_calls: [sum($0), sum($1)] }
         LogicalProject { exprs: [Case(Like($22, 'PROMO%':Varchar), ($6 * (1:Int32 - $7)), 0:Int32::Decimal), ($6 * (1:Int32 - $7))], expr_alias: [ ,  ] }
           LogicalFilter { predicate: ($2 = $18) AND ($11 >= '1995-09-01':Varchar::Date) AND ($11 < ('1995-09-01':Varchar::Date + '1 mon 00:00:00':Interval)) }
-            LogicalJoin { type: Inner, on: true:Boolean }
+            LogicalJoin { type: Inner, on: always }
               LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
               LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
 - id: tpch_q15
@@ -901,8 +897,8 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $3, $5, $9], expr_alias: [s_suppkey, s_name, s_address, s_phone, total_revenue] }
       LogicalFilter { predicate: ($1 = $8) AND ($9 = $10) }
-        LogicalJoin { type: LeftOuter, on: true:Boolean }
-          LogicalJoin { type: Inner, on: true:Boolean }
+        LogicalJoin { type: LeftOuter, on: always }
+          LogicalJoin { type: Inner, on: always }
             LogicalScan { table: supplier, columns: [_row_id#0, s_suppkey, s_name, s_address, s_nationkey, s_phone, s_acctbal, s_comment] }
             LogicalProject { exprs: [$0, $1], expr_alias: [l_suppkey, total_revenue] }
               LogicalAgg { group_keys: [0], agg_calls: [sum($1)] }
@@ -944,7 +940,7 @@
         LogicalProject { exprs: [$6], expr_alias: [ ] }
           LogicalFilter { predicate: ($18 = $2) AND ($21 = 'Brand#13':Varchar) AND ($24 = 'JUMBO PKG':Varchar) AND ($5 < $27) }
             LogicalApply { type: LeftOuter }
-              LogicalJoin { type: Inner, on: true:Boolean }
+              LogicalJoin { type: Inner, on: always }
                 LogicalScan { table: lineitem, columns: [_row_id#0, l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment] }
                 LogicalScan { table: part, columns: [_row_id#0, p_partkey, p_name, p_mfgr, p_brand, p_type, p_size, p_container, p_retailprice, p_comment] }
               LogicalProject { exprs: [(0.2:Decimal * ($0 / $1))], expr_alias: [ ] }
@@ -989,7 +985,7 @@
       o_totalprice desc,
       o_orderdate
     LIMIT 100;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "o_orderkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "l_orderkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [Identifier(Ident { value: "l_orderkey", quote_style: None })], having: Some(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }), op: Gt, right: Value(Number("1", false)) }) }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "o_orderkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "l_orderkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: None, group_by: [Identifier(Ident { value: "l_orderkey", quote_style: None })], having: Some(BinaryOp { left: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }), op: Gt, right: Value(Number("1", false)) }) }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: tpch_q19
   before:
     - create_tables
@@ -1029,7 +1025,7 @@
         and l_shipmode in ('AIR', 'AIR REG')
         and l_shipinstruct = 'DELIVER IN PERSON'
       );
-  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "p_container", quote_style: None }), list: [Value(SingleQuotedString("SM CASE")), Value(SingleQuotedString("SM BOX")), Value(SingleQuotedString("SM PACK")), Value(SingleQuotedString("SM PKG"))], negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InList { expr: Identifier(Ident { value: "p_container", quote_style: None }), list: [Value(SingleQuotedString("SM CASE")), Value(SingleQuotedString("SM BOX")), Value(SingleQuotedString("SM PACK")), Value(SingleQuotedString("SM PKG"))], negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
 - id: tpch_q20
   before:
     - create_tables
@@ -1071,4 +1067,4 @@
       and n_name = 'KENYA'
     order by
       s_name;
-  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "s_suppkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "ps_suppkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "partsupp", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: InSubquery { expr: Identifier(Ident { value: "ps_partkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "p_partkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "part", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "p_name", quote_style: None }), op: Like, right: Value(SingleQuotedString("forest%")) }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, op: And, right: BinaryOp { left: Identifier(Ident { value: "ps_availqty", quote_style: None }), op: Gt, right: Subquery(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(BinaryOp { left: Value(Number("0.5", false)), op: Multiply, right: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: BinaryOp { left: BinaryOp { left: BinaryOp { left: Identifier(Ident { value: "l_partkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_partkey", quote_style: None }) }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_suppkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_suppkey", quote_style: None }) } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: GtEq, right: TypedString { data_type: Date, value: "1994-01-01" } } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: Lt, right: BinaryOp { left: TypedString { data_type: Date, value: "1994-01-01" }, op: Plus, right: Value(Interval { value: "1", leading_field: Some(Year), leading_precision: None, last_field: None, fractional_seconds_precision: None }) } } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }'
+  binder_error: 'Feature is not yet implemented: unsupported expression InSubquery { expr: Identifier(Ident { value: "s_suppkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "ps_suppkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "partsupp", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: InSubquery { expr: Identifier(Ident { value: "ps_partkey", quote_style: None }), subquery: Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(Identifier(Ident { value: "p_partkey", quote_style: None }))], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "part", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: Identifier(Ident { value: "p_name", quote_style: None }), op: Like, right: Value(SingleQuotedString("forest%")) }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, op: And, right: BinaryOp { left: Identifier(Ident { value: "ps_availqty", quote_style: None }), op: Gt, right: Subquery(Query { with: None, body: Select(Select { distinct: false, projection: [UnnamedExpr(BinaryOp { left: Value(Number("0.5", false)), op: Multiply, right: Function(Function { name: ObjectName([Ident { value: "sum", quote_style: None }]), args: [Unnamed(Expr(Identifier(Ident { value: "l_quantity", quote_style: None })))], over: None, distinct: false }) })], from: [TableWithJoins { relation: Table { name: ObjectName([Ident { value: "lineitem", quote_style: None }]), alias: None, args: [] }, joins: [] }], lateral_views: [], selection: Some(BinaryOp { left: BinaryOp { left: BinaryOp { left: BinaryOp { left: Identifier(Ident { value: "l_partkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_partkey", quote_style: None }) }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_suppkey", quote_style: None }), op: Eq, right: Identifier(Ident { value: "ps_suppkey", quote_style: None }) } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: GtEq, right: TypedString { data_type: Date, value: "1994-01-01" } } }, op: And, right: BinaryOp { left: Identifier(Ident { value: "l_shipdate", quote_style: None }), op: Lt, right: BinaryOp { left: TypedString { data_type: Date, value: "1994-01-01" }, op: Plus, right: Value(Interval { value: "1", leading_field: Some(Year), leading_precision: None, last_field: None, fractional_seconds_precision: None }) } } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }) } }), group_by: [], having: None }), order_by: [], limit: None, offset: None, fetch: None }, negated: false }, Tracking issue: https://github.com/singularity-data/risingwave/issues/112'
