@@ -14,34 +14,36 @@
 
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use paste::paste;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
-
-use crate::binder::BoundSetExpr;
-mod input_ref;
-pub use input_ref::*;
-mod correlated_input_ref;
-pub use correlated_input_ref::*;
-mod literal;
-pub use literal::*;
-mod function_call;
-pub use function_call::*;
-mod agg_call;
-pub use agg_call::*;
-mod subquery;
-pub use subquery::*;
-mod type_inference;
 use risingwave_pb::expr::ExprNode;
-pub use type_inference::*;
-mod utils;
-pub use utils::*;
+
+mod agg_call;
+mod correlated_input_ref;
+mod function_call;
+mod input_ref;
+mod literal;
+mod subquery;
+
 mod expr_rewriter;
-pub use expr_rewriter::*;
 mod expr_visitor;
-pub use expr_visitor::*;
+mod type_inference;
+mod utils;
+
+pub use agg_call::AggCall;
+pub use correlated_input_ref::CorrelatedInputRef;
+pub use function_call::FunctionCall;
+pub use input_ref::{as_alias_display, input_ref_to_column_indices, InputRef, InputRefDisplay};
+pub use literal::Literal;
+pub use subquery::{Subquery, SubqueryKind};
+
 pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
-use paste::paste;
+pub use expr_rewriter::ExprRewriter;
+pub use expr_visitor::ExprVisitor;
+pub use type_inference::infer_type;
+pub use utils::*;
 
 /// the trait of bound exprssions
 pub trait Expr: Into<ExprImpl> {
@@ -161,6 +163,8 @@ impl ExprImpl {
             }
 
             fn visit_subquery(&mut self, subquery: &Subquery) {
+                use crate::binder::BoundSetExpr;
+
                 match &subquery.query.body {
                     BoundSetExpr::Select(select) => select
                         .select_items
