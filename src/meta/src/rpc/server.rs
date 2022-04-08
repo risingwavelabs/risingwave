@@ -49,7 +49,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, GlobalSourceManager, GlobalStreamManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -161,24 +161,8 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.clone(),
     ));
 
-    let stream_manager = Arc::new(
-        GlobalStreamManager::new(
-            env.clone(),
-            fragment_manager.clone(),
-            barrier_manager.clone(),
-            cluster_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
-
-    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
-        hummock_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
     let source_manager = Arc::new(
-        GlobalSourceManager::new(
+        SourceManager::new(
             env.clone(),
             cluster_manager.clone(),
             barrier_manager.clone(),
@@ -194,6 +178,23 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager.run().await.unwrap();
         });
     }
+
+    let stream_manager = Arc::new(
+        GlobalStreamManager::new(
+            env.clone(),
+            fragment_manager.clone(),
+            barrier_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());

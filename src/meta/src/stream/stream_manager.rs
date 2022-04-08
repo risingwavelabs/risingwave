@@ -23,6 +23,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::stream_plan::source_node;
+use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -34,7 +36,7 @@ use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -60,6 +62,9 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Maintains information of the cluster
     cluster_manager: ClusterManagerRef<S>,
 
+    /// Maintains streaming sources from external system like kafka
+    source_manager: SourceManagerRef<S>,
+
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
 
@@ -76,6 +81,7 @@ where
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager,
@@ -83,6 +89,7 @@ where
             scheduler: Scheduler::new(cluster_manager.clone()),
             cluster_manager,
             clients: env.stream_clients_ref(),
+            source_manager,
         })
     }
 
@@ -278,7 +285,37 @@ where
             })
             .await?;
 
-        Ok(())
+        let mut source_actors_group_by_frag = HashMap::new();
+
+        for (_actor_id, actor) in actor_map {
+            let mut node = actor.get_nodes().unwrap();
+            while !node.get_input().is_empty() {
+                node = node.get_input().get(0).unwrap();
+            }
+            if let Node::SourceNode(n) = node.get_node().unwrap() {
+                let source_type = n.get_source_type().unwrap();
+                if matches!(source_type, source_node::SourceType::Source) {
+                    let source_id = n.table_ref_id.as_ref().unwrap().table_id as u32;
+                    let frag_id = actor.fragment_id;
+                    let actor_id = actor.actor_id;
+                    source_actors_group_by_frag
+                        .entry(source_id)
+                        .or_insert_with(HashMap::new)
+                        .entry(frag_id)
+                        .or_insert(vec![])
+                        .push(actor_id);
+                }
+            }
+        }
+
+        self.source_manager
+            .register_source_discovery(
+                source_actors_group_by_frag
+                    .into_iter()
+                    .map(|(actor_id, frag)| (actor_id, frag.into_values().collect_vec()))
+                    .collect(),
+            )
+            .await
     }
 
     /// Dropping materialized view is done by barrier manager. Check
@@ -341,7 +378,7 @@ mod tests {
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
-    use crate::stream::FragmentManager;
+    use crate::stream::{FragmentManager, SourceManager};
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
@@ -500,17 +537,28 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
-                catalog_manager,
+                catalog_manager.clone(),
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),
             ));
+
+            let source_manager = Arc::new(
+                SourceManager::new(
+                    env.clone(),
+                    cluster_manager.clone(),
+                    barrier_manager.clone(),
+                    catalog_manager.clone(),
+                )
+                .await?,
+            );
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
                 barrier_manager.clone(),
                 cluster_manager.clone(),
+                source_manager.clone(),
             )
             .await?;
 

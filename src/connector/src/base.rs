@@ -29,7 +29,7 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::{PulsarSplitEnumerator};
+use crate::pulsar::PulsarSplitEnumerator;
 use crate::{kafka, kinesis, pulsar};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -66,8 +66,8 @@ pub struct ConnectorState {
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
     async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
-        where
-            Self: Sized;
+    where
+        Self: Sized;
 }
 
 #[async_trait]
@@ -140,12 +140,8 @@ pub async fn new_connector(
 ) -> Result<Box<dyn SourceReader + Send + Sync>> {
     let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
     let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
-        KAFKA_SOURCE => {
-            Box::new(KafkaSplitReader::new(config, state).await?)
-        }
-        KINESIS_SOURCE => {
-            Box::new(KinesisSplitReader::new(config, state).await?)
-        }
+        KAFKA_SOURCE => Box::new(KafkaSplitReader::new(config, state).await?),
+        KINESIS_SOURCE => Box::new(KinesisSplitReader::new(config, state).await?),
         // PULSAR_SOURCE => {
         //     let pulsar = PulsarSplitReader::new(config, state).await?;
         //     Box::new(pulsar)

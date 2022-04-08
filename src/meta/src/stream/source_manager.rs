@@ -41,17 +41,16 @@ use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, StreamClient};
 use crate::model::ActorId;
 use crate::storage::MetaStore;
 
-pub type GlobalSourceManagerRef<S> = Arc<GlobalSourceManager<S>>;
+pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 #[allow(dead_code)]
-pub struct GlobalSourceManager<S: MetaStore> {
+pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
 pub struct SourceDiscovery {
-    id: SourceId,
     current_splits: Arc<Mutex<Option<Vec<SplitImpl>>>>,
     last_assigned_splits: Vec<HashMap<ActorId, Vec<SplitImpl>>>,
     stop_tx: oneshot::Sender<()>,
@@ -84,15 +83,14 @@ impl SourceDiscovery {
         });
 
         Ok(Self {
-            id: source_id,
             current_splits: splits,
             last_assigned_splits: vec![],
             stop_tx,
         })
     }
 
-    pub async fn stop(&mut self) {
-        //self.stop_tx.borrow_mut().take().unwrap().send(()).unwrap();
+    pub async fn stop(self) {
+        self.stop_tx.send(()).unwrap();
     }
 }
 
@@ -104,8 +102,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     fn new(
         meta_srv_env: MetaSrvEnv<S>,
@@ -164,6 +162,7 @@ impl<S> SourceManagerCore<S>
                     .map(|(actor_id, _)| actor_id)
                     .collect_vec();
 
+                // todo: use heap
                 for (i, (_, split)) in new_created_ids.iter().cloned().enumerate() {
                     let actor_id = actor_ids[i % actor_ids.len()];
                     assign
@@ -171,7 +170,10 @@ impl<S> SourceManagerCore<S>
                         .or_insert_with(Vec::new)
                         .push((**split).clone());
 
-                    grouped_splits.entry(*actor_id).or_insert_with(Vec::new).push((**split).clone());
+                    grouped_splits
+                        .entry(*actor_id)
+                        .or_insert_with(Vec::new)
+                        .push((**split).clone());
                 }
 
                 current_assigned_splits.push(grouped_splits);
@@ -206,9 +208,9 @@ impl<S> SourceManagerCore<S>
     }
 }
 
-impl<S> GlobalSourceManager<S>
-    where
-        S: MetaStore,
+impl<S> SourceManager<S>
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -225,18 +227,18 @@ impl<S> GlobalSourceManager<S>
         })
     }
 
-    async fn unregister_source_discovery(&self, source_id: SourceId) -> Result<()> {
+    pub async fn unregister_source_discovery(&self, source_id: SourceId) -> Result<()> {
         let mut core = self.core.lock().await;
 
-        if let Some(mut source) = core.managed_sources.remove(&source_id) {
+        if let Some(source) = core.managed_sources.remove(&source_id) {
             source.stop().await;
         }
 
         Ok(())
     }
 
-    async fn register_source_discovery(
-        &mut self,
+    pub async fn register_source_discovery(
+        &self,
         actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
     ) -> Result<()> {
         let mut core = self.core.lock().await;
@@ -282,7 +284,7 @@ impl<S> GlobalSourceManager<S>
         Ok(())
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -297,8 +299,8 @@ impl<S> GlobalSourceManager<S>
                 .iter()
                 .map(|worker| self.env.stream_clients().get(worker)),
         )
-            .await?
-            .into_iter();
+        .await?
+        .into_iter();
 
         Ok(all_stream_clients)
     }

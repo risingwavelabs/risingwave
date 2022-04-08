@@ -31,7 +31,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    FragmentManagerRef, GlobalSourceManagerRef, GlobalStreamManagerRef, StreamFragmenter,
+    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
 };
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: GlobalSourceManagerRef<S>,
+    source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -53,7 +53,7 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: GlobalSourceManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
