@@ -9,7 +9,7 @@ use risingwave_rpc_client::MetaClient;
 /// in this trait so that the mocking can be simplified.
 #[async_trait::async_trait]
 pub trait FrontendMetaClient: Send + Sync {
-    async fn pin_snapshot(&self) -> Result<u64>;
+    async fn pin_snapshot(&self, epoch: u64) -> Result<u64>;
 
     async fn flush(&self) -> Result<()>;
 
@@ -20,15 +20,14 @@ pub struct FrontendMetaClientImpl(pub MetaClient);
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for FrontendMetaClientImpl {
-    async fn pin_snapshot(&self) -> Result<u64> {
+    // pin a specific snapshot
+    async fn pin_snapshot(&self, epoch: u64) -> Result<u64> {
         let resp = self
             .0
             .inner
             .pin_snapshot(PinSnapshotRequest {
                 context_id: 0,
-                // u64::MAX always return the greatest current epoch. Use correct `last_pinned` when
-                // retrying this RPC.
-                last_pinned: u64::MAX,
+                epoch,
             })
             .await?;
         Ok(resp.get_snapshot()?.epoch)

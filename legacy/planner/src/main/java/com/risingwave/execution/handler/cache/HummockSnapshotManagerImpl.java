@@ -95,7 +95,7 @@ public class HummockSnapshotManagerImpl implements HummockSnapshotManager {
             .pinSnapshot(
                 PinSnapshotRequest.newBuilder()
                     .setContextId(this.workerNodeId)
-                    .setLastPinned(~0L)
+                    .setEpoch(0L)
                     .build())
             .getSnapshot()
             .getEpoch();

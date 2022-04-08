@@ -21,7 +21,7 @@ use std::time::Duration;
 use itertools::{enumerate, Itertools};
 use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
 use prost::Message;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
     INVALID_EPOCH,
@@ -31,6 +31,7 @@ use risingwave_pb::hummock::{
     HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
     SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
 };
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::ClusterManagerRef;
@@ -577,13 +578,13 @@ where
         Ok(ret_hummock_version)
     }
 
-    /// Pin a hummock snapshot that is greater than `last_pinned`. The pin belongs to `context_id`
-    /// and will be unpinned when `context_id` is invalidated.
-    /// `last_pinned` helps to `pin_snapshot` retryable, see `pin_version` for detail.
+    /// Pin and return `max_commited_epoch` when `epoch` is less than or equal to
+    /// `max_commited_epoch` and was never pinned. Return `epoch` when epoch was pinned. Return
+    /// error when `epoch` is bigger than `max_commited_epoch`.
     pub async fn pin_snapshot(
         &self,
         context_id: HummockContextId,
-        last_pinned: HummockEpoch,
+        mut epoch: HummockEpoch,
     ) -> Result<HummockSnapshot> {
         let mut versioning_guard = self.versioning.write().await;
 
@@ -607,37 +608,28 @@ where
             },
         );
 
-        let mut already_pinned = false;
-        let epoch = {
-            let partition_point = context_pinned_snapshot
-                .snapshot_id
-                .iter()
-                .sorted()
-                .cloned()
-                .collect_vec()
-                .partition_point(|p| *p <= last_pinned);
-            if partition_point < context_pinned_snapshot.snapshot_id.len() {
-                already_pinned = true;
-                context_pinned_snapshot.snapshot_id[partition_point]
+        if epoch <= max_committed_epoch {
+            if context_pinned_snapshot.snapshot_id.contains(&epoch) {
+                abort_multi_var!(context_pinned_snapshot);
             } else {
-                max_committed_epoch
+                epoch = max_committed_epoch;
+                context_pinned_snapshot.pin_snapshot(epoch);
+                commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
             }
-        };
 
-        if !already_pinned {
-            context_pinned_snapshot.pin_snapshot(epoch);
-            commit_multi_var!(self, Some(context_id), context_pinned_snapshot)?;
+            #[cfg(test)]
+            {
+                drop(versioning_guard);
+                self.check_state_consistency().await;
+            }
+
+            Ok(HummockSnapshot { epoch })
         } else {
-            abort_multi_var!(context_pinned_snapshot);
+            Err(RwError::from(ErrorCode::InternalError(format!(
+                "epoch {} is bigger than max_commited_epoch",
+                epoch
+            ))))
         }
-
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-
-        Ok(HummockSnapshot { epoch })
     }
 
     pub async fn unpin_snapshot(
@@ -1007,6 +999,14 @@ where
             drop(compaction_guard);
             self.check_state_consistency().await;
         }
+
+        self.env
+            .notification_manager()
+            .notify_frontend(
+                Operation::Update, // Frontends don't care about operation.
+                &Info::HummockSnapshot(HummockSnapshot { epoch }),
+            )
+            .await;
 
         Ok(())
     }

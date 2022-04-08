@@ -96,9 +96,9 @@ impl HummockMetaClient for MockHummockMetaClient {
             .await
     }
 
-    async fn pin_snapshot(&self, last_pinned: HummockEpoch) -> Result<HummockEpoch> {
+    async fn pin_snapshot(&self, epoch: HummockEpoch) -> Result<HummockEpoch> {
         self.hummock_manager
-            .pin_snapshot(self.context_id, last_pinned)
+            .pin_snapshot(self.context_id, epoch)
             .await
             .map(|e| e.epoch)
     }

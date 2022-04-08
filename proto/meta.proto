@@ -8,6 +8,7 @@ option optimize_for = SPEED;
 
 import "catalog.proto";
 import "common.proto";
+import "hummock.proto";
 import "plan.proto";
 import "stream_plan.proto";
 
@@ -296,6 +297,7 @@ message SubscribeResponse {
     catalog.Table table_v2 = 10;
     catalog.Source source = 11;
     MetaSnapshot fe_snapshot = 12;
+    hummock.HummockSnapshot hummock_snapshot = 13;
   }
 }
 

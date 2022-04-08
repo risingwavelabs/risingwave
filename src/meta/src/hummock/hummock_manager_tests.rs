@@ -83,10 +83,7 @@ async fn test_hummock_pin_unpin() -> Result<()> {
         0
     );
     for _ in 0..2 {
-        let pin_result = hummock_manager
-            .pin_snapshot(context_id, u64::MAX)
-            .await
-            .unwrap();
+        let pin_result = hummock_manager.pin_snapshot(context_id, 0).await.unwrap();
         assert_eq!(pin_result.epoch, epoch);
         let pinned_snapshots = HummockPinnedSnapshot::list(env.meta_store()).await?;
         assert_eq!(pin_snapshots_sum(&pinned_snapshots), 1);
@@ -498,14 +495,8 @@ async fn test_release_context_resource() -> Result<()> {
         .pin_version(context_id_2, u64::MAX)
         .await
         .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_1, u64::MAX)
-        .await
-        .unwrap();
-    hummock_manager
-        .pin_snapshot(context_id_2, u64::MAX)
-        .await
-        .unwrap();
+    hummock_manager.pin_snapshot(context_id_1, 0).await.unwrap();
+    hummock_manager.pin_snapshot(context_id_2, 0).await.unwrap();
     assert_eq!(
         pin_versions_sum(&HummockPinnedVersion::list(env.meta_store()).await.unwrap()),
         2
@@ -793,12 +784,13 @@ async fn test_retryable_pin_snapshot() {
     hummock_manager.commit_epoch(epoch).await.unwrap();
     epoch += 1;
 
-    // Pin a snapshot with smallest last_pin
+    // Pin a snapshot with smallest epoch
     // [ e0 ] -> [ e0:pinned ]
     let snapshot = hummock_manager
         .pin_snapshot(context_id, INVALID_EPOCH)
         .await
         .unwrap();
+    assert_eq!(snapshot.epoch, INVALID_EPOCH + 1);
     assert_eq!(snapshot.epoch, epoch - 1);
 
     let test_tables = generate_test_tables(
@@ -819,15 +811,15 @@ async fn test_retryable_pin_snapshot() {
     // Retry and results the same snapshot pinned.
     // [ e0:pinned, e1 ] -> [ e0:pinned, e1 ]
     let snapshot_retry = hummock_manager
-        .pin_snapshot(context_id, INVALID_EPOCH)
+        .pin_snapshot(context_id, snapshot.epoch)
         .await
         .unwrap();
     assert_eq!(snapshot_retry.epoch, snapshot.epoch);
 
-    // Use correct last_pin to pin newer snapshot.
+    // Use correct epoch to pin newer snapshot.
     // [ e0:pinned, e1 ] -> [ e0:pinned, e1:pinned ]
     let snapshot_2 = hummock_manager
-        .pin_snapshot(context_id, snapshot.epoch)
+        .pin_snapshot(context_id, snapshot.epoch + 1)
         .await
         .unwrap();
     assert_eq!(snapshot_2.epoch, snapshot.epoch + 1);
@@ -852,17 +844,14 @@ async fn test_retryable_pin_snapshot() {
     // Retry and results the same snapshot pinned.
     // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3 ]
     let snapshot_2_retry = hummock_manager
-        .pin_snapshot(context_id, snapshot.epoch)
+        .pin_snapshot(context_id, snapshot_2.epoch)
         .await
         .unwrap();
     assert_eq!(snapshot_2.epoch, snapshot_2_retry.epoch);
 
-    // Use u64::MAX as last_pin to pin greatest snapshot
+    // Use 0 as epoch to pin greatest snapshot
     // [ e0:pinned, e1:pinned, e2, e3 ] -> [ e0:pinned, e1:pinned, e2, e3:pinned ]
-    let snapshot_3 = hummock_manager
-        .pin_snapshot(context_id, u64::MAX)
-        .await
-        .unwrap();
+    let snapshot_3 = hummock_manager.pin_snapshot(context_id, 0).await.unwrap();
     assert_eq!(snapshot_3.epoch, snapshot_2.epoch + 2);
 }
 

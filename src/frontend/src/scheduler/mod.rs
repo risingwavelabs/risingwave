@@ -18,6 +18,8 @@ use crate::session::SessionImpl;
 
 #[allow(dead_code)]
 mod execution;
+mod hummock_snapshot_manager;
+pub use hummock_snapshot_manager::*;
 #[allow(dead_code)]
 pub mod plan_fragmenter;
 mod query_manager;
