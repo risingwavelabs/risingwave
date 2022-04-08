@@ -54,8 +54,11 @@ impl Task for MinioService {
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
+        let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+        std::fs::create_dir_all(&path)?;
+
         cmd.arg("server")
-            .arg(env::var("HUMMOCK_PATH")?)
+            .arg(&path)
             .arg("--address")
             .arg(format!("{}:{}", self.config.address, self.config.port))
             .arg("--console-address")

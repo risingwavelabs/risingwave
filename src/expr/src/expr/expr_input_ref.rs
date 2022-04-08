@@ -63,7 +63,7 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
                 idx: input_ref_node.column_idx as usize,
             })
         } else {
-            Err(RwError::from(ErrorCode::NotImplementedError(
+            Err(RwError::from(ErrorCode::InternalError(
                 "expects a input ref node".to_string(),
             )))
         }

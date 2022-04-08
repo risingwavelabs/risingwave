@@ -157,6 +157,12 @@ impl fmt::Display for ObjectName {
     }
 }
 
+impl ParseTo for ObjectName {
+    fn parse_to(p: &mut Parser) -> Result<Self, ParserError> {
+        p.parse_object_name()
+    }
+}
+
 /// An SQL expression of any type.
 ///
 /// The parser does not distinguish between expressions of different types
@@ -642,6 +648,30 @@ impl fmt::Display for ShowCreateObject {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum ShowCommandObject {
+    Table(Option<Ident>),
+    Database,
+    Schema,
+    MaterializedView(Option<Ident>),
+}
+
+impl fmt::Display for ShowCommandObject {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ShowCommandObject::Database => f.write_str("DATABASES"),
+            ShowCommandObject::Schema => f.write_str("SCHEMAS"),
+            ShowCommandObject::MaterializedView(None) => f.write_str("MATERIALIZED VIEWS"),
+            ShowCommandObject::Table(None) => f.write_str("TABLES"),
+            ShowCommandObject::MaterializedView(Some(name)) => {
+                write!(f, "MATERIALIZED VIEWS FROM {}", name)
+            }
+            ShowCommandObject::Table(Some(name)) => write!(f, "TABLES FROM {}", name),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CommentObject {
     Column,
     Table,
@@ -735,23 +765,28 @@ pub enum Statement {
         if_not_exists: bool,
     },
     /// CREATE SOURCE
-    CreateSource(CreateSourceStatement),
+    CreateSource {
+        is_materialized: bool,
+        stmt: CreateSourceStatement,
+    },
     /// ALTER TABLE
     AlterTable {
         /// Table name
         name: ObjectName,
         operation: AlterTableOperation,
     },
-    /// SHOW TABLE
-    ShowTable {
-        /// Table name
+    /// DESCRIBE TABLE OR SOURCE
+    Describe {
+        /// Table or Source name
         name: ObjectName,
     },
-    /// SHOW SOURCE
-    ShowSource {
-        /// Table name
+    /// SHOW COLUMN FROM TABLE OR SOURCE
+    ShowColumn {
+        /// Table or Source name
         name: ObjectName,
     },
+    /// SHOW COMMAND
+    ShowCommand(ShowCommandObject),
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -886,12 +921,16 @@ impl fmt::Display for Statement {
                 write!(f, "ANALYZE TABLE {}", table_name)?;
                 Ok(())
             }
-            Statement::ShowTable { name } => {
-                write!(f, "SHOW TABLE {}", name)?;
+            Statement::Describe { name } => {
+                write!(f, "DESCRIBE {}", name)?;
                 Ok(())
             }
-            Statement::ShowSource { name } => {
-                write!(f, "SHOW SOURCE {}", name)?;
+            Statement::ShowColumn { name } => {
+                write!(f, "SHOW COLUMNS FROM {}", name)?;
+                Ok(())
+            }
+            Statement::ShowCommand(show_object) => {
+                write!(f, "SHOW {}", show_object)?;
                 Ok(())
             }
             Statement::Insert {
@@ -1060,7 +1099,19 @@ impl fmt::Display for Statement {
                 table_name = table_name,
                 columns = display_separated(columns, ",")
             ),
-            Statement::CreateSource(stmt) => write!(f, "CREATE SOURCE {}", stmt),
+            Statement::CreateSource {
+                is_materialized,
+                stmt,
+            } => write!(
+                f,
+                "CREATE {materialized}SOURCE {}",
+                stmt,
+                materialized = if *is_materialized {
+                    "MATERIALIZED "
+                } else {
+                    ""
+                }
+            ),
             Statement::AlterTable { name, operation } => {
                 write!(f, "ALTER TABLE {} {}", name, operation)
             }
@@ -1447,6 +1498,8 @@ pub enum ObjectType {
     MaterializedView,
     Index,
     Schema,
+    Source,
+    MaterializedSource,
 }
 
 impl fmt::Display for ObjectType {
@@ -1457,6 +1510,8 @@ impl fmt::Display for ObjectType {
             ObjectType::MaterializedView => "MATERIALIZED VIEW",
             ObjectType::Index => "INDEX",
             ObjectType::Schema => "SCHEMA",
+            ObjectType::Source => "SOURCE",
+            ObjectType::MaterializedSource => "MATERIALIZED SOURCE",
         })
     }
 }
@@ -1469,13 +1524,17 @@ impl ParseTo for ObjectType {
             ObjectType::View
         } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
             ObjectType::MaterializedView
+        } else if parser.parse_keywords(&[Keyword::MATERIALIZED, Keyword::SOURCE]) {
+            ObjectType::MaterializedSource
+        } else if parser.parse_keyword(Keyword::SOURCE) {
+            ObjectType::Source
         } else if parser.parse_keyword(Keyword::INDEX) {
             ObjectType::Index
         } else if parser.parse_keyword(Keyword::SCHEMA) {
             ObjectType::Schema
         } else {
             return parser.expected(
-                "TABLE, VIEW, INDEX or SCHEMA after DROP",
+                "TABLE, VIEW, INDEX, MATERIALIZED VIEW, SOURCE, MATERIALIZED SOURCE, or SCHEMA after DROP",
                 parser.peek_token(),
             );
         };

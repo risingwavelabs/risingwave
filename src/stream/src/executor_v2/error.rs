@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_storage::hummock::TracedHummockError;
+use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -24,7 +24,7 @@ pub enum StreamExecutorError {
     Storage(
         #[backtrace]
         #[source]
-        TracedHummockError,
+        StorageError,
     ),
 
     #[error("executor v1 error {0}")]
@@ -33,13 +33,16 @@ pub enum StreamExecutorError {
     #[error("chunk operation error {0}")]
     EvalError(RwError),
 
+    #[error("aggregate state error {0}")]
+    AggStateError(RwError),
+
     #[error("channel `{0}` closed")]
     ChannelClosed(String),
 }
 
 impl StreamExecutorError {
-    pub fn storage(error: TracedHummockError) -> TracedStreamExecutorError {
-        Self::Storage(error).into()
+    pub fn storage(error: impl Into<StorageError>) -> TracedStreamExecutorError {
+        Self::Storage(error.into()).into()
     }
 
     pub fn executor_v1(error: impl Into<RwError>) -> TracedStreamExecutorError {
@@ -48,6 +51,10 @@ impl StreamExecutorError {
 
     pub fn eval_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::EvalError(error.into()).into()
+    }
+
+    pub fn agg_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::AggStateError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
@@ -79,6 +86,12 @@ impl std::fmt::Debug for TracedStreamExecutorError {
             )?;
         }
         Ok(())
+    }
+}
+
+impl From<StorageError> for TracedStreamExecutorError {
+    fn from(s: StorageError) -> Self {
+        StreamExecutorError::storage(s)
     }
 }
 

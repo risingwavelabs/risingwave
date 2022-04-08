@@ -482,13 +482,10 @@ mod tests {
         assert_eq!(join.schema().fields().len(), 3);
         assert_eq!(join.schema().fields(), &fields[1..4]);
 
-        match join.on.clone().to_expr() {
-            ExprImpl::FunctionCall(call) => {
-                assert_eq_input_ref!(&call.inputs()[0], 0);
-                assert_eq_input_ref!(&call.inputs()[1], 2);
-            }
-            _ => panic!("Expected function call"),
-        }
+        let expr = join.on.clone().to_expr();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
+        assert_eq_input_ref!(&call.inputs()[1], 2);
 
         let left = join.left();
         let left = left.as_logical_values().unwrap();
@@ -563,13 +560,11 @@ mod tests {
         assert_eq!(join.schema().fields()[0], fields[1]);
         assert_eq!(join.schema().fields()[1], fields[3]);
 
-        match join.on.clone().to_expr() {
-            ExprImpl::FunctionCall(call) => {
-                assert_eq_input_ref!(&call.inputs()[0], 0);
-                assert_eq_input_ref!(&call.inputs()[1], 1);
-            }
-            _ => panic!("Expected function call"),
-        }
+        let expr = join.on.clone().to_expr();
+        let call = expr.as_function_call().unwrap();
+        assert_eq_input_ref!(&call.inputs()[0], 0);
+        assert_eq_input_ref!(&call.inputs()[1], 1);
+
         let left = join.left();
         let left = left.as_logical_values().unwrap();
         assert_eq!(left.schema().fields(), &fields[1..2]);

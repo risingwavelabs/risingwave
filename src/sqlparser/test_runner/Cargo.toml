@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-risingwave_sqlparser = { path = "../" }
-serde_yaml = "0.8"
-walkdir = "2"
-workspace-hack = { version = "0.1", path = "../../workspace-hack" }
-tempfile = "3"
 anyhow = "1"
 itertools = "0.10"
+risingwave_sqlparser = { path = "../" }
+serde_yaml = "0.8"
+tempfile = "3"
+walkdir = "2"
+workspace-hack = { version = "0.1", path = "../../workspace-hack" }
 
 [build-dependencies]
 walkdir = "2"

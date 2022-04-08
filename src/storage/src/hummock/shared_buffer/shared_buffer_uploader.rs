@@ -17,13 +17,12 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
+use risingwave_rpc_client::HummockMetaClient;
 
+use crate::error::StorageResult;
 use crate::hummock::compactor::{Compactor, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
-use crate::hummock::hummock_meta_client::HummockMetaClient;
-use crate::hummock::iterator::{BoxedHummockIterator, MergeIterator};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
@@ -101,12 +100,6 @@ impl SharedBufferUploader {
         };
 
         // Compact buffers into SSTs
-        let merge_iters = {
-            let iters = buffers
-                .into_iter()
-                .map(|m| Box::new(m.iter()) as BoxedHummockIterator);
-            MergeIterator::new(iters, self.stats.clone())
-        };
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
             local_version_manager: self.local_version_manager.clone(),
@@ -116,8 +109,12 @@ impl SharedBufferUploader {
             is_share_buffer_compact: true,
         };
 
-        let tables =
-            Compactor::compact_shared_buffer(Arc::new(mem_compactor_ctx), merge_iters).await?;
+        let tables = Compactor::compact_shared_buffer(
+            Arc::new(mem_compactor_ctx),
+            buffers,
+            self.stats.clone(),
+        )
+        .await?;
 
         // Add all tables at once.
         let version = self
@@ -136,7 +133,8 @@ impl SharedBufferUploader {
                     })
                     .collect(),
             )
-            .await?;
+            .await
+            .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
@@ -144,7 +142,7 @@ impl SharedBufferUploader {
         Ok(())
     }
 
-    async fn handle(&mut self, item: SharedBufferUploaderItem) -> Result<()> {
+    async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
         match item {
             SharedBufferUploaderItem::Batch(m) => {
                 if let Some(detector) = &self.write_conflict_detector {
@@ -193,7 +191,7 @@ impl SharedBufferUploader {
         }
     }
 
-    pub async fn run(mut self) -> Result<()> {
+    pub async fn run(mut self) -> StorageResult<()> {
         while let Some(m) = self.rx.recv().await {
             if let Err(e) = self.handle(m).await {
                 return Err(e);

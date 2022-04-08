@@ -69,10 +69,10 @@ impl Binder {
                     ExprType::RoundDigit
                 }
                 _ => {
-                    return Err(ErrorCode::NotImplementedError(format!(
-                        "unsupported function: {:?}",
-                        function_name
-                    ))
+                    return Err(ErrorCode::NotImplemented(
+                        format!("unsupported function: {:?}", function_name),
+                        112.into(),
+                    )
                     .into())
                 }
             };
@@ -81,10 +81,11 @@ impl Binder {
             })?
             .into())
         } else {
-            Err(
-                ErrorCode::NotImplementedError(format!("unsupported function: {:?}", f.name))
-                    .into(),
+            Err(ErrorCode::NotImplemented(
+                format!("unsupported function: {:?}", f.name),
+                112.into(),
             )
+            .into())
         }
     }
 
@@ -93,10 +94,10 @@ impl Binder {
             .iter()
             .map(|i| format!("{:?}", i.return_type()))
             .join(",");
-        ErrorCode::NotImplementedError(format!(
-            "function {}({}) doesn't exist",
-            function_name, args
-        ))
+        ErrorCode::NotImplemented(
+            format!("function {}({}) doesn't exist", function_name, args),
+            112.into(),
+        )
         .into()
     }
 

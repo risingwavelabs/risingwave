@@ -15,8 +15,9 @@
 use std::ops::Bound::{self, *};
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
+
 use crate::hummock::iterator::{HummockIterator, ReverseMergeIterator};
-use crate::hummock::key::{get_epoch, key_with_epoch, user_key as to_user_key, Epoch};
 use crate::hummock::local_version_manager::ScopedLocalVersion;
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockResult;
@@ -264,6 +265,8 @@ mod tests {
 
     use rand::distributions::Alphanumeric;
     use rand::{thread_rng, Rng};
+    use risingwave_hummock_sdk::key::{prev_key, user_key};
+    use risingwave_hummock_sdk::VersionedComparator;
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
@@ -272,11 +275,9 @@ mod tests {
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::BoxedHummockIterator;
-    use crate::hummock::key::{prev_key, user_key};
     use crate::hummock::sstable::Sstable;
     use crate::hummock::test_utils::gen_test_sstable;
     use crate::hummock::value::HummockValue;
-    use crate::hummock::version_cmp::VersionedComparator;
     use crate::hummock::{ReverseSSTableIterator, SstableStoreRef};
     use crate::monitor::StateStoreMetrics;
     use crate::storage_value::ValueMeta;

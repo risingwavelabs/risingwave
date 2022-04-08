@@ -59,7 +59,6 @@ pub(super) async fn top_n_executor_next<E: TopNExecutorBase>(executor: &mut E) -
     }
     let res = match msg {
         Message::Chunk(chunk) => Ok(Message::Chunk(executor.apply_chunk(chunk).await?)),
-        Message::Barrier(barrier) if barrier.is_stop_mutation() => Ok(Message::Barrier(barrier)),
         Message::Barrier(barrier) => {
             executor.flush_data().await?;
             executor.update_executor_state(ExecutorState::Active(barrier.epoch.curr));

@@ -21,7 +21,7 @@ use futures::channel::mpsc::{channel, Receiver};
 use futures::future::join_all;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -220,16 +220,6 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub async fn drop_materialized_view(
-        &self,
-        _table_id: &TableId,
-        _env: StreamEnvironment,
-    ) -> Result<()> {
-        // TODO(august): the data in StateStore should also be dropped directly/through unpin or
-        // some other way.
-        Ok(())
-    }
-
     /// Force stop all actors on this worker.
     pub async fn stop_all_actors(&self) -> Result<()> {
         let futures = {
@@ -320,8 +310,9 @@ pub fn build_agg_call_from_prost(agg_call_proto: &expr::AggCall) -> Result<AggCa
                 arg.get_input()?.column_idx as usize,
             ),
             _ => {
-                return Err(RwError::from(ErrorCode::NotImplementedError(
+                return Err(RwError::from(ErrorCode::NotImplemented(
                     "multiple aggregation args".to_string(),
+                    None.into(),
                 )))
             }
         }
@@ -782,9 +773,9 @@ impl LocalStreamManagerCore {
     ) -> Result<()> {
         for actor in req.get_info() {
             let ret = self.actor_infos.insert(actor.get_actor_id(), actor.clone());
-            if ret.is_some() {
+            if let Some(prev_actor) = ret && actor != &prev_actor{
                 return Err(ErrorCode::InternalError(format!(
-                    "duplicated actor {}",
+                    "actor info mismatch when broadcasting {}",
                     actor.get_actor_id()
                 ))
                 .into());

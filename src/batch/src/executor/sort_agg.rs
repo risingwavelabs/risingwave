@@ -170,7 +170,11 @@ impl Executor for SortAggExecutor {
 
         let ret = DataChunk::builder().columns(columns).build();
 
-        Ok(Some(ret))
+        if ret.cardinality() == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(ret))
+        }
     }
 
     async fn close(&mut self) -> Result<()> {

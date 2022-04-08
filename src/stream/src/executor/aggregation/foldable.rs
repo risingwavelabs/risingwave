@@ -20,8 +20,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::ErrorCode::{NotImplementedError, NumericValueOutOfRange};
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
 
 use super::{StreamingAggFunction, StreamingAggState, StreamingAggStateImpl};
@@ -93,7 +92,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_add(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
+                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((y.to_owned_scalar()).into()),
@@ -105,7 +104,7 @@ where
         Ok(match (result, input) {
             (Some(x), Some(y)) => Some(
                 x.checked_sub(&(y.to_owned_scalar()).into())
-                    .ok_or_else(|| RwError::from(NumericValueOutOfRange))?,
+                    .ok_or_else(|| RwError::from(ErrorCode::NumericValueOutOfRange))?,
             ),
             (Some(x), None) => Some(x.clone()),
             (None, Some(y)) => Some((-y.to_owned_scalar()).into()),
@@ -177,7 +176,7 @@ where
     }
 
     fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(NotImplementedError(
+        Err(RwError::from(ErrorCode::InternalError(
             "insert only for minimum".to_string(),
         )))
     }
@@ -207,7 +206,7 @@ where
     }
 
     fn retract(_result: Option<&S>, _input: Option<S::ScalarRefType<'_>>) -> Result<Option<S>> {
-        Err(RwError::from(NotImplementedError(
+        Err(RwError::from(ErrorCode::InternalError(
             "insert only for maximum".to_string(),
         )))
     }

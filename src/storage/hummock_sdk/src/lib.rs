@@ -12,11 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[allow(dead_code)]
-mod mock_hummock_meta_client;
+mod version_cmp;
+pub use version_cmp::*;
+pub mod compact;
+pub mod key;
+pub mod key_range;
 
-#[allow(unused_imports)]
-pub use mock_hummock_meta_client::*;
-
-mod mock_hummock_meta_service;
-pub use mock_hummock_meta_service::*;
+pub type HummockSSTableId = u64;
+pub type HummockRefCount = u64;
+pub type HummockVersionId = u64;
+pub type HummockContextId = u32;
+pub type HummockEpoch = u64;
+pub const INVALID_EPOCH: HummockEpoch = 0;
+pub const INVALID_VERSION_ID: HummockVersionId = 0;
+pub const FIRST_VERSION_ID: HummockVersionId = 1;

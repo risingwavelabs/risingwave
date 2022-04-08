@@ -100,7 +100,9 @@ impl Binder {
         let name = match order_by_expr.expr {
             Expr::Identifier(name) => name.value,
             expr => {
-                return Err(ErrorCode::NotImplementedError(format!("ORDER BY {:?}", expr)).into())
+                return Err(
+                    ErrorCode::NotImplemented(format!("ORDER BY {:?}", expr), 1635.into()).into(),
+                )
             }
         };
         let index = *name_to_index

@@ -18,12 +18,12 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use lz4::Decoder;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use super::utils::{
     bytes_diff, var_u32_len, xxhash64_verify, BufExt, BufMutExt, CompressionAlgorithm,
 };
 use crate::hummock::sstable::utils::xxhash64_checksum;
-use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{HummockError, HummockResult};
 
 pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;

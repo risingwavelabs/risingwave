@@ -4,10 +4,10 @@ plugins {
 
 val junit5Version = "5.7.2"
 val calciteVersion = "1.27.0"
-val grpcVersion = "1.39.0"
+val grpcVersion = "1.43.2"
 val annotationVersion = "1.3.2"
 var guiceVersion = "5.0.1"
-val protobufVersion = "3.17.2"
+val protobufVersion = "3.18.2"
 val akkaVersion = "2.6.15"
 val scalaBinaryVersion = "2.13"
 val mockitoVersion = "3.11.2"

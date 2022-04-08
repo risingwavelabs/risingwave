@@ -2,10 +2,11 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, FunctionArg, FunctionArgExpr, ObjectName};
 
-use super::{Binder, BoundBaseTable, Result};
-use crate::expr::{Expr as _, ExprImpl, InputRef};
+use super::{Binder, Relation, Result};
+use crate::expr::{ExprImpl, InputRef};
 
 #[derive(Copy, Clone, Debug)]
 pub enum WindowTableFunctionKind {
@@ -29,7 +30,7 @@ impl FromStr for WindowTableFunctionKind {
 
 #[derive(Debug)]
 pub struct BoundWindowTableFunction {
-    pub(crate) input: BoundBaseTable,
+    pub(crate) input: Relation,
     pub(crate) kind: WindowTableFunctionKind,
     pub(crate) time_col: InputRef,
     pub(crate) args: Vec<ExprImpl>,
@@ -59,9 +60,10 @@ impl Binder {
             )
             .into()),
         }?;
+        let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
 
         // TODO: support alias.
-        let base = self.bind_table(table_name.clone(), None)?;
+        let base = self.bind_table_or_source(&schema_name, &table_name, None)?;
 
         let Some(time_col_arg) = args.next() else {
             return Err(ErrorCode::BindError(
@@ -76,11 +78,8 @@ impl Binder {
             .into());
         };
 
-        let time_col_data_type = time_col.return_type();
-
         self.pop_context();
 
-        let (schema_name, table_name) = Self::resolve_table_name(table_name)?;
         let table_catalog =
             self.catalog
                 .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
@@ -107,12 +106,8 @@ impl Binder {
             })
             .chain(
                 [
-                    (
-                        "window_start".to_string(),
-                        time_col_data_type.clone(),
-                        false,
-                    ),
-                    ("window_end".to_string(), time_col_data_type, false),
+                    ("window_start".to_string(), DataType::Timestamp, false),
+                    ("window_end".to_string(), DataType::Timestamp, false),
                 ]
                 .into_iter(),
             );

@@ -113,7 +113,7 @@ mod tests {
             ColumnId::from(1),
         ];
         let table_column_descs = vec![
-            ColumnDesc::unnamed(column_ids[0], DataType::Char),
+            ColumnDesc::unnamed(column_ids[0], DataType::Varchar),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
             ColumnDesc::unnamed(column_ids[2], DataType::Int64),
             ColumnDesc::unnamed(column_ids[3], DataType::Float64),
