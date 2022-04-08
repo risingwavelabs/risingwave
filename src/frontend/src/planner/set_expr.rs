@@ -12,68 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use risingwave_common::error::Result;
 
-use itertools::Itertools;
-use risingwave_common::catalog::ColumnDesc;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
-
-use crate::binder::{BoundSelect, BoundSetExpr, Relation};
-use crate::expr::{Expr, ExprImpl};
+use crate::binder::BoundSetExpr;
 use crate::optimizer::plan_node::PlanRef;
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_set_expr(
-        &mut self,
-        set_expr: BoundSetExpr,
-    ) -> Result<(PlanRef, HashMap<String, ColumnDesc>)> {
+    pub(super) fn plan_set_expr(&mut self, set_expr: BoundSetExpr) -> Result<PlanRef> {
         match set_expr {
-            BoundSetExpr::Select(s) => {
-                let column_name_to_desc = self.store_struct_column(&s)?;
-                Ok((self.plan_select(*s)?, column_name_to_desc))
-            }
-            BoundSetExpr::Values(v) => Ok((self.plan_values(*v)?, HashMap::new())),
+            BoundSetExpr::Select(s) => self.plan_select(*s),
+            BoundSetExpr::Values(v) => self.plan_values(*v),
         }
-    }
-
-    /// For every struct select item, store its `alias_name` and `column_desc` in the map.
-    fn store_struct_column(&mut self, select: &BoundSelect) -> Result<HashMap<String, ColumnDesc>> {
-        let table: Vec<ColumnDesc> = {
-            match &select.from {
-                Some(relation) => relation.extract_column_descs(),
-                None => vec![],
-            }
-        };
-        let mut column_descs = vec![];
-
-        for i in 0..select.select_items.len() {
-            let item = &select.select_items[i];
-            if let DataType::Struct { .. } = item.return_type() {
-                if let ExprImpl::InputRef(expr) = item {
-                    let mut column = table
-                        .get(expr.index())
-                        .ok_or_else(|| RwError::from(InternalError("not found index".to_string())))?
-                        .clone();
-
-                    let name = {
-                        match select.aliases.get(i).ok_or_else(|| {
-                            RwError::from(InternalError("index out of range".to_string()))
-                        })? {
-                            Some(name) => {
-                                // Change struct column desc and field descs prefix names to alias.
-                                column.change_prefix_name(column.name.clone(), name.clone());
-                                name.clone()
-                            }
-                            None => column.name.clone(),
-                        }
-                    };
-                    column_name_to_desc.insert(name, column);
-                }
-            }
-        }
-        Ok(column_name_to_desc)
     }
 }

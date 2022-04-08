@@ -12,15 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::expr::InputRefExpr;
 use risingwave_pb::plan::ColumnOrder;
@@ -102,45 +101,39 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-        map: HashMap<String, ColumnDesc>,
+        map: Vec<ColumnDesc>,
     ) -> Result<Self> {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
-        let columns = schema
-            .fields()
+        let mut columns = map
             .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                // If field `data_type` is struct, there are `field_descs` not include in the field,
-                // so use map to get `field_descs` in `column_desc`.
-                let descs = {
-                    if let DataType::Struct { .. } = field.data_type {
-                        let desc = map.get(&field.name).ok_or_else(|| {
-                            RwError::from(InternalError(format!(
-                                "not found field name in map {}",
-                                field.name
-                            )))
-                        })?;
-                        desc.field_descs.clone()
-                    } else {
-                        vec![]
-                    }
-                };
-                Ok(ColumnCatalog {
-                    column_desc: ColumnDesc {
-                        data_type: field.data_type.clone(),
-                        column_id: (i as i32).into(),
-                        name: field.name.clone(),
-                        field_descs: descs,
-                        type_name: "".to_string(),
-                    },
-                    is_hidden: !user_cols.contains(i),
-                })
+            .map(|c| ColumnCatalog {
+                column_desc: c.clone(),
+                is_hidden: true,
             })
-            .collect::<Result<Vec<_>>>()?;
+            .chain(
+                schema
+                    .fields
+                    .clone()
+                    .into_iter()
+                    .filter(|f| is_row_id_column_name(&f.name))
+                    .enumerate()
+                    .map(|(id, f)| ColumnCatalog {
+                        column_desc: ColumnDesc {
+                            data_type: f.data_type.clone(),
+                            column_id: (id as i32).into(),
+                            name: f.name,
+                            field_descs: vec![],
+                            type_name: "".to_string(),
+                        },
+                        is_hidden: !user_cols.contains(id),
+                    }),
+            )
+            .collect_vec();
+        ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];

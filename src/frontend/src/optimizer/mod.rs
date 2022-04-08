@@ -14,8 +14,6 @@
 
 pub mod plan_node;
 
-use std::collections::HashMap;
-
 pub use plan_node::PlanRef;
 pub mod property;
 
@@ -53,7 +51,7 @@ pub struct PlanRoot {
     out_fields: FixedBitSet,
     schema: Schema,
     /// Store struct `column_name` and `column_desc`.
-    column_name_to_desc: HashMap<String, ColumnDesc>,
+    column_name_to_desc: Vec<ColumnDesc>,
 }
 
 impl PlanRoot {
@@ -62,7 +60,7 @@ impl PlanRoot {
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
-        column_name_to_desc: HashMap<String, ColumnDesc>,
+        column_name_to_desc: Vec<ColumnDesc>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
@@ -90,13 +88,7 @@ impl PlanRoot {
         required_order: Order,
         out_fields: FixedBitSet,
     ) -> Self {
-        Self::new_with_map(
-            plan,
-            required_dist,
-            required_order,
-            out_fields,
-            HashMap::new(),
-        )
+        Self::new_with_map(plan, required_dist, required_order, out_fields, vec![])
     }
 
     /// Change the distribution of [`PlanRoot`].

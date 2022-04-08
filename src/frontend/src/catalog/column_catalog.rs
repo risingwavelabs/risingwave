@@ -62,6 +62,13 @@ impl ColumnCatalog {
             is_hidden: true,
         }
     }
+
+    pub fn generate_increment_id(catalogs: &mut Vec<ColumnCatalog>) {
+        let mut index = 0;
+        for catalog in catalogs {
+            catalog.column_desc.generate_increment_id(&mut index);
+        }
+    }
 }
 
 impl From<ProstColumnCatalog> for ColumnCatalog {
