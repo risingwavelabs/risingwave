@@ -351,6 +351,16 @@ impl LocalVersionManager {
             }
         }
     }
+
+    #[cfg(test)]
+    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
+        let last_pinned = match self.current_version.read().as_ref() {
+            None => INVALID_VERSION_ID,
+            Some(v) => v.version.id,
+        };
+        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
+        self.try_set_version(version)
+    }
 }
 
 #[cfg(test)]
