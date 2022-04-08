@@ -27,8 +27,9 @@ pub enum KafkaOffset {
     None,
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KafkaSplit {
+    pub(crate) topic: String,
     pub(crate) partition: i32,
     pub(crate) start_offset: KafkaOffset,
     pub(crate) stop_offset: KafkaOffset,
@@ -45,8 +46,9 @@ impl SourceSplit for KafkaSplit {
 }
 
 impl KafkaSplit {
-    pub fn new(partition: i32, start_offset: KafkaOffset, stop_offset: KafkaOffset) -> KafkaSplit {
+    pub fn new(partition: i32, start_offset: KafkaOffset, stop_offset: KafkaOffset, topic: String) -> KafkaSplit {
         KafkaSplit {
+            topic,
             partition,
             start_offset,
             stop_offset,

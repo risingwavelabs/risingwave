@@ -75,6 +75,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let ret = topic_partitions
             .into_iter()
             .map(|partition| KafkaSplit {
+                topic: self.topic.clone(),
                 partition,
                 start_offset: start_offsets.remove(&partition).unwrap(),
                 stop_offset: stop_offsets.remove(&partition).unwrap(),
