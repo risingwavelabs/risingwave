@@ -118,6 +118,23 @@ pub struct AwsS3Config {
     pub bucket: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct KafkaConfig {
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub struct ZooKeeperConfig {
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+}
+
 /// All service configuration
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServiceConfig {
@@ -131,6 +148,8 @@ pub enum ServiceConfig {
     Grafana(GrafanaConfig),
     Jaeger(JaegerConfig),
     AwsS3(AwsS3Config),
+    Kafka(KafkaConfig),
+    ZooKeeper(ZooKeeperConfig),
 }
 
 impl ServiceConfig {
@@ -146,6 +165,8 @@ impl ServiceConfig {
             Self::Grafana(c) => &c.id,
             Self::Jaeger(c) => &c.id,
             Self::AwsS3(c) => &c.id,
+            Self::ZooKeeper(c) => &c.id,
+            Self::Kafka(c) => &c.id,
         }
     }
 }
