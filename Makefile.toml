@@ -323,7 +323,7 @@ description = "Kill RisingWave dev cluster"
 script = '''
 #!@shell
 
-tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
+tmux list-panes -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
