@@ -26,7 +26,9 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
 use risingwave_pb::stream_service::{InjectBarrierRequest, InjectBarrierResponse};
 use smallvec::SmallVec;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, watch, RwLock};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 pub use self::command::Command;
@@ -36,6 +38,7 @@ use self::notifier::{Notifier, UnfinishedNotifiers};
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
+use crate::model::BarrierManagerState;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::stream::FragmentManagerRef;
@@ -152,8 +155,6 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
 }
 
-// TODO: Persist barrier manager states in meta store including previous epoch number, current epoch
-// number and barrier collection progress
 impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
@@ -185,30 +186,62 @@ where
         }
     }
 
+    pub async fn start(
+        barrier_manager: BarrierManagerRef<S>,
+    ) -> (JoinHandle<()>, UnboundedSender<()>) {
+        let (shutdown_tx, shutdown_rx) = tokio::sync::mpsc::unbounded_channel();
+        let join_handle = tokio::spawn(async move {
+            barrier_manager.run(shutdown_rx).await;
+        });
+
+        (join_handle, shutdown_tx)
+    }
+
     /// Start an infinite loop to take scheduled barriers and send them.
-    pub async fn run(&self) -> Result<()> {
+    async fn run(&self, mut shutdown_rx: UnboundedReceiver<()>) {
         let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-        let mut prev_epoch = INVALID_EPOCH;
         let mut unfinished = UnfinishedNotifiers::default();
+
+        // handle init, here we simply trigger a recovery process to achieve the consistency. We
+        // may need to avoid this when we have more state persisted in meta store.
+        let mut state = BarrierManagerState::create(self.env.meta_store()).await;
+        let new_epoch = self.env.epoch_generator().generate().into_inner();
+        assert!(new_epoch > state.prev_epoch);
+        state.prev_epoch = new_epoch;
+
+        let (new_epoch, actors_to_finish, finished_create_mviews) =
+            self.recovery(state.prev_epoch, None).await;
+        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+        for finished in finished_create_mviews {
+            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+        }
+        state.prev_epoch = new_epoch.into_inner();
+        state.update(self.env.meta_store()).await.unwrap();
 
         loop {
             tokio::select! {
+                biased;
+                // Shutdown
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("Barrier manager is shutting down");
+                    return;
+                }
+                // there's barrier scheduled.
+                _ = self.scheduled_barriers.wait_one() => {}
                 // Wait for the minimal interval,
                 _ = min_interval.tick() => {},
-                // ... or there's barrier scheduled.
-                _ = self.scheduled_barriers.wait_one() => {}
             }
             // Get a barrier to send.
             let (command, notifiers) = self.scheduled_barriers.pop_or_default().await;
             let info = self.resolve_actor_info(command.creating_table_id()).await;
             let new_epoch = self.env.epoch_generator().generate().into_inner();
+            assert!(new_epoch > state.prev_epoch);
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
                 self.env.stream_clients_ref(),
                 &info,
-                prev_epoch,
+                state.prev_epoch,
                 new_epoch,
                 command.clone(),
             );
@@ -227,7 +260,7 @@ where
                         unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                     }
 
-                    prev_epoch = new_epoch;
+                    state.prev_epoch = new_epoch;
                 }
                 Err(e) => {
                     notifiers
@@ -235,16 +268,18 @@ where
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
                     // If failed, enter recovery mode.
                     let (new_epoch, actors_to_finish, finished_create_mviews) =
-                        self.recovery(prev_epoch, &command).await;
+                        self.recovery(state.prev_epoch, Some(command)).await;
                     unfinished = UnfinishedNotifiers::default();
                     unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
                     for finished in finished_create_mviews {
                         unfinished.finish_actors(finished.epoch, once(finished.actor_id));
                     }
 
-                    prev_epoch = new_epoch.into_inner();
+                    state.prev_epoch = new_epoch.into_inner();
                 }
             }
+
+            state.update(self.env.meta_store()).await.unwrap();
         }
     }
 

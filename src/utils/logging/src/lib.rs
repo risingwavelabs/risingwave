@@ -53,7 +53,7 @@ fn configure_risingwave_targets_fmt(targets: filter::Targets) -> filter::Targets
         .with_target("events", Level::ERROR);
 
     if let Ok(x) = std::env::var("RW_CI") && x == "true" {
-            targets.with_target("events::meta", Level::TRACE)
+            targets.with_target("events::meta::server_heartbeat", Level::TRACE)
         } else {
             targets
         }

@@ -232,7 +232,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
         loop {
             if let Some(ret_data_chunk) = probe_table.join()? {
-                print!("data_chunk before process: {:?}", ret_data_chunk);
                 let data_chunk = if probe_table.has_non_equi_cond() {
                     probe_table.process_non_equi_condition(ret_data_chunk)?
                 } else {
@@ -244,7 +243,6 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 let output_data_chunk =
                     data_chunk.map(|chunk| probe_table.remove_null_columns_for_semi_anti(chunk));
 
-                print!("data_chunk after process: {:?}", output_data_chunk);
                 probe_table.reset_result_index();
 
                 self.state = HashJoinState::Probe(probe_table);

@@ -122,10 +122,6 @@ impl SharedContext {
         self.barrier_manager.lock()
     }
 
-    pub fn reset_barrier_manager(&self) {
-        *self.barrier_manager.lock() = LocalBarrierManager::new();
-    }
-
     #[inline]
     pub fn take_sender(&self, ids: &UpDownActorIds) -> Result<Sender<Message>> {
         self.lock_channel_map()

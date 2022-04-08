@@ -1,4 +1,4 @@
-# RisingWave
+![RisingWave Logo](./docs/images/logo-title.svg)
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
@@ -8,7 +8,7 @@ RisingWave is a cloud-native streaming database that uses SQL as the interface l
 
 RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
-Learn more at [Introduction to RisingWave](https://singularity-data.com/risingwave-docs/docs/latest/intro/).
+Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/latest/intro/).
 
 ## Quick Start
 
@@ -61,7 +61,7 @@ create materialized view mv1 as select sum(v1) as sum_v1 from t1;
 /* insert some data into the source table */
 insert into t1 values (1), (2), (3);
 
-/* ensure materialized view has been incrementally updated */
+/* (optional) ensure the materialized view has been updated */
 flush;
 
 /* the materialized view should reflect the changes in source table */
@@ -81,11 +81,11 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/) for more information.
+Please refer to [getting started guide](https://www.risingwave.dev/docs/latest/getting-started/) for more information.
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 
