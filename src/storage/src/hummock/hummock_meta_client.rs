@@ -22,14 +22,14 @@ use risingwave_pb::hummock::{
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId, TracedHummockError};
+use crate::hummock::{HummockEpoch, HummockError, HummockSSTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
 
 #[derive(Default)]
 pub struct RetryableError {}
 
-impl tokio_retry::Condition<TracedHummockError> for RetryableError {
-    fn should_retry(&mut self, _error: &TracedHummockError) -> bool {
+impl tokio_retry::Condition<HummockError> for RetryableError {
+    fn should_retry(&mut self, _error: &HummockError) -> bool {
         // TODO #2745 define retryable error here
         false
     }

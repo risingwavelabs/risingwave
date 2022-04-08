@@ -16,15 +16,15 @@ use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
 
+use crate::error::StorageResult;
 use crate::monitor::{MonitoredStateStore, StateStoreMetrics};
 use crate::storage_value::StorageValue;
 use crate::write_batch::WriteBatch;
 
-pub trait GetFutureTrait<'a> = Future<Output = Result<Option<Bytes>>> + Send;
-pub trait ScanFutureTrait<'a, R, B> = Future<Output = Result<Vec<(Bytes, Bytes)>>> + Send;
-pub trait EmptyFutureTrait<'a> = Future<Output = Result<()>> + Send;
+pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
+pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
+pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
 
 #[macro_export]
 macro_rules! define_state_store_associated_type {
@@ -36,8 +36,8 @@ macro_rules! define_state_store_associated_type {
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
-        type IterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
-        type ReverseIterFuture<'a, R, B> = impl Future<Output = Result<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+        type IterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
+        type ReverseIterFuture<'a, R, B> = impl Future<Output = $crate::error::StorageResult<Self::Iter<'a>>> + Send where R: 'static + Send, B: 'static + Send;
     }
 }
 
@@ -66,12 +66,12 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
     type SyncFuture<'a>: EmptyFutureTrait<'a>;
 
-    type IterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
+    type IterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter<'a>>> + Send
     where
         R: 'static + Send,
         B: 'static + Send;
 
-    type ReverseIterFuture<'a, R, B>: Future<Output = Result<Self::Iter<'a>>> + Send
+    type ReverseIterFuture<'a, R, B>: Future<Output = StorageResult<Self::Iter<'a>>> + Send
     where
         R: 'static + Send,
         B: 'static + Send;
@@ -164,7 +164,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
 
 pub trait StateStoreIter: Send {
     type Item;
-    type NextFuture<'a>: Future<Output = Result<Option<Self::Item>>>
+    type NextFuture<'a>: Future<Output = StorageResult<Option<Self::Item>>>
     where
         Self: 'a;
 

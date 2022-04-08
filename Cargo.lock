@@ -3287,6 +3287,7 @@ dependencies = [
  "itertools",
  "lazy_static",
  "log",
+ "maplit",
  "memcomparable",
  "num-traits",
  "paste",
