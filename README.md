@@ -8,7 +8,7 @@ RisingWave is a cloud-native streaming database that uses SQL as the interface l
 
 RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
-Learn more at [Introduction to RisingWave](https://singularity-data.com/risingwave-docs/docs/latest/intro/).
+Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/latest/intro/).
 
 ## Quick Start
 
@@ -81,11 +81,11 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/) for more information.
+Please refer to [getting started guide](https://www.risingwave.dev/docs/latest/getting-started/) for more information.
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 
