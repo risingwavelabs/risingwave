@@ -282,9 +282,9 @@ impl LocalVersionManager {
                     },
                 }
             }
-            // if versions_to_unpin.is_empty() {
-            //     continue;
-            // }
+            if versions_to_unpin.is_empty() {
+                continue;
+            }
             // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
             match hummock_meta_client
                 .unpin_version(&versions_to_unpin.iter().map(|v| v.id).collect_vec())
@@ -350,6 +350,16 @@ impl LocalVersionManager {
                 }
             }
         }
+    }
+
+    #[cfg(test)]
+    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
+        let last_pinned = match self.current_version.read().as_ref() {
+            None => INVALID_VERSION_ID,
+            Some(v) => v.version.id,
+        };
+        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
+        self.try_set_version(version)
     }
 }
 
