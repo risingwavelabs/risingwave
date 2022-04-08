@@ -115,49 +115,99 @@ fn new_neg(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
 }
 
 fn new_add(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    use DataType as T;
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
     if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
-    if lt.is_instant() && rt == DataType::Interval {
+    let interval_other = match (lt == T::Interval, rt == T::Interval) {
+        (true, _) => Some(rt.clone()),
+        (_, true) => Some(lt.clone()),
+        _ => None,
+    };
+    if let Some(t @ (T::Interval | T::Time | T::Timestamp | T::Timestampz)) = interval_other {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
-            DataType::Timestamp,
+            t,
         ));
     }
-    if rt.is_instant() && lt == DataType::Interval {
+    let date_other = match (lt == T::Date, rt == T::Date) {
+        (true, _) => Some(rt),
+        (_, true) => Some(lt),
+        _ => None,
+    };
+    let date_ret = match date_other {
+        Some(T::Interval | T::Time) => Some(T::Timestamp),
+        Some(T::Int32) => Some(T::Date),
+        _ => None,
+    };
+    if let Some(t) = date_ret {
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
-            DataType::Timestamp,
+            t,
         ));
     }
     None
 }
 
 fn new_sub(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    use DataType as T;
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
     if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
-    if lt.is_instant() && rt == DataType::Interval {
+    if matches!(lt, T::Interval | T::Time | T::Timestamp | T::Timestampz) {
+        let return_type = if rt == lt {
+            T::Interval
+        } else if rt == T::Interval {
+            lt
+        } else {
+            return None;
+        };
         return Some(FunctionCall::new_with_return_type(
             func_type,
             vec![lhs, rhs],
-            DataType::Timestamp,
+            return_type,
+        ));
+    }
+    let date_ret = match (lt, rt) {
+        (T::Date, T::Date) => Some(T::Int32),
+        (T::Date, T::Int32) => Some(T::Date),
+        (T::Date, T::Interval) => Some(T::Timestamp),
+        _ => None,
+    };
+    if let Some(t) = date_ret {
+        return Some(FunctionCall::new_with_return_type(
+            func_type,
+            vec![lhs, rhs],
+            t,
         ));
     }
     None
 }
 
 fn new_mul(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
+    use DataType as T;
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
     if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
+    }
+    let interval_other = match (lt == T::Interval, rt == T::Interval) {
+        (true, _) => Some(rt),
+        (_, true) => Some(lt),
+        _ => None,
+    };
+    if matches!(interval_other, Some(t) if t.is_number()) {
+        return Some(FunctionCall::new_with_return_type(
+            func_type,
+            vec![lhs, rhs],
+            T::Interval,
+        ));
     }
     None
 }
@@ -168,13 +218,20 @@ fn new_div(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     if lt.is_number() && rt.is_number() {
         return new_num_atm(func_type, lhs, rhs);
     }
+    if lt == DataType::Interval && rt.is_number() {
+        return Some(FunctionCall::new_with_return_type(
+            func_type,
+            vec![lhs, rhs],
+            DataType::Interval,
+        ));
+    }
     None
 }
 
 fn new_mod(func_type: ExprType, inputs: Vec<ExprImpl>) -> Option<FunctionCall> {
     let (lhs, rhs) = as_binary(inputs)?;
     let (lt, rt) = (lhs.return_type(), rhs.return_type());
-    if lt.is_number() && rt.is_number() {
+    if lt.is_exact() && rt.is_exact() {
         return new_num_atm(func_type, lhs, rhs);
     }
     None

@@ -187,6 +187,13 @@ impl DataType {
         }
     }
 
+    pub fn is_exact(&self) -> bool {
+        matches!(
+            self,
+            DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Decimal
+        )
+    }
+
     pub fn is_number(&self) -> bool {
         matches!(
             self,
