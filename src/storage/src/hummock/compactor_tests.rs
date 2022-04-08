@@ -125,7 +125,7 @@ mod tests {
                 .level
                 .as_ref()
                 .unwrap()
-                .table_ids
+                .table_infos
                 .len(),
             kv_count
         );
@@ -135,13 +135,14 @@ mod tests {
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
-        let output_table_id = *version
+        let output_table_id = version
             .get_levels()
             .last()
             .unwrap()
-            .table_ids
+            .table_infos
             .first()
-            .unwrap();
+            .unwrap()
+            .id;
         let table = storage
             .local_version_manager()
             .pick_few_tables(&[output_table_id])

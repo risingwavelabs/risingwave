@@ -62,10 +62,10 @@ use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
 use self::utils::range_overlap;
 use super::monitor::StateStoreMetrics;
-use crate::hummock::iterator::ReverseUserIterator;
+use crate::hummock::iterator::{ConcatIterator, ReverseConcatIterator, ReverseUserIterator};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
-use crate::hummock::utils::validate_epoch;
+use crate::hummock::utils::{validate_epoch, validate_table_key_range};
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -226,25 +226,40 @@ impl StateStore for HummockStorage {
             validate_epoch(version.safe_epoch(), epoch)?;
 
             // Query shared buffer. Return the value without iterating SSTs if found
-            if version.max_committed_epoch() < epoch && let Some(v) = self
-                .shared_buffer_manager
-                .get(key, (version.max_committed_epoch() + 1)..=epoch)
-            {
-                self.stats.get_shared_buffer_hit_counts.inc();
-                return Ok(v.into_user_value().map(|v| v.into()));
+            if version.max_committed_epoch() < epoch {
+                if let Some(v) = self
+                    .shared_buffer_manager
+                    .get(key, (version.max_committed_epoch() + 1)..=epoch)
+                {
+                    self.stats.get_shared_buffer_hit_counts.inc();
+                    return Ok(v.into_user_value().map(|v| v.into()));
+                }
             }
             let internal_key = key_with_epoch(key.to_vec(), epoch);
 
             let mut table_counts = 0;
             for level in &version.levels() {
-                let mut tables = self
-                    .local_version_manager
-                    .pick_few_tables(&level.table_ids)
-                    .await?;
+                if level.table_infos.is_empty() {
+                    continue;
+                }
                 match level.level_type() {
                     LevelType::Overlapping => {
-                        tables.reverse();
-                        for table in tables {
+                        let table_infos = level
+                            .table_infos
+                            .iter()
+                            .filter(|info| {
+                                let table_range = info.key_range.as_ref().unwrap();
+                                let table_start = user_key(table_range.left.as_slice());
+                                let table_end = user_key(table_range.right.as_slice());
+                                table_start.le(key) && table_end.ge(key)
+                            })
+                            .map(|info| info.id)
+                            .collect_vec();
+                        let tables = self
+                            .local_version_manager
+                            .pick_few_tables(&table_infos)
+                            .await?;
+                        for table in tables.into_iter().rev() {
                             table_counts += 1;
                             if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
                                 return Ok(Some(v));
@@ -252,25 +267,29 @@ impl StateStore for HummockStorage {
                         }
                     }
                     LevelType::Nonoverlapping => {
-                        let table_idx = tables
+                        let table_idx = level
+                            .table_infos
                             .partition_point(|table| {
                                 let ord = VersionedComparator::compare_key(
-                                    user_key(&table.meta.smallest_key),
+                                    user_key(&table.key_range.as_ref().unwrap().left),
                                     key,
                                 );
                                 ord == Ordering::Less || ord == Ordering::Equal
                             })
                             .saturating_sub(1); // considering the boundary of 0
-                        if table_idx < tables.len() {
-                            table_counts += 1;
-                            // Because we will keep multiple version of one in the same sst file, we
-                            // do not find it in the next adjacent file.
-                            if let Some(v) = self
-                                .get_from_table(tables[table_idx].clone(), &internal_key, key)
-                                .await?
-                            {
-                                return Ok(Some(v));
-                            }
+                        assert!(table_idx < level.table_infos.len());
+                        table_counts += 1;
+                        // Because we will keep multiple version of one in the same sst file, we
+                        // do not find it in the next adjacent file.
+                        let tables = self
+                            .local_version_manager
+                            .pick_few_tables(&[level.table_infos[table_idx].id])
+                            .await?;
+                        if let Some(v) = self
+                            .get_from_table(tables.first().unwrap().clone(), &internal_key, key)
+                            .await?
+                        {
+                            return Ok(Some(v));
                         }
                     }
                 }
@@ -400,23 +419,48 @@ impl StateStore for HummockStorage {
             let version = self.local_version_manager.get_version()?;
             // Check epoch validity
             validate_epoch(version.safe_epoch(), epoch)?;
+            let levels = version.levels();
+            validate_table_key_range(&levels)?;
 
             // Filter out tables that overlap with given `key_range`
-            let tables = self.local_version_manager.tables(&version.levels()).await?;
-            let tables_count = tables.len();
-            let overlapped_sstable_iters = tables
-                .into_iter()
-                .filter(|t| {
-                    let table_start = user_key(t.meta.smallest_key.as_slice());
-                    let table_end = user_key(t.meta.largest_key.as_slice());
-                    range_overlap(&key_range, table_start, table_end, false)
-                })
-                .map(|t| {
-                    Box::new(SSTableIterator::new(t, self.sstable_store.clone()))
-                        as BoxedHummockIterator
-                })
-                .collect_vec();
-
+            let mut overlapped_sstable_iters = vec![];
+            for level in &version.levels() {
+                let table_ids = level
+                    .table_infos
+                    .iter()
+                    .filter(|info| {
+                        let table_range = info.key_range.as_ref().unwrap();
+                        let table_start = user_key(table_range.left.as_slice());
+                        let table_end = user_key(table_range.right.as_slice());
+                        range_overlap(&key_range, table_start, table_end, false)
+                    })
+                    .map(|info| info.id)
+                    .collect_vec();
+                if table_ids.is_empty() {
+                    continue;
+                }
+                let tables = self
+                    .local_version_manager
+                    .pick_few_tables(&table_ids)
+                    .await?;
+                match level.level_type() {
+                    LevelType::Overlapping => {
+                        for table in tables.into_iter().rev() {
+                            overlapped_sstable_iters.push(Box::new(SSTableIterator::new(
+                                table,
+                                self.sstable_store.clone(),
+                            ))
+                                as BoxedHummockIterator);
+                        }
+                    }
+                    LevelType::Nonoverlapping => overlapped_sstable_iters.push(Box::new(
+                        ConcatIterator::new(tables, self.sstable_store.clone()),
+                    )),
+                }
+            }
+            self.stats
+                .iter_merge_sstable_counts
+                .observe(overlapped_sstable_iters.len() as f64);
             let mi = if version.max_committed_epoch() < epoch {
                 // Take shared buffers into consideration if the read epoch is above the max
                 // committed epoch
@@ -430,9 +474,6 @@ impl StateStore for HummockStorage {
                     self.stats.clone(),
                 )
             } else {
-                self.stats
-                    .iter_merge_sstable_counts
-                    .observe(tables_count as f64);
                 MergeIterator::new(overlapped_sstable_iters, self.stats.clone())
             };
 
@@ -463,24 +504,57 @@ impl StateStore for HummockStorage {
             let version = self.local_version_manager.get_version()?;
             // Check epoch validity
             validate_epoch(version.safe_epoch(), epoch)?;
-
             // Filter out tables that overlap with given `key_range`
-            let overlapped_sstable_iters = self
-                .local_version_manager
-                .tables(&version.levels())
-                .await?
-                .into_iter()
-                .filter(|t| {
-                    let table_start = user_key(t.meta.smallest_key.as_slice());
-                    let table_end = user_key(t.meta.largest_key.as_slice());
-                    range_overlap(&key_range, table_start, table_end, true)
-                })
-                .map(|t| {
-                    Box::new(ReverseSSTableIterator::new(t, self.sstable_store.clone()))
-                        as BoxedHummockIterator
-                })
-                .collect_vec();
-
+            let mut overlapped_sstable_iters = vec![];
+            for level in &version.levels() {
+                let table_ids = level
+                    .table_infos
+                    .iter()
+                    .filter(|info| {
+                        let table_range = info.key_range.as_ref().unwrap();
+                        let table_start = user_key(table_range.left.as_slice());
+                        let table_end = user_key(table_range.right.as_slice());
+                        range_overlap(&key_range, table_start, table_end, true)
+                    })
+                    .map(|info| info.id)
+                    .collect_vec();
+                if table_ids.is_empty() {
+                    continue;
+                }
+                let mut tables = self
+                    .local_version_manager
+                    .pick_few_tables(&table_ids)
+                    .await?;
+                match level.level_type() {
+                    LevelType::Overlapping => {
+                        for table in tables.into_iter().rev() {
+                            overlapped_sstable_iters.push(Box::new(ReverseSSTableIterator::new(
+                                table,
+                                self.sstable_store.clone(),
+                            ))
+                                as BoxedHummockIterator);
+                        }
+                    }
+                    LevelType::Nonoverlapping => {
+                        if tables.len() > 1 {
+                            tables.reverse();
+                            overlapped_sstable_iters.push(Box::new(ReverseConcatIterator::new(
+                                tables,
+                                self.sstable_store.clone(),
+                            )))
+                        } else {
+                            overlapped_sstable_iters.push(Box::new(ReverseSSTableIterator::new(
+                                tables.pop().unwrap(),
+                                self.sstable_store.clone(),
+                            ))
+                                as BoxedHummockIterator);
+                        }
+                    }
+                }
+            }
+            self.stats
+                .iter_merge_sstable_counts
+                .observe(overlapped_sstable_iters.len() as f64);
             let reverse_merge_iterator = if version.max_committed_epoch() < epoch {
                 // Take shared buffers into consideration if the read epoch is above the max
                 // committed epoch

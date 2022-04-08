@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
@@ -31,7 +33,20 @@ pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
 
-pub const ROWID_PREFIX: &str = "_row_id";
+/// Check if the column name does not conflict with the internally reserved column name.
+pub fn check_valid_column_name(column_name: &str) -> Result<()> {
+    if is_row_id_column_name(column_name) {
+        Err(ErrorCode::InternalError(format!(
+            "column name prefixed with {:?} are reserved word.",
+            ROWID_PREFIX
+        ))
+        .into())
+    } else {
+        Ok(())
+    }
+}
+
+const ROWID_PREFIX: &str = "_row_id";
 
 pub fn gen_row_id_column_name(idx: usize) -> String {
     ROWID_PREFIX.to_string() + "#" + &idx.to_string()
@@ -39,6 +54,19 @@ pub fn gen_row_id_column_name(idx: usize) -> String {
 
 pub fn is_row_id_column_name(name: &str) -> bool {
     name.starts_with(ROWID_PREFIX)
+}
+
+pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
+
+/// Creates a row ID column (for implicit primary key).
+pub fn row_id_column_desc() -> ColumnDesc {
+    ColumnDesc {
+        data_type: DataType::Int64,
+        column_id: ColumnId::new(0),
+        name: gen_row_id_column_name(0),
+        field_descs: vec![],
+        type_name: "".to_string(),
+    }
 }
 
 #[derive(Error, Debug)]

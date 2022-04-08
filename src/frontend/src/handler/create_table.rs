@@ -17,57 +17,31 @@ use std::rc::Rc;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
+use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_pb::plan::ColumnCatalog;
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
+use super::create_source::make_prost_source;
 use crate::binder::expr::bind_data_type;
-use crate::binder::Binder;
-use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ROWID_PREFIX};
+use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
 use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
-pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
 
-pub fn gen_create_table_plan(
-    session: &SessionImpl,
-    context: OptimizerContextRef,
-    table_name: ObjectName,
-    columns: Vec<ColumnDef>,
-) -> Result<(PlanRef, ProstSource, ProstTable)> {
-    let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
-
+/// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
+pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
     let column_descs = {
         let mut column_descs = Vec::with_capacity(columns.len() + 1);
         // Put the hidden row id column in the first column. This is used for PK.
-        column_descs.push(ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: TABLE_SOURCE_PK_COLID,
-            name: gen_row_id_column_name(0),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        });
+        column_descs.push(row_id_column_desc());
         // Then user columns.
         for (i, column) in columns.into_iter().enumerate() {
-            if is_row_id_column_name(&column.name.value) {
-                return Err(ErrorCode::InternalError(format!(
-                    "column name prefixed with {:?} are reserved word.",
-                    ROWID_PREFIX
-                ))
-                .into());
-            }
-
+            check_valid_column_name(&column.name.value)?;
             column_descs.push(ColumnDesc {
                 data_type: bind_data_type(&column.data_type)?,
                 column_id: ColumnId::new((i + 1) as i32),
@@ -87,18 +61,32 @@ pub fn gen_create_table_plan(
             is_hidden: i == 0, // the row id column is hidden
         })
         .collect_vec();
+    Ok(columns_catalog)
+}
 
-    let source = ProstSource {
-        id: TableId::placeholder().table_id(),
-        schema_id,
-        database_id,
-        name: table_name.clone(),
-        info: Info::TableSource(TableSourceInfo {
-            columns: columns_catalog,
-        })
-        .into(),
-    };
+pub(crate) fn gen_create_table_plan(
+    session: &SessionImpl,
+    context: OptimizerContextRef,
+    table_name: ObjectName,
+    columns: Vec<ColumnDef>,
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
+    let source = make_prost_source(
+        session,
+        table_name,
+        Info::TableSource(TableSourceInfo {
+            columns: bind_sql_columns(columns)?,
+        }),
+    )?;
+    let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
+    Ok((plan, source, table))
+}
 
+/// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it ressembles a
+/// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
+pub(crate) fn gen_materialized_source_plan(
+    context: OptimizerContextRef,
+    source: ProstSource,
+) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
@@ -113,11 +101,13 @@ pub fn gen_create_table_plan(
             Order::any().clone(),
             required_cols,
         )
-        .gen_create_mv_plan(table_name)?
+        .gen_create_mv_plan(source.name.clone())?
     };
-    let table = materialize.table().to_prost(schema_id, database_id);
+    let table = materialize
+        .table()
+        .to_prost(source.schema_id, source.database_id);
 
-    Ok((materialize.into(), source, table))
+    Ok((materialize.into(), table))
 }
 
 pub async fn handle_create_table(
@@ -146,12 +136,7 @@ pub async fn handle_create_table(
         .create_materialized_source(source, table, plan)
         .await?;
 
-    Ok(PgResponse::new(
-        StatementType::CREATE_TABLE,
-        0,
-        vec![],
-        vec![],
-    ))
+    Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
 
 #[cfg(test)]

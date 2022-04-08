@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::key::{user_key, FullKey};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{HummockEpoch, HummockSSTableId};
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, TableSetStatistics,
+    CompactMetrics, CompactTask, Level, LevelEntry, LevelType, SstableInfo, TableSetStatistics,
 };
 
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
@@ -318,12 +318,25 @@ impl CompactStatus {
                             level: if is_select_level_leveling {
                                 Some(Level {
                                     level_type: LevelType::Nonoverlapping as i32,
-                                    table_ids: select_ln_ids,
+                                    table_infos: select_ln_ids
+                                        .into_iter()
+                                        .map(|id| SstableInfo {
+                                            id,
+                                            // compact node will never use key_range in SstableInfo.
+                                            key_range: None,
+                                        })
+                                        .collect_vec(),
                                 })
                             } else {
                                 Some(Level {
                                     level_type: LevelType::Overlapping as i32,
-                                    table_ids: select_ln_ids,
+                                    table_infos: select_ln_ids
+                                        .into_iter()
+                                        .map(|id| SstableInfo {
+                                            id,
+                                            key_range: None,
+                                        })
+                                        .collect_vec(),
                                 })
                             },
                         },
@@ -332,12 +345,24 @@ impl CompactStatus {
                             level: if is_target_level_leveling {
                                 Some(Level {
                                     level_type: LevelType::Nonoverlapping as i32,
-                                    table_ids: select_lnsuc_ids,
+                                    table_infos: select_lnsuc_ids
+                                        .into_iter()
+                                        .map(|id| SstableInfo {
+                                            id,
+                                            key_range: None,
+                                        })
+                                        .collect_vec(),
                                 })
                             } else {
                                 Some(Level {
                                     level_type: LevelType::Overlapping as i32,
-                                    table_ids: select_lnsuc_ids,
+                                    table_infos: select_lnsuc_ids
+                                        .into_iter()
+                                        .map(|id| SstableInfo {
+                                            id,
+                                            key_range: None,
+                                        })
+                                        .collect_vec(),
                                 })
                             },
                         },
