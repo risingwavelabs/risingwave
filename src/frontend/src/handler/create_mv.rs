@@ -81,12 +81,12 @@ pub async fn handle_create_mv(
 pub mod tests {
     use std::collections::HashMap;
 
+    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
 
     use crate::catalog::gen_row_id_column_name;
-    use crate::test_utils::tests::{create_proto_file, PROTO_FILE_DATA};
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_create_mv_handler() {
@@ -122,11 +122,13 @@ pub mod tests {
             .clone();
         assert_eq!(table.name(), "mv1");
 
-        let mut columns = vec![];
         // Get all column descs
-        for catalog in table.columns {
-            columns.append(&mut catalog.column_desc.get_column_descs());
-        }
+        let columns = table
+            .columns
+            .iter()
+            .flat_map(|c| c.column_desc.get_column_descs())
+            .collect_vec();
+
         let columns = columns
             .iter()
             .map(|col| (col.name.as_str(), col.data_type.clone()))

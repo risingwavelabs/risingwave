@@ -15,8 +15,7 @@
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 
 use crate::binder::{BoundQuery, BoundSelect, BoundSetExpr};
 use crate::expr::{Expr, ExprImpl};
@@ -56,7 +55,7 @@ impl Planner {
         Ok(root)
     }
 
-    /// For every struct select item, store its `alias_name` and `column_desc` in the map.
+    /// Extract the `column_desc` of `select_items` and change column name to `alias_name`.
     fn extract_select_items(&mut self, select: &BoundSelect) -> Result<Vec<ColumnDesc>> {
         let table: Vec<ColumnDesc> = {
             match &select.from {
@@ -64,42 +63,27 @@ impl Planner {
                 None => vec![],
             }
         };
-        let mut items = vec![];
-        let mut names = vec![];
-        for i in 0..select.select_items.len() {
-            let expr = &select.select_items[i];
-            let name = select.aliases[i].clone();
-            if let ExprImpl::InputRef(input) = expr {
-                if input.index() < table.len() {
-                    items.push(expr);
-                    names.push(name);
-                }
-            } else {
-                items.push(expr);
-                names.push(name);
-            }
-        }
-        let column_descs = items
+        let column_descs = select
+            .select_items
             .iter()
-            .zip_eq(names)
+            .zip_eq(select.aliases.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
-                let mut desc = match expr {
-                    ExprImpl::InputRef(input) => table
-                        .get(input.index())
-                        .ok_or_else(|| {
-                            RwError::from(InternalError("index out of range".to_string()))
-                        })?
-                        .clone(),
-                    _ => ColumnDesc {
-                        data_type: expr.return_type(),
-                        column_id: ColumnId::new(id as i32),
-                        name: "".to_string(),
-                        field_descs: vec![],
-                        type_name: "".to_string(),
-                    },
+                let default_desc = ColumnDesc {
+                    data_type: expr.return_type(),
+                    column_id: ColumnId::new(id as i32),
+                    name: "".to_string(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
                 };
-                let name = alias.unwrap_or(match desc.name.is_empty() {
+                let mut desc = match expr {
+                    ExprImpl::InputRef(input) => match table.get(input.index()) {
+                        Some(column) => column.clone(),
+                        None => default_desc,
+                    },
+                    _ => default_desc,
+                };
+                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
                     true => desc.name.clone(),
                     false => format!("expr#{}", id),
                 });

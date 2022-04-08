@@ -63,6 +63,7 @@ impl ColumnCatalog {
         }
     }
 
+    /// Generate increment `column_id` store in `column_desc` and `field_descs`
     pub fn generate_increment_id(catalogs: &mut Vec<ColumnCatalog>) {
         let mut index = 0;
         for catalog in catalogs {

@@ -97,8 +97,7 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
 
-    use crate::test_utils::tests::{create_proto_file, PROTO_FILE_DATA};
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_describe_handler() {

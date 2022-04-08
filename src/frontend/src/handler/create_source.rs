@@ -118,8 +118,7 @@ pub mod tests {
     use risingwave_common::types::DataType;
 
     use crate::catalog::gen_row_id_column_name;
-    use crate::test_utils::tests::{create_proto_file, PROTO_FILE_DATA};
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_create_source_handler() {

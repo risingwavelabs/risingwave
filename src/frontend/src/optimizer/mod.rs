@@ -50,7 +50,7 @@ pub struct PlanRoot {
     required_order: Order,
     out_fields: FixedBitSet,
     schema: Schema,
-    /// Store struct `column_name` and `column_desc`.
+    /// Store select `column_desc`.
     select_items: Vec<ColumnDesc>,
 }
 
