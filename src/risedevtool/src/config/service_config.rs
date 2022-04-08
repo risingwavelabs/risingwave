@@ -125,6 +125,7 @@ pub struct KafkaConfig {
     pub address: String,
     pub port: u16,
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
+    pub persist_data: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -133,6 +134,7 @@ pub struct ZooKeeperConfig {
     pub id: String,
     pub address: String,
     pub port: u16,
+    pub persist_data: bool,
 }
 
 /// All service configuration

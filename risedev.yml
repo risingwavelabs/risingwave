@@ -31,8 +31,8 @@ risedev:
     # - use: frontend-legacy
 
     # If you want to create source from Kafka, uncomment the following lines
-    # - use: zookeeper
-    # - use: kafka
+    - use: zookeeper
+    - use: kafka
 
   legacy:
     - use: meta-node
@@ -327,10 +327,13 @@ template:
     address: "127.0.0.1"
 
     # Listen port of Kafka
-    port: 32888
+    port: 39092
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
 
   # Apache ZooKeeper service
   zookeeper:
@@ -341,4 +344,8 @@ template:
     address: "127.0.0.1"
 
     # Listen port of ZooKeeper
-    port: 39092
+    port: 32888
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+

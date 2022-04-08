@@ -55,7 +55,11 @@ impl Task for KafkaService {
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
 
-        let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+        let path = if self.config.persist_data {
+            Path::new(&env::var("PREFIX_DATA")?).join(self.id())
+        } else {
+            Path::new("/tmp").join(self.id())
+        };
         std::fs::create_dir_all(&path)?;
 
         let config_path = Path::new(&prefix_config).join(format!("{}.properties", self.id()));
