@@ -15,6 +15,7 @@
 use std::backtrace::Backtrace;
 
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -23,7 +24,7 @@ pub enum StreamExecutorError {
     Storage(
         #[backtrace]
         #[source]
-        RwError,
+        StorageError,
     ),
 
     #[error("executor v1 error {0}")]
@@ -40,7 +41,7 @@ pub enum StreamExecutorError {
 }
 
 impl StreamExecutorError {
-    pub fn storage(error: impl Into<RwError>) -> TracedStreamExecutorError {
+    pub fn storage(error: impl Into<StorageError>) -> TracedStreamExecutorError {
         Self::Storage(error.into()).into()
     }
 
@@ -85,6 +86,12 @@ impl std::fmt::Debug for TracedStreamExecutorError {
             )?;
         }
         Ok(())
+    }
+}
+
+impl From<StorageError> for TracedStreamExecutorError {
+    fn from(s: StorageError) -> Self {
+        StreamExecutorError::storage(s)
     }
 }
 

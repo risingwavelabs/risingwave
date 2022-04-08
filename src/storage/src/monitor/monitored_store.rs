@@ -17,9 +17,9 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
-use risingwave_common::error::Result;
 
 use super::StateStoreMetrics;
+use crate::error::StorageResult;
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
@@ -48,9 +48,9 @@ where
     async fn monitored_iter<'a, I>(
         &self,
         iter: I,
-    ) -> Result<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
+    ) -> StorageResult<<MonitoredStateStore<S> as StateStore>::Iter<'a>>
     where
-        I: Future<Output = Result<S::Iter<'a>>>,
+        I: Future<Output = StorageResult<S::Iter<'a>>>,
     {
         let iter = iter.await?;
 
@@ -215,7 +215,7 @@ where
     I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>> where Self: 'a;
+    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self: 'a;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let pair = self.inner.next().await?;

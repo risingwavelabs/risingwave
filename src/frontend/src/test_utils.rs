@@ -165,6 +165,14 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn drop_source(&self, source_id: u32) -> Result<()> {
+        let (database_id, schema_id) = self.drop_id(source_id);
+        self.catalog
+            .write()
+            .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
     async fn drop_materialized_view(&self, table_id: TableId) -> Result<()> {
         let (database_id, schema_id) = self.drop_id(table_id.table_id);
         self.drop_id(table_id.table_id);
@@ -206,9 +214,7 @@ impl MockCatalogWriter {
     fn drop_id(&self, id: u32) -> (DatabaseId, SchemaId) {
         self.id_to_schema_id.write().remove(&id).unwrap()
     }
-}
 
-impl MockCatalogWriter {
     fn create_source_inner(&self, mut source: ProstSource) -> Result<u32> {
         source.id = self.gen_id();
         self.catalog.write().create_source(source.clone());
@@ -221,8 +227,8 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self, epoch: u64) -> Result<u64> {
-        Ok(epoch)
+    async fn pin_snapshot(&self, _epoch: u64) -> Result<u64> {
+        Ok(0)
     }
 
     async fn flush(&self) -> Result<()> {

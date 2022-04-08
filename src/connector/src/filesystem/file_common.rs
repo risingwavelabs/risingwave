@@ -68,7 +68,8 @@ impl Default for EntryOptEvent {
     }
 }
 
-pub enum DirectoryChangeWatch {
+#[derive(Debug, Clone)]
+pub enum StatusWatch {
     Running,
     Stopped,
 }
@@ -85,7 +86,7 @@ pub trait Directory: Send + Sync {
     async fn push_entries_change(
         &self,
         sender: tokio_sync::mpsc::Sender<EntryOptEvent>,
-        task_status: tokio_sync::watch::Receiver<DirectoryChangeWatch>,
+        task_status: tokio_sync::watch::Receiver<StatusWatch>,
     ) -> Result<()>;
     async fn list_entries(&self) -> Result<Vec<EntryStat>>;
     // async fn last_modification(&self) -> i64;
@@ -105,7 +106,7 @@ mod test {
     use tokio::{sync, time};
 
     use crate::filesystem::file_common::{
-        Directory, DirectoryChangeWatch, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat,
+        Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
     };
 
     // path, init_count, total_count, file_size
@@ -253,7 +254,7 @@ mod test {
         async fn push_entries_change(
             &self,
             sender: tokio::sync::mpsc::Sender<EntryOptEvent>,
-            mut task_status: tokio::sync::watch::Receiver<DirectoryChangeWatch>,
+            mut task_status: tokio::sync::watch::Receiver<StatusWatch>,
         ) -> anyhow::Result<()> {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(2));
             let file_system_clone = Arc::new(&self.file_system);
@@ -268,7 +269,7 @@ mod test {
                     },
                     status = task_status.changed() => {
                         if status.is_ok() {
-                            if let DirectoryChangeWatch::Stopped = *task_status.borrow() {
+                            if let StatusWatch::Stopped = *task_status.borrow() {
                                 break Ok(());
                             }
                         }
@@ -374,8 +375,8 @@ mod test {
         let file_system = MockFileSystem::new(default_filesystem_conf());
         let directory = DummyDirectory::new(file_system.clone());
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
-        let (s_tx, s_rx) = tokio::sync::watch::channel(DirectoryChangeWatch::Running);
-        let _ = s_tx.send(DirectoryChangeWatch::Running);
+        let (s_tx, s_rx) = tokio::sync::watch::channel(StatusWatch::Running);
+        let _ = s_tx.send(StatusWatch::Running);
         let directory_for_clone = Arc::new(directory.clone());
         file_system.state_change(1).await;
         file_system.wait_state_change_complete().await;
@@ -396,7 +397,7 @@ mod test {
                 let receive_event = rx.recv().await;
                 println!("receive event change = {:?}", receive_event);
             }
-            let send_rs = s_tx.send(DirectoryChangeWatch::Stopped);
+            let send_rs = s_tx.send(StatusWatch::Stopped);
             assert!(send_rs.is_ok());
             println!("receive task complete");
         });
