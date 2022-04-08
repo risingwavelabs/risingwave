@@ -70,8 +70,8 @@ While another sequence [(6, "Singularity"), (7, "Singularity")] comes, the MV wi
 
 | A | B
 | - | -
-| 6	| Oracle
-| 8	| Huawei
+| 6 | Oracle
+| 8 | Huawei
 | 13 | Singularity
 
 `mv1` can also act as other MV's source. For example, mv2, mv3 can reuse the processing results of mv1 thus deduplicating the computation.
