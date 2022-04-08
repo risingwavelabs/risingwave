@@ -45,15 +45,6 @@ const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
 const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
-// the macro is defined in batch, copy here due to dependency issues
-macro_rules! get_from_properties {
-    ($node_type:expr, $source:expr) => {
-        $node_type.get($source).ok_or_else(|| {
-            RwError::from(ProtocolError(format!("property {} not found", $source)))
-        })?
-    };
-}
-
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
     async fn create_source(
@@ -162,7 +153,7 @@ impl SourceManager for MemSourceManager {
     }
 
     async fn create_source_v2(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
-        let format = match RowFormatType::from_i32(info.row_format).unwrap() {
+        let format = match info.get_row_format()? {
             RowFormatType::Json => SourceFormat::Json,
             RowFormatType::Protobuf => SourceFormat::Protobuf,
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
@@ -175,7 +166,8 @@ impl SourceManager for MemSourceManager {
             )));
         }
 
-        let parser = build_parser(&format, &info.properties, info.row_schema_location.as_str())?;
+        let parser =
+            build_source_parser(&format, &info.properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -192,13 +184,24 @@ impl SourceManager for MemSourceManager {
             })
             .collect::<Result<Vec<SourceColumnDesc>>>()?;
 
-        let row_id_index = if info.row_id_index >= 0 {
-            Some(info.row_id_index as usize)
-        } else {
-            None
-        };
+        assert!(
+            info.row_id_index >= 0,
+            "expected row_id_index >= 0, got {}",
+            info.row_id_index
+        );
+        let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match get_from_properties!(info.properties, UPSTREAM_SOURCE_KEY).as_str() {
+        let config = match info
+            .properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "property {} not found",
+                    UPSTREAM_SOURCE_KEY
+                )))
+            })?
+            .as_str()
+        {
             // TODO support more connector here
             KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
             other => Err(RwError::from(ProtocolError(format!(
@@ -312,7 +315,7 @@ impl Default for MemSourceManager {
     }
 }
 
-fn build_parser(
+fn build_source_parser(
     format: &SourceFormat,
     properties: &HashMap<String, String>,
     schema_location: &str,
@@ -418,8 +421,7 @@ mod tests {
     #[ignore] // ignored because the test involves aws credentials, remove this line after changing to other
               // connector
     async fn test_source_v2() -> Result<()> {
-        let mut properties: HashMap<String, String> = HashMap::new();
-        kinesis_demo_properties(&mut properties);
+        let properties = kinesis_demo_properties();
         let source_columns =
             vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64).to_protobuf()];
         let columns = source_columns
