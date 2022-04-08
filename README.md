@@ -85,7 +85,7 @@ Please refer to [getting started guide](https://singularity-data.com/risingwave-
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 
