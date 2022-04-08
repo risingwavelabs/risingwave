@@ -29,7 +29,7 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::pulsar::{PulsarSplitEnumerator};
 use crate::{kafka, kinesis, pulsar};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -141,12 +141,10 @@ pub async fn new_connector(
     let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
     let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
         KAFKA_SOURCE => {
-            let kafka = KafkaSplitReader::new(config, state).await?;
-            Box::new(kafka)
+            Box::new(KafkaSplitReader::new(config, state).await?)
         }
         KINESIS_SOURCE => {
-            let kinesis = KinesisSplitReader::new(config, state).await?;
-            Box::new(kinesis)
+            Box::new(KinesisSplitReader::new(config, state).await?)
         }
         // PULSAR_SOURCE => {
         //     let pulsar = PulsarSplitReader::new(config, state).await?;

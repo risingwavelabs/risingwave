@@ -53,7 +53,7 @@ pub struct GlobalSourceManager<S: MetaStore> {
 pub struct SourceDiscovery {
     id: SourceId,
     current_splits: Arc<Mutex<Option<Vec<SplitImpl>>>>,
-    last_assigned_splits: Vec<Vec<(ActorId, Vec<SplitImpl>)>>,
+    last_assigned_splits: Vec<HashMap<ActorId, Vec<SplitImpl>>>,
     stop_tx: oneshot::Sender<()>,
 }
 
@@ -90,6 +90,10 @@ impl SourceDiscovery {
             stop_tx,
         })
     }
+
+    pub async fn stop(&mut self) {
+        //self.stop_tx.borrow_mut().take().unwrap().send(()).unwrap();
+    }
 }
 
 pub struct SourceManagerCore<S: MetaStore> {
@@ -100,8 +104,8 @@ pub struct SourceManagerCore<S: MetaStore> {
 }
 
 impl<S> SourceManagerCore<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     fn new(
         meta_srv_env: MetaSrvEnv<S>,
@@ -118,7 +122,7 @@ where
     }
 
     async fn tick(&mut self) -> Result<()> {
-        for source in self.managed_sources.values() {
+        for mut source in self.managed_sources.values_mut() {
             let last_assign_splits = &source.last_assigned_splits;
 
             let current_splits = match {
@@ -138,9 +142,12 @@ where
                 .collect::<HashMap<_, _>>();
 
             let mut assign = HashMap::new();
+            let mut current_assigned_splits = vec![];
 
             // TODO(peng): use metastore instead
             for last_splits in last_assign_splits {
+                let mut grouped_splits = last_splits.clone();
+
                 // for now we only check new splits
                 let assigned_ids = last_splits
                     .iter()
@@ -163,7 +170,11 @@ where
                         .entry(*actor_id)
                         .or_insert_with(Vec::new)
                         .push((**split).clone());
+
+                    grouped_splits.entry(*actor_id).or_insert_with(Vec::new).push((**split).clone());
                 }
+
+                current_assigned_splits.push(grouped_splits);
             }
 
             // todo: error handling
@@ -186,6 +197,8 @@ where
                             .collect(),
                     })))
                     .await?;
+
+                source.last_assigned_splits = current_assigned_splits;
             }
         }
 
@@ -194,8 +207,8 @@ where
 }
 
 impl<S> GlobalSourceManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -210,6 +223,16 @@ where
                 SourceManagerCore::new(env, barrier_manager, catalog_manager).unwrap(),
             )),
         })
+    }
+
+    async fn unregister_source_discovery(&self, source_id: SourceId) -> Result<()> {
+        let mut core = self.core.lock().await;
+
+        if let Some(mut source) = core.managed_sources.remove(&source_id) {
+            source.stop().await;
+        }
+
+        Ok(())
     }
 
     async fn register_source_discovery(
@@ -259,7 +282,7 @@ where
         Ok(())
     }
 
-    async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
+    async fn all_stream_clients(&self) -> Result<impl Iterator<Item=StreamClient>> {
         // FIXME: there is gap between the compute node activate itself and source ddl operation,
         // create/drop source(non-stateful source like TableSource) before the compute node
         // activate itself will cause an inconsistent state. This situation will happen when some
@@ -274,8 +297,8 @@ where
                 .iter()
                 .map(|worker| self.env.stream_clients().get(worker)),
         )
-        .await?
-        .into_iter();
+            .await?
+            .into_iter();
 
         Ok(all_stream_clients)
     }
