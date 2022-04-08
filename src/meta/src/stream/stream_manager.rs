@@ -514,7 +514,7 @@ mod tests {
             )
             .await?;
 
-            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::run(barrier_manager).await;
+            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
             Ok(Self {
                 global_stream_manager: stream_manager,

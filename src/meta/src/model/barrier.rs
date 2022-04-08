@@ -18,21 +18,25 @@ use crate::manager::INVALID_EPOCH;
 use crate::storage;
 use crate::storage::{MetaStore, DEFAULT_COLUMN_FAMILY};
 
-// add more states for barrier when needed.
-pub struct BarrierState {
+/// `BarrierManagerState` defines the necessary state of `GlobalBarrierManager`, this will be stored
+/// persistently to meta store. Add more states when needed.
+pub struct BarrierManagerState {
     pub prev_epoch: u64,
 }
 
-impl BarrierState {
-    pub async fn new<S>(store: &S) -> Self
+impl BarrierManagerState {
+    pub async fn create<S>(store: &S) -> Self
     where
         S: MetaStore,
     {
-        match store.get_cf(DEFAULT_COLUMN_FAMILY, b"barrier_state").await {
-            Ok(byte_vec) => BarrierState {
+        match store
+            .get_cf(DEFAULT_COLUMN_FAMILY, b"barrier_manager_state")
+            .await
+        {
+            Ok(byte_vec) => BarrierManagerState {
                 prev_epoch: u64::from_be_bytes(byte_vec.as_slice().try_into().unwrap()),
             },
-            Err(storage::Error::ItemNotFound(_)) => BarrierState {
+            Err(storage::Error::ItemNotFound(_)) => BarrierManagerState {
                 prev_epoch: INVALID_EPOCH,
             },
             Err(e) => panic!("{:?}", e),
@@ -46,7 +50,7 @@ impl BarrierState {
         store
             .put_cf(
                 DEFAULT_COLUMN_FAMILY,
-                b"barrier_state".to_vec(),
+                b"barrier_manager_state".to_vec(),
                 self.prev_epoch.to_be_bytes().to_vec(),
             )
             .await

@@ -15,7 +15,7 @@
 use std::collections::HashSet;
 
 use futures::future::try_join_all;
-use log::debug;
+use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::data::Epoch as ProstEpoch;
@@ -66,23 +66,23 @@ where
                 .await
                 .is_err()
             {
-                debug!("reset_and_wait_compute_nodes failed");
+                error!("reset_and_wait_compute_nodes failed");
                 continue;
             }
 
             // Refresh sources in local source manger of compute node.
             if let Err(err) = self.sync_sources(&info).await {
-                debug!("sync_sources failed: {}", err);
+                error!("sync_sources failed: {}", err);
                 continue;
             }
 
             // update and build all actors.
             if let Err(err) = self.update_actors(&info).await {
-                debug!("update_actors failed: {}", err);
+                error!("update_actors failed: {}", err);
                 continue;
             }
             if let Err(err) = self.build_actors(&info).await {
-                debug!("build_actors failed: {}", err);
+                error!("build_actors failed: {}", err);
                 continue;
             }
 
