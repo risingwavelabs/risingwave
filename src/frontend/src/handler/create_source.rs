@@ -135,13 +135,10 @@ pub mod tests {
     use std::collections::HashMap;
     use std::io::Write;
 
-    use itertools::Itertools;
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
     use tempfile::NamedTempFile;
 
-    use super::*;
-    use crate::catalog::column_catalog::ColumnCatalog;
     use crate::catalog::gen_row_id_column_name;
     use crate::test_utils::LocalFrontend;
 
@@ -201,40 +198,34 @@ pub mod tests {
         assert_eq!(source.name, "t");
 
         // Only check stream source
-        if let Info::StreamSource(info) = source.info.as_ref().unwrap() {
-            let catalogs: Vec<ColumnCatalog> = info
-                .columns
-                .iter()
-                .map(|col| col.clone().into())
-                .collect_vec();
-            let mut columns = vec![];
+        let catalogs = source.columns;
+        let mut columns = vec![];
 
-            // Get all column descs
-            for catalog in catalogs {
-                columns.append(&mut catalog.column_desc.get_column_descs());
-            }
-            let columns = columns
-                .iter()
-                .map(|col| (col.name.as_str(), col.data_type.clone()))
-                .collect::<HashMap<&str, DataType>>();
-
-            let city_type = DataType::Struct {
-                fields: vec![DataType::Varchar, DataType::Varchar].into(),
-            };
-            let row_id_col_name = gen_row_id_column_name(0);
-            let expected_columns = maplit::hashmap! {
-                row_id_col_name.as_str() => DataType::Int32,
-                "id" => DataType::Int32,
-                "country.zipcode" => DataType::Varchar,
-                "zipcode" => DataType::Int64,
-                "country.city.address" => DataType::Varchar,
-                "country.address" => DataType::Varchar,
-                "country.city" => city_type.clone(),
-                "country.city.zipcode" => DataType::Varchar,
-                "rate" => DataType::Float32,
-                "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
-            };
-            assert_eq!(columns, expected_columns);
+        // Get all column descs
+        for catalog in catalogs {
+            columns.append(&mut catalog.column_desc.get_column_descs());
         }
+        let columns = columns
+            .iter()
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let city_type = DataType::Struct {
+            fields: vec![DataType::Varchar, DataType::Varchar].into(),
+        };
+        let row_id_col_name = gen_row_id_column_name(0);
+        let expected_columns = maplit::hashmap! {
+            row_id_col_name.as_str() => DataType::Int32,
+            "id" => DataType::Int32,
+            "country.zipcode" => DataType::Varchar,
+            "zipcode" => DataType::Int64,
+            "country.city.address" => DataType::Varchar,
+            "country.address" => DataType::Varchar,
+            "country.city" => city_type.clone(),
+            "country.city.zipcode" => DataType::Varchar,
+            "rate" => DataType::Float32,
+            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+        };
+        assert_eq!(columns, expected_columns);
     }
 }

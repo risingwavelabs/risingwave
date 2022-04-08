@@ -125,12 +125,12 @@ mod tests {
             let is_negative_len = matches!(len, Some(ScalarImpl::Int32(len_i32)) if len_i32 < 0);
             let expr = new_substr_start_end(
                 Box::new(LiteralExpression::new(
-                    DataType::Char,
+                    DataType::Varchar,
                     Some(ScalarImpl::from(String::from(text))),
                 )),
                 Box::new(LiteralExpression::new(DataType::Int32, start)),
                 Box::new(LiteralExpression::new(DataType::Int32, len)),
-                DataType::Char,
+                DataType::Varchar,
             );
             let res = expr.eval(&DataChunk::new_dummy(1));
             if is_negative_len {
@@ -161,18 +161,18 @@ mod tests {
         for (text, pattern, replacement, expected) in cases {
             let expr = new_replace_expr(
                 Box::new(LiteralExpression::new(
-                    DataType::Char,
+                    DataType::Varchar,
                     Some(ScalarImpl::from(String::from(text))),
                 )),
                 Box::new(LiteralExpression::new(
-                    DataType::Char,
+                    DataType::Varchar,
                     Some(ScalarImpl::from(String::from(pattern))),
                 )),
                 Box::new(LiteralExpression::new(
-                    DataType::Char,
+                    DataType::Varchar,
                     Some(ScalarImpl::from(String::from(replacement))),
                 )),
-                DataType::Char,
+                DataType::Varchar,
             );
             let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
             assert_eq!(

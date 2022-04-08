@@ -1,0 +1,11 @@
+[package]
+name = "risingwave_hummock_sdk"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytes = "1"
+log = "0.4"
+prost = "0.10"
+risingwave_pb = { path = "../../prost" }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }

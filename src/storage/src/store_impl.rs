@@ -15,21 +15,22 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use enum_as_inner::EnumAsInner;
 use risingwave_common::config::StorageConfig;
 use risingwave_common::error::{Result, RwError};
+use risingwave_rpc_client::HummockMetaClient;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::{HummockStorage, SstableStore};
 use crate::memory::MemoryStateStore;
 use crate::monitor::{MonitoredStateStore as Monitored, StateStoreMetrics};
-use crate::object::{InMemObjectStore, ObjectStore, S3ObjectStore};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, S3ObjectStore};
 use crate::rocksdb_local::RocksDBStateStore;
 use crate::tikv::TikvStateStore;
 use crate::StateStore;
 
 /// The type erased [`StateStore`].
-#[derive(Clone)]
+#[derive(Clone, EnumAsInner)]
 pub enum StateStoreImpl {
     /// The Hummock state store, which operates on an S3-like service. URLs beginning with
     /// `hummock` will be automatically recognized as Hummock state store.
@@ -91,20 +92,18 @@ impl StateStoreImpl {
     ) -> Result<Self> {
         let store = match s {
             hummock if hummock.starts_with("hummock") => {
-                let object_store = match hummock {
-                    s3 if s3.starts_with("hummock+s3://") => Arc::new(
+                let object_store = Arc::new(match hummock {
+                    s3 if s3.starts_with("hummock+s3://") => ObjectStoreImpl::S3(
                         S3ObjectStore::new(s3.strip_prefix("hummock+s3://").unwrap().to_string())
                             .await,
-                    )
-                        as Arc<dyn ObjectStore>,
-                    minio if minio.starts_with("hummock+minio://") => Arc::new(
+                    ),
+                    minio if minio.starts_with("hummock+minio://") => ObjectStoreImpl::S3(
                         S3ObjectStore::new_with_minio(minio.strip_prefix("hummock+").unwrap())
                             .await,
-                    )
-                        as Arc<dyn ObjectStore>,
+                    ),
                     memory if memory.starts_with("hummock+memory") => {
                         tracing::warn!("You're using Hummock in-memory object store. This should never be used in benchmarks and production environment.");
-                        Arc::new(InMemObjectStore::new()) as Arc<dyn ObjectStore>
+                        ObjectStoreImpl::Mem(InMemObjectStore::new())
                     }
                     other => {
                         unimplemented!(
@@ -112,7 +111,7 @@ impl StateStoreImpl {
                             other
                         )
                     }
-                };
+                });
 
                 let sstable_store = Arc::new(SstableStore::new(
                     object_store,

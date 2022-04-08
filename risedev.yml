@@ -76,6 +76,23 @@ risedev:
     - use: frontend
 
   # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend-legacy and 1 MinIO.
+  ci-3node-frontend-v2:
+    - use: minio
+    # - use: etcd
+    #   # unsafe-no-fsync: true # If you are running on your own PC, uncomment this to do harm less to your SSD.
+    - use: meta-node
+    - use: compute-node
+      port: 5687
+      exporter-port: 1222
+    - use: compute-node
+      port: 5688
+      exporter-port: 1223
+    - use: compute-node
+      port: 5689
+      exporter-port: 1224
+    - use: frontend
+
+  # The CI-3node configuration will start 3 compute nodes, 1 meta node, 1 frontend-legacy and 1 MinIO.
   ci-3node:
     - use: minio
     # - use: etcd

@@ -17,11 +17,13 @@ use std::cmp::min;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime};
+use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime};
 use num_traits::{CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub};
 use risingwave_common::error::ErrorCode::{InternalError, NumericValueOutOfRange};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+
+use super::cast::date_to_timestamp;
 
 #[inline(always)]
 pub fn general_add<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -152,11 +154,11 @@ pub fn date_date_sub<T1, T2, T3>(l: NaiveDateWrapper, r: NaiveDateWrapper) -> Re
 }
 
 #[inline(always)]
-pub fn interval_date_add<T1, T2, T3>(
+pub fn interval_timestamp_add<T1, T2, T3>(
     l: IntervalUnit,
-    r: NaiveDateWrapper,
+    r: NaiveDateTimeWrapper,
 ) -> Result<NaiveDateTimeWrapper> {
-    let mut date = r.0;
+    let mut date = r.0.date();
     if l.get_months() != 0 {
         // NaiveDate don't support add months. We need calculate manually
         let mut day = date.day() as i32;
@@ -187,7 +189,7 @@ pub fn interval_date_add<T1, T2, T3>(
         day = min(day, get_mouth_days(year, month as usize));
         date = NaiveDate::from_ymd(year, month as u32, day as u32);
     }
-    let mut datetime = NaiveDateTime::new(date, NaiveTime::from_hms(0, 0, 0));
+    let mut datetime = NaiveDateTime::new(date, r.0.time());
     datetime = datetime
         .checked_add_signed(Duration::days(l.get_days().into()))
         .ok_or_else(|| InternalError("Date out of range".to_string()))?;
@@ -195,6 +197,14 @@ pub fn interval_date_add<T1, T2, T3>(
         .checked_add_signed(Duration::milliseconds(l.get_ms()))
         .ok_or_else(|| InternalError("Date out of range".to_string()))?;
     Ok(NaiveDateTimeWrapper::new(datetime))
+}
+
+#[inline(always)]
+pub fn interval_date_add<T1, T2, T3>(
+    l: IntervalUnit,
+    r: NaiveDateWrapper,
+) -> Result<NaiveDateTimeWrapper> {
+    interval_timestamp_add::<T1, T2, T3>(l, date_to_timestamp(r)?)
 }
 
 #[inline(always)]
@@ -211,6 +221,22 @@ pub fn date_interval_sub<T2, T1, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     interval_date_add::<T1, T2, T3>(r.negative(), l)
+}
+
+#[inline(always)]
+pub fn timestamp_interval_add<T1, T2, T3>(
+    l: NaiveDateTimeWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
+    interval_timestamp_add::<T1, T2, T3>(r, l)
+}
+
+#[inline(always)]
+pub fn timestamp_interval_sub<T1, T2, T3>(
+    l: NaiveDateTimeWrapper,
+    r: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
+    interval_timestamp_add::<T1, T2, T3>(r.negative(), l)
 }
 
 #[cfg(test)]

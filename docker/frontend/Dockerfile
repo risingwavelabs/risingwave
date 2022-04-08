@@ -1,31 +1,36 @@
-FROM openjdk:11.0.13-jdk-bullseye as risingwave_fe_builder
+FROM ubuntu:20.04 as builder
 
 ENV LANG en_US.utf8
-ENV RISINGWAVE_FE_HOME=/risingwave_fe
-ENV RISINGWAVE_FE_BUILD_ENV=docker
-ENV JAVA_TOOL_OPTIONS=-Dfile.encoding=UTF8
 
-RUN mkdir -p $RISINGWAVE_FE_HOME/proto $RISINGWAVE_FE_HOME/legacy
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl openssl libssl-dev pkg-config
 
-WORKDIR $RISINGWAVE_FE_HOME
-COPY proto ./proto
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 
-WORKDIR $RISINGWAVE_FE_HOME/legacy
-COPY legacy ./
+RUN mkdir -p /risingwave
 
-RUN ./gradlew build
+WORKDIR /risingwave
 
-FROM openjdk:11.0.13-jre-slim-bullseye
+COPY proto proto
+COPY src src
+COPY rust-toolchain rust-toolchain
+COPY Cargo.toml Cargo.toml
 
-RUN mkdir dir -p /risingwave_fe/conf /risingwave_fe/lib
+ENV PATH /root/.cargo/bin/:$PATH
 
-COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/libs/risingwave-fe-runnable.jar /risingwave_fe/lib
-COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/resources/main/server.properties /risingwave_fe/conf
-COPY --from=risingwave_fe_builder /risingwave_fe/legacy/pgserver/build/resources/main/logback.xml  /risingwave_fe/conf
+# We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
+RUN rustup self update \
+  && rustup set profile minimal \
+  && rustup default $(cat "/risingwave/rust-toolchain") \
+  && rustup component add rustfmt
 
-WORKDIR /risingwave_fe
+RUN cargo clean && cargo build --release
 
-ENV RISINGWAVE_FE_CONF=/risingwave_fe/conf
-ENV RISINGWAVE_FE_LIB=/risingwave_fe/lib
+FROM ubuntu:20.04
 
-EXPOSE 4567
+RUN mkdir -p /risingwave/bin
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev
+
+COPY --from=builder /risingwave/target/release/frontend-v2 /risingwave/bin/frontend-v2
+
+EXPOSE 4566

@@ -38,7 +38,7 @@
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by 1+1;
-  binder_error: 'Feature is not yet implemented: ORDER BY BinaryOp { left: Value(Number("1", false)), op: Plus, right: Value(Number("1", false)) }'
+  binder_error: 'Feature is not yet implemented: ORDER BY BinaryOp { left: Value(Number("1", false)), op: Plus, right: Value(Number("1", false)) }, Tracking issue: https://github.com/singularity-data/risingwave/issues/1635'
 - sql: |
     create table t (v1 bigint, v2 double precision);
     select * from t order by v;

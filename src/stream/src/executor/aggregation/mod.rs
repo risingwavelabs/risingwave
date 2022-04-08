@@ -153,7 +153,6 @@ pub fn create_streaming_agg_state(
                     (Count, float32, int64, StreamingCountAgg::<F32Array>),
                     (Count, decimal, int64, StreamingCountAgg::<DecimalArray>),
                     (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
-                    (Count, char, int64, StreamingCountAgg::<Utf8Array>),
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
                     // Sum
                     (Sum, int64, int64, StreamingSumAgg::<I64Array, I64Array>),
@@ -231,12 +230,6 @@ pub fn create_streaming_agg_state(
                         decimal,
                         decimal,
                         StreamingSingleValueAgg::<DecimalArray>
-                    ),
-                    (
-                        SingleValue,
-                        char,
-                        char,
-                        StreamingSingleValueAgg::<Utf8Array>
                     ),
                     (
                         SingleValue,

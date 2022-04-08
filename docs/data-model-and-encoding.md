@@ -1,5 +1,12 @@
 # Data Model and Encoding
 
+- [Data Model and Encoding](#data-model-and-encoding)
+  - [Data Model](#data-model)
+  - [In-Memory Encoding](#in-memory-encoding)
+  - [On-Disk Encoding](#on-disk-encoding)
+
+<!-- Created by https://github.com/ekalinin/github-markdown-toc -->
+
 ## Data Model
 
 > Source files: `common/src/types`
@@ -12,13 +19,12 @@ Tables created by users have an implicit, auto-generated row-id column as their 
 
 Primitive data types:
 
-- Integers: `SMALLINT` (16-bit), `INT` (32-bit), `BIGINT` (64-bit)
 - Booleans: `BOOLEAN`
+- Integers: `SMALLINT` (16-bit), `INT` (32-bit), `BIGINT` (64-bit)
 - Decimals: `NUMERIC`
-- Floating-point numbers: `FLOAT`, `DOUBLE`
-- Date & Time: `DATE`, `TIME`, `TIMESTAMP`, `TIMESTAMPZ` (timestamp without timezone)
-- Time Interval: `INTERVAL` 
-- Strings: `VARCHAR`, `CHAR`
+- Floating-point numbers: `REAL`, `DOUBLE`
+- Strings: `VARCHAR`
+- Temporals: `DATE`, `TIMESTAMP`, `TIMESTAMP WITH TIME ZONE`, `TIME`, `INTERVAL`
 
 Composite data types (WIP):
 

@@ -65,4 +65,47 @@ pub trait ObjectStore: Send + Sync {
     async fn delete(&self, path: &str) -> Result<()>;
 }
 
-pub type ObjectStoreRef = Arc<dyn ObjectStore>;
+pub type ObjectStoreRef = Arc<ObjectStoreImpl>;
+
+pub enum ObjectStoreImpl {
+    Mem(InMemObjectStore),
+    S3(S3ObjectStore),
+}
+
+/// Manually dispatch trait methods.
+impl ObjectStoreImpl {
+    pub async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
+        match self {
+            ObjectStoreImpl::Mem(mem) => mem.upload(path, obj).await,
+            ObjectStoreImpl::S3(s3) => s3.upload(path, obj).await,
+        }
+    }
+
+    pub async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> Result<Bytes> {
+        match self {
+            ObjectStoreImpl::Mem(mem) => mem.read(path, block_loc).await,
+            ObjectStoreImpl::S3(s3) => s3.read(path, block_loc).await,
+        }
+    }
+
+    pub async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+        match self {
+            ObjectStoreImpl::Mem(mem) => mem.readv(path, block_locs).await,
+            ObjectStoreImpl::S3(s3) => s3.readv(path, block_locs).await,
+        }
+    }
+
+    pub async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
+        match self {
+            ObjectStoreImpl::Mem(mem) => mem.metadata(path).await,
+            ObjectStoreImpl::S3(s3) => s3.metadata(path).await,
+        }
+    }
+
+    pub async fn delete(&self, path: &str) -> Result<()> {
+        match self {
+            ObjectStoreImpl::Mem(mem) => mem.delete(path).await,
+            ObjectStoreImpl::S3(s3) => s3.delete(path).await,
+        }
+    }
+}

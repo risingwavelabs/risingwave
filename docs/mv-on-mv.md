@@ -1,4 +1,4 @@
-# Create mview on top of mview
+# Create MView on Top of MView
 
 ## Background
 

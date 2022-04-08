@@ -60,10 +60,10 @@ macro_rules! gen_cast_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
+                return Err(ErrorCode::NotImplemented(format!(
                     "CAST({:?} AS {:?}) not supported yet!",
                     $child.return_type(), $ret
-                ))
+                ), 1632.into())
                 .into());
             }
         }
@@ -100,23 +100,8 @@ macro_rules! gen_cast {
             { varchar, float64, str_parse },
             { varchar, decimal, str_parse },
             { varchar, boolean, str_to_bool },
-            { char,    date, str_to_date },
-            { char,    time, str_to_time },
-            { char,    timestamp, str_to_timestamp },
-            { char,    timestampz, str_to_timestampz },
-            { char,    int16, str_parse },
-            { char,    int32, str_parse },
-            { char,    int64, str_parse },
-            { char,    float32, str_parse },
-            { char,    float64, str_parse },
-            { char,    decimal, str_parse },
-            { char,    boolean, str_to_bool },
-            { varchar, char, str_to_str },
-            { char, char, str_to_str },
-            { char, varchar, str_to_str },
 
             { boolean, varchar, bool_to_str },
-            { boolean, char, bool_to_str },
 
             { int16, int32, general_cast },
             { int16, int64, general_cast },
@@ -174,10 +159,10 @@ macro_rules! gen_neg_impl {
                 ),
             )*
             _ => {
-                return Err(ErrorCode::NotImplementedError(format!(
+                return Err(ErrorCode::NotImplemented(format!(
                     "Neg is not supported on {:?}",
                     $child.return_type()
-                ))
+                ), 112.into())
                 .into());
             }
         }
@@ -266,10 +251,10 @@ pub fn new_unary_expr(
         (ProstType::PgSleep, _, DataType::Decimal) => Box::new(PgSleepExpression::new(child_expr)),
 
         (expr, ret, child) => {
-            return Err(ErrorCode::NotImplementedError(format!(
+            return Err(ErrorCode::NotImplemented(format!(
                 "The expression {:?}({:?}) ->{:?} using vectorized expression framework is not supported yet.",
                 expr, child, ret
-            ))
+            ), 112.into())
             .into());
         }
     };

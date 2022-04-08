@@ -17,9 +17,7 @@ use std::path::Path;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use risingwave_common::array::Op;
-use risingwave_common::error::ErrorCode::{
-    InternalError, ItemNotFound, NotImplementedError, ProtocolError,
-};
+use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
 use risingwave_pb::plan::ColumnDesc;
@@ -194,7 +192,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
     let is_repeated = f.is_repeated();
     let field_type = &f.field_type(descriptors);
     if is_repeated {
-        return Err(NotImplementedError("repeated field is not supported".to_string()).into());
+        return Err(ErrorCode::NotImplemented(
+            "repeated field is not supported".to_string(),
+            None.into(),
+        )
+        .into());
     }
     let t = match field_type {
         FieldType::Double => DataType::Float64,
@@ -212,9 +214,11 @@ fn protobuf_type_mapping(f: &FieldDescriptor, descriptors: &Descriptors) -> Resu
             DataType::Struct { fields: vec.into() }
         }
         actual_type => {
-            return Err(
-                NotImplementedError(format!("unsupported field type: {:?}", actual_type)).into(),
-            );
+            return Err(ErrorCode::NotImplemented(
+                format!("unsupported field type: {:?}", actual_type),
+                None.into(),
+            )
+            .into());
         }
     };
     Ok(t)
@@ -242,7 +246,7 @@ impl SourceParser for ProtobufParser {
                 }
                 DataType::Int16 => {
                     protobuf_match_type!(value, ScalarImpl::Int16, { I8, I16, U8 }, i16)
-                },
+                }
                 DataType::Int32 => {
                     protobuf_match_type!(value, ScalarImpl::Int32, { I8, I16, I32, U8, U16 }, i32)
                 }
@@ -258,7 +262,7 @@ impl SourceParser for ProtobufParser {
                 DataType::Decimal => {
                     protobuf_match_type!(value, ScalarImpl::Decimal, { I8, I16, I32, I64, U8, U16, U32, U64}, Decimal)
                 }
-                DataType::Char | DataType::Varchar => {
+                DataType::Varchar => {
                     protobuf_match_type!(value, ScalarImpl::Utf8, { String }, String)
                 }
                 DataType::Date => {
@@ -427,13 +431,13 @@ mod tests {
             },
             SourceColumnDesc {
                 name: "address".to_string(),
-                data_type: DataType::Char,
+                data_type: DataType::Varchar,
                 column_id: ColumnId::from(1),
                 skip_parse: false,
             },
             SourceColumnDesc {
                 name: "city".to_string(),
-                data_type: DataType::Char,
+                data_type: DataType::Varchar,
                 column_id: ColumnId::from(2),
                 skip_parse: false,
             },
