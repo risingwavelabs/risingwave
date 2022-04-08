@@ -10,7 +10,7 @@ There are currently 3 types of nodes in the cluster:
 
 * **Frontend**: Frontend is a stateless proxy that accepts user queries through Postgres protocol. It is responsible for parsing, validation, optimization, and answering the results of each individual query. 
 * **ComputeNode**: ComputeNode is responsible to execute the optimized query plan. 
-* **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends a heartbeat to every Frontends and ComputeNode-s in the cluster. 
+* **MetaServer**: The central metadata management service. It also acts as a failure detector that periodically sends heartbeats to frontends and compute-nodes in the cluster.
 
 ![Architecture](./images/architecture-design/architecture.svg)
 
@@ -18,7 +18,7 @@ The topmost component is the Postgres client. It issues queries through [TCP-bas
 
 The leftmost component is the streaming data source. [Kafka](https://kafka.apache.org) is the most representative system for streaming sources. Alternatively, [Redpanda](https://redpanda.com/), [Apache Pulsar](https://pulsar.apache.org/), [AWS Kinesis](aws.amazon.com/kinesis), [Google Pub/Sub](https://cloud.google.com/pubsub/docs/overview) are also widely-used. Streams from Kafka will be consumed and processed through the pipeline in the database. 
 
-The bottom-most component is AWS S3, or MinIO (an open-sourced s3-compatible system). We employed disaggregated architecture in order to elastically scale the ComputeNodes without migrating the storage.
+The bottom-most component is AWS S3, or MinIO (an open-sourced s3-compatible system). We employed disaggregated architecture in order to elastically scale the compute-nodes without migrating the storage.
 
 ## Execution Mode 
 
@@ -36,9 +36,9 @@ SELECT SUM(t.quantity) FROM t group by t.company;
 
 ![Batch-Query](./images/architecture-design/batch-query.svg)
 
-The query will be sliced into multiple *plan fragments*, each is an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of ComputeNode-s in the cluster.
+The query will be sliced into multiple *plan fragments*, each is an independent scheduling unit and probably with different parallelism. For simplicity, parallelism is usually set to the number of compute-nodes in the cluster.
 
-Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 3 tasks to 3 ComputeNode-s.
+Each parallel unit is called a *task*. Specifically, PlanFragment 2 will be distributed as 3 tasks to 3 compute-nodes.
 
 ![Plan-Fragments](./images/architecture-design/plan-fragments.svg)
 
@@ -59,20 +59,20 @@ CREATE MATERIALIZED VIEW mv1 AS SELECT SUM(t.quantity) as q FROM t group by t.co
 
 When the data source (Kafka, e.g.) propagates a bunch of records into the system, the materialized view will refresh automatically.
 
-Assuming a sequence [(2, "Oracle"), (3, "Huawei"), (4, "Oracle"), (5, "Huawei")]. After the sequence flowed through the DAG, the MV will be updated to: 
+Assuming a sequence [(2, "AMERICA"), (3, "ASIA"), (4, "AMERICA"), (5, "ASIA")]. After the sequence flowed through the DAG, the MV will be updated to: 
 
 | A | B
 | - | -
-| 6 | Oracle
-| 8 | Huawei
+| 6 | AMERICA
+| 8 | ASIA
 
-While another sequence [(6, "Singularity"), (7, "Singularity")] comes, the MV will soon be: 
+While another sequence [(6, "EUROPE"), (7, "EUROPE")] comes, the MV will soon be: 
 
 | A | B
 | - | -
-| 6 | Oracle
-| 8 | Huawei
-| 13 | Singularity
+| 6 | AMERICA
+| 8 | ASIA
+| 13 | EUROPE
 
 `mv1` can also act as other MV's source. For example, mv2, mv3 can reuse the processing results of mv1 thus deduplicating the computation.
 
