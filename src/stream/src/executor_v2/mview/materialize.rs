@@ -261,7 +261,7 @@ mod tests {
                         .await
                         .unwrap()
                         .len(),
-                    10
+                    9
                 );
 
                 // FIXME(Bugen): restore this test by using new `RowTable` interface

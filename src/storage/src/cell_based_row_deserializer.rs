@@ -19,7 +19,7 @@ use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
-use risingwave_common::util::ordered::{deserialize_column_id, NULL_ROW_SPECIAL_CELL_ID};
+use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
 
 #[derive(Clone)]
@@ -63,9 +63,6 @@ impl CellBasedRowDeserializer {
         let mut result = None;
         let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
         let cell_id = deserialize_column_id(cell_id_bytes)?;
-        if cell_id == NULL_ROW_SPECIAL_CELL_ID {
-            return Ok(result);
-        }
         if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();
             self.pk_bytes = Some(cur_pk_bytes.to_vec());
@@ -130,7 +127,7 @@ mod tests {
             Some(ScalarImpl::Int64(1500)),
             Some(ScalarImpl::Float64(233.3f64.into())),
         ]);
-        let row2 = Row(vec![None, Some(ScalarImpl::Int32(2020)), None, None]);
+        let row2 = Row(vec![None, None, None, None]);
         let row3 = Row(vec![
             None,
             Some(ScalarImpl::Int32(2020)),

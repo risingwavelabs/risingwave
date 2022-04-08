@@ -298,7 +298,7 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
-                number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
+                number_rows.map(|top_n_count| top_n_count * (self.data_types.len() + 1)),
                 epoch,
             )
             .await?
@@ -521,7 +521,7 @@ mod tests {
         );
         // Right after recovery.
         assert!(!managed_state.is_dirty());
-        assert_eq!(managed_state.get_cache_len(), 1);
+        assert_eq!(managed_state.get_cache_len(), 2);
         assert_eq!(managed_state.total_count, 3);
 
         assert_eq!(
@@ -531,7 +531,7 @@ mod tests {
         // now ("abd", 3) on storage -> ("abc", 3) in memory
         assert!(managed_state.is_dirty());
         assert_eq!(managed_state.total_count, 2);
-        assert_eq!(managed_state.get_cache_len(), 2);
+        assert_eq!(managed_state.get_cache_len(), 1);
         assert_eq!(
             managed_state.pop_top_element(epoch).await.unwrap(),
             Some((ordered_rows[1].clone(), rows[1].clone()))

@@ -123,30 +123,29 @@ impl<S: StateStore> CellBasedTable<S> {
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let column_ids = generate_column_id(&self.column_descs);
         // let mut row = Vec::with_capacity(column_ids.len());
-        let sentinel_key = &[
+        let sentinel_key = [
             &serialize_pk(pk, pk_serializer)?[..],
-            &serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?,
+            &serialize_column_id(&SENTINEL_CELL_ID)?,
         ]
         .concat();
         let mut get_res = Vec::new();
-        let sentinel_cell = self.keyspace.get(&sentinel_key.clone(), epoch).await?;
+        let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
             return Ok(None);
+        } else {
+            get_res.push((sentinel_key, sentinel_cell.unwrap()));
         }
         for column_id in column_ids {
-            let key = &[
+            let key = [
                 &serialize_pk(pk, pk_serializer)?[..],
                 &serialize_column_id(&column_id)?,
             ]
             .concat();
-            let state_store_get_res = self.keyspace.get(&key.clone(), epoch).await?;
+            let state_store_get_res = self.keyspace.get(&key, epoch).await?;
             if let Some(state_store_get_res) = state_store_get_res {
-                get_res.push((key.clone(), state_store_get_res));
+                get_res.push((key, state_store_get_res));
             }
-        }
-        if get_res.is_empty() {
-            return Ok(Some(Row::new(vec![None; self.column_descs.len()])));
         }
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());
