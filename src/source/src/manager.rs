@@ -20,17 +20,30 @@ use async_trait::async_trait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::base::SourceReader;
 use risingwave_connector::new_connector;
+use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{HighLevelKafkaSource, SourceConfig, SourceFormat, SourceImpl, SourceParser};
+use crate::{
+    DebeziumJsonParser, HighLevelKafkaSource, JSONParser, ProtobufParser, SourceConfig,
+    SourceFormat, SourceImpl, SourceParser,
+};
 
 pub type SourceRef = Arc<SourceImpl>;
+
+// the same key is defined in `src/batch/src/executor/create_source.rs`, remove in batch if
+// necessary
+const UPSTREAM_SOURCE_KEY: &str = "connector";
+const KINESIS_SOURCE: &str = "kinesis";
+
+const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
+const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
+const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
 #[async_trait]
 pub trait SourceManager: Debug + Sync + Send {
@@ -43,6 +56,7 @@ pub trait SourceManager: Debug + Sync + Send {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()>;
+    async fn create_source_v2(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
     fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
@@ -138,6 +152,102 @@ impl SourceManager for MemSourceManager {
         Ok(())
     }
 
+    async fn create_source_v2(&self, source_id: &TableId, info: StreamSourceInfo) -> Result<()> {
+        let format = match info.get_row_format()? {
+            RowFormatType::Json => SourceFormat::Json,
+            RowFormatType::Protobuf => SourceFormat::Protobuf,
+            RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
+            RowFormatType::Avro => SourceFormat::Avro,
+        };
+
+        if format == SourceFormat::Protobuf && info.row_schema_location.is_empty() {
+            return Err(RwError::from(ProtocolError(
+                "protobuf file location not provided".to_string(),
+            )));
+        }
+
+        let parser =
+            build_source_parser(&format, &info.properties, info.row_schema_location.as_str())?;
+
+        let columns = info
+            .columns
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| {
+                let c = c.column_desc.as_ref().unwrap().clone();
+                Ok(SourceColumnDesc {
+                    name: c.name.clone(),
+                    data_type: DataType::from(&c.column_type.unwrap()),
+                    column_id: ColumnId::from(c.column_id),
+                    skip_parse: idx as i32 == info.row_id_index,
+                })
+            })
+            .collect::<Result<Vec<SourceColumnDesc>>>()?;
+
+        assert!(
+            info.row_id_index >= 0,
+            "expected row_id_index >= 0, got {}",
+            info.row_id_index
+        );
+        let row_id_index = Some(info.row_id_index as usize);
+
+        let config = match info
+            .properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "property {} not found",
+                    UPSTREAM_SOURCE_KEY
+                )))
+            })?
+            .as_str()
+        {
+            // TODO support more connector here
+            KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
+            other => Err(RwError::from(ProtocolError(format!(
+                "source type {} not supported",
+                other
+            )))),
+        }?;
+
+        let source =
+            match config {
+                SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(
+                    HighLevelKafkaSource::new(config, Arc::new(columns.clone()), parser.clone()),
+                ),
+                SourceConfig::Connector(config) => {
+                    let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+                        Arc::new(tokio::sync::Mutex::new(
+                            new_connector(config.clone(), None)
+                                .await
+                                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                        ));
+                    SourceImpl::Connector(ConnectorSource {
+                        parser: parser.clone(),
+                        reader: split_reader,
+                        column_descs: columns.clone(),
+                    })
+                }
+            };
+
+        let desc = SourceDesc {
+            source: Arc::new(source),
+            format,
+            columns,
+            row_id_index,
+        };
+
+        let mut tables = self.get_sources()?;
+        ensure!(
+            !tables.contains_key(source_id),
+            "Source id already exists: {:?}",
+            source_id
+        );
+        tables.insert(*source_id, desc);
+
+        Ok(())
+    }
+
     fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()> {
         let mut sources = self.get_sources()?;
 
@@ -205,6 +315,41 @@ impl Default for MemSourceManager {
     }
 }
 
+fn build_source_parser(
+    format: &SourceFormat,
+    properties: &HashMap<String, String>,
+    schema_location: &str,
+) -> Result<Arc<dyn SourceParser + Send + Sync>> {
+    let parser: Arc<dyn SourceParser + Send + Sync> = match format {
+        SourceFormat::Json => {
+            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
+            Ok(parser)
+        }
+        SourceFormat::Protobuf => {
+            let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
+                RwError::from(ProtocolError(format!(
+                    "{} not found in properties",
+                    PROTOBUF_MESSAGE_KEY
+                )))
+            })?;
+
+            let parser: Arc<dyn SourceParser + Send + Sync> =
+                Arc::new(ProtobufParser::new(schema_location, message_name)?);
+
+            Ok(parser)
+        }
+        SourceFormat::DebeziumJson => {
+            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
+            Ok(parser)
+        }
+        _ => Err(RwError::from(InternalError(
+            "format not support".to_string(),
+        ))),
+    }?;
+
+    Ok(parser)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -212,6 +357,9 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
     use risingwave_common::types::DataType;
+    use risingwave_connector::kinesis::config::kinesis_demo_properties;
+    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::plan::ColumnCatalog;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::Keyspace;
 
@@ -265,6 +413,38 @@ mod tests {
         let get_source_res = mem_source_manager.get_source(&table_id);
 
         assert!(get_source_res.is_err());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore] // ignored because the test involves aws credentials, remove this line after changing to other
+              // connector
+    async fn test_source_v2() -> Result<()> {
+        let properties = kinesis_demo_properties();
+        let source_columns =
+            vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64).to_protobuf()];
+        let columns = source_columns
+            .iter()
+            .map(|c| ColumnCatalog {
+                column_desc: Some(c.to_owned()),
+                is_hidden: false,
+            })
+            .collect();
+        let info = StreamSourceInfo {
+            properties,
+            row_format: 0,
+            row_schema_location: "".to_string(),
+            row_id_index: 0,
+            pk_column_ids: vec![0],
+            columns,
+        };
+        let source_id = TableId::default();
+
+        let mem_source_manager = MemSourceManager::new();
+        let source = mem_source_manager.create_source_v2(&source_id, info).await;
+
+        assert!(source.is_ok());
 
         Ok(())
     }

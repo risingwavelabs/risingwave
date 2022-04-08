@@ -2,8 +2,8 @@
 
 - [Develop RisingWave](#develop-risingwave)
   - [Communication](#communication)
-  - [Setting Up Development Environment](#setting-up-development-environment)
   - [Code Structure](#code-structure)
+  - [Setting Up Development Environment](#setting-up-development-environment)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
     - [Adding More Components](#adding-more-components)
     - [Start All-In-One Process](#start-all-in-one-process)
@@ -38,6 +38,16 @@ If you have questions, please [create a Github issue](https://github.com/singula
 
 RisingWave community is available on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join.
 
+
+## Code Structure
+
+- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
+- The `src` folder contains all of the kernal components, refer to [src/README.md](src/README.md) for more details.
+- The `docker` folder contains Dockerfiles to build and start RisingWave.
+- The `e2e_test` folder contains the latest end-to-end test cases.
+- The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
+- The `dashbaord` folder contains RisingWave dashboard v2.
+
 ## Setting Up Development Environment
 
 To contribute to RisingWave, the first thing is to set up the development environment. You'll need:
@@ -64,15 +74,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RisingWave!
-
-## Code Structure
-
-- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
-- The `src` folder contains all of the kernal components, read [src/README.md][https://github.com/singularity-data/risingwave/blob/main/src/README.md] for more details.
-- The `docker` folder contains Dockerfiles to build and start RisingWave.
-- The `e2e_test` folder contains the latest end-to-end test cases.
-- The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
-- The `dashbaord` folder contains RisingWave dashboard v2.
 
 ## Start and Monitor a Dev Cluster
 
