@@ -74,10 +74,14 @@ impl QueryManager {
             output_id: 0,
         };
 
-        // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
-        // TODO: hummock snapshot should maintain as cache instead of RPC each query.
         let meta_client = session.env().meta_client_ref();
-        let epoch = meta_client.pin_snapshot().await?;
+
+        // Pin snapshot in meta.
+        // TODO: Hummock snapshot should maintain as cache instead of RPC each query.
+        // TODO: Use u64::MAX for `last_pinned` so it always return the greatest current epoch. Use
+        // correct `last_pinned` when retrying this RPC.
+        let last_pinned = u64::MAX;
+        let epoch = meta_client.pin_snapshot(last_pinned).await?;
 
         compute_client
             .create_task(task_id.clone(), plan, epoch)
@@ -101,10 +105,14 @@ impl QueryManager {
         // Cheat compiler to resolve type
         let session = context.session();
 
-        // Pin snapshot in meta. Single frontend for now. So context_id is always 0.
-        // TODO: hummock snapshot should maintain as cache instead of RPC each query.
         let meta_client = session.env().meta_client_ref();
-        let epoch = meta_client.pin_snapshot().await?;
+
+        // Pin snapshot in meta.
+        // TODO: Hummock snapshot should maintain as cache instead of RPC each query.
+        // TODO: Use u64::MAX for `last_pinned` so it always return the greatest current epoch. Use
+        // correct `last_pinned` when retrying this RPC.
+        let last_pinned = u64::MAX;
+        let epoch = meta_client.pin_snapshot(last_pinned).await?;
 
         let query_execution = QueryExecution::new(
             query,
