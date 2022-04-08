@@ -31,8 +31,8 @@ risedev:
     # - use: frontend-legacy
 
     # If you want to create source from Kafka, uncomment the following lines
-    - use: zookeeper
-    - use: kafka
+    # - use: zookeeper
+    # - use: kafka
 
   legacy:
     - use: meta-node
