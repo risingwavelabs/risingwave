@@ -132,6 +132,7 @@ impl<S: StateStore> CellBasedTable<S> {
         let sentinel_cell = self.keyspace.get(&sentinel_key, epoch).await?;
 
         if sentinel_cell.is_none() {
+            // if sentinel cell is none, this row doesn't exist
             return Ok(None);
         } else {
             get_res.push((sentinel_key, sentinel_cell.unwrap()));
