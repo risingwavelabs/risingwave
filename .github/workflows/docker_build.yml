@@ -1,7 +1,7 @@
 name: Daily build of docker image
 
 on:
-  push:
+  pull_request:
     paths:
       - '.github/workflows/docker_build.yml'
       - 'docker/**'
