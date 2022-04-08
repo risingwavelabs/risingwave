@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockSnapshot, HummockVersion,
-    SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tonic::Streaming;
