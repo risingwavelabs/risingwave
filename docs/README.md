@@ -2,7 +2,7 @@
 
 ## Content
 
-* Architecture Design
+* [Architecture Design](./architecture-design.md)
 * [An Overview of RisingWave Streaming Engine](./streaming-overview.md)
 * [An Overview of RisingWave State Store](./state-store-overview.md)
 * [Meta Service](./meta-service.md)
