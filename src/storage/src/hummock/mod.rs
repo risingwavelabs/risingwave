@@ -22,12 +22,14 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
+use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::{VersionedComparator, *};
+use risingwave_pb::hummock::LevelType;
+use risingwave_rpc_client::HummockMetaClient;
 
 mod block_cache;
 pub use block_cache::*;
 mod sstable;
-use risingwave_common::error::Result;
-use risingwave_rpc_client::HummockMetaClient;
 pub use sstable::*;
 pub mod compactor;
 #[cfg(test)]
@@ -50,9 +52,6 @@ mod vacuum;
 pub mod value;
 
 pub use error::*;
-use risingwave_common::config::StorageConfig;
-use risingwave_hummock_sdk::{VersionedComparator, *};
-use risingwave_pb::hummock::LevelType;
 use value::*;
 
 use self::iterator::{
@@ -614,7 +613,7 @@ impl<'a> HummockStateStoreIter<'a> {
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
-    type NextFuture<'b> = impl Future<Output = Result<Option<Self::Item>>> where Self:'b;
+    type NextFuture<'b> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'b;
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let iter = &mut self.inner;

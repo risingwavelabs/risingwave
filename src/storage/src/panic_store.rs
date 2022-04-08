@@ -16,7 +16,6 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -124,7 +123,7 @@ pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
     fn next(&'_ mut self) -> Self::NextFuture<'_> {
         async move { unreachable!() }
     }
