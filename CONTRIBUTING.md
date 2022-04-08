@@ -194,7 +194,7 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 To run end-to-end test, you will need to start a full cluster first:
 
 ```shell
-RW_IMPLICIT_FLUSH=1 ./risedev d
+./risedev d
 ```
 
 Then run some e2e tests:

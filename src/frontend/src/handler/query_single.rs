@@ -75,8 +75,10 @@ pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> 
     };
 
     // Implicitly flush the writes.
-    if *IMPLICIT_FLUSH {
-        flush_for_write(&session, stmt_type).await?;
+    if let Some(flag) = session.get(&IMPLICIT_FLUSH) {
+        if flag.is_true() {
+            flush_for_write(&session, stmt_type).await?;
+        }
     }
 
     Ok(PgResponse::new(stmt_type, rows_count, rows, pg_descs))

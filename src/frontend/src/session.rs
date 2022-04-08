@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::Formatter;
 use std::marker::Sync;
@@ -37,6 +38,7 @@ use tokio::task::JoinHandle;
 use crate::catalog::catalog_service::{CatalogReader, CatalogWriter, CatalogWriterImpl};
 use crate::catalog::root_catalog::Catalog;
 use crate::handler::handle;
+use crate::handler::query::IMPLICIT_FLUSH;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
@@ -249,11 +251,32 @@ impl FrontendEnv {
 pub struct SessionImpl {
     env: FrontendEnv,
     database: String,
+    /// Stores the value of configurations.
+    config_map: RwLock<HashMap<String, ConfigEntry>>,
+}
+
+#[derive(Clone)]
+pub struct ConfigEntry {
+    str_val: String,
+}
+
+impl ConfigEntry {
+    pub fn new(str_val: String) -> Self {
+        ConfigEntry { str_val }
+    }
+
+    pub fn is_true(&self) -> bool {
+        self.str_val.parse().unwrap_or(false)
+    }
 }
 
 impl SessionImpl {
     pub fn new(env: FrontendEnv, database: String) -> Self {
-        Self { env, database }
+        Self {
+            env,
+            database,
+            config_map: Self::init_config_map(),
+        }
     }
 
     #[cfg(test)]
@@ -261,6 +284,7 @@ impl SessionImpl {
         Self {
             env: FrontendEnv::mock(),
             database: "dev".to_string(),
+            config_map: Self::init_config_map(),
         }
     }
 
@@ -270,6 +294,27 @@ impl SessionImpl {
 
     pub fn database(&self) -> &str {
         &self.database
+    }
+
+    pub fn set(&self, key: &str, val: &str) {
+        self.config_map
+            .write()
+            .insert(key.to_string(), ConfigEntry::new(val.to_string()));
+    }
+
+    pub fn get(&self, key: &str) -> Option<ConfigEntry> {
+        let reader = self.config_map.read();
+        reader.get(key).cloned()
+    }
+
+    fn init_config_map() -> RwLock<HashMap<String, ConfigEntry>> {
+        let mut map = HashMap::new();
+        // FIXME: May need better init way + default config.
+        map.insert(
+            IMPLICIT_FLUSH.to_string(),
+            ConfigEntry::new("false".to_string()),
+        );
+        RwLock::new(map)
     }
 }
 
