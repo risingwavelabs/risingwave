@@ -34,7 +34,7 @@ enum LevelType {
 
 message Level {
   LevelType level_type = 1;
-  repeated uint64 table_ids = 2;
+  repeated SstableInfo table_infos = 2;
 }
 
 message UncommittedEpoch {

@@ -117,7 +117,7 @@ pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec
     hummock_version
         .levels
         .iter()
-        .flat_map(|level| level.table_ids.clone())
+        .flat_map(|level| level.table_infos.iter().map(|info| info.id))
         .sorted()
         .collect_vec()
 }
