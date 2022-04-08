@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -11,7 +12,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -29,7 +29,7 @@ use tokio::sync;
 use tokio::sync::mpsc::Sender;
 
 use crate::filesystem::file_common::{
-    Directory, DirectoryChangeWatch, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat,
+    Directory, EntryDiscover, EntryOpt, EntryOptEvent, EntryStat, StatusWatch,
 };
 use crate::filesystem::s3::s3_notification_event::{NotificationEvent, NotifyEventType};
 
@@ -49,6 +49,10 @@ pub enum FileSystemOptError {
     AwsSdkInnerError(String, String),
     #[error("S3 Bucket {0} download object {1} Error.")]
     GetS3ObjectError(String, String),
+    #[error("S3FileSplit illegal. must not be null")]
+    S3SplitIsEmpty,
+    #[error("Illegal Path format {0}, S3 File path format is s3://bucket_name/object_key")]
+    IllegalS3FilePath(String),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -144,13 +148,65 @@ pub async fn new_share_config(
 }
 
 #[derive(Debug, Clone)]
-pub struct S3SourceConfig {
+pub struct S3SourceBasicConfig {
     pub(crate) bucket: String,
     pub(crate) sqs_queue_name: String,
+    pub(crate) access: String,
+    pub(crate) secret: String,
+    pub(crate) region: String,
+    pub(crate) match_pattern: Option<String>,
+}
+
+impl S3SourceBasicConfig {
+    pub(crate) fn empty() -> Self {
+        Self {
+            bucket: "_BUCKET_NONE".to_string(),
+            sqs_queue_name: "_SQS_QUEUE_NONE".to_string(),
+            access: "".to_string(),
+            secret: "".to_string(),
+            region: "".to_string(),
+            match_pattern: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct S3SourceConfig {
+    pub(crate) basic_config: S3SourceBasicConfig,
     pub(crate) shared_config: aws_types::SdkConfig,
     pub(crate) custom_config: Option<AwsCustomConfig>,
     pub(crate) sqs_config: SqsReceiveMsgConfig,
-    pub(crate) match_pattern: Option<String>,
+}
+
+impl From<HashMap<String, String>> for S3SourceBasicConfig {
+    fn from(map: HashMap<String, String>) -> Self {
+        let mut empty_config = S3SourceBasicConfig::empty();
+        // May be, use macro instead of this method.
+        for (k, v) in map {
+            match k.as_str() {
+                "s3.region_name" => {
+                    empty_config.region = v;
+                }
+                "s3.bucket_name" => {
+                    empty_config.bucket = v;
+                }
+                "sqs_queue_name" => {
+                    empty_config.sqs_queue_name = v;
+                }
+                "match_pattern" => {
+                    empty_config.match_pattern = Some(v);
+                }
+                "s3.credentials.access" => {
+                    empty_config.access = v;
+                }
+                "s3.credentials.secret" => {
+                    empty_config.secret = v;
+                }
+                _ => {}
+            }
+        }
+        empty_config
+    }
 }
 
 pub(crate) fn new_s3_client(s3_source_config: S3SourceConfig) -> s3_client::Client {
@@ -182,7 +238,7 @@ pub struct S3Directory {
 
 impl S3Directory {
     pub fn is_match(&self, s3_object_key: String) -> anyhow::Result<bool> {
-        let match_string_option = self.source_config.clone().match_pattern;
+        let match_string_option = self.source_config.clone().basic_config.match_pattern;
         if let Some(match_string) = match_string_option {
             let glob = globset::Glob::new(match_string.as_str());
             if let Ok(matcher) = glob {
@@ -296,13 +352,13 @@ impl Directory for S3Directory {
     async fn push_entries_change(
         &self,
         sender: Sender<EntryOptEvent>,
-        mut running_status: watch::Receiver<DirectoryChangeWatch>,
+        mut running_status: watch::Receiver<StatusWatch>,
     ) -> anyhow::Result<()> {
         let sqs_config = self.source_config.clone().sqs_config;
         let sqs_queue_url_rs = match self
             .client_for_sqs
             .get_queue_url()
-            .queue_name(self.source_config.clone().sqs_queue_name)
+            .queue_name(self.source_config.clone().basic_config.sqs_queue_name)
             .send()
             .await
         {
@@ -342,7 +398,7 @@ impl Directory for S3Directory {
                 response = rsp_future => response,
                 status = running_status.changed() => {
                     if status.is_ok() {
-                        if let DirectoryChangeWatch::Stopped = *running_status.borrow() {
+                        if let StatusWatch::Stopped = *running_status.borrow() {
                             println!("sqs_recv_msg_post() send change complete");
                             // info!("");
                             return Ok(());
@@ -389,23 +445,24 @@ impl Directory for S3Directory {
     }
 
     async fn list_entries(&self) -> anyhow::Result<Vec<EntryStat>> {
-        let prefix_string = if let Some(match_string) = self.source_config.clone().match_pattern {
-            let glob = globset::Glob::new(match_string.as_str());
-            if let Ok(glob_obj) = glob {
-                Ok(find_prefix(glob_obj.compile_matcher().glob().glob()))
+        let prefix_string =
+            if let Some(match_string) = self.source_config.clone().basic_config.match_pattern {
+                let glob = globset::Glob::new(match_string.as_str());
+                if let Ok(glob_obj) = glob {
+                    Ok(find_prefix(glob_obj.compile_matcher().glob().glob()))
+                } else {
+                    Err(glob.err().unwrap())
+                }
             } else {
-                Err(glob.err().unwrap())
-            }
-        } else {
-            Ok("".to_string())
-        };
+                Ok("".to_string())
+            };
 
         match prefix_string {
             Ok(prefix) => {
                 let obj_keys_rsp = self
                     .client_for_s3
                     .list_objects_v2()
-                    .bucket(self.source_config.clone().bucket)
+                    .bucket(self.source_config.clone().basic_config.bucket)
                     .prefix(prefix)
                     .send()
                     .await;
@@ -418,7 +475,7 @@ impl Directory for S3Directory {
                                 let mut entry_stat = EntryStat::default();
                                 let path = format!(
                                     "s3://{}/{}",
-                                    self.source_config.bucket,
+                                    self.source_config.basic_config.bucket,
                                     v.key.unwrap()
                                 );
                                 entry_stat.path = path;
@@ -452,9 +509,10 @@ pub(crate) mod test {
     use aws_smithy_http::byte_stream::ByteStream;
     use chrono::Utc;
 
-    use crate::filesystem::file_common::{Directory, DirectoryChangeWatch};
+    use crate::filesystem::file_common::{Directory, StatusWatch};
     use crate::filesystem::s3::s3_dir::{
-        new_share_config, AwsCredential, S3Directory, S3SourceConfig, SqsReceiveMsgConfig,
+        new_share_config, AwsCredential, S3Directory, S3SourceBasicConfig, S3SourceConfig,
+        SqsReceiveMsgConfig,
     };
 
     pub const TEST_REGION_NAME: &str = "cn-north-1";
@@ -493,13 +551,15 @@ pub(crate) mod test {
     }
 
     pub fn new_s3_source_config(shared_config: aws_types::SdkConfig) -> S3SourceConfig {
+        let mut basic_config = S3SourceBasicConfig::empty();
+        basic_config.sqs_queue_name = "s3-dd-storage-notify-queue".to_string();
+        basic_config.bucket = BUCKET_NAME.to_string();
+        basic_config.region = TEST_REGION_NAME.to_string();
         S3SourceConfig {
-            bucket: BUCKET_NAME.to_string(),
-            sqs_queue_name: "s3-dd-storage-notify-queue".to_string(),
+            basic_config,
             shared_config,
             custom_config: None,
             sqs_config: SqsReceiveMsgConfig::default(),
-            match_pattern: None,
         }
     }
 
@@ -524,8 +584,8 @@ pub(crate) mod test {
         let s3_source_config = new_s3_source_config(shared_config);
         let s3_directory = S3Directory::new(s3_source_config);
         let s3_dir_for_task = Arc::new(s3_directory);
-        let (s_tx, s_rx) = tokio::sync::watch::channel(DirectoryChangeWatch::Stopped);
-        let s_send_rs = s_tx.send(DirectoryChangeWatch::Running);
+        let (s_tx, s_rx) = tokio::sync::watch::channel(StatusWatch::Stopped);
+        let s_send_rs = s_tx.send(StatusWatch::Running);
         assert!(s_send_rs.is_ok());
         let (tx, mut rx) = tokio::sync::mpsc::channel(10);
         let change_join = tokio::task::spawn(async move {
@@ -539,7 +599,7 @@ pub(crate) mod test {
                 "receive S3 DirectoryEntryOptEvent={:?}",
                 entry_event.unwrap()
             );
-            let send_rs = s_tx.send(DirectoryChangeWatch::Stopped);
+            let send_rs = s_tx.send(StatusWatch::Stopped);
             assert!(send_rs.is_ok());
             println!("send dir watch stopped complete");
         });

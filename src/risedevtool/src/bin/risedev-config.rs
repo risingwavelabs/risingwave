@@ -60,6 +60,7 @@ pub enum Components {
     MinIO,
     PrometheusAndGrafana,
     Etcd,
+    Kafka,
     Tracing,
     RustComponents,
     LegacyFrontend,
@@ -75,6 +76,7 @@ impl Components {
             Self::MinIO => "[Component] Hummock: MinIO + MinIO-CLI",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
+            Self::Kafka => "[Component] Kafka",
             Self::RustComponents => "[Build] Rust components",
             Self::LegacyFrontend => "[Build] Legacy Java frontend",
             Self::Dashboard => "[Build] Dashboard v2",
@@ -99,6 +101,11 @@ Required if you want to view metrics."
             Self::Etcd => {
                 "
 Required if you want to persistent meta-node data.
+                "
+            }
+            Self::Kafka => {
+                "
+Required if you want to create source from Kafka.
                 "
             }
             Self::RustComponents => {
@@ -149,7 +156,9 @@ a dev cluster.
             "ENABLE_MINIO" => Some(Self::MinIO),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
+            "ENABLE_KAFKA" => Some(Self::Kafka),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
+            "ENABLE_BUILD_DASHBOARD_V2" => Some(Self::Dashboard),
             "ENABLE_BUILD_FRONTEND" => Some(Self::LegacyFrontend),
             "ENABLE_COMPUTE_TRACING" => Some(Self::Tracing),
             "ENABLE_RELEASE_PROFILE" => Some(Self::Release),
@@ -164,6 +173,7 @@ a dev cluster.
             Self::MinIO => "ENABLE_MINIO",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
+            Self::Kafka => "ENABLE_KAFKA",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::LegacyFrontend => "ENABLE_BUILD_FRONTEND",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD_V2",

@@ -5,7 +5,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
-use super::error::{StreamExecutorError, TracedStreamExecutorError};
+use super::error::TracedStreamExecutorError;
 use super::{Executor, ExecutorInfo, Message};
 use crate::executor_v2::BoxedMessageStream;
 
@@ -45,16 +45,11 @@ where
 
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self, epoch: u64) {
-        let mut iter = self
-            .table
-            .iter(epoch)
-            .await
-            .map_err(StreamExecutorError::storage)?;
+        let mut iter = self.table.iter(epoch).await?;
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(&self.table, Some(self.batch_size))
-            .await
-            .map_err(StreamExecutorError::storage)?
+            .await?
         {
             let ops = vec![Op::Insert; data_chunk.cardinality()];
             let stream_chunk = StreamChunk::from_parts(ops, data_chunk);

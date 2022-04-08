@@ -160,17 +160,13 @@ impl SstableMeta {
         cursor -= 4;
         let magic = (&buf[cursor..]).get_u32_le();
         if magic != MAGIC {
-            return Err(HummockError::MagicMismatch {
-                expected: MAGIC,
-                found: magic,
-            }
-            .into());
+            return Err(HummockError::magic_mismatch(MAGIC, magic));
         }
 
         cursor -= 4;
         let version = (&buf[cursor..cursor + 4]).get_u32_le();
         if version != VERSION {
-            return Err(HummockError::InvalidFormatVersion(version).into());
+            return Err(HummockError::invalid_format_version(version));
         }
 
         cursor -= 8;

@@ -18,6 +18,7 @@ mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
 mod level_handler;
+mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
 mod model;
@@ -157,7 +158,15 @@ where
                     let input_ssts = compact_task
                         .input_ssts
                         .iter()
-                        .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                        .flat_map(|v| {
+                            v.level
+                                .as_ref()
+                                .unwrap()
+                                .table_infos
+                                .iter()
+                                .map(|sst| sst.id)
+                                .collect_vec()
+                        })
                         .collect_vec();
                     tracing::debug!(
                         "Try to compact SSTs {:?} in worker {}.",

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
-use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use risingwave_pb::hummock::{HummockVersion, Level};
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -28,6 +28,7 @@ use tokio_retry::strategy::jitter;
 
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
 };
@@ -128,6 +129,9 @@ impl LocalVersionManager {
     /// Updates cached version if the new version is of greater id
     pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
+        if validate_table_key_range(&hummock_version.levels).is_err() {
+            return false;
+        }
         let mut guard = self.current_version.write();
         match guard.as_ref() {
             Some(cached_version) if cached_version.id() >= new_version_id => {
@@ -189,29 +193,6 @@ impl LocalVersionManager {
             ssts.push(self.sstable_store.sstable(*sst_id).await?);
         }
         Ok(ssts)
-    }
-
-    /// Gets the iterators on the underlying tables.
-    pub async fn tables(
-        &self,
-        levels: &[risingwave_pb::hummock::Level],
-    ) -> HummockResult<Vec<Arc<Sstable>>> {
-        // Should the LevelType be returned and made use of?
-        let mut out: Vec<Arc<Sstable>> = Vec::new();
-        for level in levels {
-            match level.level_type() {
-                LevelType::Overlapping => {
-                    let mut tables = self.pick_few_tables(&level.table_ids).await?;
-                    out.append(&mut tables);
-                }
-                LevelType::Nonoverlapping => {
-                    let mut tables = self.pick_few_tables(&level.table_ids).await?;
-                    out.append(&mut tables);
-                }
-            }
-        }
-
-        Ok(out)
     }
 
     async fn start_pin_worker(
@@ -369,6 +350,16 @@ impl LocalVersionManager {
                 }
             }
         }
+    }
+
+    #[cfg(test)]
+    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
+        let last_pinned = match self.current_version.read().as_ref() {
+            None => INVALID_VERSION_ID,
+            Some(v) => v.version.id,
+        };
+        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
+        self.try_set_version(version)
     }
 }
 

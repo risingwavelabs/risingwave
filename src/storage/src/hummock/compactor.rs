@@ -196,9 +196,8 @@ impl Compactor {
         for (split_index, _) in compact_task.splits.iter().enumerate() {
             let compactor = compactor.clone();
             compaction_futures.push(tokio::spawn(async move {
-                compactor
-                    .compact_key_range(split_index, compactor.build_sst_iter().await?)
-                    .await
+                let merge_iter = compactor.build_sst_iter().await?;
+                compactor.compact_key_range(split_index, merge_iter).await
             }));
         }
 
@@ -355,10 +354,12 @@ impl Compactor {
         } in &self.compact_task.input_ssts
         {
             let level = opt_level.as_ref().unwrap();
+            // Do not need to filter the table because manager has done it.
+            let table_idxs = level.table_infos.iter().map(|sst| sst.id).collect_vec();
             let tables = self
                 .context
                 .local_version_manager
-                .pick_few_tables(level.get_table_ids())
+                .pick_few_tables(&table_idxs)
                 .await?;
 
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
