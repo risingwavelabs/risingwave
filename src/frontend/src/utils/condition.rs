@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    fold_boolean_constant, to_conjunctions, try_get_bool_constant, ExprImpl, ExprRewriter,
-    ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    push_down_not, fold_boolean_constant, to_conjunctions, try_get_bool_constant, ExprImpl,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 
 #[derive(Debug, Clone)]
@@ -263,6 +263,7 @@ impl Condition {
         let conjunctions: Vec<_> = self
             .conjunctions
             .into_iter()
+            .map(push_down_not)
             .map(fold_boolean_constant)
             .flat_map(to_conjunctions)
             .collect();
