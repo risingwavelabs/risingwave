@@ -69,11 +69,15 @@ impl Task for ConfigureTmuxTask {
                 let (pane_id, name) = line
                     .split_once(' ')
                     .ok_or_else(|| anyhow!("failed to parse tmux list-windows output"))?;
-                let mut cmd = self.tmux();
-
                 ctx.pb
                     .set_message(format!("killing {} {}...", pane_id, name));
+
+                let mut cmd = self.tmux();
                 cmd.arg("send-keys").arg("-t").arg(pane_id).arg("C-c");
+                ctx.run_command(cmd)?;
+
+                let mut cmd = self.tmux();
+                cmd.arg("send-keys").arg("-t").arg(pane_id).arg("C-d");
                 ctx.run_command(cmd)?;
             }
         }
