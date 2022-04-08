@@ -18,6 +18,7 @@ use std::process::Command;
 
 use anyhow::{anyhow, Context, Result};
 use console::style;
+use itertools::Itertools;
 
 use crate::{ExecuteContext, Task};
 
@@ -59,18 +60,18 @@ impl Task for ConfigureTmuxTask {
             .arg("-t")
             .arg(RISEDEV_SESSION_NAME)
             .arg("-F")
-            .arg("#{pane_id} #{window_name}");
+            .arg("#{pane_id} #{pane_pid} #{window_name}");
 
         if let Ok(output) = ctx.run_command(cmd) {
             for line in String::from_utf8(output.stdout)?.split('\n') {
                 if line.trim().is_empty() {
                     continue;
                 }
-                let (pane_id, name) = line
-                    .split_once(' ')
-                    .ok_or_else(|| anyhow!("failed to parse tmux list-windows output"))?;
+                let [pane_id, pid, name, ..] = line.split(' ').collect_vec()[..] else {
+                    return Err(anyhow!("failed to parse tmux list-windows output"));
+                };
                 ctx.pb
-                    .set_message(format!("killing {} {}...", pane_id, name));
+                    .set_message(format!("killing {} {} {}...", pane_id, pid, name));
 
                 // Send ^C & ^D
                 let mut cmd = self.tmux();
