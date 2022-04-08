@@ -330,9 +330,9 @@ description = "Start a full RisingWave dev cluster using risedev-playground"
 category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster"
 script = '''
-#!@shell
+#!/bin/bash
 
-tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
+tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
