@@ -9,7 +9,7 @@ If you have questions, please [create a Github issue](https://github.com/singula
   - [Setting Up Development Environment](#setting-up-development-environment)
   - [Code Structure](#code-structure)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
-    - [Adding More Components](#adding-more-components)
+    - [Additional Components](#additional-components)
     - [Start All-In-One Process](#start-all-in-one-process)
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
