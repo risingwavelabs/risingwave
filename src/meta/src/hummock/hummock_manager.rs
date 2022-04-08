@@ -370,6 +370,30 @@ where
                 .unwrap()
                 .set(compact_cnt as i64);
         }
+
+        static mut CALLS_AFTER_LAST_OBSERVATION: u32 = 0;
+        unsafe {
+            CALLS_AFTER_LAST_OBSERVATION += 1;
+            if CALLS_AFTER_LAST_OBSERVATION >= 10 {
+                CALLS_AFTER_LAST_OBSERVATION = 0;
+                for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
+                    let (sst_num, compact_cnt) = match level_handler {
+                        LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
+                            (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                        }
+                        LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
+                            (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
+                        }
+                    };
+                    tracing::info!(
+                        "Level {} has {} SSTs, {} of those are being compacted to bottom levels",
+                        idx,
+                        sst_num,
+                        compact_cnt,
+                    );
+                }
+            }
+        }
     }
 
     fn single_level_stat_bytes<
