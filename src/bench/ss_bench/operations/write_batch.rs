@@ -42,7 +42,7 @@ impl BatchTaskContext {
         assert!(origin_task_count < (1 << 8));
         Self {
             meta_client,
-            epoch: AtomicU64::new(0),
+            epoch: AtomicU64::new(1),
             task_count: AtomicUsize::new(origin_task_count << 8),
         }
     }
