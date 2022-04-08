@@ -19,7 +19,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 **Use a Pre-built Package (Linux)**
 
 ```shell
+# Download the pre-built library
 wget https://github.com/singularity-data/risingwave/releases/download/v0.1.5/risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+# Unzip the library
 tar xvf risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
