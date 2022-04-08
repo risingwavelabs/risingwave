@@ -72,12 +72,13 @@ impl Task for ConfigureTmuxTask {
                 ctx.pb
                     .set_message(format!("killing {} {}...", pane_id, name));
 
+                // Send ^C & ^D
                 let mut cmd = self.tmux();
-                cmd.arg("send-keys").arg("-t").arg(pane_id).arg("C-c");
-                ctx.run_command(cmd)?;
-
-                let mut cmd = self.tmux();
-                cmd.arg("send-keys").arg("-t").arg(pane_id).arg("C-d");
+                cmd.arg("send-keys")
+                    .arg("-t")
+                    .arg(pane_id)
+                    .arg("C-c")
+                    .arg("C-d");
                 ctx.run_command(cmd)?;
             }
         }
