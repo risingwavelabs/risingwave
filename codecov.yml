@@ -2,10 +2,6 @@
 # Reference: https://docs.codecov.com/docs/codecovyml-reference
 # Tips. You may run following command to validate before committing any changes
 #   curl --data-binary @codecov.yml https://codecov.io/validate
-codecov:
-  notify:
-    # do not notify until 3 builds collected (java & rust)
-    after_n_builds: 2
 coverage:
   status:
     patch: off # disable patch status
@@ -17,8 +13,5 @@ coverage:
           - "src/"
         target: auto # compared with the coverage from the base commit
         threshold: 0.1% # allow the coverage to drop by 0.1% and posting a success status
-comment:
-  # do not comment until 2 builds collected (java & rust)
-  after_n_builds: 2
 ignore:
   - "src/risedevtooltool"

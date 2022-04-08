@@ -19,8 +19,8 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 **Use a Pre-built Package (Linux)**
 
 ```shell
-wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4/risingwave-v0.1.4-unknown-linux.tar.gz
-tar xvf risingwave-v0.1.4-unknown-linux.tar.gz
+wget https://github.com/singularity-data/risingwave/releases/download/v0.1.5/risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
 ```
@@ -36,9 +36,9 @@ git clone https://github.com/singularity-data/risingwave.git && cd risingwave
 ./risedev playground
 ```
 
-To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+To build from source, you need to pre-install several tools in your system. You may use `./risedev configure` to configure compile settings. Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
 
-You may launch a RisingWave cluster and process streaming data in a distributed manner, or enable other features like metrics collection and data persistence. Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+You may launch a RisingWave cluster and process streaming data in a distributed manner, or enable other features like metrics collection and data persistence. Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
 
 ### Your First Query
 
@@ -83,7 +83,7 @@ Please refer to [getting started guide](https://singularity-data.com/risingwave-
 
 ## Documentation
 
-Please refer to [RisingWave Docs](https://singularity-data.com/risingwave-docs/) and [Developer Docs](https://github.com/singularity-data/risingwave/tree/main/docs) for more information.
+To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 
@@ -91,4 +91,4 @@ RisingWave is under the Apache License 2.0. Please refer to [LICENSE](LICENSE) f
 
 ## Contributing
 
-Thanks for your interest in contributing to the project! Please refer to [CONTRIBUTING](CONTRIBUTING.md) for more information.
+Thanks for your interest in contributing to the project! Please refer to [Contribution and Development Guidelines](CONTRIBUTING.md) for more information.
