@@ -43,11 +43,11 @@ impl Planner {
     fn store_struct_column(&mut self, select: &BoundSelect) -> Result<HashMap<String, ColumnDesc>> {
         let table: Vec<ColumnDesc> = {
             match &select.from {
-                Some(relation) => Self::extract_column_descs(relation)?,
+                Some(relation) => relation.extract_column_descs(),
                 None => vec![],
             }
         };
-        let mut column_name_to_desc = HashMap::new();
+        let mut column_descs = vec![];
 
         for i in 0..select.select_items.len() {
             let item = &select.select_items[i];
@@ -75,19 +75,5 @@ impl Planner {
             }
         }
         Ok(column_name_to_desc)
-    }
-
-    /// Extract `column_descs` from relation.
-    fn extract_column_descs(relation: &Relation) -> Result<Vec<ColumnDesc>> {
-        // TODO: Support other relation type.
-        match relation {
-            Relation::Source(source) => Ok(source
-                .catalog
-                .columns
-                .iter()
-                .map(|c| c.column_desc.clone())
-                .collect_vec()),
-            _ => Ok(vec![]),
-        }
     }
 }

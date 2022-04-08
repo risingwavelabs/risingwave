@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -42,6 +42,43 @@ pub enum Relation {
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     WindowTableFunction(Box<BoundWindowTableFunction>),
+}
+
+impl Relation {
+    /// Extract `column_descs` from relation.
+    pub fn extract_column_descs(&self) -> Vec<ColumnDesc> {
+        match self {
+            Relation::Source(source) => source
+                .catalog
+                .columns
+                .iter()
+                .map(|c| c.column_desc.clone())
+                .collect_vec(),
+            Relation::BaseTable(table) => table
+                .table_catalog
+                .columns
+                .iter()
+                .map(|c| c.column_desc.clone())
+                .collect_vec(),
+            Relation::WindowTableFunction(window) => window.input.extract_column_descs(),
+            Relation::Join(join) => {
+                let mut left = join.left.extract_column_descs();
+                let mut right = join.right.extract_column_descs();
+                left.append(&mut right);
+                left
+            }
+            Relation::Subquery(sub) => {
+                if let BoundSetExpr::Select(select) = &sub.query.body {
+                    match &select.from {
+                        Some(relation) => relation.extract_column_descs(),
+                        None => vec![],
+                    }
+                } else {
+                    vec![]
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
