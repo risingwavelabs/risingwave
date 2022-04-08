@@ -15,6 +15,8 @@
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::RangeBounds;
 
+use risingwave_pb::hummock::Level;
+
 use super::{HummockError, HummockResult};
 
 pub fn range_overlap<R, B>(
@@ -56,5 +58,19 @@ pub fn validate_epoch(safe_epoch: u64, epoch: u64) -> HummockResult<()> {
         return Err(HummockError::expired_epoch(safe_epoch, epoch));
     }
 
+    Ok(())
+}
+
+pub fn validate_table_key_range(levels: &[Level]) -> HummockResult<()> {
+    for l in levels {
+        for t in &l.table_infos {
+            if t.key_range.is_none() {
+                return Err(HummockError::meta_error(format!(
+                    "key_range in table [{}] is none",
+                    t.id
+                )));
+            }
+        }
+    }
     Ok(())
 }

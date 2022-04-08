@@ -16,8 +16,7 @@ use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::column_catalog::ColumnCatalog;
-use super::{ColumnId, SourceId};
-use crate::handler::create_table::TABLE_SOURCE_PK_COLID;
+use super::{ColumnId, SourceId, TABLE_SOURCE_PK_COLID};
 /// this struct `SourceCatalog` is used in frontend and compared with `ProstSource` it only maintain
 /// information which will be used during optimization.
 #[derive(Clone, Debug)]

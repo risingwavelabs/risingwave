@@ -28,7 +28,7 @@ select v1, v2 from t order by v2;
 statement ok
 delete from t where v1 = 1919;
 
-query RI
+query RI rowsort
 select v1, v2 from t order by v2;
 ----
 114 10
@@ -40,7 +40,7 @@ select count(*) from t;
 ----
 3
 
-query I
+query I rowsort
 select count(*), v1 from t group by v1;
 ----
 1 810

@@ -211,7 +211,7 @@ async fn test_snapshot_reverse_range_scan() {
     ));
     let hummock_options = Arc::new(default_config_for_test());
     let hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
+        hummock_options.clone(),
         sstable_store.clone(),
         vm.clone(),
         mock_hummock_meta_client.clone(),
@@ -228,13 +228,33 @@ async fn test_snapshot_reverse_range_scan() {
                 (Bytes::from("2"), StorageValue::new_default_put("test")),
                 (Bytes::from("3"), StorageValue::new_default_put("test")),
                 (Bytes::from("4"), StorageValue::new_default_put("test")),
+                (Bytes::from("5"), StorageValue::new_default_put("test")),
+                (Bytes::from("6"), StorageValue::new_default_put("test")),
             ],
             epoch,
         )
         .await
         .unwrap();
     hummock_storage.sync(Some(epoch)).await.unwrap();
+    mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
 
+    hummock_storage
+        .ingest_batch(
+            vec![
+                (Bytes::from("5"), StorageValue::new_default_put("test")),
+                (Bytes::from("6"), StorageValue::new_default_put("test")),
+                (Bytes::from("7"), StorageValue::new_default_put("test")),
+                (Bytes::from("8"), StorageValue::new_default_put("test")),
+            ],
+            epoch + 1,
+        )
+        .await
+        .unwrap();
+    hummock_storage.sync(Some(epoch + 1)).await.unwrap();
+    mock_hummock_meta_client
+        .commit_epoch(epoch + 1)
+        .await
+        .unwrap();
     macro_rules! key {
         ($idx:expr) => {
             Bytes::from(stringify!($idx)).to_vec()
@@ -246,5 +266,7 @@ async fn test_snapshot_reverse_range_scan() {
     assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
     assert_count_reverse_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
     assert_count_reverse_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
-    assert_count_reverse_range_scan!(hummock_storage, .., 4, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, .., 6, epoch);
+    assert_count_reverse_range_scan!(hummock_storage, .., 8, epoch + 1);
+    assert_count_reverse_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
 }

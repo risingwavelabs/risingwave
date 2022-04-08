@@ -12,3 +12,13 @@ query T
 select interval '1' day + timestamp '2022-02-22 00:00:00';
 ----
 2022-02-23 00:00:00
+
+query T
+select interval '1' second * 59;
+----
+00:00:59
+
+query T
+select 61 * interval '1' second;
+----
+00:01:01
