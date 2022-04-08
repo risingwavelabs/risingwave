@@ -52,7 +52,7 @@ impl Planner {
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let root = PlanRoot::new_with_map(plan, dist, order, out_fields, select_items);
+        let root = PlanRoot::new_with_items(plan, dist, order, out_fields, select_items);
         Ok(root)
     }
 
@@ -64,10 +64,24 @@ impl Planner {
                 None => vec![],
             }
         };
-        let column_descs = select
-            .select_items
+        let mut items = vec![];
+        let mut names = vec![];
+        for i in 0..select.select_items.len() {
+            let expr = &select.select_items[i];
+            let name = select.aliases[i].clone();
+            if let ExprImpl::InputRef(input) = expr {
+                if input.index() < table.len() {
+                    items.push(expr);
+                    names.push(name);
+                }
+            } else {
+                items.push(expr);
+                names.push(name);
+            }
+        }
+        let column_descs = items
             .iter()
-            .zip_eq(select.aliases.iter())
+            .zip_eq(names)
             .enumerate()
             .map(|(id, (expr, alias))| {
                 let mut desc = match expr {
@@ -85,7 +99,7 @@ impl Planner {
                         type_name: "".to_string(),
                     },
                 };
-                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
+                let name = alias.unwrap_or(match desc.name.is_empty() {
                     true => desc.name.clone(),
                     false => format!("expr#{}", id),
                 });

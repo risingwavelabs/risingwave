@@ -26,6 +26,7 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use super::create_source::make_prost_source;
 use crate::binder::expr::bind_data_type;
+use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
@@ -89,17 +90,25 @@ pub(crate) fn gen_materialized_source_plan(
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
         // Manually assemble the materialization plan for the table.
+        let source_catalog: SourceCatalog = (&source).into();
+        let select_items = source_catalog
+            .columns
+            .iter()
+            .filter(|f| !f.is_hidden)
+            .map(|c| c.clone().column_desc)
+            .collect_vec();
         let source_node: PlanRef =
-            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
+            StreamSource::new(LogicalSource::new(Rc::new(source_catalog), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
         required_cols.toggle_range(..);
         required_cols.toggle(0);
 
-        PlanRoot::new(
+        PlanRoot::new_with_items(
             source_node,
             Distribution::HashShard(vec![0]),
             Order::any().clone(),
             required_cols,
+            select_items,
         )
         .gen_create_mv_plan(source.name.clone())?
     };

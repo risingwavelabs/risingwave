@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -101,42 +101,43 @@ impl StreamMaterialize {
         mv_name: String,
         user_order_by: Order,
         user_cols: FixedBitSet,
-        map: Vec<ColumnDesc>,
+        select_items: Vec<ColumnDesc>,
     ) -> Result<Self> {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
-        let mut columns = map
+        let mut select_map: HashMap<String, ColumnDesc> = HashMap::new();
+        for desc in select_items {
+            select_map.insert(desc.name.clone(), desc);
+        }
+        let mut columns = schema
+            .fields()
             .iter()
-            .map(|c| ColumnCatalog {
-                column_desc: c.clone(),
-                is_hidden: true,
+            .enumerate()
+            .map(|(i, field)| {
+                let desc = match select_map.get(&field.name) {
+                    Some(desc) => desc.clone(),
+                    None => ColumnDesc {
+                        data_type: field.data_type.clone(),
+                        column_id: (i as i32).into(),
+                        name: field.name.clone(),
+                        field_descs: vec![],
+                        type_name: "".to_string(),
+                    },
+                };
+                ColumnCatalog {
+                    column_desc: desc,
+                    is_hidden: !user_cols.contains(i),
+                }
             })
-            .chain(
-                schema
-                    .fields
-                    .clone()
-                    .into_iter()
-                    .filter(|f| is_row_id_column_name(&f.name))
-                    .enumerate()
-                    .map(|(id, f)| ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: f.data_type.clone(),
-                            column_id: (id as i32).into(),
-                            name: f.name,
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        },
-                        is_hidden: !user_cols.contains(id),
-                    }),
-            )
             .collect_vec();
         ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];
+
         for field in &user_order_by.field_order {
             let idx = field.index;
             pk_desc.push(OrderedColumnDesc {

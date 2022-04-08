@@ -51,16 +51,16 @@ pub struct PlanRoot {
     out_fields: FixedBitSet,
     schema: Schema,
     /// Store struct `column_name` and `column_desc`.
-    column_name_to_desc: Vec<ColumnDesc>,
+    select_items: Vec<ColumnDesc>,
 }
 
 impl PlanRoot {
-    pub fn new_with_map(
+    pub fn new_with_items(
         plan: PlanRef,
         required_dist: Distribution,
         required_order: Order,
         out_fields: FixedBitSet,
-        column_name_to_desc: Vec<ColumnDesc>,
+        select_items: Vec<ColumnDesc>,
     ) -> Self {
         let input_schema = plan.schema();
         assert_eq!(input_schema.fields().len(), out_fields.len());
@@ -78,7 +78,7 @@ impl PlanRoot {
             required_order,
             out_fields,
             schema,
-            column_name_to_desc,
+            select_items,
         }
     }
 
@@ -88,7 +88,7 @@ impl PlanRoot {
         required_order: Order,
         out_fields: FixedBitSet,
     ) -> Self {
-        Self::new_with_map(plan, required_dist, required_order, out_fields, vec![])
+        Self::new_with_items(plan, required_dist, required_order, out_fields, vec![])
     }
 
     /// Change the distribution of [`PlanRoot`].
@@ -217,7 +217,7 @@ impl PlanRoot {
             mv_name,
             self.required_order.clone(),
             self.out_fields.clone(),
-            self.column_name_to_desc.clone(),
+            self.select_items.clone(),
         )
     }
 
