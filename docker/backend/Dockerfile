@@ -12,22 +12,26 @@ WORKDIR /risingwave
 
 COPY proto proto
 COPY src src
+COPY rust-toolchain rust-toolchain
+COPY Cargo.toml Cargo.toml
 
 ENV PATH /root/.cargo/bin/:$PATH
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
   && rustup set profile minimal \
-  && rustup default $(cat "/risingwave/src/rust-toolchain") \
+  && rustup default $(cat "/risingwave/rust-toolchain") \
   && rustup component add rustfmt
 
-RUN cd /risingwave/rust && cargo clean && cargo build --release
+RUN cargo clean && cargo build --release
 
-FROM alpine:latest
+FROM ubuntu:20.04
 
 RUN mkdir -p /risingwave/bin
 
-COPY --from=builder /risingwave/src/target/release/compute-node /risingwave/bin/compute-node
-COPY --from=builder /risingwave/src/target/release/meta-node /risingwave/bin/meta-node
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install openssl libssl-dev
+
+COPY --from=builder /risingwave/target/release/compute-node /risingwave/bin/compute-node
+COPY --from=builder /risingwave/target/release/meta-node /risingwave/bin/meta-node
 
 EXPOSE 5687 5690

@@ -34,6 +34,44 @@ pub const RW_ERROR_GRPC_HEADER: &str = "risingwave-error-bin";
 
 pub type BoxedError = Box<dyn Error + Send + Sync>;
 
+#[derive(Debug, Clone, Copy)]
+pub struct TrackingIssue(Option<u32>);
+
+impl TrackingIssue {
+    pub fn new(id: u32) -> Self {
+        TrackingIssue(Some(id))
+    }
+
+    pub fn none() -> Self {
+        TrackingIssue(None)
+    }
+}
+
+impl From<u32> for TrackingIssue {
+    fn from(id: u32) -> Self {
+        TrackingIssue(Some(id))
+    }
+}
+
+impl From<Option<u32>> for TrackingIssue {
+    fn from(id: Option<u32>) -> Self {
+        TrackingIssue(id)
+    }
+}
+
+impl Display for TrackingIssue {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(id) => write!(
+                f,
+                "Tracking issue: https://github.com/singularity-data/risingwave/issues/{}",
+                id
+            ),
+            None => write!(f, "No tracking issue"),
+        }
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum ErrorCode {
     #[error("ok")]
@@ -44,8 +82,8 @@ pub enum ErrorCode {
     InternalError(String),
     #[error(transparent)]
     ProstError(prost::DecodeError),
-    #[error("Feature is not yet implemented: {0}")]
-    NotImplementedError(String),
+    #[error("Feature is not yet implemented: {0}, {1}")]
+    NotImplemented(String, TrackingIssue),
     #[error(transparent)]
     IoError(IoError),
     #[error("Storage error: {0}")]
@@ -211,7 +249,7 @@ impl ErrorCode {
             ErrorCode::OK => 0,
             ErrorCode::InternalError(_) => 1,
             ErrorCode::MemoryError { .. } => 2,
-            ErrorCode::NotImplementedError(_) => 4,
+            ErrorCode::NotImplemented(..) => 4,
             ErrorCode::IoError(_) => 5,
             ErrorCode::StorageError(_) => 6,
             ErrorCode::ParseError(_) => 7,
@@ -510,7 +548,7 @@ mod tests {
         check_grpc_error(ErrorCode::TaskNotFound, Code::Internal);
         check_grpc_error(ErrorCode::InternalError(String::new()), Code::Internal);
         check_grpc_error(
-            ErrorCode::NotImplementedError(String::new()),
+            ErrorCode::NotImplemented(String::new(), None.into()),
             Code::Internal,
         );
     }

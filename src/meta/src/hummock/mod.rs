@@ -18,17 +18,21 @@ mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
 mod level_handler;
+mod metrics_utils;
+#[cfg(any(test, feature = "test"))]
+pub mod mock_hummock_meta_client;
 mod model;
-#[cfg(test)]
+#[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod vacuum;
-
 use std::sync::Arc;
 use std::time::Duration;
 
 pub use compactor_manager::*;
 pub use hummock_manager::*;
 use itertools::Itertools;
+#[cfg(any(test, feature = "test"))]
+pub use mock_hummock_meta_client::MockHummockMetaClient;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -154,7 +158,15 @@ where
                     let input_ssts = compact_task
                         .input_ssts
                         .iter()
-                        .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+                        .flat_map(|v| {
+                            v.level
+                                .as_ref()
+                                .unwrap()
+                                .table_infos
+                                .iter()
+                                .map(|sst| sst.id)
+                                .collect_vec()
+                        })
                         .collect_vec();
                     tracing::debug!(
                         "Try to compact SSTs {:?} in worker {}.",

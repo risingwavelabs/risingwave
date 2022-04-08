@@ -21,6 +21,7 @@ env:
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
   RUSTFLAGS: -D warnings
+  PROTOC_NO_VENDOR: true
 jobs:
   start-runner-a:
     name: ec2-start-a
@@ -189,11 +190,6 @@ jobs:
           if-no-files-found: error
           path: |
             legacy/pgserver/build/libs/risingwave-fe-runnable.jar
-      - uses: codecov/codecov-action@v2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          directory: legacy
-          flags: java
   end-to-end-risedev-dev:
     name: e2e-test-risedev-dev
     needs:
@@ -262,11 +258,26 @@ jobs:
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
-      - name: e2e test w/ Rust frontend
+      - name: e2e test, streaming, Rust frontend, 3 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
-          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test, batch, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
+        timeout-minutes: 2
+        run: |
+          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node
@@ -367,11 +378,26 @@ jobs:
         run: |
           ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
-      - name: e2e test w/ Rust frontend
+      - name: e2e test, streaming, Rust frontend, 3 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-default
-          sqllogictest -p 4566 -d dev './e2e_test/v2/**/*.slt'
+          ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/streaming/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test, batch, Rust frontend, 1 node
+        timeout-minutes: 2
+        run: |
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
+          sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
+      - name: Kill cluster
+        run: ~/cargo-make/makers ci-kill
+      - name: e2e test w/ Rust frontend ci-3node, batch, distributed
+        timeout-minutes: 2
+        run: |
+          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
       - name: e2e test streaming 3-node
@@ -543,7 +569,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -571,12 +601,12 @@ jobs:
       - name: Run rust format check
         run: |
           cargo fmt --all -- --check
-      - name: Run rust doc check
-        run: |
-          cargo doc --document-private-items
       - name: Build Rust components
         run: |
           cargo build --profile dev --features=all-in-one
+      - name: Compress RisingWave debug info
+        run: |
+          objcopy --compress-debug-sections=zlib-gnu target/debug/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-dev
@@ -607,7 +637,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -635,12 +669,12 @@ jobs:
       - name: Run rust format check
         run: |
           cargo fmt --all -- --check
-      - name: Run rust doc check
-        run: |
-          cargo doc --document-private-items
       - name: Build Rust components
         run: |
           cargo build --profile release --features=all-in-one
+      - name: Compress RisingWave debug info
+        run: |
+          objcopy --compress-debug-sections=zlib-gnu target/release/risingwave
       - uses: actions/upload-artifact@v2
         with:
           name: risingwave-release
@@ -672,7 +706,11 @@ jobs:
         uses: actions/checkout@v2
         with:
           fetch-depth: 0
-      - name: Install rust toolchain
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v1
+        with:
+          version: '3.x'
+      - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN }}
@@ -693,6 +731,9 @@ jobs:
         run: |
           # If new CI checks are added, the one with `--locked` must be run first.
           cargo clippy --all-targets --locked -- -D warnings
+      - name: Run rust doc check
+        run: |
+          cargo doc --document-private-items --no-deps
       - name: Run rust test with coverage
         run: |
           cargo llvm-cov nextest --lcov --output-path lcov.info --no-fail-fast

@@ -31,11 +31,11 @@ use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::MetaClient;
 use risingwave_source::MemSourceManager;
 use risingwave_storage::hummock::compactor::Compactor;
-use risingwave_storage::hummock::hummock_meta_client::RpcHummockMetaClient;
+use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::monitor::{HummockMetrics, StateStoreMetrics};
 use risingwave_storage::StateStoreImpl;
 use risingwave_stream::executor::monitor::StreamingMetrics;
-use risingwave_stream::task::{LocalStreamManager, ObserverManager, StreamEnvironment};
+use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 use tower::make::Shared;
@@ -76,7 +76,6 @@ pub async fn compute_node_serve(
         config,
         get_compile_mode()
     );
-    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
 
     let mut meta_client = MetaClient::new(&opts.meta_address).await.unwrap();
 
@@ -105,7 +104,7 @@ pub async fn compute_node_serve(
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,
-        Arc::new(RpcHummockMetaClient::new(
+        Arc::new(MonitoredHummockMetaClient::new(
             meta_client.clone(),
             hummock_metrics.clone(),
         )),
@@ -115,7 +114,7 @@ pub async fn compute_node_serve(
     .unwrap();
 
     // A hummock compactor is deployed along with compute node for now.
-    if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
+    if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
             hummock.inner().local_version_manager().clone(),
@@ -133,11 +132,6 @@ pub async fn compute_node_serve(
         streaming_metrics.clone(),
     ));
     let source_mgr = Arc::new(MemSourceManager::new());
-
-    // Initialize observer manager and subscribe to notification service in meta.
-    let observer_mgr =
-        ObserverManager::new(meta_client.clone(), client_addr.clone(), source_mgr.clone()).await;
-    sub_tasks.push(observer_mgr.start().await.unwrap());
 
     // Initialize batch environment.
     let batch_config = Arc::new(config.batch.clone());
@@ -159,7 +153,6 @@ pub async fn compute_node_serve(
         stream_config,
         worker_id,
         state_store,
-        shutdown_send.clone(),
     );
 
     // Boot the runtime gRPC services.
@@ -167,6 +160,7 @@ pub async fn compute_node_serve(
     let exchange_srv = ExchangeServiceImpl::new(batch_mgr, stream_mgr.clone());
     let stream_srv = StreamServiceImpl::new(stream_mgr, stream_env.clone());
 
+    let (shutdown_send, mut shutdown_recv) = tokio::sync::mpsc::unbounded_channel();
     let join_handle = tokio::spawn(async move {
         tonic::transport::Server::builder()
             .add_service(TaskServiceServer::new(batch_srv))

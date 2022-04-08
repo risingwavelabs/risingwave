@@ -1,6 +1,6 @@
 [package]
 name = "risingwave_stream"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,6 +14,7 @@ chrono = "0.4"
 crc32fast = "1"
 dyn-clone = "1"
 either = "1"
+enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
@@ -27,7 +28,7 @@ num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
-prost = "0.9"
+prost = "0.10"
 rdkafka = { version = "0.28", features = ["cmake-build"] }
 risingwave_common = { path = "../common" }
 risingwave_connector = { path = "../connector" }
@@ -52,7 +53,7 @@ tokio = { version = "1", features = [
     "fs",
 ] }
 tokio-stream = "0.1"
-tonic = "0.6"
+tonic = "0.7"
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = { version = "0.1" }
 tracing-futures = "0.2"

@@ -80,7 +80,7 @@ pub fn user_key(full_key: &[u8]) -> &[u8] {
 /// # Examples
 ///
 /// ```rust
-/// use risingwave_storage::hummock::key::next_key;
+/// use risingwave_hummock_sdk::key::next_key;
 /// assert_eq!(next_key(b"123"), b"124");
 /// assert_eq!(next_key(b"12\xff"), b"13");
 /// assert_eq!(next_key(b"\xff\xff"), b"");
@@ -107,7 +107,7 @@ pub fn next_key(key: &[u8]) -> Vec<u8> {
 /// # Examples
 ///
 /// ```rust
-/// use risingwave_storage::hummock::key::prev_key;
+/// use risingwave_hummock_sdk::key::prev_key;
 /// assert_eq!(prev_key(b"123"), b"122");
 /// assert_eq!(prev_key(b"12\x00"), b"11\xff");
 /// assert_eq!(prev_key(b"\x00\x00"), b"\xff\xff");

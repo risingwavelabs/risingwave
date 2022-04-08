@@ -88,10 +88,10 @@ impl AggCall {
         let data_types = inputs.iter().map(ExprImpl::return_type).collect_vec();
         let return_type = Self::infer_return_type(&agg_kind, &data_types).ok_or_else(|| {
             let args = data_types.iter().map(|t| format!("{:?}", t)).join(", ");
-            RwError::from(ErrorCode::NotImplementedError(format!(
-                "No function matches to {}({})",
-                agg_kind, args
-            )))
+            RwError::from(ErrorCode::NotImplemented(
+                format!("No function matches to {}({})", agg_kind, args),
+                None.into(),
+            ))
         })?;
         Ok(AggCall {
             agg_kind,

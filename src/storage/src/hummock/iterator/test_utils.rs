@@ -17,14 +17,14 @@
 use std::iter::Iterator;
 use std::sync::Arc;
 
+use risingwave_hummock_sdk::key::{key_with_epoch, Epoch};
 use sstable_store::{SstableStore, SstableStoreRef};
 
-use crate::hummock::key::{key_with_epoch, Epoch};
 pub use crate::hummock::test_utils::default_builder_opt_for_test;
 use crate::hummock::test_utils::gen_test_sstable;
 use crate::hummock::{sstable_store, HummockValue, SSTableBuilderOptions, Sstable};
 use crate::monitor::StateStoreMetrics;
-use crate::object::{InMemObjectStore, ObjectStoreRef};
+use crate::object::{InMemObjectStore, ObjectStoreImpl, ObjectStoreRef};
 
 /// `assert_eq` two `Vec<u8>` with human-readable format.
 #[macro_export]
@@ -41,7 +41,7 @@ macro_rules! assert_bytes_eq {
 pub const TEST_KEYS_COUNT: usize = 10;
 
 pub fn mock_sstable_store() -> SstableStoreRef {
-    let object_store = Arc::new(InMemObjectStore::new());
+    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     mock_sstable_store_with_object_store(object_store)
 }
 

@@ -4,6 +4,7 @@ extend = [
   {path = "src/risedevtool/minio.toml"},
   {path = "src/risedevtool/etcd.toml"},
   {path = "src/risedevtool/jaeger.toml"},
+  {path = "src/risedevtool/kafka.toml"},
   {path = "src/risedevtool/risedev-components.toml"},
   {path = "src/frontend/test_runner/planner_test.toml"},
 ]
@@ -151,6 +152,12 @@ description = "Copy RisngWave binaries to bin"
 condition = { env_set = [ "ENABLE_BUILD_RUST" ] }
 dependencies = ["link-standalone-binaries", "link-all-in-one-binaries", "link-user-bin"]
 
+[tasks.b]
+alias = "build-risingwave"
+
+[tasks.build]
+alias = "build-risingwave"
+
 [tasks.extract-dashboard-artifact]
 category = "RiseDev - Build"
 description = "Extract dashboard artifact"
@@ -270,6 +277,7 @@ dependencies = [
   "download-grafana",
   "download-prometheus",
   "download-jaeger",
+  "download-kafka",
   "build-risingwave",
   "post-build-risingwave",
   "build-frontend",
@@ -394,9 +402,10 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run
+cargo nextest run "$@"
 """
 description = "Run unit tests"
+
 
 [tasks.check-hakari]
 category = "RiseDev - Check"

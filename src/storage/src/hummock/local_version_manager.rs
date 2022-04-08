@@ -20,18 +20,20 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock};
-use risingwave_pb::hummock::{HummockVersion, Level, LevelType};
+use risingwave_pb::hummock::{HummockVersion, Level};
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::mpsc::error::TryRecvError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_retry::strategy::jitter;
 
-use crate::hummock::hummock_meta_client::HummockMetaClient;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
 };
 
+#[derive(Debug)]
 pub struct ScopedLocalVersion {
     version: Arc<HummockVersion>,
     unpin_worker_tx: UnboundedSender<Arc<HummockVersion>>,
@@ -127,6 +129,9 @@ impl LocalVersionManager {
     /// Updates cached version if the new version is of greater id
     pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
+        if validate_table_key_range(&hummock_version.levels).is_err() {
+            return false;
+        }
         let mut guard = self.current_version.write();
         match guard.as_ref() {
             Some(cached_version) if cached_version.id() >= new_version_id => {
@@ -188,29 +193,6 @@ impl LocalVersionManager {
             ssts.push(self.sstable_store.sstable(*sst_id).await?);
         }
         Ok(ssts)
-    }
-
-    /// Gets the iterators on the underlying tables.
-    pub async fn tables(
-        &self,
-        levels: &[risingwave_pb::hummock::Level],
-    ) -> HummockResult<Vec<Arc<Sstable>>> {
-        // Should the LevelType be returned and made use of?
-        let mut out: Vec<Arc<Sstable>> = Vec::new();
-        for level in levels {
-            match level.level_type() {
-                LevelType::Overlapping => {
-                    let mut tables = self.pick_few_tables(&level.table_ids).await?;
-                    out.append(&mut tables);
-                }
-                LevelType::Nonoverlapping => {
-                    let mut tables = self.pick_few_tables(&level.table_ids).await?;
-                    out.append(&mut tables);
-                }
-            }
-        }
-
-        Ok(out)
     }
 
     async fn start_pin_worker(
@@ -369,6 +351,16 @@ impl LocalVersionManager {
             }
         }
     }
+
+    #[cfg(test)]
+    pub async fn refresh_version(&self, hummock_meta_client: &dyn HummockMetaClient) -> bool {
+        let last_pinned = match self.current_version.read().as_ref() {
+            None => INVALID_VERSION_ID,
+            Some(v) => v.version.id,
+        };
+        let version = hummock_meta_client.pin_version(last_pinned).await.unwrap();
+        self.try_set_version(version)
+    }
 }
 
 #[cfg(test)]
@@ -377,17 +369,18 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_meta::hummock::test_utils::setup_compute_env;
+    use risingwave_meta::hummock::MockHummockMetaClient;
 
     use super::LocalVersionManager;
     use crate::hummock::iterator::test_utils::{
         iterator_test_key_of_epoch, mock_sstable_store_with_object_store,
     };
-    use crate::hummock::mock::{MockHummockMetaClient, MockHummockMetaService};
     use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
-    use crate::object::InMemObjectStore;
+    use crate::object::{InMemObjectStore, ObjectStoreImpl};
 
     fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, HummockValue<Bytes>)> {
         vec![(
@@ -398,12 +391,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_shared_buffer_cleanup() {
-        let object_store = Arc::new(InMemObjectStore::new());
+        let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
         let sstable_store = mock_sstable_store_with_object_store(object_store);
         let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-            MockHummockMetaService::new(),
-        )));
+        let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+            setup_compute_env(8080).await;
+        let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
+            hummock_manager_ref,
+            worker_node.id,
+        ));
         let shared_buffer_manager = Arc::new(SharedBufferManager::new(
             Arc::new(default_config_for_test()),
             local_version_manager.clone(),

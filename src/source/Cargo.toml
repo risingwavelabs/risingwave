@@ -1,7 +1,7 @@
 [package]
 edition = "2021"
 name = "risingwave_source"
-version = "0.1.4"
+version = "0.1.5"
 
 [dependencies]
 anyhow = "1"
@@ -12,6 +12,7 @@ bytes = "1"
 chrono = "0.4"
 crc32fast = "1"
 either = "1"
+enum-as-inner = "0.4"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
@@ -22,7 +23,7 @@ memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 parking_lot = "0.12"
 paste = "1"
-prost = "0.9"
+prost = "0.10"
 protobuf = "2"
 protobuf-codegen-pure = "2.25.2"
 rand = "0.8"
@@ -42,7 +43,7 @@ tempfile = "3"
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
-tonic = "0.6"
+tonic = "0.7"
 twox-hash = "1"
 url = "2"
 workspace-hack = { version = "0.1", path = "../workspace-hack" }

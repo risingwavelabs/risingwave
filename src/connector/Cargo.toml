@@ -1,16 +1,16 @@
 [package]
 edition = "2021"
 name = "risingwave_connector"
-version = "0.1.4"
+version = "0.1.5"
 
 [dependencies]
 anyhow = "1"
 async-stream = "0.3"
 async-trait = "0.1"
-aws-config = "0.9"
-aws-sdk-kinesis = "0.9"
-aws-sdk-s3 = "0.9"
-aws-sdk-sqs = "0.9"
+aws-config = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-kinesis = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
+aws-sdk-s3 = { version = "0.9", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-sqs = { version = "0.9", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.39"
 aws-smithy-types = "0.39"
 aws-types = { version = "0.9", features = ["hardcoded-credentials"] }
@@ -27,10 +27,11 @@ hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
 log = "0.4"
+maplit = "1.0.2"
 memcomparable = { path = "../utils/memcomparable" }
 num-traits = "0.2"
 paste = "1"
-prost = "0.9"
+prost = "0.10"
 protobuf = "2"
 pulsar = { git = "https://github.com/shanicky/pulsar-rs.git", rev = "3b6353943833057f4379a354c1754a4e86fa57ff", default-features = false, features = ["tokio-runtime"] }
 rdkafka = { version = "0.28", features = ["cmake-build"] }
@@ -47,7 +48,7 @@ thiserror = "1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
-tonic = "0.6"
+tonic = "0.7"
 twox-hash = "1"
 url = "2"
 urlencoding = "2"

@@ -6,8 +6,8 @@
   logical_plan: |
     LogicalProject { exprs: [$1, $2, $4, $5, $7, $8], expr_alias: [v1, v2, v3, v4, v5, v6] }
       LogicalFilter { predicate: ($1 = $4) AND ($1 = $7) }
-        LogicalJoin { type: Inner, on: true:Boolean }
-          LogicalJoin { type: Inner, on: true:Boolean }
+        LogicalJoin { type: Inner, on: always }
+          LogicalJoin { type: Inner, on: always }
             LogicalScan { table: t1, columns: [_row_id#0, v1, v2] }
             LogicalScan { table: t2, columns: [_row_id#0, v3, v4] }
           LogicalScan { table: t3, columns: [_row_id#0, v5, v6] }
@@ -16,8 +16,7 @@
       StreamHashJoin { type: Inner, predicate: $0 = $6 }
         StreamHashJoin { type: Inner, predicate: $0 = $3 }
           StreamExchange { dist: HashShard([0]) }
-            StreamFilter { predicate: true:Boolean AND true:Boolean }
-              StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+            StreamTableScan { table: t1, columns: [v1, v2, _row_id#0], pk_indices: [2] }
           StreamExchange { dist: HashShard([0]) }
             StreamTableScan { table: t2, columns: [v3, v4, _row_id#0], pk_indices: [2] }
         StreamExchange { dist: HashShard([0]) }

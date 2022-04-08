@@ -215,7 +215,7 @@ impl TikvStateStoreIter {
 
 impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
-    type NextFuture<'a> = impl Future<Output = Result<Option<Self::Item>>>;
+    type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
@@ -257,9 +257,9 @@ impl StateStoreIter for TikvStateStoreIter {
 mod tests {
 
     use bytes::Bytes;
+    use risingwave_hummock_sdk::key::next_key;
 
     use super::{TikvStateStore, *};
-    use crate::hummock::key::next_key;
     use crate::StateStore;
 
     #[tokio::test]

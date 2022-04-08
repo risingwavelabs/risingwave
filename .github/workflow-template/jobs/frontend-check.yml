@@ -34,9 +34,3 @@ jobs:
           if-no-files-found: error
           path: |
             legacy/pgserver/build/libs/risingwave-fe-runnable.jar
-
-      - uses: codecov/codecov-action@v2
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          directory: legacy
-          flags: java

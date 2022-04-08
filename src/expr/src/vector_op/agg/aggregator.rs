@@ -174,7 +174,6 @@ pub fn create_agg_state_unary(
         (Count, count, float32, int64),
         (Count, count, float64, int64),
         (Count, count, decimal, int64),
-        (Count, count_str, char, int64),
         (Count, count_str, varchar, int64),
         (Count, count, boolean, int64),
         (Sum, sum, int16, int64),
@@ -190,7 +189,6 @@ pub fn create_agg_state_unary(
         (Min, min, float64, float64),
         (Min, min, decimal, decimal),
         (Min, min, boolean, boolean), // TODO(#359): remove once unnecessary
-        (Min, min_str, char, char),
         (Min, min_str, varchar, varchar),
         (Max, max, int16, int16),
         (Max, max, int32, int32),
@@ -199,7 +197,6 @@ pub fn create_agg_state_unary(
         (Max, max, float64, float64),
         (Max, max, decimal, decimal),
         (Max, max, boolean, boolean), // TODO(#359): remove once unnecessary
-        (Max, max_str, char, char),
         (Max, max_str, varchar, varchar),
         // Global Agg
         (Sum, sum, int64, int64),
@@ -212,7 +209,6 @@ pub fn create_agg_state_unary(
         (SingleValue, SingleValue::new(), float64, float64),
         (SingleValue, SingleValue::new(), decimal, decimal),
         (SingleValue, SingleValue::new(), boolean, boolean),
-        (SingleValue, SingleValue::new(), char, char),
         (SingleValue, SingleValue::new(), varchar, varchar),
     ];
     Ok(state)
@@ -229,7 +225,7 @@ mod tests {
         let int64_type = DataType::Int64;
         let decimal_type = DataType::Decimal;
         let bool_type = DataType::Boolean;
-        let char_type = DataType::Char;
+        let char_type = DataType::Varchar;
 
         macro_rules! test_create {
             ($input_type:expr, $agg:ident, $return_type:expr, $expected:ident) => {

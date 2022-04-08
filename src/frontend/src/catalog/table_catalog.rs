@@ -159,7 +159,7 @@ mod tests {
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
     use crate::catalog::column_catalog::ColumnCatalog;
-    use crate::catalog::gen_row_id_column_name;
+    use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
 
     #[test]
@@ -171,13 +171,7 @@ mod tests {
             name: "test".to_string(),
             columns: vec![
                 ProstColumnCatalog {
-                    column_desc: Some(ProstColumnDesc {
-                        column_id: 0,
-                        name: gen_row_id_column_name(0),
-                        field_descs: vec![],
-                        column_type: Some(DataType::Int32.to_protobuf()),
-                        type_name: String::new(),
-                    }),
+                    column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
@@ -216,16 +210,7 @@ mod tests {
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
                 columns: vec![
-                    ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Int32,
-                            column_id: ColumnId::new(0),
-                            name: gen_row_id_column_name(0),
-                            field_descs: vec![],
-                            type_name: String::new()
-                        },
-                        is_hidden: true,
-                    },
+                    ColumnCatalog::row_id_column(),
                     ColumnCatalog {
                         column_desc: ColumnDesc {
                             data_type: DataType::Struct {
@@ -255,13 +240,7 @@ mod tests {
                     }
                 ],
                 pk_desc: vec![OrderedColumnDesc {
-                    column_desc: ColumnDesc {
-                        data_type: DataType::Int32,
-                        column_id: ColumnId::new(0),
-                        name: gen_row_id_column_name(0),
-                        field_descs: vec![],
-                        type_name: String::new()
-                    },
+                    column_desc: row_id_column_desc(),
                     order: OrderType::Ascending
                 }]
             }

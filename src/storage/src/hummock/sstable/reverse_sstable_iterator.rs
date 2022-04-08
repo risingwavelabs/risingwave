@@ -16,11 +16,11 @@ use std::cmp::Ordering::{Equal, Less};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::variants::BACKWARD;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::version_cmp::VersionedComparator;
 use crate::hummock::{
     BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, Sstable,
     SstableStoreRef,
@@ -150,11 +150,11 @@ impl SSTableIteratorType for ReverseSSTableIterator {
 mod tests {
     use itertools::Itertools;
     use rand::prelude::*;
+    use risingwave_hummock_sdk::key::key_with_epoch;
 
     use super::*;
     use crate::assert_bytes_eq;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::key::key_with_epoch;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, test_key_of, test_value_of,
         TEST_KEYS_COUNT,

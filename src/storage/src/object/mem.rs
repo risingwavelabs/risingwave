@@ -17,11 +17,9 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use itertools::Itertools;
-use risingwave_common::ensure;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
 use tokio::sync::Mutex;
 
+use super::{ObjectError, ObjectResult};
 use crate::object::{BlockLocation, ObjectMetadata, ObjectStore};
 
 /// In-memory object storage, useful for testing.
@@ -32,13 +30,16 @@ pub struct InMemObjectStore {
 
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> Result<()> {
-        ensure!(!obj.is_empty());
-        self.objects.lock().await.insert(path.into(), obj);
-        Ok(())
+    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        if obj.is_empty() {
+            Err(ObjectError::internal("upload empty object"))
+        } else {
+            self.objects.lock().await.insert(path.into(), obj);
+            Ok(())
+        }
     }
 
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> Result<Bytes> {
+    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
@@ -46,7 +47,7 @@ impl ObjectStore for InMemObjectStore {
         }
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> Result<Vec<Bytes>> {
+    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
         let futures = block_locs
             .into_iter()
             .map(|block_loc| self.read(path, Some(block_loc)))
@@ -54,12 +55,12 @@ impl ObjectStore for InMemObjectStore {
         try_join_all(futures).await
     }
 
-    async fn metadata(&self, path: &str) -> Result<ObjectMetadata> {
+    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let total_size = self.get_object(path, |v| v.len()).await?;
         Ok(ObjectMetadata { total_size })
     }
 
-    async fn delete(&self, path: &str) -> Result<()> {
+    async fn delete(&self, path: &str) -> ObjectResult<()> {
         self.objects.lock().await.remove(path);
         Ok(())
     }
@@ -72,7 +73,7 @@ impl InMemObjectStore {
         }
     }
 
-    async fn get_object<R, F>(&self, path: &str, f: F) -> Result<R>
+    async fn get_object<R, F>(&self, path: &str, f: F) -> ObjectResult<R>
     where
         F: Fn(&Bytes) -> R,
     {
@@ -80,14 +81,17 @@ impl InMemObjectStore {
             .lock()
             .await
             .get(path)
-            .ok_or_else(|| RwError::from(InternalError(format!("no object at path '{}'", path))))
+            .ok_or_else(|| ObjectError::internal(format!("no object at path '{}'", path)))
             .map(f)
     }
 }
 
-fn find_block(obj: &Bytes, block: BlockLocation) -> Result<Bytes> {
-    ensure!(block.offset + block.size <= obj.len());
-    Ok(obj.slice(block.offset..(block.offset + block.size)))
+fn find_block(obj: &Bytes, block: BlockLocation) -> ObjectResult<Bytes> {
+    if block.offset + block.size > obj.len() {
+        Err(ObjectError::internal("bad block offset and size"))
+    } else {
+        Ok(obj.slice(block.offset..(block.offset + block.size)))
+    }
 }
 
 #[cfg(test)]

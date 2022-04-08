@@ -223,6 +223,7 @@ mod logical_join;
 mod logical_limit;
 mod logical_project;
 mod logical_scan;
+mod logical_source;
 mod logical_topn;
 mod logical_values;
 mod stream_exchange;
@@ -256,6 +257,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_limit::LogicalLimit;
 pub use logical_project::LogicalProject;
 pub use logical_scan::LogicalScan;
+pub use logical_source::LogicalSource;
 pub use logical_topn::LogicalTopN;
 pub use logical_values::LogicalValues;
 pub use stream_exchange::StreamExchange;
@@ -292,6 +294,7 @@ macro_rules! for_all_plan_nodes {
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }
+            ,{ Logical, Source }
             ,{ Logical, Insert }
             ,{ Logical, Delete }
             ,{ Logical, Join }
@@ -334,6 +337,7 @@ macro_rules! for_logical_plan_nodes {
             ,{ Logical, Filter }
             ,{ Logical, Project }
             ,{ Logical, Scan }
+            ,{ Logical, Source }
             ,{ Logical, Insert }
             ,{ Logical, Delete }
             ,{ Logical, Join }

@@ -35,7 +35,6 @@ enum DataTypeName {
     Float64,
     Decimal,
     Date,
-    Char,
     Varchar,
     Time,
     Timestamp,
@@ -53,7 +52,6 @@ fn name_of(ty: &DataType) -> DataTypeName {
         DataType::Float32 => DataTypeName::Float32,
         DataType::Float64 => DataTypeName::Float64,
         DataType::Boolean => DataTypeName::Boolean,
-        DataType::Char => DataTypeName::Char,
         DataType::Varchar => DataTypeName::Varchar,
         DataType::Date => DataTypeName::Date,
         DataType::Time => DataTypeName::Time,
@@ -79,7 +77,6 @@ pub fn infer_type(func_type: ExprType, inputs_type: Vec<DataType>) -> Option<Dat
         DataTypeName::Float32 => DataType::Float32,
         DataTypeName::Float64 => DataType::Float64,
         DataTypeName::Boolean => DataType::Boolean,
-        DataTypeName::Char => DataType::Char,
         DataTypeName::Varchar => DataType::Varchar,
         DataTypeName::Date => DataType::Date,
         DataTypeName::Time => DataType::Time,
@@ -111,7 +108,9 @@ struct FuncSign {
     func: ExprType,
     inputs_type: Vec<DataTypeName>,
 }
+
 impl Eq for FuncSign {}
+
 #[allow(dead_code)]
 impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
@@ -147,6 +146,7 @@ impl FuncSign {
         }
     }
 }
+
 fn arithmetic_type_derive(t1: DataTypeName, t2: DataTypeName) -> DataTypeName {
     if t2 as i32 > t1 as i32 {
         t2
@@ -154,6 +154,7 @@ fn arithmetic_type_derive(t1: DataTypeName, t2: DataTypeName) -> DataTypeName {
         t1
     }
 }
+
 fn build_unary_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -164,6 +165,7 @@ fn build_unary_funcs(
         map.insert(FuncSign::new_unary(*expr, *a1), ret);
     }
 }
+
 fn build_binary_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -175,6 +177,18 @@ fn build_binary_funcs(
         map.insert(FuncSign::new_binary(*expr, *a1, *a2), ret);
     }
 }
+
+fn build_commutative_binary_funcs(
+    map: &mut HashMap<FuncSign, DataTypeName>,
+    exprs: &[ExprType],
+    arg1: &[DataTypeName],
+    arg2: &[DataTypeName],
+    ret: DataTypeName,
+) {
+    build_binary_funcs(map, exprs, arg1, arg2, ret);
+    build_binary_funcs(map, exprs, arg2, arg1, ret);
+}
+
 fn build_ternary_funcs(
     map: &mut HashMap<FuncSign, DataTypeName>,
     exprs: &[ExprType],
@@ -187,6 +201,7 @@ fn build_ternary_funcs(
         map.insert(FuncSign::new_ternary(*expr, *a1, *a2, *a3), ret);
     }
 }
+
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     use {DataTypeName as T, ExprType as E};
     let mut map = HashMap::new();
@@ -205,7 +220,6 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Float32,
         T::Float64,
         T::Boolean,
-        T::Char,
         T::Varchar,
         T::Decimal,
         T::Time,
@@ -214,7 +228,7 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Date,
         T::Timestampz,
     ];
-    let str_types = vec![T::Char, T::Varchar];
+    let str_types = vec![T::Varchar];
     let atm_exprs = vec![E::Add, E::Subtract, E::Multiply, E::Divide, E::Modulus];
     let cmp_exprs = vec![
         E::Equal,
@@ -251,14 +265,27 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Date, T::Timestamp],
         T::Boolean,
     );
-    // Date minus and plus
-    map.insert(
-        FuncSign::new_binary(E::Add, T::Date, T::Interval),
+    // Date/Timestamp/Interval arithmetic
+    build_commutative_binary_funcs(
+        &mut map,
+        &[E::Add],
+        &[T::Timestamp, T::Date],
+        &[T::Interval],
         T::Timestamp,
     );
-    map.insert(
-        FuncSign::new_binary(E::Subtract, T::Date, T::Interval),
+    build_binary_funcs(
+        &mut map,
+        &[E::Subtract],
+        &[T::Timestamp, T::Date],
+        &[T::Interval],
         T::Timestamp,
+    );
+    build_commutative_binary_funcs(
+        &mut map,
+        &[E::Multiply],
+        &[T::Interval],
+        &[T::Int16, T::Int32, T::Int64],
+        T::Interval,
     );
 
     build_binary_funcs(
@@ -326,8 +353,16 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         &[T::Timestamp, T::Time, T::Date],
         T::Decimal,
     );
+    build_binary_funcs(
+        &mut map,
+        &[E::TumbleStart],
+        &[T::Date, T::Timestamp],
+        &[T::Interval],
+        T::Timestamp,
+    );
     map
 }
+
 lazy_static::lazy_static! {
     static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
         build_type_derive_map()

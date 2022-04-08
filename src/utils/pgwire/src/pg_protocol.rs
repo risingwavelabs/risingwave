@@ -18,6 +18,7 @@ use std::sync::Arc;
 use bytes::BytesMut;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 
+use crate::error::PsqlError;
 use crate::pg_message::{
     BeCommandCompleteMessage, BeMessage, BeParameterStatusMessage, FeMessage, FeQueryMessage,
     FeStartupMessage,
@@ -85,6 +86,11 @@ where
             }
             FeMessage::Query(query_msg) => {
                 self.process_query_msg(query_msg).await?;
+            }
+            FeMessage::CancelQuery => {
+                self.write_message_no_flush(&BeMessage::ErrorResponse(Box::new(
+                    PsqlError::cancel(),
+                )))?;
             }
             FeMessage::Terminate => {
                 self.process_terminate();

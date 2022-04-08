@@ -16,25 +16,26 @@ use std::cmp::max;
 use std::collections::{BTreeMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
+use std::time::Duration;
 
-use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
-    SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
-};
-use risingwave_storage::hummock::{
+use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
     INVALID_EPOCH,
+};
+use risingwave_pb::hummock::{
+    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
+    SstableInfo, UncommittedEpoch,
 };
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
@@ -176,11 +177,11 @@ where
                 levels: vec![
                     Level {
                         level_type: LevelType::Overlapping as i32,
-                        table_ids: vec![],
+                        table_infos: vec![],
                     },
                     Level {
                         level_type: LevelType::Nonoverlapping as i32,
-                        table_ids: vec![],
+                        table_infos: vec![],
                     },
                 ],
                 uncommitted_epochs: vec![],
@@ -325,134 +326,6 @@ where
         Ok(())
     }
 
-    fn trigger_commit_stat(&self, current_version: &HummockVersion) {
-        self.metrics
-            .max_committed_epoch
-            .set(current_version.max_committed_epoch as i64);
-        let uncommitted_sst_num = current_version
-            .uncommitted_epochs
-            .iter()
-            .fold(0, |accum, elem| accum + elem.tables.len());
-        self.metrics
-            .uncommitted_sst_num
-            .set(uncommitted_sst_num as i64);
-    }
-
-    fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
-        let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
-            risingwave_storage::hummock::key_range::KeyRange,
-            u64,
-            u64,
-        )>| {
-            compacting_key_ranges
-                .iter()
-                .fold(0, |accum, elem| accum + elem.2)
-        };
-        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let (sst_num, compact_cnt) = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-            };
-            let level_label = String::from("L") + &idx.to_string();
-            self.metrics
-                .level_sst_num
-                .get_metric_with_label_values(&[&level_label])
-                .unwrap()
-                .set(sst_num as i64);
-            self.metrics
-                .level_compact_cnt
-                .get_metric_with_label_values(&[&level_label])
-                .unwrap()
-                .set(compact_cnt as i64);
-        }
-    }
-
-    fn single_level_stat_bytes<
-        T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicF64>>,
-    >(
-        mut metric_vec: T,
-        level_stat: &TableSetStatistics,
-    ) {
-        let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().inc_by(level_stat.size_gb);
-    }
-
-    fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicU64>>>(
-        mut metric_vec: T,
-        level_stat: &TableSetStatistics,
-    ) {
-        let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().inc_by(level_stat.cnt);
-    }
-
-    fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
-        self.metrics
-            .level_compact_frequency
-            .get_metric_with_label_values(&[&(String::from("L")
-                + &compact_metrics
-                    .read_level_n
-                    .as_ref()
-                    .unwrap()
-                    .level_idx
-                    .to_string())])
-            .unwrap()
-            .inc();
-
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_read_curr
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_n.as_ref().unwrap(),
-        );
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_read_next
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_nplus1.as_ref().unwrap(),
-        );
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_write
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.write.as_ref().unwrap(),
-        );
-
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_read_sstn_curr
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_n.as_ref().unwrap(),
-        );
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_read_sstn_next
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_nplus1.as_ref().unwrap(),
-        );
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_write_sstn
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.write.as_ref().unwrap(),
-        );
-    }
-
     pub async fn add_tables(
         &self,
         context_id: HummockContextId,
@@ -475,14 +348,20 @@ where
         for sst_id in sstables.iter().map(|s| s.id) {
             match sstable_id_infos.get_mut(&sst_id) {
                 None => {
-                    #[cfg(not(test))]
                     return Err(ErrorCode::MetaError(format!(
-                        "invalid sst id {}, may have been vacuumed",
+                        "Invalid SST id {}, may have been vacuumed",
                         sst_id
                     ))
                     .into());
                 }
                 Some(sst_id_info) => {
+                    if sst_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
+                        return Err(ErrorCode::MetaError(format!(
+                            "SST id {} has been marked for vacuum",
+                            sst_id
+                        ))
+                        .into());
+                    }
                     if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
                         // This is a duplicate request.
                         return Ok(current_hummock_version);
@@ -535,7 +414,7 @@ where
         )?;
 
         // Update metrics
-        self.trigger_commit_stat(&ret_hummock_version);
+        trigger_commit_stat(&self.metrics, &ret_hummock_version);
 
         #[cfg(test)]
         {
@@ -715,7 +594,15 @@ where
         let input_sst_ids = compact_task
             .input_ssts
             .iter()
-            .flat_map(|v| v.level.as_ref().unwrap().table_ids.clone())
+            .flat_map(|v| {
+                v.level
+                    .as_ref()
+                    .unwrap()
+                    .table_infos
+                    .iter()
+                    .map(|sst| sst.id)
+                    .collect_vec()
+            })
             .collect_vec();
         let output_sst_ids = compact_task
             .sorted_output_ssts
@@ -764,16 +651,38 @@ where
                     .map(|level_handler| match level_handler {
                         LevelHandler::Overlapping(l_n, _) => Level {
                             level_type: LevelType::Overlapping as i32,
-                            table_ids: l_n
+                            table_infos: l_n
                                 .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
+                                .map(
+                                    |SSTableStat {
+                                         table_id,
+                                         key_range,
+                                         ..
+                                     }| {
+                                        SstableInfo {
+                                            id: *table_id,
+                                            key_range: Some(key_range.clone().into()),
+                                        }
+                                    },
+                                )
                                 .collect(),
                         },
                         LevelHandler::Nonoverlapping(l_n, _) => Level {
                             level_type: LevelType::Nonoverlapping as i32,
-                            table_ids: l_n
+                            table_infos: l_n
                                 .iter()
-                                .map(|SSTableStat { table_id, .. }| *table_id)
+                                .map(
+                                    |SSTableStat {
+                                         table_id,
+                                         key_range,
+                                         ..
+                                     }| {
+                                        SstableInfo {
+                                            id: *table_id,
+                                            key_range: Some(key_range.clone().into()),
+                                        }
+                                    },
+                                )
                                 .collect(),
                         },
                     })
@@ -836,9 +745,9 @@ where
             tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
 
-        self.trigger_sst_stat(&compaction_guard.compact_status);
+        trigger_sst_stat(&self.metrics, &compaction_guard.compact_status);
         if let Some(compact_task_metrics) = compact_metrics {
-            self.trigger_rw_stat(&compact_task_metrics);
+            trigger_rw_stat(&self.metrics, &compact_task_metrics);
         }
 
         #[cfg(test)]
@@ -888,7 +797,7 @@ where
                     uncommitted_epoch
                         .tables
                         .iter()
-                        .for_each(|t| version_first_level.table_ids.push(t.id));
+                        .for_each(|t| version_first_level.table_infos.push(t.clone()));
                 }
                 LevelType::Nonoverlapping => {
                     unimplemented!()
@@ -935,8 +844,8 @@ where
         )?;
 
         // Update metrics
-        self.trigger_sst_stat(&compact_status_copy);
-        self.trigger_commit_stat(&new_hummock_version_copy);
+        trigger_sst_stat(&self.metrics, &compact_status_copy);
+        trigger_commit_stat(&self.metrics, &new_hummock_version_copy);
 
         tracing::trace!("new committed epoch {}", epoch);
 
@@ -1289,5 +1198,54 @@ where
         self.release_contexts(&invalid_context_ids).await?;
 
         Ok(invalid_context_ids)
+    }
+
+    /// Marks SSTs which haven't been added in meta (`meta_create_timestamp` is not set) for at
+    /// least `sst_retention_interval` since `id_create_timestamp`
+    pub async fn mark_orphan_ssts(
+        &self,
+        sst_retention_interval: Duration,
+    ) -> Result<Vec<SstableIdInfo>> {
+        let mut versioning_guard = self.versioning.write().await;
+        let mut sstable_id_infos = VarTransaction::new(&mut versioning_guard.sstable_id_infos);
+
+        let now = sstable_id_info::get_timestamp_now();
+        let mut marked = vec![];
+        for (_, sstable_id_info) in sstable_id_infos.iter_mut() {
+            if sstable_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
+                continue;
+            }
+            let is_orphan = sstable_id_info.meta_create_timestamp == INVALID_TIMESTAMP
+                && now >= sstable_id_info.id_create_timestamp
+                && now - sstable_id_info.id_create_timestamp >= sst_retention_interval.as_secs();
+            if is_orphan {
+                sstable_id_info.meta_delete_timestamp = now;
+                marked.push(sstable_id_info.clone());
+            }
+        }
+        if marked.is_empty() {
+            return Ok(vec![]);
+        }
+
+        commit_multi_var!(self, None, sstable_id_infos)?;
+
+        #[cfg(test)]
+        {
+            drop(versioning_guard);
+            self.check_state_consistency().await;
+        }
+
+        tracing::debug!("Mark {:?} as orphan SSTs", marked);
+        Ok(marked)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn get_current_version(&self) -> HummockVersion {
+        let versioning_guard = self.versioning.read().await;
+        versioning_guard
+            .hummock_versions
+            .get(&versioning_guard.current_version_id.id())
+            .unwrap()
+            .clone()
     }
 }

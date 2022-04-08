@@ -28,6 +28,7 @@ pub enum FeMessage {
     Ssl,
     Startup(FeStartupMessage),
     Query(FeQueryMessage),
+    CancelQuery,
     Terminate,
 }
 
@@ -82,8 +83,11 @@ impl FeStartupMessage {
             stream.read_exact(&mut payload).await?;
         }
         match protocol_num {
+            // code from: https://www.postgresql.org/docs/current/protocol-message-formats.html
             196608 => Ok(FeMessage::Startup(FeStartupMessage {})),
             80877103 => Ok(FeMessage::Ssl),
+            // Cancel request code.
+            80877102 => Ok(FeMessage::CancelQuery),
             _ => unimplemented!(
                 "Unsupported protocol number in start up msg {:?}",
                 protocol_num

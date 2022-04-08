@@ -164,7 +164,7 @@ fn split_test_cases(file_content: &str) -> Vec<String> {
 /// The entry point of test_runner.
 pub fn run_all_test_files() {
     use walkdir::WalkDir;
-    for entry in WalkDir::new("./tests/testdata/") {
+    for entry in WalkDir::new("../tests/testdata/") {
         let entry = entry.unwrap();
         if !entry.path().is_file() {
             continue;

@@ -16,6 +16,7 @@ use std::fmt::{Debug, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_expr::expr::BoxedExpression;
 
@@ -70,7 +71,10 @@ impl Debug for SimpleFilterExecutor {
 }
 
 impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_chunk(&mut self, chunk: StreamChunk) -> StreamExecutorResult<StreamChunk> {
+    fn map_filter_chunk(
+        &mut self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact().map_err(StreamExecutorError::eval_error)?;
 
         let (ops, columns, _visibility) = chunk.into_inner();
@@ -87,7 +91,7 @@ impl SimpleExecutor for SimpleFilterExecutor {
 
         // TODO: Can we update ops and visibility inplace?
         let mut new_ops = Vec::with_capacity(n);
-        let mut new_visibility = Vec::with_capacity(n);
+        let mut new_visibility = BitmapBuilder::with_capacity(n);
         let mut last_res = false;
 
         assert!(match visibility {
@@ -104,9 +108,9 @@ impl SimpleExecutor for SimpleFilterExecutor {
                     Op::Insert | Op::Delete => {
                         new_ops.push(op);
                         if res {
-                            new_visibility.push(true);
+                            new_visibility.append(true);
                         } else {
-                            new_visibility.push(false);
+                            new_visibility.append(false);
                         }
                     }
                     Op::UpdateDelete => {
@@ -116,26 +120,26 @@ impl SimpleExecutor for SimpleFilterExecutor {
                         (true, false) => {
                             new_ops.push(Op::Delete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(true);
-                            new_visibility.push(false);
+                            new_visibility.append(true);
+                            new_visibility.append(false);
                         }
                         (false, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::Insert);
-                            new_visibility.push(false);
-                            new_visibility.push(true);
+                            new_visibility.append(false);
+                            new_visibility.append(true);
                         }
                         (true, true) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(true);
-                            new_visibility.push(true);
+                            new_visibility.append(true);
+                            new_visibility.append(true);
                         }
                         (false, false) => {
                             new_ops.push(Op::UpdateDelete);
                             new_ops.push(Op::UpdateInsert);
-                            new_visibility.push(false);
-                            new_visibility.push(false);
+                            new_visibility.append(false);
+                            new_visibility.append(false);
                         }
                     },
                 }
@@ -144,11 +148,14 @@ impl SimpleExecutor for SimpleFilterExecutor {
             panic!("unmatched type: filter expr returns a non-null array");
         }
 
-        let visibility = new_visibility
-            .try_into()
-            .map_err(StreamExecutorError::eval_error)?;
-        let new_chunk = StreamChunk::new(new_ops, columns, Some(visibility));
-        Ok(new_chunk)
+        let new_visibility = new_visibility.finish();
+
+        Ok(if new_visibility.num_high_bits() > 0 {
+            let new_chunk = StreamChunk::new(new_ops, columns, Some(new_visibility));
+            Some(new_chunk)
+        } else {
+            None
+        })
     }
 
     fn schema(&self) -> &Schema {
@@ -263,6 +270,6 @@ mod tests {
             unreachable!();
         }
 
-        assert!(filter.next().await.unwrap().unwrap().is_terminate());
+        assert!(filter.next().await.unwrap().unwrap().is_stop());
     }
 }

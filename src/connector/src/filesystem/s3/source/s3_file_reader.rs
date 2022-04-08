@@ -13,6 +13,7 @@
 // limitations under the License.
 use std::borrow::BorrowMut;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -26,15 +27,19 @@ use log::{error, info};
 use mpsc::Sender;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::base::{InnerMessage, SourceReader, SourceSplit};
-use crate::filesystem::file_common::EntryStat;
-use crate::filesystem::s3::s3_dir::FileSystemOptError::{AwsSdkInnerError, GetS3ObjectError};
-use crate::filesystem::s3::s3_dir::{new_s3_client, S3SourceConfig};
+use crate::filesystem::file_common::{EntryStat, StatusWatch};
+use crate::filesystem::s3::s3_dir::FileSystemOptError::IllegalS3FilePath;
+use crate::filesystem::s3::s3_dir::{
+    new_s3_client, new_share_config, AwsCredential, AwsCustomConfig, S3SourceBasicConfig,
+    S3SourceConfig, SqsReceiveMsgConfig,
+};
+use crate::ConnectorState;
 
 const MAX_CHANNEL_BUFFER_SIZE: usize = 2048;
 const READ_CHUNK_SIZE: usize = 1024;
@@ -80,6 +85,27 @@ impl Default for S3FileSplit {
 }
 
 impl S3FileSplit {
+    // path s3://bucket_name/path
+    fn from_path(path_string: String) -> Result<Self> {
+        let mut s3_file = S3File::default();
+        s3_file.object.path = path_string.clone();
+        let path = std::path::Path::new(path_string.as_str());
+        let parent = path.parent();
+        if let Some(parent_path) = parent {
+            Ok(Self {
+                bucket: parent_path
+                    .file_name()
+                    .unwrap()
+                    .to_os_string()
+                    .into_string()
+                    .unwrap(),
+                s3_file,
+            })
+        } else {
+            Err(IllegalS3FilePath(path_string).into())
+        }
+    }
+
     fn new(bucket: String, s3_files: S3File) -> Self {
         Self {
             bucket,
@@ -106,34 +132,73 @@ impl SourceSplit for S3FileSplit {
 #[derive(Debug)]
 pub struct S3FileReader {
     client_for_s3: s3_client::Client,
-    s3_split_tx: mpsc::UnboundedSender<S3FileSplit>,
+    s3_file_sender: mpsc::UnboundedSender<S3FileSplit>,
     // Considering that there are very many files under a bucket,
     // it is necessary to maintain multiple file offsets in a single S3FileReader .
     split_offset: HashMap<String, u64>,
     s3_receive_stream: ReceiverStream<S3InnerMessage>,
     s3_msg_sender: Sender<S3InnerMessage>,
+    stop_signal: Arc<watch::Sender<StatusWatch>>,
+}
+
+impl Drop for S3FileReader {
+    fn drop(&mut self) {
+        self.stop_signal.send(StatusWatch::Stopped).unwrap();
+    }
 }
 
 impl S3FileReader {
-    fn new(s3_source_config: S3SourceConfig) -> Self {
+    fn build_from_config(s3_source_config: S3SourceConfig) -> Self {
         let (tx, rx) = mpsc::channel(MAX_CHANNEL_BUFFER_SIZE);
         let (split_s, mut split_r) = mpsc::unbounded_channel();
+        let (signal_s, mut signal_r) = watch::channel(StatusWatch::Running);
+        let signal_arc = Arc::new(signal_s);
         let s3_file_reader = S3FileReader {
             client_for_s3: new_s3_client(s3_source_config.clone()),
-            s3_split_tx: split_s,
+            s3_file_sender: split_s,
             split_offset: HashMap::new(),
             s3_receive_stream: ReceiverStream::from(rx),
             s3_msg_sender: tx.clone(),
+            stop_signal: signal_arc.clone(),
         };
+        signal_arc.send(StatusWatch::Running).unwrap();
         tokio::task::spawn(async move {
             let s3_client = new_s3_client(s3_source_config.clone());
-            while let Some(s3_split) = split_r.recv().await {
-                let _rs =
-                    S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone())
-                        .await;
+            loop {
+                tokio::select! {
+                    s3_split = split_r.recv() => {
+                        if let Some(s3_split) = s3_split {
+                            let _rs =S3FileReader::stream_read(s3_client.clone(), s3_split.clone(), tx.clone()).await;
+                        } else {
+                            continue;
+                        }
+                    }
+                    running_status = signal_r.changed() => {
+                        if running_status.is_ok() {
+                            if let StatusWatch::Stopped = *signal_r.borrow() {
+                                break;
+                            }
+                        }
+                        continue;
+                    }
+                }
             }
         });
         s3_file_reader
+    }
+
+    fn add_s3_split(&mut self, state: ConnectorState) -> anyhow::Result<()> {
+        let identifier_bytes = state.identifier.to_vec();
+        let raw_path = std::str::from_utf8(&identifier_bytes).unwrap();
+        let s3_file_split_rs = S3FileSplit::from_path(raw_path.to_string());
+        if let Ok(s3_file_split) = s3_file_split_rs {
+            self.s3_file_sender.send(s3_file_split).unwrap();
+            Ok(())
+        } else {
+            let err = s3_file_split_rs.err().unwrap();
+            error!("S3FileReader add_s3_split error. cause by {:?}", err);
+            Err(err)
+        }
     }
 
     async fn stream_read(
@@ -195,7 +260,7 @@ impl S3FileReader {
                                 payload: read_bytes,
                             };
                             if s3_msg_sender.send(s3_inner_msg).await.is_err() {
-                                return Err(anyhow::Error::from(GetS3ObjectError(
+                                return Err(anyhow::Error::from(crate::filesystem::s3::s3_dir::FileSystemOptError::GetS3ObjectError(
                                     bucket.clone(),
                                     s3_file.clone().object.path,
                                 )));
@@ -214,6 +279,7 @@ impl S3FileReader {
             }
         }
     }
+
     async fn get_object(
         client_for_s3: &s3_client::Client,
         s3_file: &S3File,
@@ -231,15 +297,16 @@ impl S3FileReader {
             .get_object()
             .bucket(bucket)
             .key(s3_object_key)
-            .set_range(Some(format!("bytes={}-{}", 0, 10)))
             .send()
             .await;
         match get_object {
             Ok(get_object_out) => Ok(get_object_out.body),
-            Err(sdk_err) => Err(anyhow::Error::from(AwsSdkInnerError(
-                format!("S3 GetObject from {} error:", bucket),
-                sdk_err.to_string(),
-            ))),
+            Err(sdk_err) => Err(anyhow::Error::from(
+                crate::filesystem::s3::s3_dir::FileSystemOptError::AwsSdkInnerError(
+                    format!("S3 GetObject from {} error:", bucket),
+                    sdk_err.to_string(),
+                ),
+            )),
         }
     }
 }
@@ -257,7 +324,6 @@ impl SourceReader for S3FileReader {
                 .into_iter()
                 .map(|msg| {
                     let msg_id = msg.msg_id;
-                    // let split_key = msg.message_id();
                     let new_offset = if !self.split_offset.contains_key(msg_id.as_str()) {
                         1_u64
                     } else {
@@ -276,89 +342,90 @@ impl SourceReader for S3FileReader {
         Ok(Some(msg_vec))
     }
 
-    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> anyhow::Result<()> {
-    //     let split_json_str = std::str::from_utf8(split);
-    //     match split_json_str {
-    //         Err(convert_err) => Err(anyhow::Error::from(convert_err)),
-    //         Ok(json_str) => {
-    //             let s3_split_rs: Result<S3FileSplit, serde_json::Error> =
-    //                 serde_json::from_str(json_str);
-    //             if let Err(serde_err) = s3_split_rs {
-    //                 Err(anyhow::Error::from(serde_err))
-    //             } else {
-    //                 let s3_file_split = s3_split_rs.unwrap();
-    //                 println!("S3FileReader assign_split success. {:?}", s3_file_split);
-    //                 self.s3_split_tx.send(s3_file_split).unwrap();
-    //                 Ok(())
-    //             }
-    //         }
-    //     }
-    // }
-
+    /// 1. The config include all information about the connection to S3, for example:
+    /// `s3.region_name, s3.bucket_name, s3-dd-storage-notify-queue` and the credential's access_key
+    /// and secret. For now, only static credential is supported.
+    /// 2. The identifier of the State is the Path of S3 - S3://bucket_name/object_key
     async fn new(
-        _config: HashMap<String, String>,
-        _state: Option<crate::ConnectorState>,
+        config: HashMap<String, String>,
+        state: Option<crate::ConnectorState>,
     ) -> Result<Self>
     where
         Self: Sized,
     {
-        todo!()
+        let s3_basic_config = S3SourceBasicConfig::from(config);
+        let credential = if s3_basic_config.secret.is_empty() || s3_basic_config.access.is_empty() {
+            AwsCredential::Default
+        } else {
+            AwsCredential::Static {
+                access_key: s3_basic_config.clone().access,
+                secret_access: s3_basic_config.clone().secret,
+                session_token: None,
+            }
+        };
+        let shared_config_rs = new_share_config(s3_basic_config.clone().region, credential).await;
+        if let Ok(config) = shared_config_rs {
+            let s3_source_config = S3SourceConfig {
+                basic_config: s3_basic_config.clone(),
+                shared_config: config,
+                custom_config: Some(AwsCustomConfig::default()),
+                sqs_config: SqsReceiveMsgConfig::default(),
+            };
+            let mut s3_file_reader = S3FileReader::build_from_config(s3_source_config);
+            if let Some(s3_state) = state {
+                if let Err(err) = s3_file_reader.add_s3_split(s3_state) {
+                    Err(err)
+                } else {
+                    Ok(s3_file_reader)
+                }
+            } else {
+                Ok(s3_file_reader)
+            }
+        } else {
+            Err(shared_config_rs.err().unwrap())
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
+    use std::collections::HashMap;
+
+    use bytes::Bytes;
+
     use crate::base::SourceReader;
-    use crate::filesystem::s3::s3_dir::test::new_s3_source_config;
-    use crate::filesystem::s3::s3_dir::{new_share_config, AwsCredential};
     use crate::filesystem::s3::source::s3_file_reader::{S3FileReader, S3FileSplit};
+    use crate::ConnectorState;
 
     const TEST_REGION_NAME: &str = "cn-north-1";
     const BUCKET_NAME: &str = "dd-storage-s3";
 
+    const EMPTY_JSON_FILE_NAME: &str = "EMPTY-2022-03-23-03:35:28.json";
+    const SMALL_JSON_FILE_NAME: &str = "2022-02-28-09:32:34-example.json";
     const EMPTY_JSON_DATA: &str = r#""#;
 
-    const S3_ARRAY_FILE_JSON_STR: &str = r#"[
-	{
-		color: "red",
-		value: "f00"
-	},
-	{
-		color: "green",
-		value: "0f0"
-	},
-	{
-		color: "blue",
-		value: "00f"
-	},
-	{
-		color: "cyan",
-		value: "0ff"
-	},
-	{
-		color: "magenta",
-		value: "f0f"
-	}
-    ]"#;
+    fn test_config_map() -> HashMap<String, String> {
+        let config: HashMap<String, String> = vec![
+            ("s3.region_name".to_string(), TEST_REGION_NAME.to_string()),
+            ("s3.bucket_name".to_string(), BUCKET_NAME.to_string()),
+            (
+                "sqs_queue_name".to_string(),
+                "s3-dd-storage-notify-queue".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        config
+    }
 
-    fn new_s3_file_split_form_str(path: String) -> String {
-        format!(
-            r#"{{
-            "bucket": "dd-storage-s3",
-            "s3_file": {{
-               "object": {{
-                 "path": "{}",
-                 "atime": 0,
-                 "time": 0,
-                 "mtime": 0,
-                 "size": 11
-               }},
-               "start": 0,
-               "end": 1
-            }}
-        }}"#,
-            path
-        )
+    fn new_test_connect_state(file_name: String) -> ConnectorState {
+        let path_string = format!("s3://{}/{}", BUCKET_NAME, file_name);
+        let identifier = Bytes::copy_from_slice(path_string.as_str().as_bytes());
+        ConnectorState {
+            identifier,
+            start_offset: "".to_string(),
+            end_offset: "".to_string(),
+        }
     }
 
     fn new_test_s3_file_split(split_str: &str) -> S3FileSplit {
@@ -366,44 +433,28 @@ mod test {
         s3_file_split
     }
 
-    async fn new_s3_file_reader() -> S3FileReader {
-        let shared_config = new_share_config(TEST_REGION_NAME.to_string(), AwsCredential::Default)
-            .await
-            .unwrap();
-        let s3_source_config = new_s3_source_config(shared_config);
-        S3FileReader::new(s3_source_config)
+    async fn new_s3_file_reader(file_name: String) -> S3FileReader {
+        let s3_file_reader =
+            S3FileReader::new(test_config_map(), Some(new_test_connect_state(file_name)));
+        s3_file_reader.await.unwrap()
     }
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     #[ignore]
     async fn test_s3_file_reader() {
-        let split_str = new_s3_file_split_form_str("2022-02-28-09:32:34-example.json".to_string());
-
-        let mut s3_file_reader = create_and_assign_split(split_str.as_str()).await;
+        let mut s3_file_reader =
+            new_s3_file_reader("2022-02-28-09:32:34-example.json".to_string()).await;
         let msg_rs = s3_file_reader.next().await;
         assert!(msg_rs.is_ok());
         println!("S3FileReader next() msg = {:?}", msg_rs.unwrap());
-    }
-
-    async fn create_and_assign_split(_split_str: &str) -> S3FileReader {
-        // TODO here shows a proper new and assign process, redo later
-        let s3_file_reader = new_s3_file_reader().await;
-        // let test_s3_file_split = new_test_s3_file_split(split_str);
-
-        // let s3_file_split_string = serde_json::to_string(&test_s3_file_split).unwrap();
-        // let assign_rs = s3_file_reader
-        //     .assign_split(s3_file_split_string.as_bytes())
-        //     .await;
-        // assert!(assign_rs.is_ok());
-        s3_file_reader
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore]
     async fn test_empty_s3_file_reader() {
         println!("S3FileReader read empty json file.");
-        let empty_split = new_s3_file_split_form_str("EMPTY-2022-03-23-03:35:28.json".to_string());
-        let mut s3_file_reader = create_and_assign_split(empty_split.as_str()).await;
+        let mut s3_file_reader =
+            new_s3_file_reader("EMPTY-2022-03-23-03:35:28.json".to_string()).await;
         let task_join_handler = tokio::task::spawn(async move {
             tokio::select! {
                 _=  tokio::time::sleep(tokio::time::Duration::from_secs(5))=> {
