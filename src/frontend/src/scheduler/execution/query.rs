@@ -153,9 +153,9 @@ impl QueryExecution {
                 let msg_sender = runner.msg_sender.clone();
                 let task_handle = tokio::spawn(runner.run());
 
-                let root_stage = root_stage_receiver
-                    .await
-                    .map_err(|_e| InternalError("Starting query execution failed!".to_string()))?;
+                let root_stage = root_stage_receiver.await.map_err(|e| {
+                    InternalError(format!("Starting query execution failed: {:?}", e))
+                })?;
 
                 debug!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
