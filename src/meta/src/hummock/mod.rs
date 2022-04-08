@@ -18,6 +18,7 @@ mod hummock_manager;
 #[cfg(test)]
 mod hummock_manager_tests;
 mod level_handler;
+mod metrics_utils;
 #[cfg(any(test, feature = "test"))]
 pub mod mock_hummock_meta_client;
 mod model;
