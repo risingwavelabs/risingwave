@@ -1,17 +1,19 @@
 use std::num::NonZeroUsize;
 
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, StreamChunk};
-use risingwave_common::catalog::{Field, Schema};
+
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
-use risingwave_pb::expr::{expr_node, InputRefExpr};
+use risingwave_pb::expr::{expr_node};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
 
+#[allow(unused)]
 pub struct HopWindowExecutor {
     pub(super) input: BoxedExecutor,
     pub(super) info: ExecutorInfo,
@@ -23,7 +25,7 @@ pub struct HopWindowExecutor {
 
 impl Executor for HopWindowExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        todo!()
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &risingwave_common::catalog::Schema {
@@ -62,11 +64,6 @@ impl HopWindowExecutor {
         let window_size_expr = LiteralExpression::new(
             DataType::Interval,
             Some(ScalarImpl::Interval(self.window_size)),
-        )
-        .boxed();
-        let window_slide_expr = LiteralExpression::new(
-            DataType::Interval,
-            Some(ScalarImpl::Interval(self.window_slide)),
         )
         .boxed();
         let tumble_start = new_binary_expr(

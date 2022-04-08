@@ -271,7 +271,7 @@ mod tests {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
             });
-            if let Err(_) = result {
+            if result.is_err() {
                 println!("Failed on {}.exact_div({})", lhs, rhs);
                 break;
             }
