@@ -171,7 +171,7 @@ where
     ) -> Self {
         // TODO: make this configurable
         // TODO: when tracing is on, warn the developer on this short interval.
-        let interval = Duration::from_millis(100);
+        let interval = Duration::from_millis(50);
 
         Self {
             interval,
