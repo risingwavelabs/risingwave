@@ -400,9 +400,10 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run
+cargo nextest run "$@"
 """
 description = "Run unit tests"
+
 
 [tasks.check-hakari]
 category = "RiseDev - Check"
