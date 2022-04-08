@@ -21,10 +21,11 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 ```shell
 wget https://github.com/singularity-data/risingwave/releases/download/v0.1.4/risingwave-v0.1.4-unknown-linux.tar.gz
 tar xvf risingwave-v0.1.4-unknown-linux.tar.gz
+# Start RisingWave in single-binary playground mode
 ./risingwave playground
 ```
 
-**Compile from Source (Linux and macOS)**
+**Compile from Source with [RiseDev](./CONTRIBUTING.md#setting-up-development-environment) (Linux and macOS)**
 
 ```shell
 # Install Rust toolchain
@@ -41,7 +42,7 @@ You may launch a RisingWave cluster and process streaming data in a distributed 
 
 ### Your First Query
 
-To connect to the RisingWave server, you will need to install PostgreSQL terminal (`psql`) in advance.
+To connect to the RisingWave server, you will need to [install PostgreSQL shell](./CONTRIBUTING.md#setting-up-development-environment) (`psql`) in advance.
 
 ```shell
 # Use psql to connect RisingWave cluster
