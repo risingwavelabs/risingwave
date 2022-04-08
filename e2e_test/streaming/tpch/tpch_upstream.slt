@@ -3,12 +3,40 @@ include ../../tpch/create_tables.slt.part
 include ./create_views.slt.part
 
 include ../../tpch/insert_customer.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_lineitem.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_nation.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_orders.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_part.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_partsupp.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_region.slt.part
+
+statement ok
+flush;
+
 include ../../tpch/insert_supplier.slt.part
 
 statement ok
