@@ -122,7 +122,11 @@ impl StreamMaterialize {
             .enumerate()
             .map(|(i, field)| {
                 let desc = match select_map.get(&field.name) {
-                    Some(desc) => desc.clone(),
+                    Some(desc) => {
+                        // assert_eq!(desc.name,field.name);
+                        // assert_eq!(desc.data_type,field.data_type);
+                        desc.clone()
+                    }
                     None => ColumnDesc {
                         data_type: field.data_type.clone(),
                         column_id: (i as i32).into(),
