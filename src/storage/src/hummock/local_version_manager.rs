@@ -282,9 +282,9 @@ impl LocalVersionManager {
                     },
                 }
             }
-            // if versions_to_unpin.is_empty() {
-            //     continue;
-            // }
+            if versions_to_unpin.is_empty() {
+                continue;
+            }
             // 2. Call unpin RPC, including versions failed to unpin in previous RPC calls.
             match hummock_meta_client
                 .unpin_version(&versions_to_unpin.iter().map(|v| v.id).collect_vec())
