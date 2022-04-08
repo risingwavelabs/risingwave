@@ -114,7 +114,7 @@ impl TaskOutput {
                 // Received some data
                 Ok(Some(chunk)) => {
                     let chunk = chunk.compact()?;
-                    debug!(
+                    trace!(
                         "Task output id: {:?}, data len: {:?}",
                         self.output_id,
                         chunk.cardinality()
