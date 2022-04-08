@@ -227,7 +227,7 @@ pub struct MockFrontendMetaClient {}
 
 #[async_trait::async_trait]
 impl FrontendMetaClient for MockFrontendMetaClient {
-    async fn pin_snapshot(&self) -> Result<u64> {
+    async fn pin_snapshot(&self, _last_pinned: u64) -> Result<u64> {
         Ok(0)
     }
 
