@@ -18,8 +18,8 @@ use async_trait::async_trait;
 use risingwave_common::error::Result;
 use risingwave_hummock_sdk::{HummockContextId, HummockEpoch, HummockSSTableId, HummockVersionId};
 use risingwave_pb::hummock::{
-    CompactTask, HummockSnapshot, HummockVersion, KeyRange, Level, LevelEntry, LevelType,
-    SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
+    CompactTask, HummockSnapshot, HummockVersion, SstableInfo, SubscribeCompactTasksResponse,
+    VacuumTask,
 };
 use risingwave_rpc_client::HummockMetaClient;
 use tonic::Streaming;
@@ -43,42 +43,11 @@ impl MockHummockMetaClient {
         }
     }
 
-    pub async fn get_compact_task(&self, target_level: u32) -> Option<CompactTask> {
-        let v = self.hummock_manager.get_current_version().await;
-        // `MockHummockMetaClient` only support compact file from L0 to L1.
-        if v.levels.is_empty()
-            || v.levels.first().unwrap().level_type != LevelType::Overlapping as i32
-        {
-            return None;
-        }
-        let select_ln_ids = v.levels.first().unwrap().table_infos.clone();
-        let compact_task = CompactTask {
-            input_ssts: vec![
-                LevelEntry {
-                    level_idx: 0,
-                    level: Some(Level {
-                        level_type: LevelType::Overlapping as i32,
-                        table_infos: select_ln_ids,
-                    }),
-                },
-                LevelEntry {
-                    level_idx: target_level,
-                    level: Some(Level {
-                        level_type: LevelType::Nonoverlapping as i32,
-                        table_infos: vec![],
-                    }),
-                },
-            ],
-            splits: vec![KeyRange::default()],
-            watermark: HummockEpoch::MAX,
-            sorted_output_ssts: vec![],
-            task_id: 1,
-            target_level,
-            is_target_ultimate_and_leveling: target_level as usize + 1 == v.levels.len(),
-            metrics: None,
-            task_status: false,
-        };
-        Some(compact_task)
+    pub async fn get_compact_task(&self) -> Option<CompactTask> {
+        self.hummock_manager
+            .get_compact_task(1)
+            .await
+            .unwrap_or(None)
     }
 }
 

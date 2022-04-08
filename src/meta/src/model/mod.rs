@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod barrier;
 mod catalog;
 mod catalog_v2;
 mod cluster;
@@ -22,6 +23,7 @@ use std::collections::BTreeMap;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
+pub use barrier::*;
 pub use catalog::*;
 pub use catalog_v2::*;
 pub use cluster::*;

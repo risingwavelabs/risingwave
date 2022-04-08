@@ -234,6 +234,11 @@ impl WorkerNodeManager {
         self.worker_nodes.write().unwrap().retain(|x| *x != node);
     }
 
+    pub fn refresh_worker_node(&self, nodes: Vec<WorkerNode>) {
+        let mut write_guard = self.worker_nodes.write().unwrap();
+        *write_guard = nodes;
+    }
+
     /// Get a random worker node.
     pub fn next_random(&self) -> WorkerNode {
         let current_nodes = self.worker_nodes.read().unwrap();

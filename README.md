@@ -8,7 +8,7 @@ RisingWave is a cloud-native streaming database that uses SQL as the interface l
 
 RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
-Learn more at [Introduction to RisingWave](https://singularity-data.com/risingwave-docs/docs/latest/intro/).
+Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/latest/intro/).
 
 ## Quick Start
 
@@ -19,7 +19,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 **Use a Pre-built Package (Linux)**
 
 ```shell
+# Download the pre-built binary
 wget https://github.com/singularity-data/risingwave/releases/download/v0.1.5/risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+# Unzip the binary
 tar xvf risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
@@ -79,11 +81,11 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/) for more information.
+Please refer to [getting started guide](https://www.risingwave.dev/docs/latest/getting-started/) for more information.
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 

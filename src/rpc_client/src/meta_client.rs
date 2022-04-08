@@ -94,7 +94,7 @@ impl MetaClient {
     /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
-        addr: HostAddr,
+        addr: &HostAddr,
         worker_type: WorkerType,
     ) -> Result<Box<dyn NotificationStream>> {
         let request = SubscribeRequest {
@@ -105,7 +105,7 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: HostAddr, worker_type: WorkerType) -> Result<u32> {
+    pub async fn register(&mut self, addr: &HostAddr, worker_type: WorkerType) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -118,7 +118,7 @@ impl MetaClient {
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
-    pub async fn activate(&self, addr: HostAddr) -> Result<()> {
+    pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
