@@ -168,7 +168,7 @@ impl SstableStore {
         self.meta_cache
             .try_get_with(sst_id, fetch)
             .await
-            .map_err(|e| HummockError::other(e).into())
+            .map_err(HummockError::other)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {

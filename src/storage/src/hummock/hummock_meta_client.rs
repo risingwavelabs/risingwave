@@ -22,7 +22,7 @@ use risingwave_pb::hummock::{
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use tonic::Streaming;
 
-use crate::hummock::{HummockEpoch, HummockSSTableId, HummockVersionId, HummockError};
+use crate::hummock::{HummockEpoch, HummockError, HummockSSTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
 
 #[derive(Default)]
