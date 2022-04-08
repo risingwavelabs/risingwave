@@ -19,8 +19,10 @@ use itertools::Itertools;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{ObjectName, ObjectType};
-use crate::ast::{display_comma_separated, ColumnDef, Ident, SqlOption, TableConstraint};
+use super::ObjectType;
+use crate::ast::{
+    display_comma_separated, ColumnDef, Ident, ObjectName, SqlOption, TableConstraint,
+};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
