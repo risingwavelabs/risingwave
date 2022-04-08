@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::mem::swap;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
@@ -30,7 +31,14 @@ pub const ROOT_TASK_OUTPUT_ID: u32 = 0;
 
 enum StageState {
     Pending,
-    Running(StageRunningState),
+    Started {
+        sender: Sender<StageMessage>,
+        handle: JoinHandle<Result<()>>,
+    },
+    Running {
+        sender: Sender<StageMessage>,
+        handle: JoinHandle<Result<()>>,
+    },
     Completed,
     Failed,
 }
@@ -44,11 +52,6 @@ pub enum StageEvent {
     Scheduled(StageId),
     Failed(StageId),
     Completed(StageId),
-}
-
-struct StageRunningState {
-    sender: Sender<StageMessage>,
-    handle: JoinHandle<Result<()>>,
 }
 
 #[derive(Clone)]
@@ -79,6 +82,7 @@ pub struct StageExecution {
 
 struct StageRunner {
     epoch: u64,
+    state: Arc<RwLock<StageState>>,
     stage: QueryStageRef,
     worker_node_manager: WorkerNodeManagerRef,
     tasks: Arc<HashMap<TaskId, TaskStatusHolder>>,
@@ -142,10 +146,11 @@ impl StageExecution {
                     _receiver: receiver,
                     msg_sender: self.msg_sender.clone(),
                     children: self.children.clone(),
+                    state: self.state.clone(),
                 };
                 let handle = spawn(runner.run());
 
-                *s = StageState::Running(StageRunningState { sender, handle });
+                *s = StageState::Started { sender, handle };
                 Ok(())
             }
             _ => Err(InternalError("Staged already started!".to_string()).into()),
@@ -158,7 +163,7 @@ impl StageExecution {
 
     pub async fn is_scheduled(&self) -> bool {
         let s = self.state.read().await;
-        matches!(*s, StageState::Running(_))
+        matches!(*s, StageState::Running { .. })
     }
 
     pub fn get_task_status_unchecked(&self, task_id: TaskId) -> Arc<TaskStatus> {
@@ -185,7 +190,7 @@ impl StageExecution {
 
                 ExchangeSource {
                     task_output_id: Some(task_output_id),
-                    host: status_holder.inner.load_full().location.clone(),
+                    host: Some(status_holder.inner.load_full().location.clone().unwrap()),
                 }
             })
             .collect()
@@ -202,6 +207,19 @@ impl StageRunner {
             };
             self.schedule_task(task_id, self.create_plan_fragment(id))
                 .await?;
+        }
+
+        {
+            // Changing state
+            let mut s = self.state.write().await;
+            let mut tmp_s = StageState::Failed;
+            swap(&mut *s, &mut tmp_s);
+            match tmp_s {
+                StageState::Started { sender, handle } => {
+                    *s = StageState::Running { sender, handle };
+                }
+                _ => unreachable!(),
+            }
         }
 
         // All tasks scheduled, send `StageScheduled` event to `QueryRunner`.
