@@ -29,6 +29,7 @@ use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_expr::expr::{build_from_prost, AggKind, RowExpression};
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::data::StopMutation;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
@@ -50,12 +51,8 @@ use crate::task::{
 lazy_static::lazy_static! {
     pub static ref LOCAL_TEST_ADDR: HostAddr = "127.0.0.1:2333".parse().unwrap();
 }
-/// `ActorHandle` contains the join handle of actor's future, and a sender used to force stop
-/// the actor.
-pub struct ActorHandle {
-    pub handle: JoinHandle<()>,
-    pub stop_tx: oneshot::Sender<()>,
-}
+
+pub type ActorHandle = JoinHandle<()>;
 
 pub struct LocalStreamManagerCore {
     /// Each processor runs in a future. Upon receiving a `Terminate` message, they will exit.
@@ -221,15 +218,25 @@ impl LocalStreamManager {
     }
 
     /// Force stop all actors on this worker.
-    pub async fn stop_all_actors(&self) -> Result<()> {
-        let futures = {
-            let mut core = self.core.lock();
-            let futures = core.stop_all_actors()?;
-            // Reset barrier manager to a clean state.
-            core.context.reset_barrier_manager();
-            futures
+    pub async fn stop_all_actors(&self, epoch: Epoch) -> Result<()> {
+        let (actor_ids_to_send, actor_ids_to_collect) = {
+            let core = self.core.lock();
+            let actor_ids_to_send = core.context.lock_barrier_manager().all_senders();
+            let actor_ids_to_collect = core.actor_infos.keys().cloned().collect::<HashSet<_>>();
+            (actor_ids_to_send, actor_ids_to_collect)
         };
-        join_all(futures).await;
+        if actor_ids_to_send.is_empty() || actor_ids_to_collect.is_empty() {
+            return Ok(());
+        }
+        let barrier = Barrier {
+            epoch,
+            mutation: Some(Arc::new(Mutation::Stop(actor_ids_to_collect.clone()))),
+            span: tracing::Span::none(),
+        };
+
+        self.send_and_collect_barrier(&barrier, actor_ids_to_send, actor_ids_to_collect)
+            .await?;
+        self.core.lock().drop_all_actors();
 
         Ok(())
     }
@@ -252,7 +259,7 @@ impl LocalStreamManager {
     pub async fn wait_all(self) -> Result<()> {
         let handles = self.core.lock().take_all_handles()?;
         for (_id, handle) in handles {
-            handle.handle.await?;
+            handle.await?;
         }
         Ok(())
     }
@@ -732,17 +739,12 @@ impl LocalStreamManagerCore {
 
             trace!("build actor: {:#?}", &dispatcher);
 
-            let (stop_tx, stop_rx) = oneshot::channel();
-
-            let actor = Actor::new(dispatcher, actor_id, self.context.clone(), stop_rx);
+            let actor = Actor::new(dispatcher, actor_id, self.context.clone());
             self.handles.insert(
                 actor_id,
-                ActorHandle {
-                    handle: tokio::spawn(async move {
-                        actor.run().await.unwrap(); // unwrap the actor result to panic on error
-                    }),
-                    stop_tx,
-                },
+                tokio::spawn(async move {
+                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                }),
             );
         }
 
@@ -784,7 +786,7 @@ impl LocalStreamManagerCore {
         Ok(())
     }
 
-    /// `drop_actor` is invoked by the leader node via RPC once the stop barrier arrives at the
+    /// `drop_actor` is invoked by meta node via RPC once the stop barrier arrives at the
     /// sink. All the actors in the actors should stop themselves before this method is invoked.
     fn drop_actor(&mut self, actor_id: ActorId) {
         let handle = self.handles.remove(&actor_id).unwrap();
@@ -793,7 +795,19 @@ impl LocalStreamManagerCore {
         self.actor_infos.remove(&actor_id);
         self.actors.remove(&actor_id);
         // Task should have already stopped when this method is invoked.
-        handle.handle.abort();
+        handle.abort();
+    }
+
+    /// `drop_all_actors` is invoked by meta node via RPC once the stop barrier arrives at all the
+    /// sink. All the actors in the actors should stop themselves before this method is invoked.
+    fn drop_all_actors(&mut self) {
+        for (actor_id, handle) in self.handles.drain() {
+            self.context.retain(|&(up_id, _)| up_id != actor_id);
+            self.actors.remove(&actor_id);
+            // Task should have already stopped when this method is invoked.
+            handle.abort();
+        }
+        self.actor_infos.clear();
     }
 
     fn build_channel_for_chain_node(
@@ -912,23 +926,5 @@ impl LocalStreamManagerCore {
             }
         }
         Ok(())
-    }
-
-    fn stop_all_actors(&mut self) -> Result<Vec<JoinHandle<()>>> {
-        let futures = self
-            .handles
-            .drain()
-            .map(|(actor_id, handle)| {
-                self.context.retain(|&(up_id, _)| up_id != actor_id);
-                self.actors.remove(&actor_id);
-                handle.stop_tx.send(()).ok();
-                handle.handle
-            })
-            .collect_vec();
-
-        // meta will rebuild this soon
-        self.actor_infos.clear();
-
-        Ok(futures)
     }
 }
