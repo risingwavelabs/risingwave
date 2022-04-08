@@ -15,16 +15,16 @@
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
 
-use crate::hummock::TracedHummockError;
+use crate::hummock::HummockError;
 
-#[derive(Error, Debug)]
+#[derive(Error)]
 pub enum StorageError {
     #[error("Hummock error: {0}")]
     Hummock(
         #[backtrace]
         #[source]
         #[from]
-        TracedHummockError,
+        HummockError,
     ),
 
     #[error("Cell-based table error: {0}")]
@@ -40,5 +40,21 @@ pub type StorageResult<T> = std::result::Result<T, StorageError>;
 impl From<StorageError> for RwError {
     fn from(s: StorageError) -> Self {
         ErrorCode::StorageError(Box::new(s)).into()
+    }
+}
+
+impl std::fmt::Debug for StorageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self)?;
+        writeln!(f)?;
+        if let Some(backtrace) = self.backtrace() {
+            // Since we forward all backtraces from source, `self.backtrace()` is the backtrace of
+            // inner error.
+            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
+        }
+
+        Ok(())
     }
 }

@@ -19,7 +19,7 @@ use thiserror::Error;
 use crate::object::ObjectError;
 
 #[derive(Error, Debug)]
-pub enum HummockError {
+enum HummockErrorInner {
     #[error("Magic number mismatch: expected {expected}, found: {found}.")]
     MagicMismatch { expected: u32, found: u32 },
     #[error("Invalid format version: {0}.")]
@@ -32,6 +32,7 @@ pub enum HummockError {
     EncodeError(String),
     #[error("Decode error {0}.")]
     DecodeError(String),
+    #[allow(dead_code)]
     #[error("Mock error {0}.")]
     MockError(String),
     #[error("ObjectStore failed with IO error {0}.")]
@@ -50,75 +51,81 @@ pub enum HummockError {
     Other(String),
 }
 
+#[derive(Error)]
+#[error("{inner}")]
+pub struct HummockError {
+    #[from]
+    inner: HummockErrorInner,
+    backtrace: Backtrace,
+}
+
 impl HummockError {
-    pub fn object_io_error(error: ObjectError) -> TracedHummockError {
-        Self::ObjectIoError(error).into()
+    pub fn object_io_error(error: ObjectError) -> HummockError {
+        HummockErrorInner::ObjectIoError(error).into()
     }
 
-    pub fn invalid_block() -> TracedHummockError {
-        Self::InvalidBlock.into()
+    pub fn invalid_format_version(v: u32) -> HummockError {
+        HummockErrorInner::InvalidFormatVersion(v).into()
     }
 
-    pub fn encode_error(error: impl ToString) -> TracedHummockError {
-        Self::EncodeError(error.to_string()).into()
+    pub fn invalid_block() -> HummockError {
+        HummockErrorInner::InvalidBlock.into()
     }
 
-    pub fn decode_error(error: impl ToString) -> TracedHummockError {
-        Self::DecodeError(error.to_string()).into()
+    pub fn encode_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::EncodeError(error.to_string()).into()
     }
 
-    pub fn checksum_mismatch(expected: u64, found: u64) -> TracedHummockError {
-        Self::ChecksumMismatch { expected, found }.into()
+    pub fn decode_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::DecodeError(error.to_string()).into()
     }
 
-    pub fn meta_error(error: impl ToString) -> TracedHummockError {
-        Self::MetaError(error.to_string()).into()
+    pub fn magic_mismatch(expected: u32, found: u32) -> HummockError {
+        HummockErrorInner::MagicMismatch { expected, found }.into()
     }
 
-    pub fn invalid_write_batch() -> TracedHummockError {
-        Self::InvalidWriteBatch.into()
+    pub fn checksum_mismatch(expected: u64, found: u64) -> HummockError {
+        HummockErrorInner::ChecksumMismatch { expected, found }.into()
     }
 
-    pub fn shared_buffer_error(error: impl ToString) -> TracedHummockError {
-        Self::SharedBufferError(error.to_string()).into()
+    pub fn meta_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::MetaError(error.to_string()).into()
     }
 
-    pub fn wait_epoch(error: impl ToString) -> TracedHummockError {
-        Self::WaitEpoch(error.to_string()).into()
+    pub fn invalid_write_batch() -> HummockError {
+        HummockErrorInner::InvalidWriteBatch.into()
     }
 
-    pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> TracedHummockError {
-        Self::ExpiredEpoch { safe_epoch, epoch }.into()
+    pub fn shared_buffer_error(error: impl ToString) -> HummockError {
+        HummockErrorInner::SharedBufferError(error.to_string()).into()
+    }
+
+    pub fn wait_epoch(error: impl ToString) -> HummockError {
+        HummockErrorInner::WaitEpoch(error.to_string()).into()
+    }
+
+    pub fn expired_epoch(safe_epoch: u64, epoch: u64) -> HummockError {
+        HummockErrorInner::ExpiredEpoch { safe_epoch, epoch }.into()
+    }
+
+    pub fn other(error: impl ToString) -> HummockError {
+        HummockErrorInner::Other(error.to_string()).into()
     }
 }
 
 impl From<prost::DecodeError> for HummockError {
     fn from(error: prost::DecodeError) -> Self {
-        Self::DecodeError(error.to_string())
+        HummockErrorInner::DecodeError(error.to_string()).into()
     }
 }
 
-impl From<prost::DecodeError> for TracedHummockError {
-    fn from(error: prost::DecodeError) -> Self {
-        Self::from(HummockError::from(error))
-    }
-}
-
-#[derive(Error)]
-#[error("{source}")]
-pub struct TracedHummockError {
-    #[from]
-    source: HummockError,
-    backtrace: Backtrace,
-}
-
-impl std::fmt::Debug for TracedHummockError {
+impl std::fmt::Debug for HummockError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use std::error::Error;
 
-        write!(f, "{}", self.source)?;
+        write!(f, "{}", self.inner)?;
         writeln!(f)?;
-        if let Some(backtrace) = self.source.backtrace() {
+        if let Some(backtrace) = self.inner.backtrace() {
             write!(f, "  backtrace of inner error:\n{}", backtrace)?;
         } else {
             write!(
@@ -131,4 +138,4 @@ impl std::fmt::Debug for TracedHummockError {
     }
 }
 
-pub type HummockResult<T> = std::result::Result<T, TracedHummockError>;
+pub type HummockResult<T> = std::result::Result<T, HummockError>;

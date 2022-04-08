@@ -98,7 +98,7 @@ impl HummockValue<Vec<u8>> {
     /// Decodes the object from `Vec<u8>`.
     pub fn decode(buffer: &mut impl Buf) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
-            return Err(HummockError::DecodeError("empty value".to_string()).into());
+            return Err(HummockError::decode_error("empty value"));
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(
@@ -106,7 +106,7 @@ impl HummockValue<Vec<u8>> {
                 Vec::from(&buffer.chunk()[VALUE_META_SIZE..]),
             )),
             VALUE_DELETE => Ok(Self::Delete(ValueMeta::decode(&mut buffer.chunk()))),
-            _ => Err(HummockError::DecodeError("non-empty but format error".to_string()).into()),
+            _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
 
@@ -122,12 +122,12 @@ impl<'a> HummockValue<&'a [u8]> {
     /// Decodes the object from `&[u8]`.
     pub fn from_slice(mut buffer: &'a [u8]) -> HummockResult<Self> {
         if buffer.remaining() == 0 {
-            return Err(HummockError::DecodeError("empty value".to_string()).into());
+            return Err(HummockError::decode_error("empty value"));
         }
         match buffer.get_u8() {
             VALUE_PUT => Ok(Self::Put(ValueMeta::decode(&mut buffer), buffer)),
             VALUE_DELETE => Ok(Self::Delete(ValueMeta::decode(&mut buffer))),
-            _ => Err(HummockError::DecodeError("non-empty but format error".to_string()).into()),
+            _ => Err(HummockError::decode_error("non-empty but format error")),
         }
     }
 

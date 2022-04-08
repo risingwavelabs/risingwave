@@ -19,24 +19,42 @@ use risingwave_common::error::BoxedError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ObjectError {
+enum ObjectErrorInner {
     #[error(transparent)]
     S3(BoxedError),
 
-    #[error("Internal error: {msg}")]
-    Internal {
-        msg: String,
-        #[backtrace]
-        backtrace: Backtrace,
-    },
+    #[error("Internal error: {0}")]
+    Internal(String),
+}
+
+#[derive(Error)]
+#[error("{inner}")]
+pub struct ObjectError {
+    #[source]
+    #[from]
+    inner: ObjectErrorInner,
+
+    backtrace: Backtrace,
+}
+
+impl std::fmt::Debug for ObjectError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use std::error::Error;
+
+        write!(f, "{}", self.inner)?;
+        writeln!(f)?;
+        if let Some(backtrace) = self.inner.backtrace() {
+            write!(f, "  backtrace of inner error:\n{}", backtrace)?;
+        } else {
+            write!(f, "  backtrace of `ObjectError`:\n{}", self.backtrace)?;
+        }
+        Ok(())
+    }
 }
 
 impl ObjectError {
     pub fn internal(msg: impl ToString) -> Self {
-        Self::Internal {
-            msg: msg.to_string(),
-            backtrace: Backtrace::capture(),
-        }
+        ObjectErrorInner::Internal(msg.to_string()).into()
     }
 }
 
@@ -45,13 +63,13 @@ where
     E: std::error::Error + Sync + Send + 'static,
 {
     fn from(e: aws_smithy_http::result::SdkError<E>) -> Self {
-        Self::S3(e.into())
+        ObjectErrorInner::S3(e.into()).into()
     }
 }
 
 impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
     fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
-        Self::S3(e.into())
+        ObjectErrorInner::S3(e.into()).into()
     }
 }
 
