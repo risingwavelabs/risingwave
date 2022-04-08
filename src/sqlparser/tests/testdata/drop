@@ -1,0 +1,17 @@
+DROP SOURCE src
+---
+DROP SOURCE src
+=>
+Drop(DropStatement { object_type: Source, if_exists: false, name: Ident { value: "src", quote_style: None }, drop_mode: None })
+
+DROP MATERIALIZED SOURCE src
+---
+DROP MATERIALIZED SOURCE src
+=>
+Drop(DropStatement { object_type: MaterializedSource, if_exists: false, name: Ident { value: "src", quote_style: None }, drop_mode: None })
+
+DROP MATERIALIZED VIEW t
+---
+DROP MATERIALIZED VIEW t
+=>
+Drop(DropStatement { object_type: MaterializedView, if_exists: false, name: Ident { value: "t", quote_style: None }, drop_mode: None })
