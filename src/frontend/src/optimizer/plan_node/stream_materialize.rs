@@ -109,6 +109,17 @@ impl StreamMaterialize {
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
 
+        assert_eq!(
+            schema
+                .fields
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| user_cols.contains(*i))
+                .collect_vec()
+                .len(),
+            select_items.len()
+        );
+
         // mapping `column_name` and `column_desc`.
         let mut select_map: HashMap<String, ColumnDesc> = HashMap::new();
         for desc in select_items {
