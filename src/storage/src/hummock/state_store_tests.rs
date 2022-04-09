@@ -238,12 +238,12 @@ async fn test_failpoint_read_upload() {
 
     fail::cfg(mem_read_err, "return").unwrap();
 
-    let result = hummock_storage.get(&b"bb".to_vec(), 2).await;
+    let result = hummock_storage.get(b"bb".as_ref(), 2).await;
     assert!(result.is_err());
     let result = hummock_storage.iter(..=b"ee".to_vec(), 2).await;
     assert!(result.is_err());
 
-    let value = hummock_storage.get(&b"ee".to_vec(), 2).await.unwrap();
+    let value = hummock_storage.get(b"ee".as_ref(), 2).await.unwrap();
     assert!(value.is_none());
     fail::remove(mem_read_err);
     // test the upload_error
