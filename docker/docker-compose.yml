@@ -26,8 +26,6 @@ services:
     network_mode: host
     image: ghcr.io/singularity-data/risingwave-backend:latest
     command: /bin/bash -c /risingwave/bin/meta-node --host 127.0.0.1:5690 --dashboard-host 127.0.0.1:5691 --prometheus-host 127.0.0.1:1250
-    depends_on:
-      - miniocreatebuckets
   computenode:
     container_name: computenode_container
     network_mode: host
@@ -42,3 +40,4 @@ services:
     command: /bin/bash -c /risingwave/bin/frontend-v2 --host 127.0.0.1:4566 --meta-addr http://127.0.0.1:5690
     depends_on:
       - metanode
+      - computenode
