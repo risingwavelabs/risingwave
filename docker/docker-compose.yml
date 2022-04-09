@@ -24,19 +24,19 @@ services:
   metanode:
     container_name: metanode_container
     network_mode: host
-    image: ghcr.io/singularity-data/risingwave-backend:latest
+    image: ghcr.io/singularity-data/risingwave:latest
     command: /bin/bash -c /risingwave/bin/meta-node --host 127.0.0.1:5690 --dashboard-host 127.0.0.1:5691 --prometheus-host 127.0.0.1:1250
   computenode:
     container_name: computenode_container
     network_mode: host
-    image: ghcr.io/singularity-data/risingwave-backend:latest
+    image: ghcr.io/singularity-data/risingwave:latest
     command: /bin/bash -c /risingwave/bin/compute-node --config-path /risingwave/config/risingwave.toml --host 127.0.0.1:5688 --prometheus-listener-addr 127.0.0.1:1222 --metrics-level 1 --state-store hummock+minio://hummock:12345678@127.0.0.1:9000/hummock001 --meta-address http://127.0.0.1:5690
     depends_on:
       - metanode
   frontend:
     container_name: frontend_container
     network_mode: host
-    image: ghcr.io/singularity-data/risingwave-frontend:latest
+    image: ghcr.io/singularity-data/risingwave:latest
     command: /bin/bash -c /risingwave/bin/frontend-v2 --host 127.0.0.1:4566 --meta-addr http://127.0.0.1:5690
     depends_on:
       - metanode
