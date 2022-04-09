@@ -70,8 +70,7 @@ impl Relation {
             Relation::Subquery(sub) => {
                 if let BoundSetExpr::Select(select) = &sub.query.body {
                     match &select.from {
-                        Some(_relation) => vec![],
-                        // relation.extract_column_descs(),
+                        Some(relation) => relation.extract_column_descs(),
                         None => vec![],
                     }
                 } else {
