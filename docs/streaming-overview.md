@@ -19,9 +19,9 @@ RisingWave provides real time analytical results to serve user’s need. This is
 
 The core design principles of RisingWave streaming engine are summarized as follows. 
 
-* Actor model based execution engine.* We create a set of actors such that each actor react to its own input message, including both data update and control signal. In this way we build a highly concurrent and efficient streaming engine. 
-* Shared storage for states.* The backbone of the state storage is based on sharing cloud block storage (currently AWS S3), which give us computational elasticity, cheap and infinite storage capacity, and simplicity in configuration change.  
-* Everything is a table, everything is a state.* We treat every object in our internal storage as both a logical table and an internal state. Therefore they can be effectively managed by catalog, and be updated in a unified streaming engine with consistency guarantee. 
+**Actor model based execution engine.** We create a set of actors such that each actor react to its own input message, including both data update and control signal. In this way we build a highly concurrent and efficient streaming engine. 
+**Shared storage for states.** The backbone of the state storage is based on shared cloud object storage (currently AWS S3), which give us computational elasticity, cheap and infinite storage capacity, and simplicity during configuration change.  
+**Everything is a table, everything is a state.** We treat every object in our internal storage as both a logical table and an internal state. Therefore they can be effectively managed by catalog, and be updated in a unified streaming engine with consistency guarantee. 
 
 In this document we give an overview of RisingWave streaming engine. 
 

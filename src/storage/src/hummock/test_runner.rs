@@ -1,3 +1,4 @@
+// Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 use std::cell::RefCell;
 use std::env;
 
@@ -83,6 +84,7 @@ impl TestHook for FailPointHook {
         })
     }
 }
+// End Copyright 2016 TiKV Project Authors. Licensed under Apache-2.0.
 pub fn run_failpont_tests(cases: &[&TestDescAndFn]) {
     let mut cases1 = vec![];
     let mut cases2 = vec![];

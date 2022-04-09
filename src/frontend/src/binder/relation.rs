@@ -209,6 +209,22 @@ impl Binder {
         table_name: &str,
         alias: Option<TableAlias>,
     ) -> Result<Relation> {
+        if schema_name == "pg_catalog" {
+            // TODO: support pg_catalog.
+            return Err(ErrorCode::NotImplemented(
+                // TODO: We can ref the document of `SHOW` commands here if ready.
+                r###"pg_catalog is not supported, please use `SHOW` commands for now.
+`SHOW TABLES`,
+`SHOW MATERIALIZED VIEWS`,
+`DESCRIBE <table>`,
+`SHOW COLUMNS FROM [table]`
+"###
+                .into(),
+                1695.into(),
+            )
+            .into());
+        }
+
         let (ret, columns) = {
             let catalog = &self.catalog;
 

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -24,9 +23,8 @@ use super::HummockStorage;
 use crate::hummock::iterator::test_utils::{
     mock_sstable_store, mock_sstable_store_with_object_store,
 };
-use crate::hummock::key::key_with_epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::test_utils::{default_config_for_test, TEST_KEYS_COUNT};
+use crate::hummock::test_utils::default_config_for_test;
 use crate::hummock::HummockStateStoreIter;
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
@@ -203,7 +201,7 @@ async fn test_failpoint_read_upload() {
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
-        local_version_manager,
+        local_version_manager.clone(),
         meta_client.clone(),
         Arc::new(StateStoreMetrics::unused()),
     )
@@ -213,189 +211,58 @@ async fn test_failpoint_read_upload() {
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
         (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("bb"), StorageValue::new_default_put("222")),
+        (Bytes::from("cc"), StorageValue::new_default_put("222")),
     ];
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
 
     let mut batch2 = vec![
         (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_put("111111")),
-    ];
-
-    // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-    // Third batch deletes the anchor
-    let mut batch3 = vec![
-        (Bytes::from("dd"), StorageValue::new_default_put("444")),
-        (Bytes::from("ee"), StorageValue::new_default_put("555")),
         (anchor.clone(), StorageValue::new_default_delete()),
     ];
-
-    // Make sure the batch is sorted.
-    batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-    let epoch1: u64 = 1;
-
-    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
-
-    // Get the value after flushing to remote.
-    let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
-    assert_eq!(value, Bytes::from("111"));
-    // // Write second batch.
-    let epoch2 = epoch1 + 1;
-    let epoch3 = epoch2 + 1;
-    hummock_storage.ingest_batch(batch2, epoch3).await.unwrap();
-    //  Write third batch.
-    let epoch4 = epoch3 + 1;
-    let epoch5 = epoch4 + 1;
-    hummock_storage.ingest_batch(batch3, epoch5).await.unwrap();
-
-    // Injection failure to upload object_store
-    fail::cfg(mem_upload_err, "return").unwrap();
-    // compact the sst(epoch1) from shared_buffer to object_store, return err because injection
-    // failure
-    meta_client.commit_epoch(epoch1).await.unwrap();
-    let result = hummock_storage.sync(Some(epoch1)).await;
-    assert!(result.is_err());
-    // wait buffer delete
-    let mut min_execute_interval_tick = tokio::time::interval(Duration::from_millis(1000));
-    min_execute_interval_tick.tick().await;
-    min_execute_interval_tick.tick().await;
-
-    // get anchor(epoch1) from object_store, return Ok(None)
-    let value = hummock_storage.get(&anchor, epoch2).await.unwrap();
-    assert_eq!(value, None);
-    // close injection failure(upload object_store)
-    fail::remove(mem_upload_err);
-
-    // aa cc (object_store no bb)
-    let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch3)
-        .await
-        .unwrap();
-    let len = count_iter(&mut iter).await;
-    assert_eq!(len, 2);
-    // sync success and delete shared_buffer
-    hummock_storage.sync(Some(epoch3)).await.unwrap();
-    meta_client.commit_epoch(epoch3).await.unwrap();
-    hummock_storage.wait_epoch(epoch3).await.unwrap();
-    // hummock_storage.sync(Some(epoch3)).await.unwrap();
-    let mut min_execute_interval_tick = tokio::time::interval(Duration::from_millis(1000));
-    min_execute_interval_tick.tick().await;
-    min_execute_interval_tick.tick().await;
-
-    // Injection failure to read object_store
-    fail::cfg(mem_read_err, "return").unwrap();
-
-    // return Err(read_err)
-    let result = hummock_storage.get(&anchor, epoch4).await;
-    assert!(result.is_err());
-    let result = hummock_storage.iter(..=b"ee".to_vec(), epoch4).await;
-    assert!(result.is_err());
-    fail::remove(mem_read_err);
-
-    // close injection failure(read) , back to normal
-    let value = hummock_storage.get(&anchor, epoch4).await.unwrap().unwrap();
-    assert_eq!(value, Bytes::from("111111"));
-    let value = hummock_storage.get(&anchor, epoch5).await.unwrap();
-    assert_eq!(value, None);
-
-    let mut iter = hummock_storage
-        .iter(..=b"ee".to_vec(), epoch5)
-        .await
-        .unwrap();
-    let len = count_iter(&mut iter).await;
-    assert_eq!(len, 3);
-}
-#[tokio::test]
-async fn test_failpoint_buffer_drop() {
-    let mem_read_err = "mem_read_err";
-    let object_store = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
-    let sstable_store = mock_sstable_store_with_object_store(object_store.clone());
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-    let hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        local_version_manager,
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-    // Write first batch.
-    let batch1 = (0..TEST_KEYS_COUNT)
-        .map(|i| {
-            (
-                Bytes::from(key_with_epoch(
-                    format!("key_test_{:05}", i).as_bytes().to_vec(),
-                    0,
-                )),
-                StorageValue::new_default_put(format!("{}", i)),
-            )
-        })
-        .collect();
-    // Write second batch.
-    let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (Bytes::from("aa"), StorageValue::new_default_put("111111")),
-    ];
-
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    // epoch 1 is reserved by storage service
-    let epoch1: u64 = 1;
-    // Write first batch.
-    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
-    let epoch2 = epoch1 + 1;
-    hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
+    hummock_storage.ingest_batch(batch1, 1).await.unwrap();
+
+    // Get the value after flushing to remote.
+    let value = hummock_storage.get(&anchor, 1).await.unwrap().unwrap();
+    assert_eq!(value, Bytes::from("111"));
+    // // Write second batch.
+    hummock_storage.ingest_batch(batch2, 3).await.unwrap();
+
+    // sync epoch1 test the read_error
+    hummock_storage.sync(Some(1)).await.unwrap();
+    meta_client.commit_epoch(1).await.unwrap();
+    local_version_manager
+        .refresh_version(meta_client.as_ref())
+        .await;
+
     fail::cfg(mem_read_err, "return").unwrap();
-    // get an iter before commit
-    let mut iter = hummock_storage
-        .iter(..=b"key_test_10001".to_vec(), epoch1)
-        .await
-        .unwrap();
-    let test1 = key_with_epoch(format!("key_test_{:05}", 100).as_bytes().to_vec(), 0);
-    hummock_storage
-        .shared_buffer_manager()
-        .get(&test1, 0..2)
-        .unwrap();
-    // commit epoch1
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
-    meta_client.commit_epoch(epoch1).await.unwrap();
-    hummock_storage.wait_epoch(epoch1).await.unwrap();
-    // commit epoch2
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
-    meta_client.commit_epoch(epoch2).await.unwrap();
-    hummock_storage.wait_epoch(epoch2).await.unwrap();
-    // wait buffer delete
-    let mut min_execute_interval_tick = tokio::time::interval(Duration::from_millis(1000));
-    min_execute_interval_tick.tick().await;
-    min_execute_interval_tick.tick().await;
-    assert_eq!(
-        hummock_storage
-            .local_version_manager()
-            .get_version()
-            .unwrap()
-            .max_committed_epoch(),
-        epoch2
-    );
-    // epoch1 in buffer?
-    hummock_storage
-        .shared_buffer_manager()
-        .get(&test1, 0..2)
-        .unwrap();
-    // iter is_valid?
-    let len = count_iter(&mut iter).await;
-    assert_eq!(len, TEST_KEYS_COUNT);
+
+    let result = hummock_storage.get(&b"bb".to_vec(), 2).await;
+    assert!(result.is_err());
+    let result = hummock_storage.iter(..=b"ee".to_vec(), 2).await;
+    assert!(result.is_err());
+
+    let value = hummock_storage.get(&b"ee".to_vec(), 2).await.unwrap();
+    assert!(value.is_none());
     fail::remove(mem_read_err);
+    // test the upload_error
+    fail::cfg(mem_upload_err, "return").unwrap();
+
+    let result = hummock_storage.sync(Some(3)).await;
+    assert!(result.is_err());
+    meta_client.abort_epoch(3).await.unwrap();
+    meta_client.commit_epoch(4).await.unwrap();
+    local_version_manager
+        .refresh_version(meta_client.as_ref())
+        .await;
+    fail::remove(mem_upload_err);
+
+    let value = hummock_storage.get(&anchor, 5).await.unwrap().unwrap();
+    assert_eq!(value, Bytes::from("111"));
+    let mut iters = hummock_storage.iter(..=b"ee".to_vec(), 5).await.unwrap();
+    let len = count_iter(&mut iters).await;
+    assert_eq!(len, 2);
 }
 #[tokio::test]
 /// Fix this when we finished epoch management.

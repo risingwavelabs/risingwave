@@ -18,7 +18,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use moka::future::Cache;
 
-use super::{Block, BlockCache, Sstable, SstableMeta, TracedHummockError};
+use super::{Block, BlockCache, Sstable, SstableMeta};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{BlockLocation, ObjectStoreRef};
@@ -164,13 +164,13 @@ impl SstableStore {
                 .map_err(HummockError::object_io_error)?;
             let meta = SstableMeta::decode(&mut &buf[..])?;
             let sst = Arc::new(Sstable { id: sst_id, meta });
-            Ok::<_, TracedHummockError>(sst)
+            Ok::<_, HummockError>(sst)
         };
 
         self.meta_cache
             .try_get_with(sst_id, fetch)
             .await
-            .map_err(|e| HummockError::Other(e.to_string()).into())
+            .map_err(HummockError::other)
     }
 
     pub fn get_sst_meta_path(&self, sst_id: u64) -> String {

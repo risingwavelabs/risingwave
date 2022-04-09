@@ -19,10 +19,10 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
 
+use crate::error::StorageResult;
 use crate::hummock::iterator::variants::*;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -42,7 +42,7 @@ pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
     shared_buffer: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
-    uploader_handle: JoinHandle<Result<()>>,
+    uploader_handle: JoinHandle<StorageResult<()>>,
 }
 
 impl SharedBufferManager {
@@ -201,7 +201,7 @@ impl SharedBufferManager {
     }
 
     /// This function was called while [`SharedBufferManager`] exited.
-    pub async fn wait(self) -> Result<()> {
+    pub async fn wait(self) -> StorageResult<()> {
         self.uploader_handle.await.unwrap()
     }
 

@@ -22,6 +22,7 @@ use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
@@ -41,7 +42,7 @@ impl BatchTaskContext {
         assert!(origin_task_count < (1 << 8));
         Self {
             meta_client,
-            epoch: AtomicU64::new(0),
+            epoch: AtomicU64::new(1),
             task_count: AtomicUsize::new(origin_task_count << 8),
         }
     }
@@ -77,7 +78,12 @@ impl BatchTaskContext {
 }
 
 impl Operations {
-    pub(crate) async fn write_batch(&mut self, store: &impl StateStore, opts: &Opts) {
+    pub(crate) async fn write_batch(
+        &mut self,
+        store: &impl StateStore,
+        opts: &Opts,
+        context: Option<Arc<CompactorContext>>,
+    ) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
 
@@ -89,6 +95,13 @@ impl Operations {
         println!("batch size: {}", batches.len());
 
         let perf = self.run_batches(store, opts, batches).await;
+        if opts.compact_level_after_write > 0 {
+            if let Some(context) = context {
+                if let Some(task) = self.meta_client.get_compact_task(1).await {
+                    Compactor::compact(context, task).await;
+                }
+            }
+        }
 
         println!(
             "

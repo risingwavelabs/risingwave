@@ -262,7 +262,6 @@ mod tests {
         assert!(!sstable_iter.is_valid());
     }
     #[tokio::test]
-
     async fn test_failpoint_table_read() {
         let mem_read_err_fp = "mem_read_err";
         // build remote table

@@ -19,6 +19,7 @@ use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_config::sts::AssumeRoleProvider;
 use aws_types::credentials::SharedCredentialsProvider;
 use aws_types::region::Region;
+use maplit::hashmap;
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::RwError;
 use serde::{Deserialize, Serialize};
@@ -141,4 +142,14 @@ impl AwsConfigInfo {
             credentials,
         })
     }
+}
+
+/// This function provides a minimum configuration for testing kinesis
+pub fn kinesis_demo_properties() -> HashMap<String, String> {
+    let properties: HashMap<String, String> = hashmap! {
+    "kinesis.stream.name".to_string() => "kinesis_test_stream".to_string(),
+    "kinesis.stream.region".to_string() => "cn-north-1".to_string(),
+    "connector".to_string() => "kinesis".to_string()};
+
+    properties
 }

@@ -252,7 +252,9 @@ mod test {
                 assert!(count < 200 * 2);
             }
         }
-        fail::remove(mem_read_err);
         assert!(count < 200 * 2);
+        mi.seek(iterator_test_key_of(350).as_slice()).await.unwrap();
+        assert!(!mi.is_valid());
+        fail::remove(mem_read_err);
     }
 }
