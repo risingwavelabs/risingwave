@@ -4976,6 +4976,7 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils 0.8.8",
  "either",
+ "fail",
  "fixedbitset",
  "futures",
  "futures-channel",
