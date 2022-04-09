@@ -1,0 +1,53 @@
+name: Daily build of docker image
+
+on:
+  push:
+    paths:
+      - '.github/workflows/docker_build.yml'
+      - 'docker/**'
+
+  # For manually triggering workflow
+  workflow_dispatch:
+
+  # Run for every day 2am UTC+8(Beijing)
+  schedule:
+    - cron:  '0 18 */1 * *'
+
+jobs:
+  build_docker_images:
+    runs-on: ubuntu-latest
+    steps:
+      - 
+        name: Checkout
+        uses: actions/checkout@v2
+      -
+        name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+      -
+        name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      -
+        name: Login to Github Container Registry
+        uses: docker/login-action@v1 
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      -
+        name: Build frontend
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/frontend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/singularity-data/risingwave-frontend
+      -
+        name: Build backend
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./docker/backend/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/singularity-data/risingwave-backend

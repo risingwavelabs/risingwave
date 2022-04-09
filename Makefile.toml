@@ -4,6 +4,7 @@ extend = [
   {path = "src/risedevtool/minio.toml"},
   {path = "src/risedevtool/etcd.toml"},
   {path = "src/risedevtool/jaeger.toml"},
+  {path = "src/risedevtool/kafka.toml"},
   {path = "src/risedevtool/risedev-components.toml"},
   {path = "src/frontend/test_runner/planner_test.toml"},
 ]
@@ -78,11 +79,15 @@ do
   echo ""
   cat "$out_file" | tail -n 300
 done
+
+echo ""
+echo ""
+echo ""
 '''
 
 [tasks.check-logs]
 category = "Misc"
-description = "Check if there is panic in log"
+description = "Check if there is panic in log or significant log size issue"
 script = '''
 #!/bin/bash
 set -e
@@ -90,11 +95,16 @@ set -e
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "\"panicked at\" found in $out_file, please check if there's any bugs in this PR."
+    echo "$(tput setaf 3)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
     echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
     exit 1
   fi
 done
+
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 2000 )) ; then
+    echo "$(tput setaf 3)log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
+    exit 1
+fi
 '''
 
 [tasks.link-standalone-binaries]
@@ -276,6 +286,7 @@ dependencies = [
   "download-grafana",
   "download-prometheus",
   "download-jaeger",
+  "download-kafka",
   "build-risingwave",
   "post-build-risingwave",
   "build-frontend",
@@ -319,9 +330,9 @@ description = "Start a full RisingWave dev cluster using risedev-playground"
 category = "RiseDev - Stop"
 description = "Kill RisingWave dev cluster"
 script = '''
-#!@shell
+#!/bin/bash
 
-tmux list-windows -t risedev -F "-#{pane_pid}" | xargs -n 1 kill -SIGINT
+tmux list-windows -t risedev -F "#{pane_id}" | xargs -I {} tmux send-keys -t {} C-c C-d
 tmux kill-session -t risedev
 test $? -eq 0 || { echo "Failed to stop all RiseDev components."; exit 1; }
 '''
@@ -400,9 +411,10 @@ script = """
 #!/bin/bash
 set -e
 
-cargo nextest run
+cargo nextest run "$@"
 """
 description = "Run unit tests"
+
 
 [tasks.check-hakari]
 category = "RiseDev - Check"

@@ -32,7 +32,8 @@ use risedev::util::{complete_spin, fail_spin};
 use risedev::{
     AwsS3Config, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, EnsureStopService,
     ExecuteContext, FrontendService, FrontendServiceV2, GrafanaService, JaegerService,
-    MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task, RISEDEV_SESSION_NAME,
+    KafkaService, MetaNodeService, MinioService, PrometheusService, ServiceConfig, Task,
+    ZooKeeperService, RISEDEV_SESSION_NAME,
 };
 use tempfile::tempdir;
 use yaml_rust::YamlEmitter;
@@ -124,6 +125,8 @@ fn task_main(
             ServiceConfig::FrontendV2(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Grafana(c) => Some((c.port, c.id.clone())),
             ServiceConfig::Jaeger(c) => Some((c.dashboard_port, c.id.clone())),
+            ServiceConfig::Kafka(c) => Some((c.port, c.id.clone())),
+            ServiceConfig::ZooKeeper(c) => Some((c.port, c.id.clone())),
             ServiceConfig::AwsS3(_) => None,
         };
 
@@ -279,6 +282,26 @@ fn task_main(
                 ctx.pb
                     .set_message(format!("using AWS s3 bucket {}", c.bucket));
             }
+            ServiceConfig::ZooKeeper(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = ZooKeeperService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("zookeeper http://{}:{}/", c.address, c.port));
+            }
+            ServiceConfig::Kafka(c) => {
+                let mut ctx =
+                    ExecuteContext::new(&mut logger, manager.new_progress(), status_dir.clone());
+                let mut service = KafkaService::new(c.clone())?;
+                service.execute(&mut ctx)?;
+                let mut task = risedev::ConfigureGrpcNodeTask::new(c.port, false)?;
+                task.execute(&mut ctx)?;
+                ctx.pb
+                    .set_message(format!("kafka http://{}:{}/", c.address, c.port));
+            }
         }
 
         let service_id = service.id().to_string();
@@ -317,7 +340,10 @@ fn preflight_check_proxy() -> Result<()> {
 }
 
 fn preflight_check_ulimit() -> Result<()> {
-    let ulimit = Command::new("ulimit").arg("-n").output()?.stdout;
+    let ulimit = Command::new("sh")
+        .args(["-c", "ulimit -n"])
+        .output()?
+        .stdout;
     let ulimit = String::from_utf8(ulimit)?;
     let ulimit: usize = ulimit.trim().parse()?;
     if ulimit < 8192 {

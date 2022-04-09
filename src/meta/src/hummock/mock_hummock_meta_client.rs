@@ -42,6 +42,13 @@ impl MockHummockMetaClient {
             context_id,
         }
     }
+
+    pub async fn get_compact_task(&self) -> Option<CompactTask> {
+        self.hummock_manager
+            .get_compact_task(1)
+            .await
+            .unwrap_or(None)
+    }
 }
 
 #[async_trait]

@@ -32,7 +32,8 @@ use risingwave_pb::ddl_service::{
     CreateMaterializedSourceResponse, CreateMaterializedViewRequest,
     CreateMaterializedViewResponse, CreateSchemaRequest, CreateSchemaResponse, CreateSourceRequest,
     CreateSourceResponse, DropMaterializedSourceRequest, DropMaterializedSourceResponse,
-    DropMaterializedViewRequest, DropMaterializedViewResponse,
+    DropMaterializedViewRequest, DropMaterializedViewResponse, DropSourceRequest,
+    DropSourceResponse,
 };
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
@@ -93,7 +94,7 @@ impl MetaClient {
     /// Subscribe to notification from meta.
     pub async fn subscribe(
         &self,
-        addr: HostAddr,
+        addr: &HostAddr,
         worker_type: WorkerType,
     ) -> Result<Box<dyn NotificationStream>> {
         let request = SubscribeRequest {
@@ -104,7 +105,7 @@ impl MetaClient {
     }
 
     /// Register the current node to the cluster and set the corresponding worker id.
-    pub async fn register(&mut self, addr: HostAddr, worker_type: WorkerType) -> Result<u32> {
+    pub async fn register(&mut self, addr: &HostAddr, worker_type: WorkerType) -> Result<u32> {
         let request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
@@ -117,7 +118,7 @@ impl MetaClient {
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
-    pub async fn activate(&self, addr: HostAddr) -> Result<()> {
+    pub async fn activate(&self, addr: &HostAddr) -> Result<()> {
         let request = ActivateWorkerNodeRequest {
             host: Some(addr.to_protobuf()),
         };
@@ -210,6 +211,12 @@ impl MetaClient {
         };
 
         let resp = self.inner.drop_materialized_source(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn drop_source(&self, source_id: u32) -> Result<CatalogVersion> {
+        let request = DropSourceRequest { source_id };
+        let resp = self.inner.drop_source(request).await?;
         Ok(resp.version)
     }
 
@@ -457,6 +464,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, create_database, CreateDatabaseRequest, CreateDatabaseResponse }
             ,{ ddl_client, drop_materialized_source, DropMaterializedSourceRequest, DropMaterializedSourceResponse }
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
+            ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
             ,{ hummock_client, pin_version, PinVersionRequest, PinVersionResponse }
             ,{ hummock_client, unpin_version, UnpinVersionRequest, UnpinVersionResponse }
             ,{ hummock_client, pin_snapshot, PinSnapshotRequest, PinSnapshotResponse }

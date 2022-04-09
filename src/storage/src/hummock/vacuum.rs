@@ -17,26 +17,30 @@ use std::sync::Arc;
 use risingwave_pb::hummock::VacuumTask;
 use risingwave_rpc_client::HummockMetaClient;
 
+use super::{HummockError, HummockResult};
 use crate::hummock::SstableStoreRef;
 
-pub struct Vacuum {}
+pub struct Vacuum;
 
 impl Vacuum {
     pub async fn vacuum(
         sstable_store: SstableStoreRef,
         vacuum_task: VacuumTask,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-    ) -> risingwave_common::error::Result<()> {
+    ) -> HummockResult<()> {
+        let store = sstable_store.store();
         let sst_ids = vacuum_task.sstable_ids;
         for sst_id in &sst_ids {
-            sstable_store
-                .store()
+            // Meta
+            store
                 .delete(sstable_store.get_sst_meta_path(*sst_id).as_str())
-                .await?;
-            sstable_store
-                .store()
+                .await
+                .map_err(HummockError::object_io_error)?;
+            // Data
+            store
                 .delete(sstable_store.get_sst_data_path(*sst_id).as_str())
-                .await?;
+                .await
+                .map_err(HummockError::object_io_error)?;
         }
 
         // TODO: report progress instead of in one go.
@@ -44,7 +48,10 @@ impl Vacuum {
             .report_vacuum_task(VacuumTask {
                 sstable_ids: sst_ids,
             })
-            .await?;
+            .await
+            .map_err(|e| {
+                HummockError::meta_error(format!("failed to report vacuum task: {e:?}"))
+            })?;
 
         Ok(())
     }

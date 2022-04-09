@@ -30,13 +30,7 @@ sourceSets {
 
 protobuf {
     protoc {
-        // Since `protoc` does not provide pre-built binary for arm64 architecture, we use this
-        // trick to force download x86_64 binary on apple silicon machine.
-        if (osdetector.os == "osx") {
-            artifact = "com.google.protobuf:protoc:3.0.0:osx-x86_64"
-        } else {
-            artifact = "com.google.protobuf:protoc:3.0.0"
-        }
+        artifact = "com.google.protobuf:protoc:3.18.2"
     }
 
     plugins {
@@ -44,12 +38,7 @@ protobuf {
         // the identifier, which can be referred to in the "plugins"
         // container of the "generateProtoTasks" closure.
         id("grpc") {
-            // Ditto. This trick is for aplle silicon users.
-            if (osdetector.os == "osx") {
-                artifact = "io.grpc:protoc-gen-grpc-java:1.15.1:osx-x86_64"
-            } else {
-                artifact = "io.grpc:protoc-gen-grpc-java:1.15.1"
-            }
+            artifact = "io.grpc:protoc-gen-grpc-java:1.43.2"
         }
         id("grpckt") {
             artifact = "io.grpc:protoc-gen-grpc-kotlin:1.1.0:jdk7@jar"

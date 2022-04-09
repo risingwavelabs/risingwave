@@ -44,7 +44,7 @@ impl BatchManager {
         plan: PlanFragment,
         epoch: u64,
     ) -> Result<()> {
-        debug!("Received task id: {:?}, plan: {:?}", tid, plan);
+        trace!("Received task id: {:?}, plan: {:?}", tid, plan);
         let task = BatchTaskExecution::new(tid, plan, env, epoch)?;
         let task_id = task.get_task_id().clone();
 

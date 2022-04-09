@@ -1,0 +1,15 @@
+include ../../tpch/create_tables.slt.part
+
+include ../../tpch/insert_customer.slt.part
+include ../../tpch/insert_lineitem.slt.part
+include ../../tpch/insert_nation.slt.part
+include ../../tpch/insert_orders.slt.part
+include ../../tpch/insert_part.slt.part
+include ../../tpch/insert_partsupp.slt.part
+include ../../tpch/insert_supplier.slt.part
+include ../../tpch/insert_region.slt.part
+
+include ../../batch/tpch/q1.slt.part
+include ../../batch/tpch/q5.slt.part
+
+include ../../tpch/drop_tables.slt.part

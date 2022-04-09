@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
@@ -30,33 +31,43 @@ use crate::scheduler::schedule::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task
-/// which receives meta's notification and update frontend's data.
+/// which receives meta's notification and update frontend data.
 pub(crate) struct ObserverManager {
     rx: Box<dyn NotificationStream>,
+    meta_client: MetaClient,
+    addr: HostAddr,
     worker_node_manager: WorkerNodeManagerRef,
     catalog: Arc<RwLock<Catalog>>,
     catalog_updated_tx: Sender<CatalogVersion>,
 }
 
+const RE_SUBSCRIBE_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
 impl ObserverManager {
     pub async fn new(
-        client: MetaClient,
+        meta_client: MetaClient,
         addr: HostAddr,
         worker_node_manager: WorkerNodeManagerRef,
         catalog: Arc<RwLock<Catalog>>,
         catalog_updated_tx: Sender<CatalogVersion>,
     ) -> Self {
-        let rx = client.subscribe(addr, WorkerType::Frontend).await.unwrap();
+        let rx = meta_client
+            .subscribe(&addr, WorkerType::Frontend)
+            .await
+            .unwrap();
         Self {
             rx,
+            meta_client,
+            addr,
             worker_node_manager,
             catalog,
             catalog_updated_tx,
         }
     }
 
-    pub fn handle_first_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
+    pub fn handle_snapshot_notification(&mut self, resp: SubscribeResponse) -> Result<()> {
         let mut catalog_guard = self.catalog.write();
+        catalog_guard.clear();
         match resp.info {
             Some(Info::FeSnapshot(snapshot)) => {
                 for db in snapshot.database {
@@ -71,9 +82,7 @@ impl ObserverManager {
                 for source in snapshot.source {
                     catalog_guard.create_source(source)
                 }
-                for node in snapshot.nodes {
-                    self.worker_node_manager.add_worker_node(node)
-                }
+                self.worker_node_manager.refresh_worker_node(snapshot.nodes);
             }
             _ => {
                 return Err(ErrorCode::InternalError(format!(
@@ -155,7 +164,7 @@ impl ObserverManager {
     }
 
     /// `start` is used to spawn a new asynchronous task which receives meta's notification and
-    /// update frontend's data. `start` use `mut self` as parameter.
+    /// update frontend data.
     pub async fn start(mut self) -> Result<JoinHandle<()>> {
         let first_resp = self.rx.next().await?.ok_or_else(|| {
             ErrorCode::InternalError(
@@ -163,19 +172,44 @@ impl ObserverManager {
                     .to_string(),
             )
         })?;
-        self.handle_first_notification(first_resp)?;
+        self.handle_snapshot_notification(first_resp)?;
         let handle = tokio::spawn(async move {
             loop {
                 if let Ok(resp) = self.rx.next().await {
                     if resp.is_none() {
                         tracing::error!("Stream of notification terminated.");
-                        break;
+                        self.re_subscribe().await;
+                        continue;
                     }
                     self.handle_notification(resp.unwrap());
                 }
             }
         });
         Ok(handle)
+    }
+
+    /// `re_subscribe` is used to re-subscribe to the meta's notification.
+    async fn re_subscribe(&mut self) {
+        loop {
+            match self
+                .meta_client
+                .subscribe(&self.addr, WorkerType::Frontend)
+                .await
+            {
+                Ok(rx) => {
+                    tracing::debug!("re-subscribe success");
+                    self.rx = rx;
+                    if let Ok(Some(snapshot_resp)) = self.rx.next().await {
+                        self.handle_snapshot_notification(snapshot_resp)
+                            .expect("handle snapshot notification failed after re-subscribe");
+                        break;
+                    }
+                }
+                Err(_) => {
+                    tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;
+                }
+            }
+        }
     }
 
     /// `update_worker_node_manager` is called in `start` method.

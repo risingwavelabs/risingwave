@@ -56,8 +56,8 @@ async fn test_hummock_pin_unpin() -> Result<()> {
             .unwrap();
         assert_eq!(version_id, hummock_version.id);
         assert_eq!(2, hummock_version.levels.len());
-        assert_eq!(0, hummock_version.levels[0].table_ids.len());
-        assert_eq!(0, hummock_version.levels[1].table_ids.len());
+        assert_eq!(0, hummock_version.levels[0].table_infos.len());
+        assert_eq!(0, hummock_version.levels[1].table_infos.len());
 
         let pinned_versions = HummockPinnedVersion::list(env.meta_store()).await?;
         assert_eq!(pin_versions_sum(&pinned_versions), 1);
@@ -252,8 +252,8 @@ async fn test_hummock_table() -> Result<()> {
         pinned_version
             .levels
             .iter()
-            .flat_map(|level| level.table_ids.iter())
-            .copied()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|info| info.id)
             .sorted()
             .cmp(original_tables.iter().map(|ot| ot.id).sorted())
     );

@@ -11,5 +11,5 @@ make docker_backend
 
 in the project root.
 
-For developers, we always recommend using risedev to start the full cluster, instead of using these docker images.
+For RisingWave kernel hackers, we always recommend using [risedev](../src/risedevtool/README.md) to start the full cluster, instead of using docker images.
 See [CONTRIBUTING](../CONTRIBUTING.md) for more information.
