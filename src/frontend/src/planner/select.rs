@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -43,12 +43,7 @@ impl Planner {
         // Plan the FROM clause.
         let mut root = match from {
             None => self.create_dummy_values(),
-            Some(t) => {
-                let table: Vec<ColumnDesc> = t.extract_column_descs();
-                let result = self.plan_relation(t)?;
-                self.extract_select_items(&select_items, aliases.clone(), table)?;
-                result
-            }
+            Some(t) => self.plan_relation(t)?,
         };
         // Plan the WHERE clause.
         if let Some(where_clause) = where_clause {
@@ -66,51 +61,6 @@ impl Planner {
             }
             Ok(LogicalProject::create(root, select_items, aliases))
         }
-    }
-
-    /// Extract the `column_desc` of `select_items` and change column name to `alias_name`.
-    fn extract_select_items(
-        &mut self,
-        items: &[ExprImpl],
-        alias: Vec<Option<String>>,
-        table: Vec<ColumnDesc>,
-    ) -> Result<Vec<ColumnDesc>> {
-        let table = {
-            match self.select_items.is_empty() {
-                true => table,
-                false => self.select_items.clone(),
-            }
-        };
-
-        let column_descs = items
-            .iter()
-            .zip_eq(alias.iter())
-            .enumerate()
-            .map(|(id, (expr, alias))| {
-                let default_desc = ColumnDesc {
-                    data_type: expr.return_type(),
-                    column_id: ColumnId::new(id as i32),
-                    name: "".to_string(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                };
-                let mut desc = match expr {
-                    ExprImpl::InputRef(input) => match table.get(input.index()) {
-                        Some(column) => column.clone(),
-                        None => default_desc,
-                    },
-                    _ => default_desc,
-                };
-                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
-                    false => desc.name.clone(),
-                    true => format!("expr#{}", id),
-                });
-                desc.change_prefix_name(desc.name.clone(), name);
-                Ok(desc.clone())
-            })
-            .collect::<Result<Vec<_>>>()?;
-        self.select_items = column_descs.clone();
-        Ok(column_descs)
     }
 
     /// Helper to create a dummy node as child of [`LogicalProject`].

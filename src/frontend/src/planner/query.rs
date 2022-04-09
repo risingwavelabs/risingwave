@@ -15,7 +15,7 @@
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
-use crate::binder::BoundQuery;
+use crate::binder::{BoundQuery, BoundSetExpr, Relation};
 use crate::optimizer::plan_node::LogicalLimit;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
@@ -26,6 +26,20 @@ pub const LIMIT_ALL_COUNT: usize = usize::MAX / 2;
 impl Planner {
     /// Plan a [`BoundQuery`]. Need to bind before planning.
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
+        let select_items = match &query.body {
+            BoundSetExpr::Select(select) => match &select.from {
+                Some(relation) => {
+                    Relation::extract_select_items(select, relation.extract_column_descs())
+                }
+                None => {
+                    vec![]
+                }
+            },
+            BoundSetExpr::Values(_) => {
+                vec![]
+            }
+        };
+
         let mut plan = self.plan_set_expr(query.body)?;
 
         // A logical limit is added if limit, offset or both are specified
@@ -43,8 +57,7 @@ impl Planner {
         let dist = Distribution::Single;
         let mut out_fields = FixedBitSet::with_capacity(plan.schema().len());
         out_fields.insert_range(..);
-        let root =
-            PlanRoot::new_with_items(plan, dist, order, out_fields, self.select_items.clone());
+        let root = PlanRoot::new_with_items(plan, dist, order, out_fields, select_items);
         Ok(root)
     }
 }

@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -26,7 +26,7 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
-use crate::binder::{Binder, BoundSetExpr};
+use crate::binder::{Binder, BoundSelect, BoundSetExpr};
 use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -69,15 +69,48 @@ impl Relation {
             }
             Relation::Subquery(sub) => {
                 if let BoundSetExpr::Select(select) = &sub.query.body {
-                    match &select.from {
+                    let table = match &select.from {
                         Some(relation) => relation.extract_column_descs(),
                         None => vec![],
-                    }
+                    };
+                    Self::extract_select_items(select, table)
                 } else {
                     vec![]
                 }
             }
         }
+    }
+
+    pub fn extract_select_items(select: &BoundSelect, table: Vec<ColumnDesc>) -> Vec<ColumnDesc> {
+        let column_descs = select
+            .select_items
+            .iter()
+            .zip_eq(select.aliases.iter())
+            .enumerate()
+            .map(|(id, (expr, alias))| {
+                let default_desc = ColumnDesc {
+                    data_type: expr.return_type(),
+                    column_id: ColumnId::new(id as i32),
+                    name: "".to_string(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
+                };
+                let mut desc = match expr {
+                    ExprImpl::InputRef(input) => match table.get(input.index()) {
+                        Some(column) => column.clone(),
+                        None => default_desc,
+                    },
+                    _ => default_desc,
+                };
+                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
+                    false => desc.name.clone(),
+                    true => format!("expr#{}", id),
+                });
+                desc.change_prefix_name(desc.name.clone(), name);
+                desc.clone()
+            })
+            .collect_vec();
+        column_descs
     }
 }
 
