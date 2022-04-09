@@ -114,15 +114,15 @@ pub struct TableV2BatchReader;
 #[async_trait]
 impl BatchSourceReader for TableV2BatchReader {
     async fn open(&mut self) -> Result<()> {
-        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
+       unimplemented!()
     }
 
     async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
+       unimplemented!()
     }
 
     async fn close(&mut self) -> Result<()> {
-        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
+       unimplemented!()
     }
 }
 
