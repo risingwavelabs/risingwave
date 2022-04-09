@@ -113,7 +113,7 @@ pub struct RocksDBStateStoreIter {}
 
 impl RocksDBStateStoreIter {
     async fn new(_store: RocksDBStateStore, _prefix: Vec<u8>) -> Result<Self> {
-        Err(ErrorCode::NotImplemented(String::new(), None.into()).into())
+        Err(ErrorCode::NotImplemented("RocksDBStateStoreIter unimplemented".to_string(), None.into()).into())
     }
 }
 

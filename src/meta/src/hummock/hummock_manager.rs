@@ -801,7 +801,7 @@ impl<S> HummockManager<S>
                         .for_each(|t| version_first_level.table_infos.push(t.clone()));
                 }
                 LevelType::Nonoverlapping => return Err(ErrorCode::NotImplemented(
-                    String::new(), None.into(),
+                    "unsupported LevelType::Nonoverlapping".to_string(), None.into(),
                 ).into()),
             };
 

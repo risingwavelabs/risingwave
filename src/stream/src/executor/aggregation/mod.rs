@@ -253,7 +253,7 @@ pub fn create_streaming_agg_state(
                 }
                 (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
                 _ => return Err(ErrorCode::NotImplemented(
-                    String::new(), None.into()).into()),
+                    "unsupported aggregate type".to_string(), None.into()).into()),
             }
         }
         _ => todo!(),

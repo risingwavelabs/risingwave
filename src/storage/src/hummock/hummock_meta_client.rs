@@ -111,11 +111,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn commit_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        Err(ErrorCode::NotImplemented(String::new(), None.into()).into())
+        Err(ErrorCode::NotImplemented("commit_epoch unsupported".to_string(), None.into()).into())
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        Err(ErrorCode::NotImplemented(String::new(), None.into()).into())
+        Err(ErrorCode::NotImplemented("abort_epoch unsupported".to_string(), None.into()).into())
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {
