@@ -20,6 +20,8 @@ use std::time::Duration;
 
 use itertools::Itertools;
 use prost::Message;
+use tokio::sync::{Mutex, RwLock};
+
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockRefCount, HummockSSTableId, HummockVersionId,
@@ -30,15 +32,14 @@ use risingwave_pb::hummock::{
     HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
     SstableInfo, UncommittedEpoch,
 };
-use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
-    sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
-    INVALID_TIMESTAMP,
+    CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt, INVALID_TIMESTAMP,
+    sstable_id_info,
 };
 use crate::manager::{IdCategory, MetaSrvEnv};
 use crate::model::{MetadataModel, ValTransaction, VarTransaction, Worker};
@@ -113,8 +114,8 @@ struct Versioning {
 }
 
 impl<S> HummockManager<S>
-where
-    S: MetaStore,
+    where
+        S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -352,7 +353,7 @@ where
                         "Invalid SST id {}, may have been vacuumed",
                         sst_id
                     ))
-                    .into());
+                        .into());
                 }
                 Some(sst_id_info) => {
                     if sst_id_info.meta_delete_timestamp != INVALID_TIMESTAMP {
@@ -360,7 +361,7 @@ where
                             "SST id {} has been marked for vacuum",
                             sst_id
                         ))
-                        .into());
+                            .into());
                     }
                     if sst_id_info.meta_create_timestamp != INVALID_TIMESTAMP {
                         // This is a duplicate request.
@@ -711,7 +712,7 @@ where
                             "invalid sst id {}, may have been vacuumed",
                             sst_id
                         ))
-                        .into());
+                            .into());
                     }
                     Some(mut sst_id_info) => {
                         sst_id_info.meta_create_timestamp = sstable_id_info::get_timestamp_now();
@@ -799,9 +800,9 @@ where
                         .iter()
                         .for_each(|t| version_first_level.table_infos.push(t.clone()));
                 }
-                LevelType::Nonoverlapping => {
-                    unimplemented!()
-                }
+                LevelType::Nonoverlapping => return Err(ErrorCode::NotImplemented(
+                    String::new(), None.into(),
+                ).into()),
             };
 
             // Update compact status so SSTs are eligible for compaction

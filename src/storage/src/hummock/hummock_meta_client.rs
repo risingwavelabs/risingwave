@@ -15,12 +15,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use risingwave_common::error::Result;
+use tonic::Streaming;
+
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
     CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
-use tonic::Streaming;
 
 use crate::hummock::{HummockEpoch, HummockError, HummockSSTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;
@@ -110,11 +111,11 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     }
 
     async fn commit_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented(String::new(), None.into()).into())
     }
 
     async fn abort_epoch(&self, _epoch: HummockEpoch) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented(String::new(), None.into()).into())
     }
 
     async fn subscribe_compact_tasks(&self) -> Result<Streaming<SubscribeCompactTasksResponse>> {

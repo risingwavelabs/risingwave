@@ -16,20 +16,22 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use itertools::Itertools;
-use risingwave_common::array::stream_chunk::{Op, Ops};
+
 use risingwave_common::array::{Array, ArrayImpl};
+use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
+use risingwave_storage::{Keyspace, StateStore};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::write_batch::WriteBatch;
-use risingwave_storage::{Keyspace, StateStore};
 
-use super::extreme_serializer::{variants, ExtremePk, ExtremeSerializer};
-use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
 use crate::executor::{AggArgs, AggCall, PkDataTypes};
+use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
+
+use super::extreme_serializer::{ExtremePk, ExtremeSerializer, variants};
 
 pub type ManagedMinState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MIN }>;
 pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_MAX }>;
@@ -56,8 +58,8 @@ pub type ManagedMaxState<S, A> = GenericExtremeState<S, A, { variants::EXTREME_M
 ///   state store.
 /// * The `RowIDs` must be i64
 pub struct GenericExtremeState<S: StateStore, A: Array, const EXTREME_TYPE: usize>
-where
-    A::OwnedItem: Ord,
+    where
+        A::OwnedItem: Ord,
 {
     /// Top N elements in the state, which stores the mapping of (sort key, pk) ->
     /// (original sort key). This BTreeMap always maintain the elements that we are sure
@@ -110,9 +112,9 @@ pub trait ManagedTableState<S: StateStore>: Send + Sync + 'static {
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-    for<'a> &'a A: From<&'a ArrayImpl>,
+    where
+        A::OwnedItem: Ord,
+        for<'a> &'a A: From<&'a ArrayImpl>,
 {
     /// Create a managed min state based on `Keyspace`. When `top_n_count` is `None`, the cache will
     /// always be retained when flushing the managed state. Otherwise, we will only retain n entries
@@ -228,7 +230,9 @@ where
                                     }
                                 }
                             }
-                            _ => unimplemented!(),
+                            _ => return Err(ErrorCode::NotImplemented(
+                                "".to_string(), None.into(),
+                            ).into()),
                         }
                     }
 
@@ -349,10 +353,10 @@ where
 
 #[async_trait]
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> ManagedTableState<S>
-    for GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
-    for<'a> &'a A: From<&'a ArrayImpl>,
+for GenericExtremeState<S, A, EXTREME_TYPE>
+    where
+        A::OwnedItem: Ord,
+        for<'a> &'a A: From<&'a ArrayImpl>,
 {
     async fn apply_batch(
         &mut self,
@@ -379,8 +383,8 @@ where
 }
 
 impl<S: StateStore, A: Array, const EXTREME_TYPE: usize> GenericExtremeState<S, A, EXTREME_TYPE>
-where
-    A::OwnedItem: Ord,
+    where
+        A::OwnedItem: Ord,
 {
     #[cfg(test)]
     #[allow(dead_code)]
@@ -463,10 +467,11 @@ mod tests {
 
     use itertools::Itertools;
     use rand::prelude::*;
+    use smallvec::smallvec;
+
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
-    use smallvec::smallvec;
 
     use super::*;
 
@@ -481,8 +486,8 @@ mod tests {
             0,
             PkDataTypes::new(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         assert!(!managed_state.is_dirty());
 
         let mut epoch: u64 = 0;
@@ -623,8 +628,8 @@ mod tests {
             row_count,
             PkDataTypes::new(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         // The minimum should still be 30
         assert_eq!(
@@ -664,8 +669,8 @@ mod tests {
             0,
             smallvec![DataType::Int64],
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =
@@ -681,8 +686,8 @@ mod tests {
             Some(1005),
             Some(1006),
         ])
-        .unwrap()
-        .into();
+            .unwrap()
+            .into();
 
         let extreme = match EXTREME_TYPE {
             variants::EXTREME_MIN => Some(ScalarImpl::Int64(1)),
@@ -749,8 +754,8 @@ mod tests {
             0,
             smallvec![DataType::Int64],
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =
@@ -766,8 +771,8 @@ mod tests {
             Some(1005),
             Some(1006),
         ])
-        .unwrap()
-        .into();
+            .unwrap()
+            .into();
 
         let extreme = match EXTREME_TYPE {
             variants::EXTREME_MIN => None,
@@ -850,8 +855,8 @@ mod tests {
             0,
             PkDataTypes::new(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =
@@ -929,8 +934,8 @@ mod tests {
             0,
             PkDataTypes::new(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         let mut heap = BTreeSet::new();
 
@@ -1026,8 +1031,8 @@ mod tests {
             0,
             PkDataTypes::new(),
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
         assert!(!managed_state.is_dirty());
 
         let value_buffer =

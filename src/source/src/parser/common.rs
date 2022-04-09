@@ -95,6 +95,6 @@ pub(crate) fn json_parse_value(
                 Err(e) => Err(e),
             },
         },
-        _ => unimplemented!(),
+        _ => Err(ErrorCode::NotImplemented(String::new(), None.into()).into()),
     }
 }

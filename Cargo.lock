@@ -2453,6 +2453,7 @@ dependencies = [
  "async-trait",
  "byteorder",
  "bytes",
+ "risingwave_common",
  "thiserror",
  "tokio",
  "tracing",

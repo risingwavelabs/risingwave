@@ -226,7 +226,9 @@ impl QueryRunner {
                     }
                 }
                 _ => {
-                    unimplemented!()
+                    return Err(ErrorCode::NotImplemented(
+                    "".to_string(), None.into(),
+                    ).into())
                 }
             }
         }

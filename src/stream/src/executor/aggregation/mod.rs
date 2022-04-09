@@ -12,38 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod agg_executor;
-pub use agg_executor::*;
-
-mod agg_call;
 use std::any::Any;
 
-pub use agg_call::*;
-
-mod foldable;
-pub use foldable::*;
-
-mod row_count;
-mod single_value;
-
 use dyn_clone::{self, DynClone};
-use risingwave_common::array::stream_chunk::Ops;
+
+pub use agg_call::*;
+pub use agg_executor::*;
+pub use foldable::*;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
     I16Array, I32Array, I64Array, Utf8Array,
 };
+use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::AggKind;
 use risingwave_expr::*;
+use risingwave_expr::expr::AggKind;
 pub use row_count::*;
 
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 
+pub use super::aggregation::StreamingRowCountAgg;
+
+mod agg_executor;
+mod agg_call;
+mod foldable;
+mod row_count;
+mod single_value;
+
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
-    StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
+StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
@@ -53,8 +53,6 @@ pub type StreamingMinAgg<S> = StreamingFoldAgg<S, S, Minimizable<<S as Array>::O
 
 /// `StreamingMaxAgg` get maximum data of the same type.
 pub type StreamingMaxAgg<S> = StreamingFoldAgg<S, S, Maximizable<<S as Array>::OwnedItem>>;
-
-pub use super::aggregation::StreamingRowCountAgg;
 
 /// `StreamingAggState` records a state of streaming expression. For example,
 /// there will be `StreamingAggCompare` and `StreamingAggSum`.
@@ -254,7 +252,8 @@ pub fn create_streaming_agg_state(
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
                 (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
-                _ => unimplemented!(),
+                _ => return Err(ErrorCode::NotImplemented(
+                    String::new(), None.into()).into()),
             }
         }
         _ => todo!(),

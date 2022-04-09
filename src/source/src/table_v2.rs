@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{BatchSourceReader, Source, StreamSourceReader};
@@ -114,15 +114,15 @@ pub struct TableV2BatchReader;
 #[async_trait]
 impl BatchSourceReader for TableV2BatchReader {
     async fn open(&mut self) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
     }
 
     async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
     }
 
     async fn close(&mut self) -> Result<()> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented("unimplemented BatchSourceReader".to_string(), None.into(), ).into())
     }
 }
 
