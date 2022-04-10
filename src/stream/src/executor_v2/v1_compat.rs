@@ -36,6 +36,7 @@ pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef
 use crate::executor::AggCall;
 use crate::executor_v2::global_simple_agg::SimpleAggExecutor;
 use crate::executor_v2::top_n::TopNExecutor;
+use crate::executor_v2::top_n_appendonly::AppendOnlyTopNExecutor;
 use crate::task::FinishCreateMviewNotifier;
 
 /// The struct wraps a [`BoxedMessageStream`] and implements the interface of [`ExecutorV1`].
@@ -287,6 +288,35 @@ impl<S: StateStore> TopNExecutor<S> {
         keyspace: Keyspace<S>,
         cache_size: Option<usize>,
         total_count: (usize, usize, usize),
+        executor_id: u64,
+        _op_info: String,
+        key_indices: Vec<usize>,
+    ) -> Result<Self> {
+        let input = Box::new(ExecutorV1AsV2(input));
+        Self::new(
+            input,
+            pk_order_types,
+            offset_and_limit,
+            pk_indices,
+            keyspace,
+            cache_size,
+            total_count,
+            executor_id,
+            key_indices,
+        )
+    }
+}
+
+impl<S: StateStore> AppendOnlyTopNExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        pk_order_types: Vec<OrderType>,
+        offset_and_limit: (usize, Option<usize>),
+        pk_indices: PkIndices,
+        keyspace: Keyspace<S>,
+        cache_size: Option<usize>,
+        total_count: (usize, usize),
         executor_id: u64,
         _op_info: String,
         key_indices: Vec<usize>,

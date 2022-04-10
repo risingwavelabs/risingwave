@@ -8,11 +8,10 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::generate_output;
 use crate::executor::managed_state::top_n::variants::{TOP_N_MAX, TOP_N_MIN};
 use crate::executor::managed_state::top_n::{ManagedTopNBottomNState, ManagedTopNState};
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
-use crate::executor_v2::top_n_executor::{TopNExecutorBase, TopNExecutorWrapper};
+use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
 use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// `TopNExecutor` works with input with modification, it keeps all the data
@@ -424,7 +423,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                 }
             }
         }
-        generate_output(new_rows, new_ops, &self.schema).map_err(StreamExecutorError::eval_error)
+        generate_output(new_rows, new_ops, &self.schema)
     }
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
