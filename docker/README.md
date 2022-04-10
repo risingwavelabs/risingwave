@@ -5,8 +5,7 @@ RisingWave currently *only supports Linux x86_64* for building docker images.
 To build the images, simply run:
 
 ```
-make docker_frontend
-make docker_backend
+make docker
 ```
 
 in the project root.

@@ -204,7 +204,7 @@ script = '''
 #!@shell
 
 set -e
-echo "**Reminder**: risedev will only build risingwave_cmd and risedev crates"
+echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build $(tput setaf 4)risingwave_cmd and risedev$(tput sgr0) crates."
 
 export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="$RUSTFLAGS"

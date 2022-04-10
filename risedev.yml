@@ -12,8 +12,9 @@ risedev:
     # - use: aws-s3
     #   bucket: some-bucket
 
-    # if you want to enable etcd backend, uncomment the following line.
+    # if you want to enable etcd backend, uncomment the following lines.
     # - use: etcd
+    #   unsafe-no-fsync: true
 
     - use: meta-node
       enable-dashboard-v2: false
@@ -32,7 +33,9 @@ risedev:
 
     # If you want to create source from Kafka, uncomment the following lines
     # - use: zookeeper
+    #   persist-data: true
     # - use: kafka
+    #   persist-data: true
 
   legacy:
     - use: meta-node
@@ -348,4 +351,3 @@ template:
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
-
