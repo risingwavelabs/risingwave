@@ -89,14 +89,17 @@ pub(crate) fn gen_materialized_source_plan(
     source: ProstSource,
 ) -> Result<(PlanRef, ProstTable)> {
     let materialize = {
-        // Manually assemble the materialization plan for the table.
         let source_catalog: SourceCatalog = (&source).into();
+
+        // Get not hidden `column_desc` from catalog to make `table`.
         let select_items = source_catalog
             .columns
             .iter()
             .filter(|f| !f.is_hidden)
             .map(|c| c.clone().column_desc)
             .collect_vec();
+
+        // Manually assemble the materialization plan for the table.
         let source_node: PlanRef =
             StreamSource::new(LogicalSource::new(Rc::new(source_catalog), context)).into();
         let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());

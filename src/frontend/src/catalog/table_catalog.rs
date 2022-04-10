@@ -151,14 +151,14 @@ impl From<&ProstTable> for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::catalog::{OrderedColumnDesc, TableId};
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
-    use crate::catalog::column_catalog::ColumnCatalog;
+    use crate::catalog::column_catalog::tests::build_catalogs;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
 
@@ -209,36 +209,7 @@ mod tests {
                 id: TableId::new(0),
                 associated_source_id: Some(TableId::new(233)),
                 name: "test".to_string(),
-                columns: vec![
-                    ColumnCatalog::row_id_column(),
-                    ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
-                            },
-                            column_id: ColumnId::new(1),
-                            name: "country".to_string(),
-                            field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
-                            ],
-                            type_name: ".test.Country".to_string()
-                        },
-                        is_hidden: false
-                    }
-                ],
+                columns: build_catalogs(),
                 pk_desc: vec![OrderedColumnDesc {
                     column_desc: row_id_column_desc(),
                     order: OrderType::Ascending

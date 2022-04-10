@@ -81,6 +81,7 @@ impl Relation {
         }
     }
 
+    /// Extract `column_descs` from table by `select_items`.
     pub fn extract_select_items(select: &BoundSelect, table: Vec<ColumnDesc>) -> Vec<ColumnDesc> {
         let column_descs = select
             .select_items
@@ -102,10 +103,12 @@ impl Relation {
                     },
                     _ => default_desc,
                 };
+                // Get alias name.
                 let name = alias.clone().unwrap_or(match desc.name.is_empty() {
                     false => desc.name.clone(),
                     true => format!("expr#{}", id),
                 });
+                // Change desc name and `field_descs` prefix name to alias.
                 desc.change_prefix_name(desc.name.clone(), name);
                 desc.clone()
             })
@@ -309,7 +312,7 @@ impl Binder {
                             let mut catalogs = vec![];
                             let mut source = s.clone();
                             for col in source.columns {
-                                // Extract `field_descs` and form `column_catalogs`.
+                                // Extract `field_descs` and return `column_catalogs`.
                                 catalogs.append(
                                     &mut col
                                         .column_desc
