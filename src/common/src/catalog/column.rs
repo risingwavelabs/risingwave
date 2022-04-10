@@ -121,7 +121,7 @@ impl ColumnDesc {
         }
     }
 
-    /// Generate increment `column_id` store in `column_desc` and `field_descs`
+    /// Generate increment `column_id` for `column_desc` and `field_descs`
     pub fn generate_increment_id(&mut self, index: &mut i32) {
         self.column_id = ColumnId::new(*index);
         *index += 1;
@@ -231,6 +231,7 @@ impl From<ProstOrderedColumnDesc> for OrderedColumnDesc {
 
 #[cfg(test)]
 pub mod tests {
+    use itertools::Itertools;
     use risingwave_pb::plan::ColumnDesc as ProstColumnDesc;
 
     use crate::catalog::ColumnDesc;
@@ -264,5 +265,21 @@ pub mod tests {
     fn test_into_column_catalog() {
         let desc: ColumnDesc = build_prost_desc().into();
         assert_eq!(desc, build_desc());
+    }
+
+    #[test]
+    fn test_change_prefix_name() {
+        let mut column_desc = build_desc();
+        column_desc.change_prefix_name("country".to_string(), "c".to_string());
+        let columns = column_desc.get_column_descs();
+        let actual = columns.iter().map(|c| c.name.as_str()).collect_vec();
+        let expect = vec![
+            "c",
+            "c.address",
+            "c.city",
+            "c.city.address",
+            "c.city.zipcode",
+        ];
+        assert_eq!(actual, expect);
     }
 }

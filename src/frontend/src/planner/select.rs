@@ -49,7 +49,6 @@ impl Planner {
         if let Some(where_clause) = where_clause {
             root = self.plan_where(root, where_clause)?;
         }
-
         // Plan the SELECT clause.
         // TODO: select-agg, group-by, having can also contain subquery exprs.
         let has_agg_call = select_items.iter().any(|expr| expr.has_agg_call());

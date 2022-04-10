@@ -106,9 +106,8 @@ impl StreamMaterialize {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
 
+        // Assert whether not hidden fields have same len with `select_items`
         assert_eq!(
             schema
                 .fields
@@ -120,13 +119,17 @@ impl StreamMaterialize {
             select_items.len()
         );
 
-        // mapping `column_name` and `column_desc`.
+        // Mapping `column_name` and `column_desc`.
         let mut select_map: HashMap<String, ColumnDesc> = HashMap::new();
         for desc in select_items {
             select_map.insert(desc.name.clone(), desc);
         }
 
-        // Use `field_name` to get `column_desc`, if not have `column_desc` which is hidden field.
+        // Materialize executor won't change the append-only behavior of the stream, so it depends
+        // on input's `append_only`.
+        // Use `field_name` to get `column_desc`, if not have `column_desc` which is a hidden field.
+        // Because of `pk_indices` and `user_cols.contains`, must use fields order to generate
+        // columns.
         let mut columns = schema
             .fields()
             .iter()
@@ -149,8 +152,8 @@ impl StreamMaterialize {
             })
             .collect_vec();
 
-        // Since the `field_descs` also need to have increment `column_id`,
-        // so re generate increment id for each `column_desc`.
+        // Since the `column_desc.field_descs` also need to have increment `column_id`,
+        // so re generate increment id for each `column_desc` and `column_desc.field_descs`.
         ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());

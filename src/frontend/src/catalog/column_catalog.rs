@@ -63,7 +63,7 @@ impl ColumnCatalog {
         }
     }
 
-    /// Generate increment `column_id` store in `column_desc` and `field_descs`
+    /// Generate increment `column_id` for every `column_desc` and `column_desc.field_descs`
     pub fn generate_increment_id(catalogs: &mut Vec<ColumnCatalog>) {
         let mut index = 0;
         for catalog in catalogs {
@@ -88,5 +88,54 @@ impl ColumnCatalog {
         } else {
             Cow::Borrowed(&self.column_desc.name)
         }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::DataType;
+
+    use crate::catalog::column_catalog::ColumnCatalog;
+
+    pub fn build_catalogs() -> Vec<ColumnCatalog> {
+        vec![
+            ColumnCatalog::row_id_column(),
+            ColumnCatalog {
+                column_desc: ColumnDesc {
+                    data_type: DataType::Struct {
+                        fields: vec![DataType::Varchar, DataType::Varchar].into(),
+                    },
+                    column_id: ColumnId::new(1),
+                    name: "country".to_string(),
+                    field_descs: vec![
+                        ColumnDesc {
+                            data_type: DataType::Varchar,
+                            column_id: ColumnId::new(2),
+                            name: "country.address".to_string(),
+                            field_descs: vec![],
+                            type_name: String::new(),
+                        },
+                        ColumnDesc {
+                            data_type: DataType::Varchar,
+                            column_id: ColumnId::new(3),
+                            name: "country.zipcode".to_string(),
+                            field_descs: vec![],
+                            type_name: String::new(),
+                        },
+                    ],
+                    type_name: ".test.Country".to_string(),
+                },
+                is_hidden: false,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_generate_increment_id() {
+        let mut catalogs = build_catalogs();
+        catalogs[0].column_desc.column_id = ColumnId::new(5);
+        ColumnCatalog::generate_increment_id(&mut catalogs);
+        assert_eq!(build_catalogs(), catalogs);
     }
 }
