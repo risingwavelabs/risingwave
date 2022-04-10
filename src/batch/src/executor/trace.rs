@@ -53,7 +53,6 @@ impl Executor for TraceExecutor {
     async fn next(&mut self) -> Result<Option<DataChunk>> {
         let input_desc = self.input_desc.as_str();
         let span_name = format!("{input_desc}_next");
-        // debug! {"input executor:{}", input_desc};
         let input_chunk = self
             .child
             .next()
@@ -67,9 +66,6 @@ impl Executor for TraceExecutor {
             Ok(chunk) => {
                 match &chunk {
                     Some(chunk) => {
-                        // debug! {"input chunk card: {}  capacity: {}", chunk.cardinality(),
-                        // chunk.capacity()}; debug! {"input chunk: {:?}",
-                        // chunk};
                         event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                     }
                     None => {

@@ -1020,6 +1020,7 @@ mod tests {
         test_fixture.do_test(expected_chunk, false).await;
     }
 
+    #[tokio::test]
     async fn test_left_semi_join_with_non_equi_condition() {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftSemi);
 
