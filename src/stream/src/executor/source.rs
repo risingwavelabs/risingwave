@@ -17,12 +17,10 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use futures::Future;
-
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
-use futures::{Stream, StreamExt};
+use futures::{Future, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
@@ -43,8 +41,10 @@ use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRe
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
-    /// the future that builds stream_reader. It is required because source should not establish connections to the upstream before `next` is called
-    pub stream_reader_future: Option<Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>>>,
+    /// the future that builds stream_reader. It is required because source should not establish
+    /// connections to the upstream before `next` is called
+    pub stream_reader_future:
+        Option<Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>>>,
     /// The reader for stream source
     pub stream_reader: Option<Box<dyn StreamSourceReader>>,
     /// The reader for barrier
@@ -141,7 +141,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     }
 }
 
-async fn build_stream_reader<S: StateStore>(source: Arc<SourceImpl>, operator_id: u64, column_ids: Vec<ColumnId>, keyspace: Keyspace<S>) -> Result<Box<dyn StreamSourceReader>> {
+async fn build_stream_reader<S: StateStore>(
+    source: Arc<SourceImpl>,
+    operator_id: u64,
+    column_ids: Vec<ColumnId>,
+    keyspace: Keyspace<S>,
+) -> Result<Box<dyn StreamSourceReader>> {
     let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
         SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
             HighLevelKafkaSourceReaderContext {
@@ -178,7 +183,14 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
-        let stream_reader_future: Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>> = Box::pin(build_stream_reader(source, operator_id, column_ids.clone(), keyspace));
+        let stream_reader_future: Pin<
+            Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>,
+        > = Box::pin(build_stream_reader(
+            source,
+            operator_id,
+            column_ids.clone(),
+            keyspace,
+        ));
 
         Ok(Self {
             source_id,
@@ -280,7 +292,9 @@ impl SourceReader {
 impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(mut reader) = self.reader.take() {
-            reader.stream_reader.replace(reader.stream_reader_future.as_mut().unwrap().await?);
+            reader
+                .stream_reader
+                .replace(reader.stream_reader_future.as_mut().unwrap().await?);
             reader.stream_reader.as_mut().unwrap().open().await?;
             self.reader_stream.replace(reader.into_stream().boxed());
         }
