@@ -207,7 +207,7 @@ impl<S: StateStore> LookupExecutor<S> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
-        let input = std::mem::replace(&mut self.input, None);
+        let input = std::mem::take(&mut self.input);
         #[for_await]
         for msg in input.unwrap() {
             let msg = msg.map_err(StreamExecutorError::input_error)?;
