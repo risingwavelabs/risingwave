@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::execution::QueryExecution;
 use crate::scheduler::plan_fragmenter::Query;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::ExecutionContextRef;
 
 pub trait DataChunkStream = Stream<Item = Result<DataChunk>>;
