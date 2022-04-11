@@ -66,10 +66,8 @@ impl<S: StateStore> ManagedMViewState<S> {
         assert_eq!(self.order_types.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
 
-        let l = pk.0.len() == 3
-            && pk
-                .0
-                .iter()
+        let l =
+            pk.0.iter()
                 .any(|d| matches!(d, Some(ScalarImpl::Decimal(_))));
 
         if l {
@@ -84,10 +82,8 @@ impl<S: StateStore> ManagedMViewState<S> {
     pub fn delete(&mut self, pk: Row) {
         assert_eq!(self.order_types.len(), pk.size());
 
-        let l = pk.0.len() == 3
-            && pk
-                .0
-                .iter()
+        let l =
+            pk.0.iter()
                 .any(|d| matches!(d, Some(ScalarImpl::Decimal(_))));
 
         if l {
