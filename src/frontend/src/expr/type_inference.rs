@@ -374,6 +374,9 @@ lazy_static::lazy_static! {
     };
 }
 
+/// Find the least restrictive type. Used by `VALUES`, `CASE`, `UNION`, etc.
+/// It is a simplified version of the rule used in
+/// [PG](https://www.postgresql.org/docs/current/typeconv-union-case.html).
 pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     if lhs == rhs {
         Ok(lhs)
@@ -386,6 +389,9 @@ pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
     }
 }
 
+/// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
+/// that allows explicit casts, but not vice versa. See details in
+/// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
 pub enum CastContext {
     Implicit,
@@ -393,6 +399,7 @@ pub enum CastContext {
     Explicit,
 }
 
+/// Checks whether casting from `source` to `target` is ok in `allows` context.
 pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bool {
     let k = (name_of(source), name_of(target));
     matches!(CAST_MAP.get(&k), Some(context) if context <= allows)
@@ -401,8 +408,11 @@ pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bo
 fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
     use DataTypeName as T;
 
+    // Implicit cast operations in PG are organized in 3 sequences, with the reverse direction being
+    // assign cast operations.
+    // https://github.com/postgres/postgres/blob/e0064f0ff6dfada2695330c6bc1945fa7ae813be/src/include/catalog/pg_cast.dat#L18-L20
     let mut m = HashMap::new();
-    cast_map_helper(
+    insert_cast_seq(
         &mut m,
         &[
             T::Int16,
@@ -413,11 +423,22 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
             T::Float64,
         ],
     );
-    cast_map_helper(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
-    cast_map_helper(&mut m, &[T::Time, T::Interval]);
+    insert_cast_seq(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
+    insert_cast_seq(&mut m, &[T::Time, T::Interval]);
+    // Allow explicit cast operation between the same type, for types not included above.
+    // Ideally we should remove all such useless casts. But for now we just forbid them in contexts
+    // that only allow implicit or assign cast operations, and the user can still write them
+    // explicitly.
+    //
+    // Note this is different in PG, where same type cast is used for sizing (e.g. `NUMERIC(18,3)`
+    // to `NUMERIC(20,4)`). Sizing casts are only available for `numeric`, `timestamp`,
+    // `timestamptz`, `time`, `interval` and these are implicit. https://www.postgresql.org/docs/current/typeconv-query.html
+    //
+    // As we do not support size parameters in types, there are no sizing casts.
     m.insert((T::Boolean, T::Boolean), CastContext::Explicit);
     m.insert((T::Varchar, T::Varchar), CastContext::Explicit);
 
+    // Casting to and from string type.
     for t in [
         T::Boolean,
         T::Int16,
@@ -433,10 +454,17 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
         T::Interval,
     ] {
         m.insert((t, T::Varchar), CastContext::Assign);
-        // cast from varchar to type should be explicit once literal is `unknown` type
+        // Casting from string is explicit-only in PG.
+        // But as we bind string literals to `varchar` rather than `unknown`, allowing them in
+        //  assign context enables this shorter statement:
+        // `insert into t values ('2022-01-01')`
+        // If it was explicit:
+        // `insert into t values ('2022-01-01'::date)`
+        // `insert into t values (date '2022-01-01')`
         m.insert((T::Varchar, t), CastContext::Assign);
     }
 
+    // Misc casts allowed by PG that are neither in implicit cast sequences nor from/to string.
     m.insert((T::Timestamp, T::Time), CastContext::Assign);
     m.insert((T::Timestampz, T::Time), CastContext::Assign);
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
@@ -444,14 +472,15 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
     m
 }
 
-fn cast_map_helper(
+fn insert_cast_seq(
     m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>,
-    ts: &[DataTypeName],
+    types: &[DataTypeName],
 ) {
-    for (source_idx, source_type) in ts.iter().enumerate() {
-        for (target_idx, target_type) in ts.iter().enumerate() {
-            let cast_context = match source_idx.cmp(&target_idx) {
+    for (source_index, source_type) in types.iter().enumerate() {
+        for (target_index, target_type) in types.iter().enumerate() {
+            let cast_context = match source_index.cmp(&target_index) {
                 std::cmp::Ordering::Less => CastContext::Implicit,
+                // See comments in `build_cast_map` for why same type cast is marked as explicit.
                 std::cmp::Ordering::Equal => CastContext::Explicit,
                 std::cmp::Ordering::Greater => CastContext::Assign,
             };
@@ -468,99 +497,6 @@ lazy_static::lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn gen_cast_table(allows: CastContext) -> Vec<String> {
-        use itertools::Itertools as _;
-        use DataType as T;
-        let all_types = &[
-            T::Boolean,
-            T::Int16,
-            T::Int32,
-            T::Int64,
-            T::Decimal,
-            T::Float32,
-            T::Float64,
-            T::Varchar,
-            T::Date,
-            T::Timestamp,
-            T::Timestampz,
-            T::Time,
-            T::Interval,
-        ];
-        all_types
-            .iter()
-            .map(|source| {
-                all_types
-                    .iter()
-                    .map(|target| match cast_ok(source, target, &allows) {
-                        false => ' ',
-                        true => 'T',
-                    })
-                    .collect::<String>()
-            })
-            .collect_vec()
-    }
-
-    #[test]
-    fn test_cast_ok() {
-        let actual = gen_cast_table(CastContext::Implicit);
-        assert_eq!(
-            actual,
-            vec![
-                "             ",
-                "  TTTTT      ",
-                "   TTTT      ",
-                "    TTT      ",
-                "     TT      ",
-                "      T      ",
-                "             ",
-                "             ",
-                "         TT  ",
-                "          T  ",
-                "             ",
-                "            T",
-                "             ",
-            ]
-        );
-        let actual = gen_cast_table(CastContext::Assign);
-        assert_eq!(
-            actual,
-            vec![
-                "       T     ",
-                "  TTTTTT     ",
-                " T TTTTT     ",
-                " TT TTTT     ",
-                " TTT TTT     ",
-                " TTTT TT     ",
-                " TTTTT T     ",
-                "TTTTTTT TTTTT",
-                "       T TT  ",
-                "       TT TT ",
-                "       TTT T ",
-                "       T    T",
-                "       T   T ",
-            ]
-        );
-        let actual = gen_cast_table(CastContext::Explicit);
-        assert_eq!(
-            actual,
-            vec![
-                "T T    T     ",
-                " TTTTTTT     ",
-                "TTTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                " TTTTTTT     ",
-                "TTTTTTTTTTTTT",
-                "       TTTT  ",
-                "       TTTTT ",
-                "       TTTTT ",
-                "       T   TT",
-                "       T   TT",
-            ]
-        );
-    }
 
     fn test_simple_infer_type(
         func_type: ExprType,
@@ -659,5 +595,102 @@ mod tests {
         for (expr, num_t) in iproduct!(exprs, num_types) {
             test_infer_type_not_exist(expr, vec![num_t, DataType::Boolean]);
         }
+    }
+
+    fn gen_cast_table(allows: CastContext) -> Vec<String> {
+        use itertools::Itertools as _;
+        use DataType as T;
+        let all_types = &[
+            T::Boolean,
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+            T::Varchar,
+            T::Date,
+            T::Timestamp,
+            T::Timestampz,
+            T::Time,
+            T::Interval,
+        ];
+        all_types
+            .iter()
+            .map(|source| {
+                all_types
+                    .iter()
+                    .map(|target| match cast_ok(source, target, &allows) {
+                        false => ' ',
+                        true => 'T',
+                    })
+                    .collect::<String>()
+            })
+            .collect_vec()
+    }
+
+    #[test]
+    fn test_cast_ok() {
+        // With the help of a script we can obtain the 3 expected cast tables from PG. They are
+        // slightly modified on same-type cast and from-string cast for reasons explained above in
+        // `build_cast_map`.
+
+        let actual = gen_cast_table(CastContext::Implicit);
+        assert_eq!(
+            actual,
+            vec![
+                "             ", // bool
+                "  TTTTT      ",
+                "   TTTT      ",
+                "    TTT      ",
+                "     TT      ",
+                "      T      ",
+                "             ",
+                "             ", // varchar
+                "         TT  ",
+                "          T  ",
+                "             ",
+                "            T",
+                "             ",
+            ]
+        );
+        let actual = gen_cast_table(CastContext::Assign);
+        assert_eq!(
+            actual,
+            vec![
+                "       T     ", // bool
+                "  TTTTTT     ",
+                " T TTTTT     ",
+                " TT TTTT     ",
+                " TTT TTT     ",
+                " TTTT TT     ",
+                " TTTTT T     ",
+                "TTTTTTT TTTTT", // varchar
+                "       T TT  ",
+                "       TT TT ",
+                "       TTT T ",
+                "       T    T",
+                "       T   T ",
+            ]
+        );
+        let actual = gen_cast_table(CastContext::Explicit);
+        assert_eq!(
+            actual,
+            vec![
+                "T T    T     ", // bool
+                " TTTTTTT     ",
+                "TTTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                "TTTTTTTTTTTTT", // varchar
+                "       TTTT  ",
+                "       TTTTT ",
+                "       TTTTT ",
+                "       T   TT",
+                "       T   TT",
+            ]
+        );
     }
 }
