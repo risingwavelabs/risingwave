@@ -131,7 +131,6 @@ impl HopWindowExecutor {
                 .eval(&data_chunk)
                 .map_err(StreamExecutorError::EvalError)?;
             let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
-            println!("{}", hop_start_chunk.to_pretty_string());
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
@@ -157,7 +156,6 @@ impl HopWindowExecutor {
                                 self.window_slide, i
                             ))
                         })?;
-                println!("{} {}", window_start_offset, window_end_offset);
                 let window_end_offset_expr = LiteralExpression::new(
                     DataType::Interval,
                     Some(ScalarImpl::Interval(window_end_offset)),
