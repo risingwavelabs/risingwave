@@ -97,7 +97,7 @@ The final written key (aka. full key) is encoded by appending the 8-byte epoch a
 
 ### Write Path
 
-Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatiable service. An SST consists of two files: 
+Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatiable service. An SST consists of two files:
 - <id>`.data`: Data file composed of ~64KB blocks, each of which contains actual key-value pairs.
 - <id>`.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
 
