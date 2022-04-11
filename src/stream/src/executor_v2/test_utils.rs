@@ -14,11 +14,9 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::Keyspace;
 
