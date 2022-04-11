@@ -196,7 +196,7 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
     println!("RiseDev includes several components. You can select the ones you need, so as to reduce build time.");
     println!();
     println!(
-        "Use {} to navigate, use {} to go to next page, and use {} to select. Press {} to continue.",
+        "Use {} to navigate between up / down, use {} to go to next page,\nand use {} to select an item. Press {} to continue.",
         style("arrow up / down").bold(),
         style("arrow left / right").bold(),
         style("space").bold(),
@@ -223,10 +223,9 @@ fn configure(chosen: &[Components]) -> Result<Vec<Components>> {
             let instruction = if (idx + 1) % ITEMS_PER_PAGE == 0 || idx == all_components.len() - 1
             {
                 format!(
-                    "\n\n  page {}/{}, use {} to navigate",
+                    "\n\n  page {}/{}",
                     style(((idx + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE).to_string()).bold(),
                     (all_components.len() + ITEMS_PER_PAGE - 1) / ITEMS_PER_PAGE,
-                    style("arrow key left / right").blue(),
                 )
             } else {
                 String::new()
@@ -308,6 +307,7 @@ fn main() -> Result<()> {
         None => configure(&chosen)?,
     };
 
+    println!("=== Enabled Components ===");
     for component in Components::into_enum_iter() {
         println!(
             "{}: {}",
@@ -319,9 +319,9 @@ fn main() -> Result<()> {
             }
         );
     }
-    println!();
 
-    println!("Writing configuration into {}...", file_path);
+    println!("Configuration saved at {}", file_path);
+    println!("=========================");
 
     let mut file = BufWriter::new(
         OpenOptions::new()
@@ -351,6 +351,17 @@ fn main() -> Result<()> {
     }
 
     file.flush()?;
+
+    println!(
+        "RiseDev will {} the components you've enabled.",
+        style("only download").bold()
+    );
+    println!(
+        "If you want to use these components, please {} in {} to start that component.",
+        style("modify the cluster config").yellow().bold(),
+        style("risedev.yml").bold(),
+    );
+    println!("See CONTRIBUTING.md or RiseDev's readme for more information.");
 
     Ok(())
 }

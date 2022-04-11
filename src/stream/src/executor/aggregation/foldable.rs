@@ -292,6 +292,7 @@ where
     pub fn new() -> Self {
         Self::default()
     }
+
     /// Get current state without using an array builder
     pub fn get_state(&self) -> &Option<R::OwnedItem> {
         &self.result

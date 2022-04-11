@@ -39,6 +39,7 @@ impl StreamSource {
         );
         Self { base, logical }
     }
+
     pub fn column_names(&self) -> Vec<String> {
         self.schema()
             .fields()

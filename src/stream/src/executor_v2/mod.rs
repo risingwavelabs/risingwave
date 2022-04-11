@@ -25,12 +25,14 @@ pub use super::executor::{
 };
 
 mod agg;
+mod barrier_align;
 mod batch_query;
 mod chain;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
 mod local_simple_agg;
+mod lookup;
 pub mod merge;
 pub(crate) mod mview;
 #[allow(dead_code)]
@@ -47,6 +49,7 @@ pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
+pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};

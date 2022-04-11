@@ -74,6 +74,7 @@ impl Distribution {
             _ => unreachable!(),
         }
     }
+
     // "A -> B" represent A satisfies B
     //                   +---+
     //                   |Any|
@@ -108,9 +109,11 @@ impl Distribution {
             },
         }
     }
+
     pub fn any() -> &'static Self {
         &ANY_DISTRIBUTION
     }
+
     pub fn is_any(&self) -> bool {
         matches!(self, Distribution::Any)
     }

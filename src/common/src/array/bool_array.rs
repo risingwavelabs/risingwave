@@ -41,9 +41,9 @@ impl BoolArray {
 
 impl Array for BoolArray {
     type Builder = BoolArrayBuilder;
-    type RefItem<'a> = bool;
-    type OwnedItem = bool;
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = bool;
+    type RefItem<'a> = bool;
 
     fn value_at(&self, idx: usize) -> Option<bool> {
         if !self.is_null(idx) {

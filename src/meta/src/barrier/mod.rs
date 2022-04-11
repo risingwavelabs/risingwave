@@ -139,6 +139,9 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
 
+    /// Enable recovery or not when failover.
+    enable_recovery: bool,
+
     /// The queue of scheduled barriers.
     scheduled_barriers: ScheduledBarriers,
 
@@ -170,12 +173,14 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make this configurable
+        // TODO: make interval configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
+        let enable_recovery = env.opts.enable_recovery;
 
         Self {
             interval,
+            enable_recovery,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -202,22 +207,24 @@ where
         let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut unfinished = UnfinishedNotifiers::default();
-
-        // handle init, here we simply trigger a recovery process to achieve the consistency. We
-        // may need to avoid this when we have more state persisted in meta store.
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
-        let new_epoch = self.env.epoch_generator().generate().into_inner();
-        assert!(new_epoch > state.prev_epoch);
-        state.prev_epoch = new_epoch;
 
-        let (new_epoch, actors_to_finish, finished_create_mviews) =
-            self.recovery(state.prev_epoch, None).await;
-        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
-        for finished in finished_create_mviews {
-            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+        if self.enable_recovery {
+            // handle init, here we simply trigger a recovery process to achieve the consistency. We
+            // may need to avoid this when we have more state persisted in meta store.
+            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            assert!(new_epoch > state.prev_epoch);
+            state.prev_epoch = new_epoch;
+
+            let (new_epoch, actors_to_finish, finished_create_mviews) =
+                self.recovery(state.prev_epoch, None).await;
+            unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+            for finished in finished_create_mviews {
+                unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+            }
+            state.prev_epoch = new_epoch.into_inner();
+            state.update(self.env.meta_store()).await.unwrap();
         }
-        state.prev_epoch = new_epoch.into_inner();
-        state.update(self.env.meta_store()).await.unwrap();
 
         loop {
             tokio::select! {
@@ -266,16 +273,20 @@ where
                     notifiers
                         .into_iter()
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
-                    // If failed, enter recovery mode.
-                    let (new_epoch, actors_to_finish, finished_create_mviews) =
-                        self.recovery(state.prev_epoch, Some(command)).await;
-                    unfinished = UnfinishedNotifiers::default();
-                    unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
-                    for finished in finished_create_mviews {
-                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
-                    }
+                    if self.enable_recovery {
+                        // If failed, enter recovery mode.
+                        let (new_epoch, actors_to_finish, finished_create_mviews) =
+                            self.recovery(state.prev_epoch, Some(command)).await;
+                        unfinished = UnfinishedNotifiers::default();
+                        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+                        for finished in finished_create_mviews {
+                            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                        }
 
-                    state.prev_epoch = new_epoch.into_inner();
+                        state.prev_epoch = new_epoch.into_inner();
+                    } else {
+                        panic!("failed to execute barrier: {:?}", e);
+                    }
                 }
             }
 

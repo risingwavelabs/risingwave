@@ -67,10 +67,15 @@ macro_rules! def_method {
 
 impl<B: BufMut> MaybeFlip<B> {
     def_method!(put_u8, u8);
+
     def_method!(put_u16, u16);
+
     def_method!(put_u32, u32);
+
     def_method!(put_u64, u64);
+
     def_method!(put_i32, i32);
+
     def_method!(put_i64, i64);
 
     fn put_slice(&mut self, src: &[u8]) {
@@ -90,16 +95,15 @@ impl<B: BufMut> MaybeFlip<B> {
 // https://github.com/facebook/mysql-5.6/wiki/MyRocks-record-format#memcomparable-format
 // https://haxisnake.github.io/2020/11/06/TIDB源码学习笔记-基本类型编解码方案/
 impl<'a, B: BufMut> ser::Serializer for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
-
+    type Ok = ();
+    type SerializeMap = Self;
     type SerializeSeq = Self;
+    type SerializeStruct = Self;
+    type SerializeStructVariant = Self;
     type SerializeTuple = Self;
     type SerializeTupleStruct = Self;
     type SerializeTupleVariant = Self;
-    type SerializeMap = Self;
-    type SerializeStruct = Self;
-    type SerializeStructVariant = Self;
 
     fn serialize_bool(self, v: bool) -> Result<()> {
         self.serialize_u8(v as u8)
@@ -310,8 +314,8 @@ impl<'a, B: BufMut> ser::Serializer for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeSeq for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
@@ -330,8 +334,8 @@ impl<'a, B: BufMut> ser::SerializeSeq for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeTuple for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_element<T>(&mut self, value: &T) -> Result<()>
     where
@@ -346,8 +350,8 @@ impl<'a, B: BufMut> ser::SerializeTuple for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeTupleStruct for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
@@ -362,8 +366,8 @@ impl<'a, B: BufMut> ser::SerializeTupleStruct for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeTupleVariant for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_field<T>(&mut self, value: &T) -> Result<()>
     where
@@ -378,8 +382,8 @@ impl<'a, B: BufMut> ser::SerializeTupleVariant for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeMap for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_key<T>(&mut self, key: &T) -> Result<()>
     where
@@ -401,8 +405,8 @@ impl<'a, B: BufMut> ser::SerializeMap for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeStruct for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_field<T>(&mut self, _key: &'static str, value: &T) -> Result<()>
     where
@@ -417,8 +421,8 @@ impl<'a, B: BufMut> ser::SerializeStruct for &'a mut Serializer<B> {
 }
 
 impl<'a, B: BufMut> ser::SerializeStructVariant for &'a mut Serializer<B> {
-    type Ok = ();
     type Error = Error;
+    type Ok = ();
 
     fn serialize_field<T>(&mut self, _key: &'static str, value: &T) -> Result<()>
     where

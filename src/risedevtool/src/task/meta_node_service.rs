@@ -85,6 +85,10 @@ impl Task for MetaNodeService {
             cmd.arg("--dashboard-ui-path").arg(env::var("PREFIX_UI")?);
         }
 
+        if self.config.unsafe_disable_recovery {
+            cmd.arg("--disable-recovery");
+        }
+
         if !self.config.user_managed {
             ctx.run_command(ctx.tmux_run(cmd)?)?;
             ctx.pb.set_message("started");

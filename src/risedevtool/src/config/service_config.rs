@@ -44,6 +44,7 @@ pub struct MetaNodeConfig {
     pub user_managed: bool,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub enable_dashboard_v2: bool,
+    pub unsafe_disable_recovery: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -126,6 +127,7 @@ pub struct KafkaConfig {
     pub port: u16,
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
+    pub broker_id: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

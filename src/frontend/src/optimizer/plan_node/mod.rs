@@ -108,21 +108,27 @@ impl dyn PlanNode {
     pub fn id(&self) -> PlanNodeId {
         self.plan_base().id
     }
+
     pub fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx.clone()
     }
+
     pub fn schema(&self) -> &Schema {
         &self.plan_base().schema
     }
+
     pub fn pk_indices(&self) -> &[usize] {
         &self.plan_base().pk_indices
     }
+
     pub fn order(&self) -> &Order {
         &self.plan_base().order
     }
+
     pub fn distribution(&self) -> &Distribution {
         &self.plan_base().dist
     }
+
     pub fn append_only(&self) -> bool {
         self.plan_base().append_only
     }

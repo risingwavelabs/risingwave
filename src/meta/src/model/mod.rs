@@ -138,6 +138,7 @@ where
         );
         Ok(())
     }
+
     fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
         trx.delete(Self::cf_name(), self.key()?.encode_to_vec());
         Ok(())

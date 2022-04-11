@@ -261,6 +261,7 @@ impl From<Buffer> for Bitmap {
 
 impl TryFrom<&BoolArray> for Bitmap {
     type Error = RwError;
+
     fn try_from(bools: &BoolArray) -> Result<Bitmap> {
         let mut builder = BitmapBuilder::default();
         bools.iter().for_each(|e| {

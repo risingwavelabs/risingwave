@@ -116,24 +116,28 @@ impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
         FuncSign { func, inputs_type }
     }
+
     pub fn new_no_input(func: ExprType) -> Self {
         FuncSign {
             func,
             inputs_type: vec![],
         }
     }
+
     pub fn new_unary(func: ExprType, p1: DataTypeName) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1],
         }
     }
+
     pub fn new_binary(func: ExprType, p1: DataTypeName, p2: DataTypeName) -> Self {
         FuncSign {
             func,
             inputs_type: vec![p1, p2],
         }
     }
+
     pub fn new_ternary(
         func: ExprType,
         p1: DataTypeName,

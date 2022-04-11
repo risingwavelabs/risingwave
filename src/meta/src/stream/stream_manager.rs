@@ -520,14 +520,15 @@ mod tests {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handles: vec![join_handle, join_handle_2],
-                shutdown_txs: vec![shutdown_tx, shutdown_tx_2],
+                join_handles: vec![join_handle_2, join_handle],
+                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
             })
         }
 
         async fn stop(self) {
             for shutdown_tx in self.shutdown_txs {
                 shutdown_tx.send(()).unwrap();
+                tokio::time::sleep(Duration::from_millis(150)).await;
             }
             for join_handle in self.join_handles {
                 join_handle.await.unwrap();
