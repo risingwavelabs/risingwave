@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -35,7 +36,7 @@ pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
-use crate::cluster::ClusterManagerRef;
+use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::model::BarrierManagerState;
@@ -428,6 +429,8 @@ where
         let (collect_tx, collect_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
 
+        let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
@@ -439,7 +442,20 @@ where
         .await?;
 
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
-        finish_rx.await.unwrap(); // Wait for this command to be finished.
+
+        // TODO: refactor this
+        if is_create_mv {
+            let snapshot = self
+                .hummock_manager
+                .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
+                .await?;
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+            self.hummock_manager
+                .unpin_snapshot(META_NODE_ID, [snapshot])
+                .await?;
+        } else {
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+        }
 
         Ok(())
     }

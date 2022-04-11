@@ -61,6 +61,8 @@ impl Hash for WorkerKey {
     }
 }
 
+pub const META_NODE_ID: u32 = 0;
+
 /// [`ClusterManager`] manager cluster/worker meta data in [`MetaStore`].
 pub struct ClusterManager<S: MetaStore> {
     env: MetaSrvEnv<S>,

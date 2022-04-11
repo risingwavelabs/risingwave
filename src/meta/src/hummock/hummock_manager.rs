@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::{Mutex, RwLock};
 
-use crate::cluster::ClusterManagerRef;
+use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
 use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
@@ -141,6 +141,8 @@ where
 
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
+        // Release snapshots pinned by meta on restarting.
+        instance.release_contexts([META_NODE_ID]).await?;
 
         Ok(instance)
     }
