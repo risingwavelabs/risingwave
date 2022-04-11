@@ -232,7 +232,9 @@ where
         context_id: Option<HummockContextId>,
     ) -> Result<()> {
         if let Some(context_id) = context_id {
-            if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
+            if context_id == META_NODE_ID {
+                // Using the preserved meta id is allowed.
+            } else if let Some(worker) = self.cluster_manager.get_worker_by_id(context_id).await {
                 trx.check_exists(Worker::cf_name(), worker.key()?.encode_to_vec());
             } else {
                 // The worker is not found in cluster.
