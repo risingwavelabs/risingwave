@@ -19,9 +19,9 @@ RisingWave provides real-time analytics to serve user’s need. This is done by 
 
 The core design principles of RisingWave streaming engine are summarized as follows. 
 
-* **Actor model based execution engine.** We create a set of actors such that each actor reacts to its own input message, including both data update and control signal. In this way we build a highly concurrent and efficient streaming engine. 
-* **Shared storage for states.** The backbone of the state storage is based on shared cloud object storage (currently AWS S3), which gives us computational elasticity, cheap and infinite storage capacity, and simplicity during configuration change.  
-* **Everything is a table, everything is a state.** We treat every object in our internal storage as both a logical table and an internal state. Therefore they can be effectively managed by catalog, and be updated in a unified streaming engine with consistency guarantee. 
+* **Actor model based execution engine.** We create a set of actors such that each actor reacts to its own input message, including both data update and control signal. In this way we build a highly concurrent and efficient streaming engine.
+* **Shared storage for states.** The backbone of the state storage is based on shared cloud object storage (currently AWS S3), which gives us computational elasticity, cheap and infinite storage capacity, and simplicity during configuration change.
+* **Everything is a table, everything is a state.** We treat every object in our internal storage as both a logical table and an internal state. Therefore they can be effectively managed by catalog, and be updated in a unified streaming engine with consistency guarantee.
 
 In this document we give an overview of RisingWave streaming engine. 
 
@@ -31,7 +31,7 @@ In this document we give an overview of RisingWave streaming engine.
 
 The overall architecture of RisingWave is depicted in the figure above. In brief, RisingWave streaming engine consists of three sets of nodes: frontend, compute nodes, and meta service. The frontend node consists the serving layer, handling users’ SQL requests concurrently. Underlying is the processing layer. Each compute node hosts a collection of long-running actors for stream processing. All actors access a shared persistence layer of storage (currently AWS S3) as its state storage. The meta service maintains all meta-information and coordinates the whole cluster. 
 
-When receiving a create materialized view statement at the frontend, a materialized view and the corresponding streaming pipeline are built in following steps.  
+When receiving a create materialized view statement at the frontend, a materialized view and the corresponding streaming pipeline are built in following steps.
 
 1. Building a stream plan. Here a stream plan is a logical plan which consists of logical operators encoding the dataflow. This is carried out by the streaming planner at the frontend.
 2. Fragmentation. The stream fragmenter at the meta service breaks the generated logical stream plan into stream fragments, and duplicates such fragments when necessary. Here a stream fragment holds partial nodes from the stream plan, and each fragment can be parallelized by building multiple actors for data parallelization.
