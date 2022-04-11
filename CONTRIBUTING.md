@@ -5,7 +5,7 @@ Thanks for your interest in contributing to RisingWave! We welcome and appreciat
 If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose) or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
 
 
-- [Develop RisingWave](#develop-risingwave)
+- [Contribution and Development Guidelines](#contribution-and-development-guidelines)
   - [Code Structure](#code-structure)
   - [Setting Up Development Environment](#setting-up-development-environment)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
@@ -33,8 +33,7 @@ If you have questions, please [create a Github issue](https://github.com/singula
   - [Update CI Workflow](#update-ci-workflow)
   - [When adding new files...](#when-adding-new-files)
   - [When adding new dependencies...](#when-adding-new-dependencies)
-
-
+  - [To check-in PRs from forks...](#to-check-in-prs-from-forks)
 
 ## Code Structure
 
@@ -371,3 +370,14 @@ Also, we use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused 
 workspace.
 
 We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+
+## To check-in PRs from forks...
+
+```
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
+```
+
+After that, CI checks will begin on our branch, and the status will be automatically updated to
+PRs from forks.
