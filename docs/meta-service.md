@@ -12,7 +12,7 @@
 
 ## Background
 
-RisingWave provides both real-time analytical query as well as high-concurrent access to Materialized Views. Therefore, both the front-end and compute nodes are designed to be scalable, and they may share the same set of host machines or not, depending on cluster size and whether the user cares about resource isolation.
+RisingWave provides both real-time analytical query as well as high-concurrent access to Materialized Views. Therefore, both the frontend and compute nodes are designed to be scalable, and they may share the same set of host machines or not, depending on cluster size and whether the user cares about resource isolation.
 
 Meanwhile, components such as metadata provider, scheduler, monitoring are more suitable for a centralized design. For example, a typical on-premise deployment may look like below, where the dotted boxes represent minimal unit of deployment (VM or container).
 
@@ -35,7 +35,7 @@ Catalog is the metadata of relational tables in databases.
 - **Table & Materialized Views**: Definition of tables & materialized views along with the columns on them.
 - **Source**: User-defined external data sources.
 
-To execute a DDL statement like `CREATE` or `DROP TABLE`, the front-end sends an RPC to meta node and waits the updated catalog to take effect.
+To execute a DDL statement like `CREATE` or `DROP TABLE`, the frontend sends an RPC to meta node and waits the updated catalog to take effect.
 
 ### Storage
 
@@ -48,7 +48,7 @@ There are 2 choices for how to distribute information across multiple nodes.
 * *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing. 
 * *Pull*: When data changes, the master node does nothing. Other nodes may not have the latest information, so they need to ask the master node every time.
 
-Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on front-end and compute nodes. 
+Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on frontend and compute nodes. 
 
 ![Notification](./images/meta-service/notification.svg)
 
