@@ -183,7 +183,7 @@ RisingWave's SQL frontend has some tests for plans of specific SQLs. See [Planne
 
 ### End-to-End Testing
 
-Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run our e2e tests.
+Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
 
 sqllogictest installation is included when running `./risedev install-tools`. You may also install it with:
 
@@ -210,7 +210,7 @@ After running e2e tests, you may kill the cluster and clean data.
 ./risedev clean-data
 ```
 
-As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
+As RisingWave's codebase is constantly changing, and all persistent data might not be in a stable format, if there's
 some unexpected decode error, try `./risedev clean-data` first.
 
 ### End-to-End Testing on CI
@@ -307,7 +307,7 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
 - `build`: Changes that affect the build system or external dependencies (example scopes: gulp, broccoli, npm)
-- `ci`: Changes to our CI configuration files and scripts (example scopes: Travis, Circle, BrowserStack, SauceLabs)
+- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: Travis, Circle, BrowserStack, SauceLabs)
 - `chore`: Other changes that don't modify src or test files
 - `revert`: Reverts a previous commit
 
@@ -316,7 +316,7 @@ For example, a PR title could be:
 - `refactor: modify executor protobuf package path`
 - `feat(execution): enable comparison between nullable data arrays`, where `(execution)` means that this PR mainly focuses on the execution component.
 
-You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
+You may also check out previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
 
 ### Pull Request Description
 
@@ -379,5 +379,5 @@ git checkout -b forks/<PR id>
 git push origin HEAD -u
 ```
 
-After that, CI checks will begin on our branch, and the status will be automatically updated to
-PRs from forks.
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.
