@@ -54,7 +54,7 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The combined input from arrangement and stream
-    input: BoxedArrangeStream,
+    input: Option<BoxedArrangeStream>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,

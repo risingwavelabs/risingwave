@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef, StreamChunk};
@@ -172,9 +171,15 @@ impl<S: StateStore> LookupExecutor<S> {
             pk_indices,
             last_barrier: None,
             input: if use_current_epoch {
-                Box::pin(stream_lookup_arrange_this_epoch(stream, arrangement))
+                Some(Box::pin(stream_lookup_arrange_this_epoch(
+                    stream,
+                    arrangement,
+                )))
             } else {
-                Box::pin(stream_lookup_arrange_prev_epoch(stream, arrangement))
+                Some(Box::pin(stream_lookup_arrange_prev_epoch(
+                    stream,
+                    arrangement,
+                )))
             },
             stream: StreamJoinSide {
                 key_indices: stream_join_key_indices,
@@ -202,13 +207,10 @@ impl<S: StateStore> LookupExecutor<S> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
-        loop {
-            let msg = self
-                .input
-                .next()
-                .await
-                .expect("unexpected end of input")
-                .map_err(StreamExecutorError::input_error)?;
+        let input = std::mem::replace(&mut self.input, None);
+        #[for_await]
+        for msg in input.unwrap() {
+            let msg = msg.map_err(StreamExecutorError::input_error)?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
                     self.process_barrier(barrier.clone())
