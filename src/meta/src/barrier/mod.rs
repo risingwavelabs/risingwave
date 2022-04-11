@@ -173,7 +173,7 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make interval and enable_recovery configurable.
+        // TODO: make interval configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
         let enable_recovery = env.opts.enable_recovery;
