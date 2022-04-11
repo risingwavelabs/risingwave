@@ -389,13 +389,36 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
     use DataTypeName as T;
 
     let mut m = HashMap::new();
-    cast_map_helper(&mut m, &[T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64]);
+    cast_map_helper(
+        &mut m,
+        &[
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+        ],
+    );
     cast_map_helper(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
     cast_map_helper(&mut m, &[T::Time, T::Interval]);
     m.insert((T::Boolean, T::Boolean), CastContext::Explicit);
     m.insert((T::Varchar, T::Varchar), CastContext::Explicit);
 
-    for t in [T::Boolean, T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64, T::Date, T::Timestamp, T::Timestampz, T::Time, T::Interval] {
+    for t in [
+        T::Boolean,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+        T::Date,
+        T::Timestamp,
+        T::Timestampz,
+        T::Time,
+        T::Interval,
+    ] {
         m.insert((t, T::Varchar), CastContext::Assign);
         // cast from varchar to type should be explicit once literal is `unknown` type
         m.insert((T::Varchar, t), CastContext::Assign);
@@ -408,7 +431,10 @@ fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
     m
 }
 
-fn cast_map_helper(m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>, ts: &[DataTypeName]) {
+fn cast_map_helper(
+    m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>,
+    ts: &[DataTypeName],
+) {
     for (source_idx, source_type) in ts.iter().enumerate() {
         for (target_idx, target_type) in ts.iter().enumerate() {
             let cast_context = match source_idx.cmp(&target_idx) {
@@ -433,67 +459,94 @@ mod tests {
     fn gen_cast_table(allows: CastContext) -> Vec<String> {
         use itertools::Itertools as _;
         use DataType as T;
-        let all_types = &[T::Boolean, T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64, T::Varchar, T::Date, T::Timestamp, T::Timestampz, T::Time, T::Interval];
-        all_types.iter().map(
-            |source| all_types.iter().map(
-                |target| match cast_ok(source, target, &allows) {
-                    false => ' ',
-                    true => 'T',
-                }
-            ).collect::<String>()
-        ).collect_vec()
+        let all_types = &[
+            T::Boolean,
+            T::Int16,
+            T::Int32,
+            T::Int64,
+            T::Decimal,
+            T::Float32,
+            T::Float64,
+            T::Varchar,
+            T::Date,
+            T::Timestamp,
+            T::Timestampz,
+            T::Time,
+            T::Interval,
+        ];
+        all_types
+            .iter()
+            .map(|source| {
+                all_types
+                    .iter()
+                    .map(|target| match cast_ok(source, target, &allows) {
+                        false => ' ',
+                        true => 'T',
+                    })
+                    .collect::<String>()
+            })
+            .collect_vec()
     }
 
     #[test]
     fn test_cast_ok() {
         let actual = gen_cast_table(CastContext::Implicit);
-        assert_eq!(actual, vec![
-            "             ",
-            "  TTTTT      ",
-            "   TTTT      ",
-            "    TTT      ",
-            "     TT      ",
-            "      T      ",
-            "             ",
-            "             ",
-            "         TT  ",
-            "          T  ",
-            "             ",
-            "            T",
-            "             ",
-        ]);
+        assert_eq!(
+            actual,
+            vec![
+                "             ",
+                "  TTTTT      ",
+                "   TTTT      ",
+                "    TTT      ",
+                "     TT      ",
+                "      T      ",
+                "             ",
+                "             ",
+                "         TT  ",
+                "          T  ",
+                "             ",
+                "            T",
+                "             ",
+            ]
+        );
         let actual = gen_cast_table(CastContext::Assign);
-        assert_eq!(actual, vec![
-            "       T     ",
-            "  TTTTTT     ",
-            " T TTTTT     ",
-            " TT TTTT     ",
-            " TTT TTT     ",
-            " TTTT TT     ",
-            " TTTTT T     ",
-            "TTTTTTT TTTTT",
-            "       T TT  ",
-            "       TT TT ",
-            "       TTT T ",
-            "       T    T",
-            "       T   T ",
-        ]);
+        assert_eq!(
+            actual,
+            vec![
+                "       T     ",
+                "  TTTTTT     ",
+                " T TTTTT     ",
+                " TT TTTT     ",
+                " TTT TTT     ",
+                " TTTT TT     ",
+                " TTTTT T     ",
+                "TTTTTTT TTTTT",
+                "       T TT  ",
+                "       TT TT ",
+                "       TTT T ",
+                "       T    T",
+                "       T   T ",
+            ]
+        );
         let actual = gen_cast_table(CastContext::Explicit);
-        assert_eq!(actual, vec![
-            "T T    T     ",
-            " TTTTTTT     ",
-            "TTTTTTTT     ",
-            " TTTTTTT     ",
-            " TTTTTTT     ",
-            " TTTTTTT     ",
-            " TTTTTTT     ",
-            "TTTTTTTTTTTTT",
-            "       TTTT  ",
-            "       TTTTT ",
-            "       TTTTT ",
-            "       T   TT",
-            "       T   TT",
-        ]);
+        assert_eq!(
+            actual,
+            vec![
+                "T T    T     ",
+                " TTTTTTT     ",
+                "TTTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                " TTTTTTT     ",
+                "TTTTTTTTTTTTT",
+                "       TTTT  ",
+                "       TTTTT ",
+                "       TTTTT ",
+                "       T   TT",
+                "       T   TT",
+            ]
+        );
     }
 
     fn test_simple_infer_type(
