@@ -60,6 +60,7 @@ impl MockSource {
         }
     }
 
+    #[allow(dead_code)]
     pub fn with_messages(schema: Schema, pk_indices: PkIndices, msgs: Vec<Message>) -> Self {
         Self {
             schema,
