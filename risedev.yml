@@ -338,6 +338,9 @@ template:
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
 
+    # Kafka broker id. If there are multiple instances of Kafka, we will need to set.
+    broker-id: 0
+
   # Apache ZooKeeper service
   zookeeper:
     # Id to be picked-up by services
