@@ -49,6 +49,7 @@ where
             _phantom: PhantomData,
         }
     }
+
     pub(super) fn update_with_scalar_concrete(&mut self, input: &T, row_id: usize) -> Result<()> {
         let datum = self
             .f
@@ -60,6 +61,7 @@ where
         self.result = datum;
         Ok(())
     }
+
     pub(super) fn update_concrete(&mut self, input: &T) -> Result<()> {
         let mut cur = self.result.as_ref().map(|x| x.as_scalar_ref());
         for datum in input.iter() {
@@ -69,9 +71,11 @@ where
         self.result = r;
         Ok(())
     }
+
     pub(super) fn output_concrete(&self, builder: &mut R::Builder) -> Result<()> {
         builder.append(self.result.as_ref().map(|x| x.as_scalar_ref()))
     }
+
     pub(super) fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
@@ -102,6 +106,7 @@ macro_rules! impl_aggregator {
             fn return_type(&self) -> DataType {
                 self.return_type.clone()
             }
+
             fn update_with_row(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
                 if let ArrayImpl::$input_variant(i) =
                     input.column_at(self.input_col_idx).array_ref()
@@ -129,6 +134,7 @@ macro_rules! impl_aggregator {
                     .into())
                 }
             }
+
             fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$result_variant(b) = builder {
                     self.output_concrete(b)
@@ -140,6 +146,7 @@ macro_rules! impl_aggregator {
                     .into())
                 }
             }
+
             fn update_and_output_with_sorted_groups(
                 &mut self,
                 input: &DataChunk,

@@ -36,6 +36,7 @@ impl RocksDBStateStore {
 
 impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
@@ -119,7 +120,9 @@ impl RocksDBStateStoreIter {
 
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { unimplemented!() }
     }

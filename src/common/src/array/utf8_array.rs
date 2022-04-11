@@ -34,10 +34,10 @@ pub struct Utf8Array {
 }
 
 impl Array for Utf8Array {
-    type RefItem<'a> = &'a str;
-    type OwnedItem = String;
     type Builder = Utf8ArrayBuilder;
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = String;
+    type RefItem<'a> = &'a str;
 
     fn value_at(&self, idx: usize) -> Option<&str> {
         if !self.is_null(idx) {

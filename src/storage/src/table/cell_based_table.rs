@@ -289,6 +289,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         };
         Ok(iter)
     }
+
     async fn consume_more(&mut self) -> StorageResult<()> {
         assert_eq!(self.next_idx, self.buf.len());
 

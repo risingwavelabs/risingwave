@@ -6,6 +6,7 @@ normalize_comments = true
 normalize_doc_attributes = true
 imports_granularity = "Module"
 group_imports = "StdExternalCrate"
+reorder_impl_items = true
 reorder_imports = true
 tab_spaces = 4
 wrap_comments = true

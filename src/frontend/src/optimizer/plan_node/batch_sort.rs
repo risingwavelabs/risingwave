@@ -49,6 +49,7 @@ impl PlanTreeNodeUnary for BatchSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.base.order.clone())
     }
