@@ -48,7 +48,7 @@ There are 2 choices for how to distribute information across multiple nodes.
 * *Push*: When metadata changes, the meta node tells all nodes to update, and master node must wait for others to acknowledge before continuing. 
 * *Pull*: When data changes, the master node does nothing. Other nodes may not have the latest information, so they need to ask the master node every time.
 
-Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on frontend and compute nodes. 
+Currently, for simplicity, we choose the push-style approach for all kinds of metadata. This is implemented as `NotificationService` on meta service and `ObserverManager` on frontend and compute nodes.
 
 ![Notification](./images/meta-service/notification.svg)
 
