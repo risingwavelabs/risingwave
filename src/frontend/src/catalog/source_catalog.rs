@@ -1,3 +1,4 @@
+use itertools::Itertools;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,6 +27,27 @@ pub struct SourceCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub source_type: SourceType,
+}
+
+impl SourceCatalog {
+    pub fn rewrite_columns(&mut self) {
+        let mut catalogs = vec![];
+        for col in &self.columns {
+            // Extract `field_descs` and return `column_catalogs`.
+            catalogs.append(
+                &mut col
+                    .column_desc
+                    .get_column_descs()
+                    .into_iter()
+                    .map(|c| ColumnCatalog {
+                        column_desc: c,
+                        is_hidden: col.is_hidden,
+                    })
+                    .collect_vec(),
+            )
+        }
+        self.columns = catalogs.clone();
+    }
 }
 
 impl From<&ProstSource> for SourceCatalog {

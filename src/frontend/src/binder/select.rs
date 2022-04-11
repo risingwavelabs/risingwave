@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Select, SelectItem};
@@ -59,6 +60,41 @@ impl BoundSelect {
             .chain(self.group_by.iter())
             .chain(self.where_clause.iter())
             .any(|expr| expr.has_correlated_input_ref())
+    }
+
+    /// Extract `column_descs` from table by `select_items`.
+    pub fn extract_select_items(&self, table: Vec<ColumnDesc>) -> Vec<ColumnDesc> {
+        let column_descs = self
+            .select_items
+            .iter()
+            .zip_eq(self.aliases.iter())
+            .enumerate()
+            .map(|(id, (expr, alias))| {
+                let default_desc = ColumnDesc {
+                    data_type: expr.return_type(),
+                    column_id: ColumnId::new(id as i32),
+                    name: "".to_string(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
+                };
+                let mut desc = match expr {
+                    ExprImpl::InputRef(input) => match table.get(input.index()) {
+                        Some(column) => column.clone(),
+                        None => default_desc,
+                    },
+                    _ => default_desc,
+                };
+                // Get alias name.
+                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
+                    false => desc.name.clone(),
+                    true => format!("expr#{}", id),
+                });
+                // Change desc name and `field_descs` prefix name to alias.
+                desc.change_prefix_name(desc.name.clone(), name);
+                desc.clone()
+            })
+            .collect_vec();
+        column_descs
     }
 }
 

@@ -120,10 +120,10 @@ impl StreamMaterialize {
         );
 
         // Mapping `column_name` and `column_desc`.
-        let mut select_map: HashMap<String, ColumnDesc> = HashMap::new();
-        for desc in select_items {
-            select_map.insert(desc.name.clone(), desc);
-        }
+        let select_map = select_items
+            .into_iter()
+            .map(|d| (d.name.clone(), d))
+            .collect::<HashMap<String, ColumnDesc>>();
 
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
@@ -153,7 +153,7 @@ impl StreamMaterialize {
             .collect_vec();
 
         // Since the `column_desc.field_descs` also need to have increment `column_id`,
-        // so re generate increment id for each `column_desc` and `column_desc.field_descs`.
+        // so re generate incremental id for each `column_desc` and `column_desc.field_descs`.
         ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());

@@ -15,7 +15,7 @@
 use fixedbitset::FixedBitSet;
 use risingwave_common::error::Result;
 
-use crate::binder::{BoundQuery, BoundSetExpr, Relation};
+use crate::binder::{BoundQuery, BoundSetExpr};
 use crate::optimizer::plan_node::LogicalLimit;
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRoot;
@@ -28,9 +28,7 @@ impl Planner {
     pub fn plan_query(&mut self, query: BoundQuery) -> Result<PlanRoot> {
         let select_items = match &query.body {
             BoundSetExpr::Select(select) => match &select.from {
-                Some(relation) => {
-                    Relation::extract_select_items(select, relation.extract_column_descs())
-                }
+                Some(relation) => select.extract_select_items(relation.extract_column_descs()),
                 None => {
                     vec![]
                 }

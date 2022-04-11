@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -26,8 +26,7 @@ use risingwave_sqlparser::ast::{
 
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
-use crate::binder::{Binder, BoundSelect, BoundSetExpr};
-use crate::catalog::column_catalog::ColumnCatalog;
+use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, TableId};
@@ -73,47 +72,12 @@ impl Relation {
                         Some(relation) => relation.extract_column_descs(),
                         None => vec![],
                     };
-                    Self::extract_select_items(select, table)
+                    select.extract_select_items(table)
                 } else {
                     vec![]
                 }
             }
         }
-    }
-
-    /// Extract `column_descs` from table by `select_items`.
-    pub fn extract_select_items(select: &BoundSelect, table: Vec<ColumnDesc>) -> Vec<ColumnDesc> {
-        let column_descs = select
-            .select_items
-            .iter()
-            .zip_eq(select.aliases.iter())
-            .enumerate()
-            .map(|(id, (expr, alias))| {
-                let default_desc = ColumnDesc {
-                    data_type: expr.return_type(),
-                    column_id: ColumnId::new(id as i32),
-                    name: "".to_string(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                };
-                let mut desc = match expr {
-                    ExprImpl::InputRef(input) => match table.get(input.index()) {
-                        Some(column) => column.clone(),
-                        None => default_desc,
-                    },
-                    _ => default_desc,
-                };
-                // Get alias name.
-                let name = alias.clone().unwrap_or(match desc.name.is_empty() {
-                    false => desc.name.clone(),
-                    true => format!("expr#{}", id),
-                });
-                // Change desc name and `field_descs` prefix name to alias.
-                desc.change_prefix_name(desc.name.clone(), name);
-                desc.clone()
-            })
-            .collect_vec();
-        column_descs
     }
 }
 
@@ -309,24 +273,9 @@ impl Binder {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
                         .map(|s| {
-                            let mut catalogs = vec![];
                             let mut source = s.clone();
-                            for col in source.columns {
-                                // Extract `field_descs` and return `column_catalogs`.
-                                catalogs.append(
-                                    &mut col
-                                        .column_desc
-                                        .get_column_descs()
-                                        .into_iter()
-                                        .map(|c| ColumnCatalog {
-                                            column_desc: c,
-                                            is_hidden: col.is_hidden,
-                                        })
-                                        .collect_vec(),
-                                )
-                            }
-                            source.columns = catalogs.clone();
-                            (Relation::Source(Box::new((&source).into())), catalogs)
+                            source.rewrite_columns();
+                            (Relation::Source(Box::new((&source).into())), source.columns)
                         })
                 })
                 .map_err(|_| {

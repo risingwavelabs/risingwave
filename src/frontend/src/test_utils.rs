@@ -21,8 +21,11 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use pgwire::pg_response::PgResponse;
 use pgwire::pg_server::{Session, SessionManager};
-use risingwave_common::catalog::{TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{
+    ColumnDesc, ColumnId, TableId, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME,
+};
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Schema as ProstSchema, Source as ProstSource, Table as ProstTable,
@@ -34,6 +37,7 @@ use tempfile::{Builder, NamedTempFile};
 
 use crate::binder::Binder;
 use crate::catalog::catalog_service::CatalogWriter;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, SchemaId};
 use crate::meta_client::FrontendMetaClient;
@@ -240,6 +244,39 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn unpin_snapshot(&self, _epoch: u64) -> Result<()> {
         Ok(())
     }
+}
+
+pub fn build_catalogs() -> Vec<ColumnCatalog> {
+    vec![
+        ColumnCatalog::row_id_column(),
+        ColumnCatalog {
+            column_desc: ColumnDesc {
+                data_type: DataType::Struct {
+                    fields: vec![DataType::Varchar, DataType::Varchar].into(),
+                },
+                column_id: ColumnId::new(1),
+                name: "country".to_string(),
+                field_descs: vec![
+                    ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: ColumnId::new(2),
+                        name: "country.address".to_string(),
+                        field_descs: vec![],
+                        type_name: String::new(),
+                    },
+                    ColumnDesc {
+                        data_type: DataType::Varchar,
+                        column_id: ColumnId::new(3),
+                        name: "country.zipcode".to_string(),
+                        field_descs: vec![],
+                        type_name: String::new(),
+                    },
+                ],
+                type_name: ".test.Country".to_string(),
+            },
+            is_hidden: false,
+        },
+    ]
 }
 
 pub static PROTO_FILE_DATA: &str = r#"
