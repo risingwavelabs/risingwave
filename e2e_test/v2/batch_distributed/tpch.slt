@@ -1,3 +1,6 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 include ../../tpch/create_tables.slt.part
 
 include ../../tpch/insert_customer.slt.part
