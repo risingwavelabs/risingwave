@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{least_restrictive, Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -259,10 +259,10 @@ impl Binder {
         let mut return_type = results_expr.get(0).unwrap().return_type();
         for i in 1..results_expr.len() {
             return_type =
-                Self::find_compat(return_type, results_expr.get(i).unwrap().return_type())?;
+                least_restrictive(return_type, results_expr.get(i).unwrap().return_type())?;
         }
         if let Some(expr) = &else_result_expr {
-            return_type = Binder::find_compat(return_type, expr.return_type())?;
+            return_type = least_restrictive(return_type, expr.return_type())?;
         }
         for (condition, result) in zip_eq(conditions, results_expr) {
             let condition = match operand {

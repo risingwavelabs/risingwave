@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl};
+use crate::expr::{least_restrictive, Expr as _, ExprImpl};
 
 #[derive(Debug)]
 pub struct BoundValues {
@@ -67,7 +67,7 @@ impl Binder {
                 for vec in &bound {
                     for (expr, ty) in vec.iter().zip_eq(types.iter_mut()) {
                         if !expr.is_null() {
-                            *ty = Self::find_compat(ty.clone(), expr.return_type())?
+                            *ty = least_restrictive(ty.clone(), expr.return_type())?
                         }
                     }
                 }
@@ -88,26 +88,6 @@ impl Binder {
 
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
         Ok(BoundValues { rows, schema })
-    }
-
-    /// Find compatible type for `left` and `right`.
-    pub fn find_compat(left: DataType, right: DataType) -> Result<DataType> {
-        if (left == right || left.is_numeric() && right.is_numeric())
-            || (left.is_string() && right.is_string()
-                || (left.is_date_or_timestamp() && right.is_date_or_timestamp()))
-        {
-            if left.type_index() > right.type_index() {
-                Ok(left)
-            } else {
-                Ok(right)
-            }
-        } else {
-            Err(ErrorCode::InternalError(format!(
-                "Can not find compatible type for {:?} and {:?}",
-                left, right
-            ))
-            .into())
-        }
     }
 }
 

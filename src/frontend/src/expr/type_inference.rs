@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::vec;
 
 use itertools::iproduct;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
 use crate::expr::ExprType;
@@ -371,6 +372,18 @@ lazy_static::lazy_static! {
     static ref FUNC_SIG_MAP: HashMap<FuncSign, DataTypeName> = {
         build_type_derive_map()
     };
+}
+
+pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
+    if lhs == rhs {
+        Ok(lhs)
+    } else if cast_ok(&lhs, &rhs, &CastContext::Implicit) {
+        Ok(rhs)
+    } else if cast_ok(&rhs, &lhs, &CastContext::Implicit) {
+        Ok(lhs)
+    } else {
+        Err(ErrorCode::BindError(format!("types {:?} and {:?} cannot be matched", lhs, rhs)).into())
+    }
 }
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
