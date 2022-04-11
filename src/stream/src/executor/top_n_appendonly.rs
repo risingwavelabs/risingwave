@@ -390,7 +390,7 @@ impl<S: StateStore> StatefulExecutor for AppendOnlyTopNExecutor<S> {
     }
 }
 
-pub(super) fn generate_output(
+pub fn generate_output(
     new_rows: Vec<Row>,
     new_ops: Vec<Op>,
     schema: &Schema,
