@@ -71,19 +71,14 @@ impl Binder {
             ))),
             Expr::UnaryOp { op, expr } => Ok(self.bind_unary_expr(op, *expr)?),
             Expr::Nested(expr) => self.bind_expr(*expr),
-            Expr::Cast { expr, data_type } => Ok(ExprImpl::FunctionCall(Box::new(
-                self.bind_cast(*expr, data_type)?,
-            ))),
+            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
             Expr::Function(f) => Ok(self.bind_function(f)?),
             Expr::Subquery(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Scalar)?),
             Expr::Exists(q) => Ok(self.bind_subquery_expr(*q, SubqueryKind::Existential)?),
-            Expr::TypedString { data_type, value } => Ok(ExprImpl::FunctionCall(Box::new(
-                FunctionCall::new_with_return_type(
-                    ExprType::Cast,
-                    vec![ExprImpl::Literal(Box::new(self.bind_string(value)?))],
-                    bind_data_type(&data_type)?,
-                ),
-            ))),
+            Expr::TypedString { data_type, value } => {
+                let s: ExprImpl = self.bind_string(value)?.into();
+                s.cast_explicit(bind_data_type(&data_type)?)
+            }
             Expr::Between {
                 expr,
                 negated,
@@ -297,12 +292,9 @@ impl Binder {
         })
     }
 
-    pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<FunctionCall> {
-        Ok(FunctionCall::new_with_return_type(
-            ExprType::Cast,
-            vec![self.bind_expr(expr)?],
-            bind_data_type(&data_type)?,
-        ))
+    pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
+        self.bind_expr(expr)?
+            .cast_explicit(bind_data_type(&data_type)?)
     }
 }
 
