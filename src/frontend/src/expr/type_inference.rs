@@ -373,10 +373,16 @@ lazy_static::lazy_static! {
     };
 }
 
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
 pub enum CastContext {
     Implicit,
     Assign,
     Explicit,
+}
+
+pub fn cast_ok(source: &DataType, target: &DataType, allows: &CastContext) -> bool {
+    let k = (name_of(source), name_of(target));
+    matches!(CAST_MAP.get(&k), Some(context) if context <= allows)
 }
 
 fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
@@ -423,6 +429,72 @@ lazy_static::lazy_static! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn gen_cast_table(allows: CastContext) -> Vec<String> {
+        use itertools::Itertools as _;
+        use DataType as T;
+        let all_types = &[T::Boolean, T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64, T::Varchar, T::Date, T::Timestamp, T::Timestampz, T::Time, T::Interval];
+        all_types.iter().map(
+            |source| all_types.iter().map(
+                |target| match cast_ok(source, target, &allows) {
+                    false => ' ',
+                    true => 'T',
+                }
+            ).collect::<String>()
+        ).collect_vec()
+    }
+
+    #[test]
+    fn test_cast_ok() {
+        let actual = gen_cast_table(CastContext::Implicit);
+        assert_eq!(actual, vec![
+            "             ",
+            "  TTTTT      ",
+            "   TTTT      ",
+            "    TTT      ",
+            "     TT      ",
+            "      T      ",
+            "             ",
+            "             ",
+            "         TT  ",
+            "          T  ",
+            "             ",
+            "            T",
+            "             ",
+        ]);
+        let actual = gen_cast_table(CastContext::Assign);
+        assert_eq!(actual, vec![
+            "       T     ",
+            "  TTTTTT     ",
+            " T TTTTT     ",
+            " TT TTTT     ",
+            " TTT TTT     ",
+            " TTTT TT     ",
+            " TTTTT T     ",
+            "TTTTTTT TTTTT",
+            "       T TT  ",
+            "       TT TT ",
+            "       TTT T ",
+            "       T    T",
+            "       T   T ",
+        ]);
+        let actual = gen_cast_table(CastContext::Explicit);
+        assert_eq!(actual, vec![
+            "T T    T     ",
+            " TTTTTTT     ",
+            "TTTTTTTT     ",
+            " TTTTTTT     ",
+            " TTTTTTT     ",
+            " TTTTTTT     ",
+            " TTTTTTT     ",
+            "TTTTTTTTTTTTT",
+            "       TTTT  ",
+            "       TTTTT ",
+            "       TTTTT ",
+            "       T   TT",
+            "       T   TT",
+        ]);
+    }
 
     fn test_simple_infer_type(
         func_type: ExprType,
