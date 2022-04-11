@@ -177,7 +177,7 @@ where
         // TODO: make interval and enable_recovery configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
-        let enable_recovery = env_var_is_true("RW_CI");
+        let enable_recovery = !env_var_is_true("RW_CI");
 
         Self {
             interval,
