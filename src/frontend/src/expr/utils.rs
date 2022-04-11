@@ -420,7 +420,7 @@ mod tests {
         let (func, input) = lhs.decompose_as_unary();
         assert_eq!(func, Type::Not);
         assert!(input.as_input_ref().is_some());
-        // Not(A Or B) <=> Not(A) And true
+        // Not(A Or B) <=> Not(A) And Not(B)
         let expr: ExprImpl = FunctionCall::new(
             Type::Not,
             vec![FunctionCall::new(
