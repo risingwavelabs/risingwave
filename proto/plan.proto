@@ -210,7 +210,8 @@ message SortAggNode {
 message HashJoinNode {
   JoinType join_type = 1;
   repeated int32 left_key = 2;
-  repeated int32 right_key = 4;
+  repeated int32 right_key = 3;
+  expr.ExprNode condition = 4;
 }
 
 message SortMergeJoinNode {

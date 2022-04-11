@@ -70,7 +70,6 @@ workspace-hack = { version = "0.1", path = "../workspace-hack" }
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
-
 # [features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]

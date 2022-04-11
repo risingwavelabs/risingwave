@@ -147,7 +147,7 @@ pub fn oneshot_common() {
             std::process::abort();
         }));
 
-        // TODO: deadlock detection as a feature insetad of always enabling
+        // TODO: deadlock detection as a feature instead of always enabling
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(3));
             let deadlocks = parking_lot::deadlock::check_deadlock();

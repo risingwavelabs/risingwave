@@ -393,11 +393,11 @@ impl DataChunk {
 
     /// `to_pretty_string` returns a table-like text representation of the `DataChunk`.
     pub fn to_pretty_string(&self) -> String {
-        use prettytable::{format, Table};
+        use comfy_table::Table;
         let mut table = Table::new();
-        table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+        table.load_preset("||--+-++|    ++++++\n");
         for row in self.rows() {
-            let cells = row
+            let cells: Vec<_> = row
                 .0
                 .iter()
                 .map(|v| {
@@ -552,8 +552,7 @@ mod tests {
 | 2 |   |
 | 3 | 7 |
 | 4 |   |
-+---+---+
-"
++---+---+"
         );
     }
 
