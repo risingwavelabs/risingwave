@@ -81,7 +81,7 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .zip_eq(types.iter().cloned())
-                    .map(|(expr, ty)| expr.ensure_type(ty))
+                    .map(|(expr, ty)| expr.cast_assign(ty).unwrap())
                     .collect::<Vec<ExprImpl>>()
             })
             .collect::<Vec<Vec<ExprImpl>>>();

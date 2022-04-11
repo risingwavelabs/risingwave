@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 
-use super::{infer_type, Expr, ExprImpl};
+use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -104,6 +104,24 @@ impl FunctionCall {
             inputs.iter().map(|expr| expr.return_type()).collect(),
         )?; // should be derived from inputs
         Some(Self::new_with_return_type(func_type, inputs, return_type))
+    }
+
+    pub fn new_cast(e: ExprImpl, ty: DataType, allows: CastContext) -> Result<ExprImpl> {
+        let s = e.return_type();
+        if e.is_null() {
+            Ok(Literal::new(None, ty).into())
+        } else if ty == s {
+            Ok(e)
+        } else if cast_ok(&s, &ty, &allows) {
+            Ok(Self {
+                func_type: ExprType::Cast,
+                return_type: ty,
+                inputs: vec![e],
+            }
+            .into())
+        } else {
+            Err(ErrorCode::BindError(format!("cannot cast type {:?} to {:?}", s, ty)).into())
+        }
     }
 
     /// used for expressions like cast
