@@ -43,8 +43,7 @@ use crate::task::{ExecutorParams, LocalStreamManagerCore};
 struct SourceReader {
     /// the future that builds stream_reader. It is required because source should not establish
     /// connections to the upstream before `next` is called
-    pub stream_reader_future:
-        Option<Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>>>,
+    pub stream_reader_future: Option<StreamReaderFuture>,
     /// The reader for stream source
     pub stream_reader: Option<Box<dyn StreamSourceReader>>,
     /// The reader for barrier
@@ -54,6 +53,8 @@ struct SourceReader {
 /// `SourceReader` will be turned into this stream type.
 type ReaderStream =
     Pin<Box<dyn Stream<Item = Either<Result<Message>, Result<StreamChunk>>> + Send>>;
+type StreamReaderFuture =
+    Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>>;
 
 /// [`SourceExecutor`] is a streaming source, from risingwave's batch table, or external systems
 /// such as Kafka.
@@ -153,11 +154,9 @@ async fn build_stream_reader<S: StateStore>(
                 query_id: Some(format!("source-operator-{}", operator_id)),
                 bound_timestamp_ms: None,
             },
-            column_ids.clone(),
+            column_ids,
         )?),
-        SourceImpl::TableV2(s) => {
-            Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
-        }
+        SourceImpl::TableV2(s) => Box::new(s.stream_reader(TableV2ReaderContext, column_ids)?),
         SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
             source_reader: s.clone(),
             state_store: state::SourceStateHandler::new(keyspace),
@@ -183,9 +182,7 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
-        let stream_reader_future: Pin<
-            Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>,
-        > = Box::pin(build_stream_reader(
+        let stream_reader_future: StreamReaderFuture = Box::pin(build_stream_reader(
             source,
             operator_id,
             column_ids.clone(),
