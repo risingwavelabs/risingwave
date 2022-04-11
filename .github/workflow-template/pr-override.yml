@@ -5,6 +5,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  push:
+    branches:
+      - "forks/*"
 
 concurrency:
   group: environment-${{ github.ref }}
