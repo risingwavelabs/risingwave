@@ -1,8 +1,8 @@
 statement ok
-create table t (v1 int not null);
+SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-SET RW_IMPLICIT_FLUSH TO true;
+create table t (v1 int not null);
 
 statement ok
 insert into t values (3);

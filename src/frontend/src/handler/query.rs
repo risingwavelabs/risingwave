@@ -26,13 +26,11 @@ use crate::scheduler::plan_fragmenter::BatchPlanFragmenter;
 use crate::scheduler::{DataChunkStream, ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
 
-lazy_static::lazy_static! {
-    /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
-    /// until the entire dataflow is refreshed. In other words, every related table & MV will
-    /// be able to see the write.
-    /// TODO: Use session config to set this.
-    pub static ref IMPLICIT_FLUSH: &'static str = "RW_IMPLICIT_FLUSH";
-}
+/// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
+/// until the entire dataflow is refreshed. In other words, every related table & MV will
+/// be able to see the write.
+/// TODO: Use session config to set this.
+pub static IMPLICIT_FLUSH: &str = "RW_IMPLICIT_FLUSH";
 
 pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
@@ -69,8 +67,8 @@ pub async fn handle_query(context: OptimizerContext, stmt: Statement) -> Result<
         _ => unreachable!(),
     };
 
-    if let Some(flag) = session.get(&IMPLICIT_FLUSH) {
-        if flag.is_true() {
+    if let Some(flag) = session.get_config(IMPLICIT_FLUSH) {
+        if flag.is_set(false) {
             flush_for_write(&session, stmt_type).await?;
         }
     }

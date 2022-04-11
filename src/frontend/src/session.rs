@@ -265,8 +265,9 @@ impl ConfigEntry {
         ConfigEntry { str_val }
     }
 
-    pub fn is_true(&self) -> bool {
-        self.str_val.parse().unwrap_or(false)
+    /// Only used for boolean configurations.
+    pub fn is_set(&self, default: bool) -> bool {
+        self.str_val.parse().unwrap_or(default)
     }
 }
 
@@ -296,13 +297,16 @@ impl SessionImpl {
         &self.database
     }
 
-    pub fn set(&self, key: &str, val: &str) {
+    /// Set configuration values in this session.
+    /// For example, `set_config("RW_IMPLICIT_FLUSH", true)` will implicit flush for every inserts.
+    pub fn set_config(&self, key: &str, val: &str) {
         self.config_map
             .write()
             .insert(key.to_string(), ConfigEntry::new(val.to_string()));
     }
 
-    pub fn get(&self, key: &str) -> Option<ConfigEntry> {
+    /// Get configuration values in this session.
+    pub fn get_config(&self, key: &str) -> Option<ConfigEntry> {
         let reader = self.config_map.read();
         reader.get(key).cloned()
     }

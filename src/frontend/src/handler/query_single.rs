@@ -75,8 +75,8 @@ pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> 
     };
 
     // Implicitly flush the writes.
-    if let Some(flag) = session.get(&IMPLICIT_FLUSH) {
-        if flag.is_true() {
+    if let Some(flag) = session.get_config(IMPLICIT_FLUSH) {
+        if flag.is_set(false) {
             flush_for_write(&session, stmt_type).await?;
         }
     }
