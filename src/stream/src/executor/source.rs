@@ -17,6 +17,8 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
+use futures::Future;
+
 use async_trait::async_trait;
 use either::Either;
 use futures::stream::{select_with_strategy, PollNext};
@@ -41,8 +43,10 @@ use crate::executor::{Executor, ExecutorBuilder, Message, PkIndices, PkIndicesRe
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 struct SourceReader {
+    /// the future that builds stream_reader. It is required because source should not establish connections to the upstream before `next` is called
+    pub stream_reader_future: Option<Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>>>,
     /// The reader for stream source
-    pub stream_reader: Box<dyn StreamSourceReader>,
+    pub stream_reader: Option<Box<dyn StreamSourceReader>>,
     /// The reader for barrier
     pub barrier_receiver: UnboundedReceiver<Message>,
 }
@@ -137,6 +141,27 @@ impl ExecutorBuilder for SourceExecutorBuilder {
     }
 }
 
+async fn build_stream_reader<S: StateStore>(source: Arc<SourceImpl>, operator_id: u64, column_ids: Vec<ColumnId>, keyspace: Keyspace<S>) -> Result<Box<dyn StreamSourceReader>> {
+    let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
+        SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
+            HighLevelKafkaSourceReaderContext {
+                query_id: Some(format!("source-operator-{}", operator_id)),
+                bound_timestamp_ms: None,
+            },
+            column_ids.clone(),
+        )?),
+        SourceImpl::TableV2(s) => {
+            Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
+        }
+        SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
+            source_reader: s.clone(),
+            state_store: state::SourceStateHandler::new(keyspace),
+        }),
+    };
+
+    Ok(stream_reader)
+}
+
 impl SourceExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new<S: StateStore>(
@@ -153,22 +178,7 @@ impl SourceExecutor {
         streaming_metrics: Arc<StreamingMetrics>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
-        let stream_reader: Box<dyn StreamSourceReader> = match source.as_ref() {
-            SourceImpl::HighLevelKafka(s) => Box::new(s.stream_reader(
-                HighLevelKafkaSourceReaderContext {
-                    query_id: Some(format!("source-operator-{}", operator_id)),
-                    bound_timestamp_ms: None,
-                },
-                column_ids.clone(),
-            )?),
-            SourceImpl::TableV2(s) => {
-                Box::new(s.stream_reader(TableV2ReaderContext, column_ids.clone())?)
-            }
-            SourceImpl::Connector(s) => Box::new(ConnectorStreamSource {
-                source_reader: s.clone(),
-                state_store: state::SourceStateHandler::new(keyspace),
-            }),
-        };
+        let stream_reader_future: Pin<Box<dyn Future<Output = Result<Box<dyn StreamSourceReader>>> + Send + Sync>> = Box::pin(build_stream_reader(source, operator_id, column_ids.clone(), keyspace));
 
         Ok(Self {
             source_id,
@@ -177,7 +187,8 @@ impl SourceExecutor {
             schema,
             pk_indices,
             reader: Some(SourceReader {
-                stream_reader,
+                stream_reader_future: Some(stream_reader_future),
+                stream_reader: None,
                 barrier_receiver,
             }),
             next_row_id: AtomicU64::from(0u64),
@@ -255,7 +266,7 @@ impl SourceReader {
     }
 
     pub fn into_stream(self) -> impl Stream<Item = Either<Result<Message>, Result<StreamChunk>>> {
-        let stream_reader = Self::stream_reader(self.stream_reader);
+        let stream_reader = Self::stream_reader(self.stream_reader.unwrap());
         let barrier_receiver = Self::barrier_receiver(self.barrier_receiver);
         select_with_strategy(
             barrier_receiver.map(Either::Left),
@@ -269,7 +280,8 @@ impl SourceReader {
 impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(mut reader) = self.reader.take() {
-            reader.stream_reader.open().await?;
+            reader.stream_reader.replace(reader.stream_reader_future.as_ref().unwrap().await?);
+            reader.stream_reader.as_ref().unwrap().open().await?;
             self.reader_stream.replace(reader.into_stream().boxed());
         }
 
