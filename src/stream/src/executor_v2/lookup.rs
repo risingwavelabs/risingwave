@@ -63,7 +63,7 @@ pub struct LookupExecutor<S: StateStore> {
 #[async_trait]
 impl<S: StateStore> Executor for LookupExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
-        self.next_execute().boxed()
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {

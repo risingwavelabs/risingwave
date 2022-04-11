@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stream::try_stream;
 use futures::StreamExt;
-use risingwave_common::error::Result;
 use tokio::select;
 
-use crate::executor::BoxedExecutorStream;
-use crate::executor_v2::{Barrier, Executor, Message, StreamChunk};
+use crate::executor_v2::error::StreamExecutorResult;
+use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, Message, StreamChunk};
 
 #[derive(Debug, PartialEq)]
 enum BarrierWaitState {
@@ -29,8 +27,8 @@ enum BarrierWaitState {
 
 #[derive(Debug)]
 pub enum AlignedMessage {
-    Left(Result<StreamChunk>),
-    Right(Result<StreamChunk>),
+    Left(StreamExecutorResult<StreamChunk>),
+    Right(StreamExecutorResult<StreamChunk>),
     Barrier(Barrier),
 }
 
@@ -47,9 +45,9 @@ impl<'a> TryFrom<&'a AlignedMessage> for &'a Barrier {
 
 pub struct BarrierAligner {
     /// The input from the left executor
-    input_l: BoxedExecutorStream,
+    input_l: BoxedMessageStream,
     /// The input from the right executor
-    input_r: BoxedExecutorStream,
+    input_r: BoxedMessageStream,
     /// The barrier state
     state: BarrierWaitState,
 }
@@ -57,23 +55,9 @@ pub struct BarrierAligner {
 impl BarrierAligner {
     pub fn new(input_l: Box<dyn Executor>, input_r: Box<dyn Executor>) -> Self {
         // Wrap the input executors into streams to ensure cancellation-safety
-        let mut input_l = input_l.execute();
-        let input_l = try_stream! {
-            loop {
-                let message = input_l.next().await.expect("unexpected end of input")?;
-                yield message;
-            }
-        };
-        let mut input_r = input_r.execute();
-        let input_r = try_stream! {
-            loop {
-                let message = input_r.next().await.expect("unexpected end of input")?;
-                yield message;
-            }
-        };
         Self {
-            input_l: Box::pin(input_l),
-            input_r: Box::pin(input_r),
+            input_l: Box::pin(input_l.execute()),
+            input_r: Box::pin(input_r.execute()),
             state: BarrierWaitState::Either,
         }
     }

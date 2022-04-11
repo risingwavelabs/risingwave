@@ -201,7 +201,7 @@ impl<S: StateStore> LookupExecutor<S> {
     ///
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
-    pub async fn next_execute(mut self: Box<Self>) {
+    pub async fn execute_inner(mut self: Box<Self>) {
         loop {
             let msg = self
                 .input
