@@ -20,26 +20,26 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum StreamExecutorError {
-    #[error("storage error {0}")]
+    #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
         #[source]
         StorageError,
     ),
 
-    #[error("executor v1 error {0}")]
+    #[error("Executor v1 error: {0}")]
     ExecutorV1(RwError),
 
-    #[error("chunk operation error {0}")]
+    #[error("Chunk operation error: {0}")]
     EvalError(RwError),
 
-    #[error("aggregate state error {0}")]
+    #[error("Aggregate state error: {0}")]
     AggStateError(RwError),
 
-    #[error("input error")]
+    #[error("Input error: {0}")]
     InputError(RwError),
 
-    #[error("channel `{0}` closed")]
+    #[error("Channel `{0}` closed")]
     ChannelClosed(String),
 }
 
