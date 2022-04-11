@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use rand::prelude::SliceRandom;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{Result};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::{BatchSourceReader, Source, StreamSourceReader};

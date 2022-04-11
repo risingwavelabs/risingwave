@@ -124,12 +124,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                return Err(ErrorCode::NotImplemented(
+                Err(ErrorCode::NotImplemented(
                     "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`"
                         .to_string(),
                     None.into(),
                 )
-                .into());
+                .into())
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.
