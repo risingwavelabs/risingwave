@@ -126,7 +126,7 @@ pub struct KafkaConfig {
     pub port: u16,
     pub provide_zookeeper: Option<Vec<ZooKeeperConfig>>,
     pub persist_data: bool,
-    pub broker_id: u32
+    pub broker_id: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
