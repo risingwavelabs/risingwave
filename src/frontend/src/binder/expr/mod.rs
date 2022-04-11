@@ -269,6 +269,7 @@ impl Binder {
                 None => condition,
             };
             inputs.push(self.bind_expr(condition)?);
+            // `cast_implicit` always ok because `return_type` is from `least_restrictive`.
             inputs.push(result.cast_implicit(return_type.clone()).unwrap());
         }
         if let Some(expr) = else_result_expr {

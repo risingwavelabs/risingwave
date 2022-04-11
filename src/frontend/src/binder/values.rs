@@ -81,10 +81,14 @@ impl Binder {
             .map(|vec| {
                 vec.into_iter()
                     .zip_eq(types.iter().cloned())
-                    .map(|(expr, ty)| expr.cast_assign(ty).unwrap())
-                    .collect::<Vec<ExprImpl>>()
+                    // When `types` are from `INSERT`, cast-ability has not been checked yet.
+                    // When `types` are from `least_restrictive`, it's always ok.
+                    // Because `least_restrictive` uses implicit cast, all of which allowed in
+                    // assign context.
+                    .map(|(expr, ty)| expr.cast_assign(ty))
+                    .try_collect()
             })
-            .collect::<Vec<Vec<ExprImpl>>>();
+            .try_collect()?;
 
         let schema = Schema::new(types.into_iter().map(Field::unnamed).collect());
         Ok(BoundValues { rows, schema })
