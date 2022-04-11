@@ -14,7 +14,6 @@
 
 use prometheus::core::{AtomicU64, Collector, GenericCounter, Metric};
 use prometheus::Histogram;
-use risingwave_common::config::StorageConfig;
 use risingwave_storage::for_all_metrics;
 use risingwave_storage::monitor::StateStoreMetrics;
 
@@ -32,7 +31,6 @@ impl DisplayStats {
         // (Ting Sun) TODO: eliminate this clone
         self.prev_stat = self.cur_stat.clone();
         self.cur_stat = MyStateStoreStats::from_prom_stats(&StateStoreMetrics::new(
-            &StorageConfig::default(),
             prometheus::Registry::new(),
         ));
     }

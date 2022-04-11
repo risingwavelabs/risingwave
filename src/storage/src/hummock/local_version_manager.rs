@@ -413,6 +413,7 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[0]
         shared_buffer_manager
             .write_batch(gen_dummy_batch(epochs[0]), epochs[0])
+            .await
             .unwrap();
         assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
 
@@ -432,6 +433,7 @@ mod tests {
         for epoch in epochs.iter().skip(1) {
             shared_buffer_manager
                 .write_batch(gen_dummy_batch(*epoch), *epoch)
+                .await
                 .unwrap();
             local_version_manager.ref_committed_epoch(*epoch);
         }

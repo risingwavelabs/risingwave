@@ -175,25 +175,26 @@ async fn test_basic() {
 }
 
 #[tokio::test]
-async fn test_state_store_flusher() {
+async fn test_state_store_sync() {
     let object_client = Arc::new(InMemObjectStore::new());
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
-    let hummock_options = Arc::new(default_config_for_test());
+
+    let mut config = default_config_for_test();
+    config.shared_buffer_threshold_size = 64;
+    config.write_conflict_detection_enabled = false;
+
+    let hummock_options = Arc::new(config);
     let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
         MockHummockMetaService::new(),
     )));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-
-    let mut metrics = StateStoreMetrics::unused();
-    metrics.shared_buffer_threshold_size = 64; // 64 bytes
-    let state_store_stats = Arc::new(metrics);
 
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
         local_version_manager,
         meta_client.clone(),
-        state_store_stats.clone(),
+        Arc::new(StateStoreMetrics::unused()),
     )
     .await
     .unwrap();
@@ -218,7 +219,9 @@ async fn test_state_store_flusher() {
     // cost additional 16B in the shared buffer that is 32B in total.
     assert_eq!(
         32,
-        state_store_stats
+        hummock_storage
+            .shared_buffer_manager()
+            .stats()
             .shared_buffer_cur_size
             .load(Ordering::SeqCst)
     );
@@ -233,18 +236,19 @@ async fn test_state_store_flusher() {
 
     time_interval.tick().await;
 
-    // shared buffer threshold size have been reached
-    // and sync worker should have been triggered
+    // shared buffer threshold size should have been reached
     assert_eq!(
-        0,
-        state_store_stats
+        64,
+        hummock_storage
+            .shared_buffer_manager()
+            .stats()
             .shared_buffer_cur_size
             .load(Ordering::SeqCst)
     );
 
     epoch += 1;
 
-    // ingest 8B and trigger a sync
+    // ingest more 8B then will trigger a sync behind the scene
     let mut batch3 = vec![(Bytes::from("eeee"), StorageValue::new_default_put("5555"))];
     batch3.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage.ingest_batch(batch3, epoch).await.unwrap();
@@ -252,7 +256,9 @@ async fn test_state_store_flusher() {
     // 16B in total with 8B epoch appended to the key
     assert_eq!(
         16,
-        state_store_stats
+        hummock_storage
+            .shared_buffer_manager()
+            .stats()
             .shared_buffer_cur_size
             .load(Ordering::SeqCst)
     );
@@ -262,7 +268,9 @@ async fn test_state_store_flusher() {
 
     assert_eq!(
         0,
-        state_store_stats
+        hummock_storage
+            .shared_buffer_manager()
+            .stats()
             .shared_buffer_cur_size
             .load(Ordering::SeqCst)
     );

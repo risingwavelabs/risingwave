@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -60,7 +59,7 @@ pub struct SharedBufferUploader {
     /// in `StorageConfig`
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
-    rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+    uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
 
 impl SharedBufferUploader {
@@ -70,7 +69,7 @@ impl SharedBufferUploader {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+        uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
         Self {
             batches_to_upload: BTreeMap::new(),
@@ -85,19 +84,19 @@ impl SharedBufferUploader {
             } else {
                 None
             },
-            rx,
+            uploader_rx,
         }
     }
 
     /// Uploads buffer batches to S3.
-    async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
+    async fn sync(&mut self, epoch: u64) -> HummockResult<u64> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
 
         let buffers = match self.batches_to_upload.remove(&epoch) {
             Some(m) => m,
-            None => return Ok(()),
+            None => return Ok(0),
         };
 
         let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
@@ -118,17 +117,6 @@ impl SharedBufferUploader {
             self.stats.clone(),
         )
         .await?;
-
-        let shared_buff_prev_size = self
-            .stats
-            .shared_buffer_cur_size
-            .fetch_sub(sync_size, Ordering::SeqCst);
-        log::debug!(
-            "shared_buffer_uploader: shared_buff_prev_size {}, sync_size {}",
-            shared_buff_prev_size,
-            sync_size
-        );
-        assert!(shared_buff_prev_size >= sync_size);
 
         // Add all tables at once.
         let version = self
@@ -153,7 +141,7 @@ impl SharedBufferUploader {
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
 
-        Ok(())
+        Ok(sync_size)
     }
 
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
@@ -178,12 +166,16 @@ impl SharedBufferUploader {
                     None => {
                         // Sync all epochs
                         let epochs = self.batches_to_upload.keys().copied().collect_vec();
-                        let mut res = Ok(());
+                        let mut res = Ok(0);
+                        let mut size_total: u64 = 0;
+
                         for e in epochs {
                             res = self.sync(e).await;
                             if res.is_err() {
                                 break;
                             }
+                            size_total += res.unwrap();
+                            res = Ok(size_total);
                         }
                         res
                     }

@@ -14,7 +14,8 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
+use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
@@ -24,17 +25,33 @@ use tokio::task::JoinHandle;
 
 use crate::error::StorageResult;
 use crate::hummock::iterator::variants::*;
+use crate::hummock::key::Epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem,
 };
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
-    SharedBufferUploader, SharedBufferUploaderItem, SyncItem,
+    SharedBufferUploader, SharedBufferUploaderItem, SyncItem, SyncNotify,
 };
 use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
+
+#[derive(Debug)]
+pub struct SharedBufferMetrics {
+    pub shared_buffer_cur_size: atomic::AtomicU64,
+    pub shared_buffer_threshold_size: u64,
+}
+
+impl SharedBufferMetrics {
+    pub fn new(options: &StorageConfig) -> Self {
+        Self {
+            shared_buffer_cur_size: atomic::AtomicU64::new(0),
+            shared_buffer_threshold_size: options.shared_buffer_threshold_size as u64,
+        }
+    }
+}
 
 /// A manager to manage reads and writes on shared buffer.
 /// Shared buffer is a node level abstraction to buffer write batches across executors.
@@ -42,7 +59,9 @@ pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
     shared_buffer: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
+    sync_tx: tokio::sync::watch::Sender<SharedBufferUploaderItem>,
     uploader_handle: JoinHandle<StorageResult<()>>,
+    stats: SharedBufferMetrics,
 }
 
 impl SharedBufferManager {
@@ -51,30 +70,87 @@ impl SharedBufferManager {
         local_version_manager: Arc<LocalVersionManager>,
         sstable_store: SstableStoreRef,
         // TODO: separate `HummockStats` from `StateStoreMetrics`.
-        stats: Arc<StateStoreMetrics>,
+        state_store_stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (sync_tx, sync_rx) =
+            tokio::sync::watch::channel(SharedBufferUploaderItem::Sync(SyncItem::default()));
+        let stats = SharedBufferMetrics::new(options.as_ref());
+
         let uploader = SharedBufferUploader::new(
             options,
             local_version_manager,
             sstable_store,
-            stats,
+            state_store_stats,
             hummock_meta_client,
             uploader_rx,
+            sync_rx,
         );
         let uploader_handle = tokio::spawn(uploader.run());
         Self {
             shared_buffer: PLRwLock::new(BTreeMap::new()),
             uploader_tx,
+            sync_tx,
             uploader_handle,
+            stats,
         }
     }
 
+    /// Allocates a shared buffer budget.
+    async fn allocate_space(&self, batch_size: u64, _epoch: Epoch) -> HummockResult<()> {
+        let mut current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+        let threshold = self.stats.shared_buffer_threshold_size;
+
+        // Atomically allocates space,
+        // since there could be concurrent Actors write to the shared buffer.
+        'retry_allocate: loop {
+            // flush shared buffer if there is no enough space
+            while threshold < current_size + batch_size {
+                log::info!("triggered flush: threshold {}, require {}", threshold, current_size + batch_size);
+                self.sync(None).await?;
+                current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+            }
+
+            assert!(current_size + batch_size <= threshold);
+            let res = self.stats.shared_buffer_cur_size.compare_exchange(
+                current_size,
+                current_size + batch_size,
+                Ordering::SeqCst,
+                Ordering::Acquire,
+            );
+            match res {
+                Ok(_) => {
+                    break; // success
+                }
+                Err(old_val) => {
+                    current_size = old_val;
+                    continue 'retry_allocate;
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
-    pub fn write_batch(&self, batch: Vec<SharedBufferItem>, epoch: u64) -> HummockResult<u64> {
+    pub async fn write_batch(
+        &self,
+        batch: Vec<SharedBufferItem>,
+        epoch: Epoch,
+    ) -> HummockResult<u64> {
         let batch = SharedBufferBatch::new(batch, epoch);
         let size = batch.size;
+
+        self.allocate_space(size, epoch).await?;
+
+        let shared_buffer_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
+        log::info!(
+            "ingested batch size: {}, shared_buff_curr_size: {}",
+            size,
+            shared_buffer_size
+        );
+
+        // Write the batch to shared buffer and notify the Uploader
         self.shared_buffer
             .write()
             .entry(epoch)
@@ -103,14 +179,36 @@ impl SharedBufferManager {
 
     // TODO: support time-based syncing
     pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.uploader_tx
+        let sync_notify = SyncNotify::new(Arc::new(tokio::sync::Notify::new()));
+        self.sync_tx
             .send(SharedBufferUploaderItem::Sync(SyncItem {
                 epoch,
-                notifier: Some(tx),
+                notifier: sync_notify.clone(),
             }))
             .unwrap();
-        rx.await.unwrap()
+
+        sync_notify.notify.notified().await;
+        let res = sync_notify.result.lock();
+        match res.as_ref() {
+            Ok(sync_size) => {
+                // Update the shared buffer size count
+                let shared_buff_prev_size = self
+                    .stats
+                    .shared_buffer_cur_size
+                    .fetch_sub(*sync_size, Ordering::SeqCst);
+                log::info!(
+                    "shared_buffer_prev_size {}, sync_size {}",
+                    shared_buff_prev_size,
+                    sync_size
+                );
+                assert!(shared_buff_prev_size >= *sync_size);
+
+                Ok(())
+            }
+            Err(_) => Err(HummockError::shared_buffer_error(
+                "Fail to sync shared buffer",
+            )),
+        }
     }
 
     /// Searches shared buffers within the `epoch_range` for the given key.
@@ -216,6 +314,10 @@ impl SharedBufferManager {
         self.shared_buffer.write().remove(&epoch);
     }
 
+    pub fn stats(&self) -> &SharedBufferMetrics {
+        &self.stats
+    }
+
     #[cfg(test)]
     pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
         self.shared_buffer.read().clone()
@@ -265,7 +367,7 @@ mod tests {
         )
     }
 
-    fn generate_and_write_batch(
+    async fn generate_and_write_batch(
         put_keys: &[Vec<u8>],
         delete_keys: &[Vec<u8>],
         epoch: u64,
@@ -289,6 +391,7 @@ mod tests {
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
         shared_buffer_manager
             .write_batch(shared_buffer_items.clone(), epoch)
+            .await
             .unwrap();
         shared_buffer_items
             .iter()
@@ -315,7 +418,8 @@ mod tests {
             epoch1,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
@@ -326,7 +430,8 @@ mod tests {
             epoch2,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Get and check value with epoch 0..=epoch1
         for i in 0..3 {
@@ -402,7 +507,8 @@ mod tests {
             epoch1,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
@@ -413,7 +519,8 @@ mod tests {
             epoch2,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Forward iterator with 0..=epoch1
         let range = keys[0].clone()..=keys[3].clone();
@@ -537,7 +644,8 @@ mod tests {
             epoch1,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Write a batch in epoch2, with key1 overlapping with epoch1 and key2 deleted.
         let epoch2 = epoch1 + 1;
@@ -548,7 +656,8 @@ mod tests {
             epoch2,
             &mut idx,
             &shared_buffer_manager,
-        );
+        )
+        .await;
 
         // Backward iterator with 0..=epoch1
         let range = keys[3].clone()..=keys[0].clone();
@@ -668,7 +777,7 @@ mod tests {
         // Write a batch
         let epoch = 1;
         let shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
 
         // Get and check value with epoch 0..=epoch1
         for (idx, key) in keys.iter().enumerate() {
@@ -688,7 +797,7 @@ mod tests {
         keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
         let epoch = 1;
         let new_shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
         for (idx, key) in keys.iter().enumerate() {
             assert_eq!(
                 shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
