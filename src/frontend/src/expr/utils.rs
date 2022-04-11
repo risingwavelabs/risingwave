@@ -264,7 +264,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::{push_down_not, fold_boolean_constant};
+    use super::{fold_boolean_constant, push_down_not};
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
 
     #[test]

@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    push_down_not, fold_boolean_constant, to_conjunctions, try_get_bool_constant, ExprImpl,
+    fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
     ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
 };
 
