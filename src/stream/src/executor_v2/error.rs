@@ -102,10 +102,10 @@ impl From<StorageError> for TracedStreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to internal error of `RwResult`.
+/// Always convert [`TracedStreamExecutorError`] to stream error of `RwResult`.
 impl From<TracedStreamExecutorError> for RwError {
     fn from(h: TracedStreamExecutorError) -> Self {
-        ErrorCode::InternalError(h.to_string()).into()
+        ErrorCode::StreamError(h.into()).into()
     }
 }
 
