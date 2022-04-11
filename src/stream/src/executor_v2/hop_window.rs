@@ -2,6 +2,7 @@ use std::num::NonZeroUsize;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
@@ -61,7 +62,13 @@ impl Executor for HopWindowExecutor {
 impl HopWindowExecutor {
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
-        let input = self.input.execute();
+        let Self {
+            input,
+            time_col_idx,
+            window_slide,
+            window_size,
+            ..
+        } = *self;
         let units = self
             .window_size
             .exact_div(&self.window_slide)
@@ -69,29 +76,48 @@ impl HopWindowExecutor {
             .ok_or_else(|| {
                 StreamExecutorError::InvalidArgument(format!(
                     "window_size {} cannot be divided by window_slide {}",
-                    self.window_size, self.window_slide
+                    window_size, self.window_slide
                 ))
             })?
             .get();
 
         let schema = self.info.schema;
-        let time_col_data_type = schema.fields()[self.time_col_idx].data_type();
+        let time_col_data_type = schema.fields()[time_col_idx].data_type();
         let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
 
-        let window_size_expr = LiteralExpression::new(
+        let window_slide_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
+                .boxed();
+
+        // The first window_start of hop window should be:
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
+        // Let's pre calculate (`window_size` - `window_slide`).
+        let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
+            StreamExecutorError::InvalidArgument(format!(
+                "window_size {} cannot be subtracted by window_slide {}",
+                window_size, window_slide
+            ))
+        })?;
+        let window_size_sub_slide_expr = LiteralExpression::new(
             DataType::Interval,
-            Some(ScalarImpl::Interval(self.window_size)),
+            Some(ScalarImpl::Interval(window_size_sub_slide)),
         )
         .boxed();
-        let tumble_start = new_binary_expr(
+
+        let hop_start = new_binary_expr(
             expr_node::Type::TumbleStart,
             risingwave_common::types::DataType::Timestamp,
-            time_col_ref,
-            window_size_expr,
+            new_binary_expr(
+                expr_node::Type::Subtract,
+                DataType::Timestamp,
+                time_col_ref,
+                window_size_sub_slide_expr,
+            ),
+            window_slide_expr,
         );
 
         #[for_await]
-        for msg in input {
+        for msg in input.execute() {
             let msg = msg?;
             let Message::Chunk(chunk) = msg else {
                 // TODO: syn has not supported `let_else`, we desugar here manually.
@@ -101,11 +127,11 @@ impl HopWindowExecutor {
             // TODO: compact may be not necessary here.
             let chunk = chunk.compact().map_err(StreamExecutorError::ExecutorV1)?;
             let (data_chunk, ops) = chunk.into_parts();
-            let tumble_start = tumble_start
+            let hop_start = hop_start
                 .eval(&data_chunk)
                 .map_err(StreamExecutorError::EvalError)?;
-            let tumble_start_chunk = DataChunk::new(vec![Column::new(tumble_start)], None);
-            println!("{}", tumble_start_chunk.to_pretty_string());
+            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], None);
+            println!("{}", hop_start_chunk.to_pretty_string());
             let (origin_cols, visibility) = data_chunk.into_parts();
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
@@ -144,7 +170,7 @@ impl HopWindowExecutor {
                     window_start_offset_expr,
                 );
                 let window_start_col = window_start_expr
-                    .eval(&tumble_start_chunk)
+                    .eval(&hop_start_chunk)
                     .map_err(StreamExecutorError::EvalError)?;
                 let window_end_expr = new_binary_expr(
                     expr_node::Type::Add,
@@ -153,7 +179,7 @@ impl HopWindowExecutor {
                     window_end_offset_expr,
                 );
                 let window_end_col = window_end_expr
-                    .eval(&tumble_start_chunk)
+                    .eval(&hop_start_chunk)
                     .map_err(StreamExecutorError::EvalError)?;
                 let mut new_cols = origin_cols.clone();
                 new_cols.extend_from_slice(&[
@@ -244,6 +270,8 @@ mod tests {
         .boxed();
 
         let mut stream = executor.execute();
+        // TODO: add more test infra to reduce the duplicated codes below.
+
         let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
             unreachable!();
         };
@@ -288,6 +316,10 @@ mod tests {
                 (op, row)
             })
             .collect_vec();
+        for (idx, (actual, expected)) in rows.into_iter().zip_eq(expected_rows).enumerate() {
+            assert_eq!(actual, expected, "on {}-th row", idx);
+        }
+
         let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
             unreachable!();
         };
@@ -303,6 +335,33 @@ mod tests {
                             .collect_vec(),
                     ),
                 )
+            })
+            .collect_vec();
+        assert_eq!(rows.len(), 8);
+
+        #[allow(clippy::zero_prefixed_literal)]
+        let expected_rows = [
+            ('+', 1, 1, t(10, 00), t(10, 00), t(10, 30)),
+            ('+', 2, 3, t(10, 05), t(10, 00), t(10, 30)),
+            ('-', 3, 2, t(10, 14), t(10, 00), t(10, 30)),
+            ('+', 4, 1, t(10, 22), t(10, 15), t(10, 45)),
+            ('-', 5, 3, t(10, 33), t(10, 30), t(11, 00)),
+            ('+', 6, 2, t(10, 42), t(10, 30), t(11, 00)),
+            ('-', 7, 1, t(10, 51), t(10, 45), t(11, 15)),
+            ('+', 8, 3, t(11, 02), t(11, 00), t(11, 30)),
+        ];
+        let expected_rows = expected_rows
+            .into_iter()
+            .map(|(op, f1, f2, f3, f4, f5)| {
+                let op = if op == '+' { Op::Insert } else { Op::Delete };
+                let row = Row(vec![
+                    Some(ScalarImpl::Int32(f1)),
+                    Some(ScalarImpl::Int32(f2)),
+                    Some(ScalarImpl::NaiveDateTime(f3)),
+                    Some(ScalarImpl::NaiveDateTime(f4)),
+                    Some(ScalarImpl::NaiveDateTime(f5)),
+                ]);
+                (op, row)
             })
             .collect_vec();
         for (idx, (actual, expected)) in rows.into_iter().zip_eq(expected_rows).enumerate() {
