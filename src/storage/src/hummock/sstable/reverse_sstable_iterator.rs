@@ -138,6 +138,7 @@ impl SSTableIteratorBase for ReverseSSTableIterator {}
 
 impl SSTableIteratorType for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
+
     const DIRECTION: usize = BACKWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {

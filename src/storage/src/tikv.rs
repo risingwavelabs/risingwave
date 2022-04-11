@@ -42,6 +42,7 @@ impl TikvStateStore {
             pd: pd_endpoints,
         }
     }
+
     pub async fn client(&self) -> &tikv_client::transaction::Client {
         self.client
             .get_or_init(|| async {
@@ -54,6 +55,7 @@ impl TikvStateStore {
 
 impl StateStore for TikvStateStore {
     type Iter<'a> = TikvStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
@@ -215,6 +217,7 @@ impl TikvStateStoreIter {
 
 impl StateStoreIter for TikvStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
 
     fn next(&mut self) -> Self::NextFuture<'_> {

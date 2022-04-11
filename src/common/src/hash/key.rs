@@ -202,6 +202,7 @@ pub type KeySerialized = SerializedKey;
 
 impl HashKeySerDe<'_> for bool {
     type S = [u8; 1];
+
     fn serialize(self) -> Self::S {
         if self {
             [1u8; 1]

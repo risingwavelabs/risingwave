@@ -48,9 +48,9 @@ impl IntervalArray {
 
 impl Array for IntervalArray {
     type Builder = IntervalArrayBuilder;
-    type RefItem<'a> = IntervalUnit;
-    type OwnedItem = IntervalUnit;
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = IntervalUnit;
+    type RefItem<'a> = IntervalUnit;
 
     fn value_at(&self, idx: usize) -> Option<Self::RefItem<'_>> {
         if !self.is_null(idx) {

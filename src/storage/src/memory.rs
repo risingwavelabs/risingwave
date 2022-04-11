@@ -82,6 +82,7 @@ impl MemoryStateStore {
 
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
@@ -215,7 +216,9 @@ impl MemoryStateStoreIter {
 
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { Ok(self.inner.next()) }
     }

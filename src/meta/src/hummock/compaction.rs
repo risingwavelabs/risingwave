@@ -472,6 +472,7 @@ impl Transactional for CompactStatus {
         );
         Ok(())
     }
+
     fn delete_in_transaction(&self, trx: &mut Transaction) -> Result<()> {
         trx.delete(
             CompactStatus::cf_name().to_string(),
