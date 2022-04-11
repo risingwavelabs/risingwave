@@ -158,7 +158,9 @@ impl Operations {
         let size = batches
             .iter()
             .flat_map(|batch| batch.iter())
-            .map(|(key, value)| size_of_val(key) + size_of_val(value))
+            .map(|(key, value)| {
+                key.len() + value.as_ref().map(|v| v.len()).unwrap_or(0)
+            })
             .sum::<usize>();
 
         // partitioned these batches for each concurrency
