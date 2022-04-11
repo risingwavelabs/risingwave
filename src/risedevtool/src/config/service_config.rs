@@ -16,7 +16,10 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ComputeNodeConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -33,7 +36,10 @@ pub struct ComputeNodeConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct MetaNodeConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -49,7 +55,10 @@ pub struct MetaNodeConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct FrontendConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -59,7 +68,10 @@ pub struct FrontendConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct MinioConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -75,7 +87,10 @@ pub struct MinioConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct EtcdConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     // TODO: only one node etcd is supported.
     pub address: String,
@@ -86,7 +101,10 @@ pub struct EtcdConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct PrometheusConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -97,7 +115,10 @@ pub struct PrometheusConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct GrafanaConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -106,7 +127,10 @@ pub struct GrafanaConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct JaegerConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub dashboard_address: String,
     pub dashboard_port: u16,
@@ -114,14 +138,20 @@ pub struct JaegerConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct AwsS3Config {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub bucket: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
@@ -132,7 +162,10 @@ pub struct KafkaConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ZooKeeperConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
     pub id: String,
     pub address: String,
     pub port: u16,
