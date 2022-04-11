@@ -252,7 +252,7 @@ jobs:
       - name: e2e test batch 3-node
         timeout-minutes: 2
         run: |
-          ~/cargo-make/makers ci-start ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev --engine risingwave './e2e_test/batch/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -351,7 +351,7 @@ jobs:
         timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
-          ~/cargo-make/makers dev ci-3node
+          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
           RUST_LOG=info target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
