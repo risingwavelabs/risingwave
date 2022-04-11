@@ -48,6 +48,7 @@ use std::time::Duration;
 
 use clap::{ArgEnum, Parser};
 
+use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, MetaStoreBackend};
 
 #[derive(Copy, Clone, Debug, ArgEnum)]
@@ -80,6 +81,11 @@ pub struct MetaNodeOpts {
 
     #[clap(long)]
     dashboard_ui_path: Option<String>,
+
+    /// Whether to enable fail-on-recovery. If not set, default to enable. Should only be used in
+    /// e2e tests.
+    #[clap(long)]
+    disable_recovery: bool,
 }
 
 /// Start meta node
@@ -107,6 +113,9 @@ pub async fn start(opts: MetaNodeOpts) {
         backend,
         max_heartbeat_interval,
         opts.dashboard_ui_path,
+        MetaOpts {
+            enable_recovery: !opts.disable_recovery,
+        },
     )
     .await
     .unwrap();
