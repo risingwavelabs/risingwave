@@ -291,14 +291,13 @@ impl<S: StateStore, const TOP_N_TYPE: usize> ManagedTopNState<S, TOP_N_TYPE> {
         number_rows: Option<usize>,
         epoch: u64,
     ) -> Result<Vec<(OrderedRow, Row)>> {
-        // We remark that since we now encode a null row by only using a special cell encoding
-        // instead of # datum in Row of cell encodings. `top_n_count *
-        // self.data_types.len()` over-calculates the number of kv-pairs that we need to
-        // read from storage. But it is fine.
+        // We remark that since we uses a sentinel column by encoding a special none cell.
+        // `top_n_count * self.data_types.len()` over-calculates the number of kv-pairs that
+        // we need to read from storage. But it is fine.
         let pk_row_bytes = self
             .keyspace
             .scan_strip_prefix(
-                number_rows.map(|top_n_count| top_n_count * self.data_types.len()),
+                number_rows.map(|top_n_count| top_n_count * (self.data_types.len() + 1)),
                 epoch,
             )
             .await?

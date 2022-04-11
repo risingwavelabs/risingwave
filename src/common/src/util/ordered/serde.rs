@@ -32,7 +32,7 @@ use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
 
 /// The special `cell_id` reserved for a whole null row is `i32::MIN`.
-pub const NULL_ROW_SPECIAL_CELL_ID: ColumnId = ColumnId::new(i32::MIN);
+pub const SENTINEL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
 
 /// We can use memcomparable serialization to serialize data
 /// and flip the bits if the order of that datum is descending.
@@ -144,7 +144,6 @@ pub fn serialize_pk_and_row(
         assert_eq!(values.0.len(), column_ids.len());
     }
     let mut result = vec![];
-    let mut all_null = true;
     for (index, column_id) in column_ids.iter().enumerate() {
         let key = [pk_buf, serialize_column_id(column_id)?.as_slice()].concat();
         match row {
@@ -154,7 +153,6 @@ pub fn serialize_pk_and_row(
                     // we serialize this null row specially by only using one cell encoding.
                 }
                 datum => {
-                    all_null = false;
                     let value = serialize_cell(datum)?;
                     result.push((key, Some(value)));
                 }
@@ -162,24 +160,20 @@ pub fn serialize_pk_and_row(
             None => {
                 // A `None` of row means deleting that row, while the a `None` of datum represents a
                 // null.
-                all_null = false;
                 result.push((key, None));
             }
         }
     }
-    if all_null {
-        // Here we use a special column id -1 to represent a row consisting of all null values.
-        // `MViewTable` has a `get` interface which accepts a cell id. A null row in this case
-        // would return null datum as it has only a single cell with column id == -1 and `get`
-        // gets nothing.
-        let key = [
-            pk_buf,
-            serialize_column_id(&NULL_ROW_SPECIAL_CELL_ID)?.as_slice(),
-        ]
-        .concat();
+
+    if row.is_none() {
+        let key = [pk_buf, serialize_column_id(&SENTINEL_CELL_ID)?.as_slice()].concat();
+        result.push((key, None));
+    } else {
+        let key = [pk_buf, serialize_column_id(&SENTINEL_CELL_ID)?.as_slice()].concat();
         let value = serialize_cell(&None)?;
         result.push((key, Some(value)));
     }
+
     Ok(result)
 }
 
