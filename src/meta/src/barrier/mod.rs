@@ -457,6 +457,8 @@ where
 
         // TODO: refactor this
         if is_create_mv {
+            // The snapshot ingestion may last for several epochs, we should pin the epoch here.
+            // TODO: this should be done in `post_collect`
             let snapshot = self
                 .hummock_manager
                 .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
