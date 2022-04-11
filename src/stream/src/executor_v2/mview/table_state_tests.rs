@@ -373,7 +373,6 @@ async fn test_get_row_by_muti_get() {
 #[tokio::test]
 async fn test_get_row_for_string() {
     let state_store = MemoryStateStore::new();
-    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
     let order_types = vec![OrderType::Ascending, OrderType::Descending];
     let keyspace = Keyspace::executor_root(state_store, 0x42);
     let column_ids = vec![ColumnId::from(1), ColumnId::from(4), ColumnId::from(7)];
