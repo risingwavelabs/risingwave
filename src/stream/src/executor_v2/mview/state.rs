@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::error::Result;
-use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::storage_value::StorageValue;
@@ -66,14 +65,6 @@ impl<S: StateStore> ManagedMViewState<S> {
         assert_eq!(self.order_types.len(), pk.size());
         assert_eq!(self.column_ids.len(), value.size());
 
-        let l =
-            pk.0.iter()
-                .any(|d| matches!(d, Some(ScalarImpl::Decimal(_))));
-
-        if l {
-            tracing::warn!(?pk, ?value, "mview put");
-        }
-
         FlushStatus::do_insert(self.cache.entry(pk), value);
     }
 
@@ -81,14 +72,6 @@ impl<S: StateStore> ManagedMViewState<S> {
     /// primary keys.
     pub fn delete(&mut self, pk: Row) {
         assert_eq!(self.order_types.len(), pk.size());
-
-        let l =
-            pk.0.iter()
-                .any(|d| matches!(d, Some(ScalarImpl::Decimal(_))));
-
-        if l {
-            tracing::warn!(?pk, "mview delete");
-        }
 
         FlushStatus::do_delete(self.cache.entry(pk));
     }
