@@ -1,7 +1,7 @@
 name: Daily build of docker image
 
 on:
-  push:
+  pull_request:
     paths:
       - '.github/workflows/docker_build.yml'
       - 'docker/**'
@@ -34,20 +34,11 @@ jobs:
           username: ${{ secrets.GHCR_USERNAME }}
           password: ${{ secrets.GHCR_TOKEN }}
       -
-        name: Build frontend
+        name: Build risingwave
         uses: docker/build-push-action@v2
         with:
           context: .
-          file: ./docker/frontend/Dockerfile
+          file: ./docker/Dockerfile
           push: true
           tags: |
-            ghcr.io/singularity-data/risingwave-frontend
-      -
-        name: Build backend
-        uses: docker/build-push-action@v2
-        with:
-          context: .
-          file: ./docker/backend/Dockerfile
-          push: true
-          tags: |
-            ghcr.io/singularity-data/risingwave-backend
+            ghcr.io/singularity-data/risingwave
