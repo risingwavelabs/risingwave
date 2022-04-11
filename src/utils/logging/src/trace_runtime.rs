@@ -44,8 +44,8 @@ impl TraceRuntime for RwTokio {
 }
 
 impl Runtime for RwTokio {
-    type Interval = tokio_stream::wrappers::IntervalStream;
     type Delay = tokio::time::Sleep;
+    type Interval = tokio_stream::wrappers::IntervalStream;
 
     fn interval(&self, duration: Duration) -> Self::Interval {
         opentelemetry::util::tokio_interval_stream(duration)

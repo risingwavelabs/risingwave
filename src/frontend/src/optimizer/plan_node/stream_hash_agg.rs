@@ -52,9 +52,11 @@ impl StreamHashAgg {
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamHashAgg { base, logical }
     }
+
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
+
     pub fn distribution_keys(&self) -> &[usize] {
         self.logical.group_keys()
     }

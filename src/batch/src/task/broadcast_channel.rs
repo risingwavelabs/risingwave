@@ -31,6 +31,7 @@ pub struct BroadcastSender {
 
 impl ChanSender for BroadcastSender {
     type SendFuture<'a> = impl Future<Output = Result<()>>;
+
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
             self.senders.iter().try_for_each(|sender| {
@@ -49,6 +50,7 @@ pub struct BroadcastReceiver {
 
 impl ChanReceiver for BroadcastReceiver {
     type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
             match self.receiver.recv().await {

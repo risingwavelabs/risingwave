@@ -46,6 +46,7 @@ impl StreamingMetrics {
             source_output_row_count,
         }
     }
+
     /// Create a new `StreamingMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(prometheus::Registry::new())

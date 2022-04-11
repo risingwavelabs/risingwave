@@ -62,9 +62,11 @@ impl PlanTreeNodeUnary for LogicalLimit {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.limit, self.offset)
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,
@@ -106,6 +108,7 @@ impl ToStream for LogicalLimit {
     fn to_stream(&self) -> PlanRef {
         panic!("there is no limit stream operator");
     }
+
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (filter, out_col_change) = self.rewrite_with_input(input, input_col_change);

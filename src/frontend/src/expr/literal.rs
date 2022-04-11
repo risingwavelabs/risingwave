@@ -47,9 +47,11 @@ impl Literal {
     pub fn new(data: Datum, data_type: DataType) -> Self {
         Literal { data, data_type }
     }
+
     pub fn get_expr_type(&self) -> ExprType {
         ExprType::ConstantValue
     }
+
     pub fn get_data(&self) -> &Datum {
         &self.data
     }

@@ -12,6 +12,7 @@ include ../../tpch/insert_region.slt.part
 include ../../batch/tpch/q1.slt.part
 include ../../batch/tpch/q5.slt.part
 include ../../batch/tpch/q6.slt.part
+include ../../batch/tpch/q7.slt.part
 
 
 include ../../tpch/drop_tables.slt.part

@@ -232,7 +232,9 @@ impl<K: HashKey> ProbeTable<K> {
     pub(super) fn set_probe_data(&mut self, probe_data_chunk: DataChunk) -> Result<()> {
         self.build_data_chunk()?;
         let probe_data_chunk = probe_data_chunk.compact()?;
-        ensure!(probe_data_chunk.cardinality() > 0);
+        // TODO(yuhao): We should make sure the output chunk of upstream executor
+        // has cardinality > 0.
+        // ensure!(probe_data_chunk.cardinality() > 0);
         let probe_keys = K::build(self.params.probe_key_columns(), &probe_data_chunk)?;
         if self.params.join_type().need_probe() && self.params.has_non_equi_cond() {
             if let Some(list) = self.probe_matched_list.as_mut() {
@@ -246,7 +248,9 @@ impl<K: HashKey> ProbeTable<K> {
             };
         }
         self.cur_probe_row_id = 0;
-        self.cur_joined_build_row_id = self.first_joined_row_id(&probe_keys[0]);
+        self.cur_joined_build_row_id = probe_keys
+            .first()
+            .and_then(|key| self.first_joined_row_id(key));
         self.cur_probe_data = Some(ProbeData::<K> {
             probe_data_chunk,
             probe_keys,
@@ -693,7 +697,31 @@ impl<K: HashKey> ProbeTable<K> {
     }
 
     fn do_left_semi_join_with_non_equi_condition(&mut self) -> Result<Option<DataChunk>> {
-        self.do_full_outer_join_with_non_equi_condition()
+        let mut probe_matched_list = self.probe_matched_list.take().unwrap();
+        let probe_matched = probe_matched_list.back_mut().unwrap();
+        while self.cur_probe_row_id < self.current_probe_data_chunk_size() {
+            let probe_row_matched = &mut probe_matched[self.cur_probe_row_id];
+            while let Some(build_row_id) = self.next_joined_build_row_id() {
+                // Only needed for non-equi condition
+                probe_row_matched.row_cnt += 1;
+                // Here we have one full data chunk
+                if let Some(ret_data_chunk) =
+                    self.append_one_row(Some(build_row_id), Some(self.cur_probe_row_id))?
+                {
+                    // There should be more rows in the build side that
+                    // matches the current row in probe side.
+                    if self.build_index[build_row_id].is_some() {
+                        self.has_pending_matched = true;
+                    }
+
+                    self.probe_matched_list = Some(probe_matched_list);
+                    return Ok(Some(ret_data_chunk));
+                }
+            }
+            self.next_probe_row();
+        }
+        self.probe_matched_list = Some(probe_matched_list);
+        Ok(None)
     }
 
     fn do_left_anti_join(&mut self) -> Result<Option<DataChunk>> {

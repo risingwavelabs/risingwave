@@ -107,6 +107,7 @@ macro_rules! impl_try_from_decimal {
     ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
         impl core::convert::TryFrom<$from_ty> for $to_ty {
             type Error = Error;
+
             fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
                 $convert(&value).ok_or_else(|| Error::from($err))
             }
@@ -118,6 +119,7 @@ macro_rules! impl_try_from_float {
     ($from_ty:ty, $to_ty:ty, $convert:path, $err:expr) => {
         impl core::convert::TryFrom<$from_ty> for $to_ty {
             type Error = Error;
+
             fn try_from(value: $from_ty) -> Result<Self, Self::Error> {
                 $convert(value).ok_or_else(|| Error::from($err))
             }
@@ -166,6 +168,7 @@ impl FromPrimitive for Decimal {
         (i32, from_i32),
         (i64, from_i64)
     ]);
+
     impl_from_float!([(f32, from_f32), (f64, from_f64)]);
 }
 
@@ -206,6 +209,7 @@ impl Add for Decimal {
 
 impl Neg for Decimal {
     type Output = Self;
+
     fn neg(self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(-d),
@@ -419,6 +423,7 @@ impl Decimal {
     pub fn new(num: i64, scale: u32) -> Self {
         Self::Normalized(RustDecimal::new(num, scale))
     }
+
     pub fn zero() -> Self {
         Self::from(0)
     }
@@ -505,6 +510,7 @@ impl ToPrimitive for Decimal {
         (u16, to_u16),
         (u8, to_u8)
     ]);
+
     impl_to_float!([(f64, to_f64), (f32, to_f32)]);
 }
 

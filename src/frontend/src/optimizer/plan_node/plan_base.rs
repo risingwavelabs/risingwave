@@ -53,6 +53,7 @@ impl PlanBase {
             append_only: true,
         }
     }
+
     pub fn new_stream(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -72,6 +73,7 @@ impl PlanBase {
             append_only,
         }
     }
+
     pub fn new_batch(
         ctx: OptimizerContextRef,
         schema: Schema,

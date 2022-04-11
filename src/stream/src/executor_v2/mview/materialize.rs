@@ -227,15 +227,15 @@ mod tests {
         // First stream chunk. We check the existence of (3) -> (3,6)
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
-                // Simply assert there is 3 rows (6 elements) in state store instead of doing full
-                // comparison
+                // Simply assert there is 3 rows (9 elements) in state store instead of doing full
+                // comparison, each row contains one sentinel cell.
                 assert_eq!(
                     memory_state_store
                         .scan::<_, Vec<u8>>(.., None, u64::MAX)
                         .await
                         .unwrap()
                         .len(),
-                    6
+                    9
                 );
 
                 // FIXME(Bugen): restore this test by using new `RowTable` interface
@@ -261,7 +261,7 @@ mod tests {
                         .await
                         .unwrap()
                         .len(),
-                    6
+                    9
                 );
 
                 // FIXME(Bugen): restore this test by using new `RowTable` interface

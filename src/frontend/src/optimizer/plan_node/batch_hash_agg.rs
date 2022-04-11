@@ -46,9 +46,11 @@ impl BatchHashAgg {
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchHashAgg { base, logical }
     }
+
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }
+
     pub fn group_keys(&self) -> &[usize] {
         self.logical.group_keys()
     }

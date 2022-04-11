@@ -30,8 +30,8 @@ pub struct Condition {
 }
 
 impl IntoIterator for Condition {
-    type Item = ExprImpl;
     type IntoIter = std::vec::IntoIter<ExprImpl>;
+    type Item = ExprImpl;
 
     fn into_iter(self) -> Self::IntoIter {
         self.conjunctions.into_iter()

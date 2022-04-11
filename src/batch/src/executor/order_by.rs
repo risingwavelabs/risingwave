@@ -114,6 +114,7 @@ impl OrderByExecutor {
             self.vis_indices[idx] += 1;
         }
     }
+
     fn get_order_index_from(&self, idx: usize) -> Vec<usize> {
         let mut index: Vec<usize> = (0..self.chunks[idx].cardinality()).collect();
         index.sort_by(|ia, ib| {
@@ -134,6 +135,7 @@ impl OrderByExecutor {
         });
         index
     }
+
     async fn collect_child_data(&mut self) -> Result<()> {
         while let Some(chunk) = self.child.next().await? {
             if !self.disable_encoding && self.encodable {
