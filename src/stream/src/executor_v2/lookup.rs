@@ -15,11 +15,13 @@
 use std::pin::Pin;
 
 use async_trait::async_trait;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
+
+use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
 
 mod sides;
 use self::sides::*;
@@ -28,9 +30,7 @@ mod impl_;
 #[cfg(test)]
 mod tests;
 
-use super::{Barrier, Executor, Message, PkIndices, PkIndicesRef};
-
-pub type BoxedArrangeStream = Pin<Box<dyn Stream<Item = Result<ArrangeMessage>> + Send>>;
+type BoxedArrangeStream = Pin<Box<dyn Stream<Item = Result<ArrangeMessage>> + Send>>;
 
 /// `LookupExecutor` takes one input stream and one arrangement. It joins the input stream with the
 /// arrangement. Currently, it only supports inner join. See `LookupExecutorParams` for more
@@ -54,33 +54,16 @@ pub struct LookupExecutor<S: StateStore> {
     stream: StreamJoinSide,
 
     /// The combined input from arrangement and stream
-    input: BoxedArrangeStream,
+    input: Option<BoxedArrangeStream>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
 }
 
-impl<S: StateStore> std::fmt::Debug for LookupExecutor<S> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LookupExecutor")
-            .field("output_data_types", &self.output_data_types)
-            .field("schema", &self.schema)
-            .field("pk_indices", &self.pk_indices)
-            .field("arrangement", &self.arrangement)
-            .field("stream", &self.stream)
-            .field("last_barrier", &self.last_barrier)
-            .finish()
-    }
-}
-
 #[async_trait]
 impl<S: StateStore> Executor for LookupExecutor<S> {
-    async fn next(&mut self) -> Result<Message> {
-        loop {
-            if let Some(msg) = self.next_inner().await? {
-                return Ok(msg);
-            }
-        }
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
     }
 
     fn schema(&self) -> &Schema {
@@ -93,10 +76,6 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
 
     fn identity(&self) -> &str {
         "<unknown>"
-    }
-
-    fn logical_operator_info(&self) -> &str {
-        "LookupExecutor"
     }
 
     fn clear_cache(&mut self) -> Result<()> {

@@ -1,6 +1,8 @@
-# Developer Docs
+## Overview
 
-## Content
+This directory contains RisingWave design documents that are intended to be used by developers to understand how we design and implement RisingWave. To learn about how to use RisingWave, check out the [RisingWave user documentation](https://www.risingwave.dev).
+
+## Table of Contents
 
 * Architecture Design
 * [An Overview of RisingWave Streaming Engine](./streaming-overview.md)
@@ -17,6 +19,6 @@
 
 ## Contribution Guide
 
-### Images
+## Images
 
-Recommend to use [draw.io](https://app.diagrams.net/) to draw illustrations and export as SVG images, with "include a copy of my diagram" selected for further editing.
+We recommend that you use [draw.io](https://app.diagrams.net/) to draw illustrations and export as SVG images, with "include a copy of my diagram" selected for further editing.

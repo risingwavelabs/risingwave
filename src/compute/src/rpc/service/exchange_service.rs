@@ -115,7 +115,7 @@ impl ExchangeServiceImpl {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
 
         let tsid = TaskOutputId::try_from(&pb_tsid)?;
-        tracing::debug!(peer_addr = %peer_addr, from = ?tsid, "serve exchange RPC");
+        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?tsid, "serve exchange RPC");
         let mut task_output = self.batch_mgr.take_output(&pb_tsid)?;
         tokio::spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
@@ -141,7 +141,7 @@ impl ExchangeServiceImpl {
         mut receiver: Receiver<Message>,
     ) -> Result<Response<<Self as ExchangeService>::GetStreamStream>> {
         let (tx, rx) = tokio::sync::mpsc::channel(EXCHANGE_BUFFER_SIZE);
-        tracing::debug!(peer_addr = %peer_addr, "serve stream exchange RPC");
+        tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, "serve stream exchange RPC");
         tokio::spawn(async move {
             loop {
                 let msg = receiver.next().await;
