@@ -36,6 +36,12 @@ pub enum StreamExecutorError {
     #[error("aggregate state error {0}")]
     AggStateError(RwError),
 
+    #[error("input error")]
+    InputError(RwError),
+
+    #[error("top n state error {0}")]
+    TopNStateError(RwError),
+
     #[error("channel `{0}` closed")]
     ChannelClosed(String),
 }
@@ -55,6 +61,14 @@ impl StreamExecutorError {
 
     pub fn agg_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::AggStateError(error.into()).into()
+    }
+
+    pub fn input_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::InputError(error.into()).into()
+    }
+
+    pub fn top_n_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::TopNStateError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {

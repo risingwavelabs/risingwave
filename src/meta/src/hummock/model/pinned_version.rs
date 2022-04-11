@@ -24,8 +24,8 @@ const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_pinned_version";
 
 /// `HummockPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockPinnedVersion {
-    type ProstType = HummockPinnedVersion;
     type KeyType = HummockContextRefId;
+    type ProstType = HummockPinnedVersion;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_PINNED_VERSION_CF_NAME)

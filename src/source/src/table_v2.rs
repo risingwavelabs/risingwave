@@ -173,8 +173,8 @@ impl StreamSourceReader for TableV2StreamReader {
 
 #[async_trait]
 impl Source for TableSourceV2 {
-    type ReaderContext = TableV2ReaderContext;
     type BatchReader = TableV2BatchReader;
+    type ReaderContext = TableV2ReaderContext;
     type StreamReader = TableV2StreamReader;
 
     fn batch_reader(

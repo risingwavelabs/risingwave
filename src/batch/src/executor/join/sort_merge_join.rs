@@ -222,6 +222,7 @@ impl SortMergeJoinExecutor {
             identity,
         }
     }
+
     fn compare_with_last_row(&self, cur_row: Option<RowRef>) -> bool {
         self.last_probe_key
             .clone()

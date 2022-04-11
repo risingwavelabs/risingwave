@@ -150,6 +150,7 @@ impl Executor for NestedLoopJoinExecutor {
             }
         }
     }
+
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }

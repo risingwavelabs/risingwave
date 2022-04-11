@@ -249,22 +249,21 @@ impl StreamChunk {
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
-        use prettytable::format::Alignment;
-        use prettytable::{format, Cell, Row, Table};
+        use comfy_table::{Cell, CellAlignment, Table};
 
         let mut table = Table::new();
-        table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+        table.load_preset("||--+-++|    ++++++");
         for row in self.rows() {
             let mut cells = Vec::with_capacity(row.size() + 1);
-            cells.push(Cell::new_align(
-                match row.op() {
+            cells.push(
+                Cell::new(match row.op() {
                     Op::Insert => "+",
                     Op::Delete => "-",
                     Op::UpdateDelete => "U-",
                     Op::UpdateInsert => "U+",
-                },
-                Alignment::RIGHT,
-            ));
+                })
+                .set_alignment(CellAlignment::Right),
+            );
             for datum in &row.values {
                 let str = match datum {
                     None => "".to_owned(), // NULL
@@ -272,7 +271,7 @@ impl StreamChunk {
                 };
                 cells.push(Cell::new(&str));
             }
-            table.add_row(Row::new(cells));
+            table.add_row(cells);
         }
         table.to_string()
     }
@@ -314,8 +313,7 @@ mod tests {
 |  - | 2 |   |
 | U- | 3 | 7 |
 | U+ | 4 |   |
-+----+---+---+
-"
++----+---+---+"
         );
     }
 }

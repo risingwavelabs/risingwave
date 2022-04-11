@@ -53,6 +53,8 @@ impl<S> HummockManagerService for HummockServiceImpl<S>
 where
     S: MetaStore,
 {
+    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
+
     async fn pin_version(
         &self,
         request: Request<PinVersionRequest>,
@@ -195,8 +197,6 @@ where
             Err(e) => Err(e.to_grpc_status()),
         }
     }
-
-    type SubscribeCompactTasksStream = RwReceiverStream<SubscribeCompactTasksResponse>;
 
     async fn subscribe_compact_tasks(
         &self,

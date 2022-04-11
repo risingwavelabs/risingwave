@@ -78,10 +78,15 @@ macro_rules! def_method {
 
 impl<B: Buf> MaybeFlip<B> {
     def_method!(get_u8, u8);
+
     def_method!(get_u16, u16);
+
     def_method!(get_u32, u32);
+
     def_method!(get_u64, u64);
+
     def_method!(get_i32, i32);
+
     def_method!(get_i64, i64);
 
     fn copy_to_slice(&mut self, dst: &mut [u8]) {

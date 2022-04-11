@@ -40,6 +40,7 @@ impl BatchSimpleAgg {
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any().clone());
         BatchSimpleAgg { base, logical }
     }
+
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }

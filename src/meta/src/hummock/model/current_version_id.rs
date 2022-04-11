@@ -31,8 +31,8 @@ pub struct CurrentHummockVersionId {
 }
 
 impl MetadataModel for CurrentHummockVersionId {
-    type ProstType = HummockVersionRefId;
     type KeyType = String;
+    type ProstType = HummockVersionRefId;
 
     fn cf_name() -> String {
         HUMMOCK_DEFAULT_CF_NAME.to_string()

@@ -29,6 +29,7 @@ impl<'a, A: Array> ArrayIterator<'a, A> {
 
 impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     type Item = Option<A::RefItem<'a>>;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.data.len() {
             None
@@ -53,6 +54,7 @@ impl<'a> ArrayImplIterator<'a> {
 
 impl<'a> Iterator for ArrayImplIterator<'a> {
     type Item = DatumRef<'a>;
+
     fn next(&mut self) -> Option<Self::Item> {
         if self.pos >= self.data.len() {
             None

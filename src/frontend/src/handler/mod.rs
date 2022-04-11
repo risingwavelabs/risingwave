@@ -29,8 +29,9 @@ pub mod drop_table;
 mod explain;
 mod flush;
 #[allow(dead_code)]
-mod query;
-mod query_single;
+pub mod query;
+pub mod query_single;
+mod set;
 mod show;
 pub mod util;
 
@@ -91,6 +92,11 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
             ..
         } => create_mv::handle_create_mv(context, name, query).await,
         Statement::Flush => flush::handle_flush(context).await,
+        Statement::SetVariable {
+            local: _,
+            variable,
+            value,
+        } => set::handle_set(context, variable, value),
         _ => {
             Err(ErrorCode::NotImplemented(format!("Unhandled ast: {:?}", stmt), None.into()).into())
         }
