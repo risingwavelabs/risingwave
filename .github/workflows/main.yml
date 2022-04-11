@@ -16,7 +16,6 @@ env:
   RUST_TOOLCHAIN: nightly-2022-03-09
   CACHE_KEY_SUFFIX: v20220331
   CARGO_TERM_COLOR: always
-  RW_CI: true
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
@@ -268,7 +267,7 @@ jobs:
       - name: e2e test, batch, Rust frontend, 1 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          ~/cargo-make/makers ci-start ci-1cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
@@ -276,7 +275,7 @@ jobs:
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
-          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -388,7 +387,7 @@ jobs:
       - name: e2e test, batch, Rust frontend, 1 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          ~/cargo-make/makers ci-start ci-1cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
@@ -396,7 +395,7 @@ jobs:
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
-          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill

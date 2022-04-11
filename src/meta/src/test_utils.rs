@@ -17,6 +17,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
+use crate::manager::MetaOpts;
 use crate::rpc::server::MetaStoreBackend;
 
 pub struct LocalMeta {
@@ -40,6 +41,7 @@ impl LocalMeta {
             MetaStoreBackend::Mem,
             Duration::from_secs(3600),
             None,
+            MetaOpts::default(),
         )
         .await
         .unwrap();
