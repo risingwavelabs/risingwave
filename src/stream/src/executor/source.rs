@@ -280,8 +280,8 @@ impl SourceReader {
 impl Executor for SourceExecutor {
     async fn next(&mut self) -> Result<Message> {
         if let Some(mut reader) = self.reader.take() {
-            reader.stream_reader.replace(reader.stream_reader_future.as_ref().unwrap().await?);
-            reader.stream_reader.as_ref().unwrap().open().await?;
+            reader.stream_reader.replace(reader.stream_reader_future.as_mut().unwrap().await?);
+            reader.stream_reader.as_mut().unwrap().open().await?;
             self.reader_stream.replace(reader.into_stream().boxed());
         }
 
