@@ -20,15 +20,13 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
-use rdkafka::consumer::stream_consumer::StreamPartitionQueue;
-use rdkafka::consumer::{Consumer, DefaultConsumerContext, StreamConsumer};
-use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
+use rdkafka::consumer::{DefaultConsumerContext, StreamConsumer};
+use rdkafka::ClientConfig;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::RwError;
 
 use crate::base::{InnerMessage, SourceReader};
-use crate::kafka::split::{KafkaOffset, KafkaSplit};
-use crate::ConnectorState;
+use crate::kafka::split::KafkaSplit;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -85,15 +83,15 @@ impl SourceReader for KafkaSplitReader {
 
     async fn new(
         properties: HashMap<String, String>,
-        state: Option<crate::ConnectorState>,
+        _state: Option<crate::ConnectorState>,
     ) -> Result<Self>
-    where
-        Self: Sized,
+        where
+            Self: Sized,
     {
         let bootstrap_servers =
             properties
                 .get(KAFKA_CONFIG_BOOTSTRAP_SERVER_KEY)
-                .ok_or(RwError::from(ProtocolError(format!(
+                .ok_or_else(|| RwError::from(ProtocolError(format!(
                     "could not found config {}",
                     KAFKA_CONFIG_BOOTSTRAP_SERVER_KEY
                 ))))?;

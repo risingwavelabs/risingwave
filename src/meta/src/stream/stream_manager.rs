@@ -23,7 +23,6 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
-use risingwave_pb::stream_plan::source_node;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
@@ -138,7 +137,51 @@ where
             .collect();
 
         table_fragments.set_actor_status(actor_info);
-        let actor_map = table_fragments.actor_map();
+        let mut actor_map = table_fragments.actor_map();
+
+        let mut source_actors_group_by_fragment = HashMap::new();
+        for fragment in table_fragments.fragments() {
+            let mut source_actors = HashMap::new();
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                {
+                    source_actors
+                        .entry(source_id)
+                        .or_insert(vec![])
+                        .push(actor.actor_id as ActorId)
+                }
+            }
+
+            for (source_id, actors) in source_actors {
+                source_actors_group_by_fragment
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .push(actors)
+            }
+        }
+
+        let split_assignment = self
+            .source_manager
+            .schedule_split_for_actors(source_actors_group_by_fragment)
+            .await?;
+
+        // patch source actors with splits
+        for (actor_id, actor) in &mut actor_map {
+            if let Some(splits) = split_assignment.get(actor_id) {
+                let mut node = actor.nodes.as_mut().unwrap();
+                while !node.input.is_empty() {
+                    node = node.input.first_mut().unwrap();
+                }
+
+                if let Some(Node::SourceNode(s)) = node.node.as_mut() {
+                    s.stream_source_splits = splits
+                        .iter()
+                        .map(|split| split.to_string().unwrap().as_bytes().to_vec())
+                        .collect();
+                }
+            }
+        }
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains: 1. actors in the current create
@@ -284,38 +327,39 @@ where
                 dispatches,
             })
             .await?;
+        // let mut source_actors_group_by_frag = HashMap::new();
+        //
+        // for (_actor_id, actor) in actor_map {
+        //     let mut node = actor.get_nodes().unwrap();
+        //     while !node.get_input().is_empty() {
+        //         node = node.get_input().get(0).unwrap();
+        //     }
+        //     if let Node::SourceNode(n) = node.get_node().unwrap() {
+        //         let source_type = n.get_source_type().unwrap();
+        //         if matches!(source_type, source_node::SourceType::Source) {
+        //             let source_id = n.table_ref_id.as_ref().unwrap().table_id as u32;
+        //             let frag_id = actor.fragment_id;
+        //             let actor_id = actor.actor_id;
+        //             source_actors_group_by_frag
+        //                 .entry(source_id)
+        //                 .or_insert_with(HashMap::new)
+        //                 .entry(frag_id)
+        //                 .or_insert(vec![])
+        //                 .push(actor_id);
+        //         }
+        //     }
+        // }
+        //
+        // self.source_manager
+        //     .register_source_discovery(
+        //         source_actors_group_by_frag
+        //             .into_iter()
+        //             .map(|(actor_id, frag)| (actor_id, frag.into_values().collect_vec()))
+        //             .collect(),
+        //     )
+        //     .await
 
-        let mut source_actors_group_by_frag = HashMap::new();
-
-        for (_actor_id, actor) in actor_map {
-            let mut node = actor.get_nodes().unwrap();
-            while !node.get_input().is_empty() {
-                node = node.get_input().get(0).unwrap();
-            }
-            if let Node::SourceNode(n) = node.get_node().unwrap() {
-                let source_type = n.get_source_type().unwrap();
-                if matches!(source_type, source_node::SourceType::Source) {
-                    let source_id = n.table_ref_id.as_ref().unwrap().table_id as u32;
-                    let frag_id = actor.fragment_id;
-                    let actor_id = actor.actor_id;
-                    source_actors_group_by_frag
-                        .entry(source_id)
-                        .or_insert_with(HashMap::new)
-                        .entry(frag_id)
-                        .or_insert(vec![])
-                        .push(actor_id);
-                }
-            }
-        }
-
-        self.source_manager
-            .register_source_discovery(
-                source_actors_group_by_frag
-                    .into_iter()
-                    .map(|(actor_id, frag)| (actor_id, frag.into_values().collect_vec()))
-                    .collect(),
-            )
-            .await
+        Ok(())
     }
 
     /// Dropping materialized view is done by barrier manager. Check

@@ -47,6 +47,7 @@ pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
     core: Arc<Mutex<SourceManagerCore<S>>>,
 }
 
@@ -219,12 +220,71 @@ where
         catalog_manager: CatalogManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
+            catalog_manager: catalog_manager.clone(),
             env: env.clone(),
             cluster_manager,
             core: Arc::new(Mutex::new(
                 SourceManagerCore::new(env, barrier_manager, catalog_manager).unwrap(),
             )),
         })
+    }
+
+    async fn fetch_splits_for_source(&self, source_id: SourceId) -> Result<Vec<SplitImpl>> {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let source = catalog_guard.get_source(source_id).await?.ok_or_else(|| {
+            RwError::from(InternalError(format!(
+                "could not find source catalog for {}",
+                source_id
+            )))
+        })?;
+
+        let info = match source.get_info()? {
+            Info::StreamSource(s) => s,
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "for now we only support StreamSource in source manager".to_string(),
+                )));
+            }
+        };
+
+        extract_split_enumerator(&info.properties)
+            .to_rw_result()?
+            .list_splits()
+            .await
+            .to_rw_result()
+    }
+
+    pub async fn schedule_split_for_actors(
+        &self,
+        actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
+    ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+        let source_splits = try_join_all(
+            actors
+                .keys()
+                .map(|source_id| self.fetch_splits_for_source(*source_id)),
+        )
+        .await?;
+        let mut result = HashMap::new();
+
+        for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {
+            for actors in fragments {
+                let actor_count = actors.len();
+                let mut chunks = vec![vec![]; actor_count];
+                for (i, split) in splits.iter().enumerate() {
+                    chunks[i % actor_count].push(split.clone());
+                }
+
+                actors
+                    .into_iter()
+                    .zip_eq(chunks)
+                    .into_iter()
+                    .for_each(|(actor_id, splits)| {
+                        result.insert(actor_id, splits.to_vec());
+                    })
+            }
+        }
+
+        Ok(result)
     }
 
     pub async fn unregister_source_discovery(&self, source_id: SourceId) -> Result<()> {

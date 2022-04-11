@@ -22,6 +22,7 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+  repeated bytes stream_source_splits = 4;
 }
 
 message ProjectNode {

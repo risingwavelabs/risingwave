@@ -82,7 +82,7 @@ pub enum SplitEnumeratorImpl {
     Kinesis(kinesis::enumerator::client::KinesisSplitEnumerator),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SplitImpl {
     Kafka(kafka::KafkaSplit),
     Pulsar(pulsar::PulsarSplit),
@@ -95,6 +95,14 @@ impl SplitImpl {
             SplitImpl::Kafka(k) => k.id(),
             SplitImpl::Pulsar(p) => p.id(),
             SplitImpl::Kinesis(k) => k.id(),
+        }
+    }
+
+    pub fn to_string(&self) -> Result<String> {
+        match self {
+            SplitImpl::Kafka(k) => k.to_string(),
+            SplitImpl::Pulsar(p) => p.to_string(),
+            SplitImpl::Kinesis(k) => k.to_string(),
         }
     }
 }
@@ -121,8 +129,8 @@ impl SplitEnumeratorImpl {
 pub fn extract_split_enumerator(
     properties: &HashMap<String, String>,
 ) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get("upstream.source") {
-        None => return Err(anyhow!("upstream.source not found")),
+    let source_type = match properties.get("connector") {
+        None => return Err(anyhow!("connector not found")),
         Some(value) => value,
     };
 
