@@ -23,7 +23,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::{StreamExecutorResult, TracedStreamExecutorError};
-use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
+use super::{Barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::executor_v2::error::StreamExecutorError;
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
@@ -124,18 +124,10 @@ impl RearrangedChainExecutor {
             .expect("the first message received by chain must be a barrier");
         let create_epoch = first_barrier.epoch;
 
-        let to_consume_snapshot = match first_barrier.mutation.as_ref().cloned().as_deref() {
-            // If the barrier is a conf change of creating this mview, init snapshot from its epoch
-            // and begin to consume the snapshot.
-            Some(Mutation::AddOutput(map)) => map
-                .values()
-                .flatten()
-                .any(|info| info.actor_id == self.actor_id),
-
-            // If the barrier is not a conf change, it means we've recovered and the snapshot is
-            // already consumed.
-            _ => false,
-        };
+        // If the barrier is a conf change of creating this mview, init snapshot from its epoch
+        // and begin to consume the snapshot.
+        // Otherwise, it means we've recovered and the snapshot is already consumed.
+        let to_consume_snapshot = first_barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
         yield first_msg;
@@ -242,12 +234,14 @@ impl RearrangedChainExecutor {
 
             #[for_await]
             for msg in remaining {
-                let msg = msg?;
-                if let Message::Barrier(_) = msg && let Some(notifier) = notifier.take()  {
-                    // Notify about the finish right before the first barrier.
+                let msg: Message = msg?;
+                let is_barrier = msg.as_barrier().is_some();
+                yield msg;
+
+                if is_barrier && let Some(notifier) = notifier.take()  {
+                    // Notify about the finish after the first barrier.
                     notifier.notify(create_epoch.curr);
                 }
-                yield msg;
             }
         } else {
             // If there's no need to consume the snapshot ...

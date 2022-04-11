@@ -18,7 +18,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::TracedStreamExecutorError;
-use super::{BoxedExecutor, Executor, ExecutorInfo, Message, Mutation};
+use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
 use crate::task::{ActorId, FinishCreateMviewNotifier};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -83,18 +83,10 @@ impl ChainExecutor {
             .expect("the first message received by chain must be a barrier");
         let epoch = barrier.epoch;
 
-        let to_consume_snapshot = match barrier.mutation.as_ref().cloned().as_deref() {
-            // If the barrier is a conf change of creating this mview, init snapshot from its epoch
-            // and begin to consume the snapshot.
-            Some(Mutation::AddOutput(map)) => map
-                .values()
-                .flatten()
-                .any(|info| info.actor_id == self.actor_id),
-
-            // If the barrier is not a conf change, it means we've recovered and the snapshot is
-            // already consumed.
-            _ => false,
-        };
+        // If the barrier is a conf change of creating this mview, init snapshot from its epoch
+        // and begin to consume the snapshot.
+        // Otherwise, it means we've recovered and the snapshot is already consumed.
+        let to_consume_snapshot = barrier.is_to_add_output(self.actor_id);
 
         // The first barrier message should be propagated.
         yield first_msg;

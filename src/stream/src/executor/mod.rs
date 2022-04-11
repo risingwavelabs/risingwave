@@ -180,6 +180,16 @@ impl Barrier {
     pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
     }
+
+    pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
+        matches!(
+            self.mutation.as_deref(),
+            Some(Mutation::AddOutput(map)) if map
+                .values()
+                .flatten()
+                .any(|info| info.actor_id == actor_id)
+        )
+    }
 }
 
 impl PartialEq for Barrier {
