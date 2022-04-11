@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use risingwave_common::array::Row;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::deserialize_column_id;
 use risingwave_common::util::value_encoding::deserialize_cell;
@@ -59,9 +59,11 @@ impl CellBasedRowDeserializer {
     ) -> Result<Option<(Vec<u8>, Row)>> {
         let pk_with_cell_id = pk_with_cell_id.to_vec();
         let pk_vec_len = pk_with_cell_id.len();
-        let cur_pk_bytes = &pk_with_cell_id[0..pk_vec_len - 4];
+        if pk_vec_len < 4 {
+            return Err(ErrorCode::InternalError("corrupted key".to_owned()).into());
+        }
+        let (cur_pk_bytes, cell_id_bytes) = pk_with_cell_id.split_at(pk_vec_len - 4);
         let mut result = None;
-        let cell_id_bytes = &pk_with_cell_id[pk_vec_len - 4..];
         let cell_id = deserialize_column_id(cell_id_bytes)?;
         if let Some(prev_pk_bytes) = &self.pk_bytes && prev_pk_bytes != cur_pk_bytes  {
             result = self.take();

@@ -136,7 +136,7 @@ mod tests {
 
         state.flush(epoch).await.unwrap();
         let data = keyspace.scan(None, epoch).await.unwrap();
-        // cell-based storage has 4 cells
+        // cell-based storage has 6 cells
         assert_eq!(data.len(), 6);
 
         epoch += 1;
