@@ -392,7 +392,7 @@ pub fn least_restrictive(lhs: DataType, rhs: DataType) -> Result<DataType> {
 /// The context a cast operation is invoked in. An implicit cast operation is allowed in a context
 /// that allows explicit casts, but not vice versa. See details in
 /// [PG](https://www.postgresql.org/docs/current/catalog-pg-cast.html).
-#[derive(Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum CastContext {
     Implicit,
     Assign,

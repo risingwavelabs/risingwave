@@ -106,21 +106,26 @@ impl FunctionCall {
         Some(Self::new_with_return_type(func_type, inputs, return_type))
     }
 
-    pub fn new_cast(e: ExprImpl, ty: DataType, allows: CastContext) -> Result<ExprImpl> {
-        let s = e.return_type();
-        if e.is_null() {
-            Ok(Literal::new(None, ty).into())
-        } else if ty == s {
-            Ok(e)
-        } else if cast_ok(&s, &ty, &allows) {
+    /// Create a cast expr over `child` to `target` type in `allows` context.
+    pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
+        let source = child.return_type();
+        if child.is_null() {
+            Ok(Literal::new(None, target).into())
+        } else if source == target {
+            Ok(child)
+        } else if cast_ok(&source, &target, &allows) {
             Ok(Self {
                 func_type: ExprType::Cast,
-                return_type: ty,
-                inputs: vec![e],
+                return_type: target,
+                inputs: vec![child],
             }
             .into())
         } else {
-            Err(ErrorCode::BindError(format!("cannot cast type {:?} to {:?}", s, ty)).into())
+            Err(ErrorCode::BindError(format!(
+                "cannot cast type {:?} to {:?} in {:?} context",
+                source, target, allows
+            ))
+            .into())
         }
     }
 

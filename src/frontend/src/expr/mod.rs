@@ -100,16 +100,19 @@ impl ExprImpl {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
 
-    pub fn cast_implicit(self, ty: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, ty, CastContext::Implicit)
+    /// Shorthand to create cast expr to `target` type in implicit context.
+    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Implicit)
     }
 
-    pub fn cast_assign(self, ty: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, ty, CastContext::Assign)
+    /// Shorthand to create cast expr to `target` type in assign context.
+    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Assign)
     }
 
-    pub fn cast_explicit(self, ty: DataType) -> Result<ExprImpl> {
-        FunctionCall::new_cast(self, ty, CastContext::Explicit)
+    /// Shorthand to create cast expr to `target` type in explicit context.
+    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 }
 
