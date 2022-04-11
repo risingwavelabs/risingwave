@@ -53,6 +53,7 @@ pub async fn pg_serve(addr: &str, session_mgr: Arc<dyn SessionManager>) -> io::R
                 tokio::spawn(async move {
                     // connection succeeded
                     pg_serve_conn(stream, session_mgr).await;
+                    tracing::info!("Connection {} closed", peer_addr);
                 });
             }
 
@@ -70,16 +71,16 @@ async fn pg_serve_conn(socket: TcpStream, session_mgr: Arc<dyn SessionManager>) 
         match terminate {
             Ok(is_ter) => {
                 if is_ter {
-                    tracing::info!("Connection closed by terminate cmd!");
                     break;
                 }
             }
             Err(e) => {
-                // Execution error should not break current connection.
-                tracing::error!("error {:?}!", e);
                 if matches!(e.kind(), ErrorKind::UnexpectedEof) {
                     break;
                 }
+                // Execution error should not break current connection.
+                // For unexpected eof, just break and not print to log.
+                tracing::error!("Error {:?}!", e);
             }
         }
     }

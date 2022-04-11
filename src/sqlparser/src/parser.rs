@@ -116,6 +116,10 @@ pub struct Parser {
 }
 
 impl Parser {
+    const BETWEEN_PREC: u8 = 20;
+    const PLUS_MINUS_PREC: u8 = 30;
+    const UNARY_NOT_PREC: u8 = 15;
+
     /// Parse the specified tokens
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, index: 0 }
@@ -1106,10 +1110,6 @@ impl Parser {
             data_type: self.parse_data_type()?,
         })
     }
-
-    const UNARY_NOT_PREC: u8 = 15;
-    const BETWEEN_PREC: u8 = 20;
-    const PLUS_MINUS_PREC: u8 = 30;
 
     /// Get the precedence of the next token
     pub fn get_next_precedence(&self) -> Result<u8, ParserError> {

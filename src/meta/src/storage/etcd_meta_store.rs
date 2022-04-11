@@ -90,6 +90,7 @@ struct GetViewer {
 
 impl SnapshotViewer for GetViewer {
     type Output = Vec<u8>;
+
     type OutputFuture<'a> = impl Future<Output = Result<(i64, Self::Output)>> + 'a;
 
     fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {
@@ -123,6 +124,7 @@ struct ListViewer {
 
 impl SnapshotViewer for ListViewer {
     type Output = Vec<Vec<u8>>;
+
     type OutputFuture<'a> = impl Future<Output = Result<(i64, Self::Output)>> + 'a;
 
     fn view(&self, mut client: KvClient, revision: i64) -> Self::OutputFuture<'_> {

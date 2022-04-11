@@ -237,8 +237,8 @@ impl HighLevelKafkaSource {
 
 #[async_trait]
 impl Source for HighLevelKafkaSource {
-    type ReaderContext = HighLevelKafkaSourceReaderContext;
     type BatchReader = HighLevelKafkaSourceBatchReader;
+    type ReaderContext = HighLevelKafkaSourceReaderContext;
     type StreamReader = HighLevelKafkaSourceStreamReader;
 
     fn batch_reader(

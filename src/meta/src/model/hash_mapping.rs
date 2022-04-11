@@ -38,8 +38,8 @@ const HASH_MAPPING_KEY: &str = "consistent_hash_mapping";
 pub struct ConsistentHashMapping(ParallelUnitMapping);
 
 impl MetadataModel for ConsistentHashMapping {
-    type ProstType = ParallelUnitMapping;
     type KeyType = String;
+    type ProstType = ParallelUnitMapping;
 
     fn cf_name() -> String {
         HASH_MAPPING_CF_NAME.to_string()
