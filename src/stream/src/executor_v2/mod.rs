@@ -135,6 +135,13 @@ pub trait Executor: Send + 'static {
         }
     }
 
+    fn boxed(self) -> BoxedExecutor
+    where
+        Self: Sized + Send + 'static,
+    {
+        Box::new(self)
+    }
+
     /// Clears the in-memory cache of the executor. It's no-op by default.
     fn clear_cache(&mut self) -> Result<()> {
         Ok(())

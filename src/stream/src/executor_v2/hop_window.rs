@@ -4,23 +4,40 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, StreamChunk};
-
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
 use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
-use risingwave_pb::expr::{expr_node};
+use risingwave_pb::expr::expr_node;
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::{BoxedExecutor, Executor, ExecutorInfo, Message};
 
 #[allow(unused)]
 pub struct HopWindowExecutor {
-    pub(super) input: BoxedExecutor,
-    pub(super) info: ExecutorInfo,
+    pub input: BoxedExecutor,
+    pub info: ExecutorInfo,
 
-    pub(super) time_col_idx: usize,
-    pub(super) window_slide: IntervalUnit,
-    pub(super) window_size: IntervalUnit,
+    pub time_col_idx: usize,
+    pub window_slide: IntervalUnit,
+    pub window_size: IntervalUnit,
+}
+
+impl HopWindowExecutor {
+    pub fn new(
+        input: BoxedExecutor,
+        info: ExecutorInfo,
+        time_col_idx: usize,
+        window_slide: IntervalUnit,
+        window_size: IntervalUnit,
+    ) -> Self {
+        HopWindowExecutor {
+            input,
+            info,
+            time_col_idx,
+            window_slide,
+            window_size,
+        }
+    }
 }
 
 impl Executor for HopWindowExecutor {
@@ -29,15 +46,15 @@ impl Executor for HopWindowExecutor {
     }
 
     fn schema(&self) -> &risingwave_common::catalog::Schema {
-        todo!()
+        &self.info.schema
     }
 
     fn pk_indices(&self) -> super::PkIndicesRef {
-        todo!()
+        &self.info.pk_indices
     }
 
     fn identity(&self) -> &str {
-        todo!()
+        &self.info.identity
     }
 }
 
@@ -88,8 +105,10 @@ impl HopWindowExecutor {
                 .eval(&data_chunk)
                 .map_err(StreamExecutorError::EvalError)?;
             let tumble_start_chunk = DataChunk::new(vec![Column::new(tumble_start)], None);
+            println!("{}", tumble_start_chunk.to_pretty_string());
             let (origin_cols, visibility) = data_chunk.into_parts();
-            assert!(visibility.is_none()); // Already compacted.
+            // SAFETY: Already compacted.
+            assert!(visibility.is_none());
             for i in 0..units {
                 let window_start_offset =
                     self.window_slide.checked_mul_int(i).ok_or_else(|| {
@@ -112,6 +131,7 @@ impl HopWindowExecutor {
                                 self.window_slide, i
                             ))
                         })?;
+                println!("{} {}", window_start_offset, window_end_offset);
                 let window_end_offset_expr = LiteralExpression::new(
                     DataType::Interval,
                     Some(ScalarImpl::Interval(window_end_offset)),
@@ -143,6 +163,150 @@ impl HopWindowExecutor {
                 let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
                 yield Message::Chunk(new_chunk);
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
+    use futures::StreamExt;
+    use itertools::Itertools;
+    use risingwave_common::array::{Op, Row};
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::{
+        DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl, ToOwnedDatum,
+    };
+
+    use crate::executor::Message;
+    use crate::executor_v2::test_utils::MockSource;
+    use crate::executor_v2::{Executor, ExecutorInfo, StreamChunk};
+
+    #[tokio::test]
+    async fn test_execute() {
+        let field1 = Field::unnamed(DataType::Int32);
+        let field2 = Field::unnamed(DataType::Int32);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+        let pk_indices = vec![0];
+
+        let t = |hours, minutes| {
+            let date = NaiveDate::from_ymd(2022, 2, 2);
+            let time = NaiveTime::from_hms(hours, minutes, 0);
+            let dt = NaiveDateTime::new(date, time);
+            NaiveDateTimeWrapper(dt)
+        };
+
+        #[allow(clippy::zero_prefixed_literal)]
+        let rows = [
+            ('+', 1, 1, t(10, 00)),
+            ('+', 2, 3, t(10, 05)),
+            ('-', 3, 2, t(10, 14)),
+            ('+', 4, 1, t(10, 22)),
+            ('-', 5, 3, t(10, 33)),
+            ('+', 6, 2, t(10, 42)),
+            ('-', 7, 1, t(10, 51)),
+            ('+', 8, 3, t(11, 02)),
+        ];
+        let rows = rows
+            .into_iter()
+            .map(|(op, f1, f2, f3)| {
+                let op = if op == '+' { Op::Insert } else { Op::Delete };
+                let row = Row(vec![
+                    Some(ScalarImpl::Int32(f1)),
+                    Some(ScalarImpl::Int32(f2)),
+                    Some(ScalarImpl::NaiveDateTime(f3)),
+                ]);
+                (op, row)
+            })
+            .collect_vec();
+
+        let chunk = StreamChunk::from_rows(&rows, &schema.data_types()).unwrap();
+
+        let input =
+            MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+
+        let executor = super::HopWindowExecutor::new(
+            input,
+            ExecutorInfo {
+                // TODO: the schema is incorrect, but it seems useless here.
+                schema: schema.clone(),
+                pk_indices,
+                identity: "test".to_string(),
+            },
+            2,
+            window_slide,
+            window_size,
+        )
+        .boxed();
+
+        let mut stream = executor.execute();
+        let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
+            unreachable!();
+        };
+        let rows = chunk
+            .rows()
+            .map(|r| {
+                (
+                    r.op,
+                    Row::new(
+                        r.values
+                            .into_iter()
+                            .map(ToOwnedDatum::to_owned_datum)
+                            .collect_vec(),
+                    ),
+                )
+            })
+            .collect_vec();
+        assert_eq!(rows.len(), 8);
+
+        #[allow(clippy::zero_prefixed_literal)]
+        let expected_rows = [
+            ('+', 1, 1, t(10, 00), t(09, 45), t(10, 15)),
+            ('+', 2, 3, t(10, 05), t(09, 45), t(10, 15)),
+            ('-', 3, 2, t(10, 14), t(09, 45), t(10, 15)),
+            ('+', 4, 1, t(10, 22), t(10, 00), t(10, 30)),
+            ('-', 5, 3, t(10, 33), t(10, 15), t(10, 45)),
+            ('+', 6, 2, t(10, 42), t(10, 15), t(10, 45)),
+            ('-', 7, 1, t(10, 51), t(10, 30), t(11, 00)),
+            ('+', 8, 3, t(11, 02), t(10, 45), t(11, 15)),
+        ];
+        let expected_rows = expected_rows
+            .into_iter()
+            .map(|(op, f1, f2, f3, f4, f5)| {
+                let op = if op == '+' { Op::Insert } else { Op::Delete };
+                let row = Row(vec![
+                    Some(ScalarImpl::Int32(f1)),
+                    Some(ScalarImpl::Int32(f2)),
+                    Some(ScalarImpl::NaiveDateTime(f3)),
+                    Some(ScalarImpl::NaiveDateTime(f4)),
+                    Some(ScalarImpl::NaiveDateTime(f5)),
+                ]);
+                (op, row)
+            })
+            .collect_vec();
+        let Message::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
+            unreachable!();
+        };
+        let rows = chunk
+            .rows()
+            .map(|r| {
+                (
+                    r.op,
+                    Row::new(
+                        r.values
+                            .into_iter()
+                            .map(ToOwnedDatum::to_owned_datum)
+                            .collect_vec(),
+                    ),
+                )
+            })
+            .collect_vec();
+        for (idx, (actual, expected)) in rows.into_iter().zip_eq(expected_rows).enumerate() {
+            assert_eq!(actual, expected, "on {}-th row", idx);
         }
     }
 }

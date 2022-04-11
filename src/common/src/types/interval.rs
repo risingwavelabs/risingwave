@@ -92,7 +92,7 @@ impl IntervalUnit {
 
     #[must_use]
     pub fn from_days(days: i32) -> Self {
-        IntervalUnit {
+        Self {
             days,
             ..Default::default()
         }
@@ -100,8 +100,16 @@ impl IntervalUnit {
 
     #[must_use]
     pub fn from_millis(ms: i64) -> Self {
-        IntervalUnit {
+        Self {
             ms,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_minutes(minutes: i64) -> Self {
+        Self {
+            ms: 1000 * 60 * minutes,
             ..Default::default()
         }
     }
