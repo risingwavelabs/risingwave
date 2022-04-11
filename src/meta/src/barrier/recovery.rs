@@ -70,8 +70,8 @@ where
         }
 
         debug!("recovery start!");
-        let retry_category = Self::get_retry_strategy();
-        let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_category, || async {
+        let retry_strategy = Self::get_retry_strategy();
+        let (new_epoch, responses) = tokio_retry::Retry::spawn(retry_strategy, || async {
             let info = self.resolve_actor_info(None).await;
             let mut new_epoch = self.env.epoch_generator().generate();
 
@@ -141,8 +141,8 @@ where
     /// it.
     async fn clean_up(&self, prev_command: Command) {
         if let Some(table_id) = prev_command.creating_table_id() {
-            let retry_category = Self::get_retry_strategy();
-            tokio_retry::Retry::spawn(retry_category, || async {
+            let retry_strategy = Self::get_retry_strategy();
+            tokio_retry::Retry::spawn(retry_strategy, || async {
                 self.fragment_manager.drop_table_fragments(&table_id).await
             })
             .await
