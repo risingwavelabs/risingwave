@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -176,11 +177,7 @@ where
         // TODO: make interval and enable_recovery configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
-        let enable_recovery = if let Ok(x) = std::env::var("RW_CI") && x == "true" {
-            false
-        } else {
-            true
-        };
+        let enable_recovery = env_var_is_true("RW_CI");
 
         Self {
             interval,
