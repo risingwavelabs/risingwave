@@ -801,7 +801,7 @@ mod tests {
 
     /// Sql:
     /// ```sql
-    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1;
+    /// select t1.v2 as t1_v2, t2.v2 as t2_v2 from t1 join t2 on t1.v1 = t2.v1 and t1.v2 < t2.v2;
     /// ```
     #[tokio::test]
     async fn test_inner_join_with_non_equi_condition() {

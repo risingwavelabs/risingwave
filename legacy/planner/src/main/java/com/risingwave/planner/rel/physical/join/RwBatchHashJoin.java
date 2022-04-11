@@ -39,7 +39,8 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
     super(cluster, traitSet, hints, left, right, condition, Collections.emptySet(), joinType);
     checkConvention();
     verify(
-        BatchJoinUtils.hasEquiCondition(analyzeCondition()), "Hash join only support equi join!");
+        BatchJoinUtils.hasEquiCondition(analyzeCondition()),
+        "Hash join must contains equi condition!");
   }
 
   @Override
