@@ -166,6 +166,7 @@ impl<K: HashKey + Send + Sync> Executor for HashAggExecutor<K> {
         self.child.open().await?;
 
         while let Some(chunk) = self.child.next().await? {
+            let chunk = chunk.compact()?;
             let keys = K::build(self.group_key_columns.as_slice(), &chunk)?;
             for (row_id, key) in keys.into_iter().enumerate() {
                 let mut err_flag = Ok(());

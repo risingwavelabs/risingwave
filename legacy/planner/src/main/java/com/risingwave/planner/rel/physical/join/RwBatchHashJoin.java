@@ -4,11 +4,12 @@ import static com.google.common.base.Verify.verify;
 import static com.risingwave.common.config.BatchPlannerConfigurations.ENABLE_HASH_JOIN;
 import static com.risingwave.execution.context.ExecutionContext.contextOf;
 import static com.risingwave.planner.rel.logical.RisingWaveLogicalRel.LOGICAL;
-import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.isEquiJoin;
+import static com.risingwave.planner.rel.physical.join.BatchJoinUtils.*;
 
 import com.risingwave.planner.rel.logical.RwLogicalJoin;
 import com.risingwave.planner.rel.physical.BatchPlan;
 import com.risingwave.planner.rel.physical.RisingWaveBatchPhyRel;
+import com.risingwave.planner.rel.serialization.RexToProtoSerializer;
 import com.risingwave.proto.plan.HashJoinNode;
 import com.risingwave.proto.plan.PlanNode;
 import java.util.Collections;
@@ -37,7 +38,9 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
       JoinRelType joinType) {
     super(cluster, traitSet, hints, left, right, condition, Collections.emptySet(), joinType);
     checkConvention();
-    verify(BatchJoinUtils.isEquiJoin(analyzeCondition()), "Hash join only support equi join!");
+    verify(
+        BatchJoinUtils.hasEquiCondition(analyzeCondition()),
+        "Hash join must contains equi condition!");
   }
 
   @Override
@@ -51,9 +54,14 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
 
     joinInfo.rightKeys.forEach(builder::addRightKey);
 
-    var hashJoinNode = builder.build();
+    RexToProtoSerializer rexVisitor = new RexToProtoSerializer();
 
-    // TODO: Push project into join
+    if (!joinInfo.nonEquiConditions.isEmpty()) {
+      var nonequiCondition = getNonequiCondition(getLeft(), getRight(), getCondition());
+      builder.setCondition(nonequiCondition.accept(rexVisitor));
+    }
+
+    var hashJoinNode = builder.build();
 
     var leftChild = ((RisingWaveBatchPhyRel) left).serialize();
     var rightChild = ((RisingWaveBatchPhyRel) right).serialize();
@@ -103,7 +111,7 @@ public class RwBatchHashJoin extends RwBufferJoinBase implements RisingWaveBatch
     public boolean matches(RelOptRuleCall call) {
       var join = (RwLogicalJoin) call.rel(0);
       var joinInfo = join.analyzeCondition();
-      return isEquiJoin(joinInfo)
+      return hasEquiCondition(joinInfo)
           && contextOf(call).getSessionConfiguration().get(ENABLE_HASH_JOIN);
     }
 

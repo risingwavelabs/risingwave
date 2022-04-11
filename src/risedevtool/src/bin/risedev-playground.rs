@@ -340,7 +340,10 @@ fn preflight_check_proxy() -> Result<()> {
 }
 
 fn preflight_check_ulimit() -> Result<()> {
-    let ulimit = Command::new("ulimit").arg("-n").output()?.stdout;
+    let ulimit = Command::new("sh")
+        .args(["-c", "ulimit -n"])
+        .output()?
+        .stdout;
     let ulimit = String::from_utf8(ulimit)?;
     let ulimit: usize = ulimit.trim().parse()?;
     if ulimit < 8192 {

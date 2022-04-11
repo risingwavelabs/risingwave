@@ -65,7 +65,7 @@ public class CreateMaterializedViewHandler implements SqlHandler {
     plan.getStreamingPlan().setTableId(catalog.getId());
     StreamManager streamManager = context.getStreamManager();
     StreamNode streamNode = StreamingPlanSerializer.serialize(plan.getStreamingPlan());
-    log.info("Stream plan serialization:\n" + Messages.jsonFormat(streamNode));
+    log.debug("Stream plan serialization:\n" + Messages.jsonFormat(streamNode));
     TableRefId tableRefId = Messages.getTableRefId(catalog.getId());
 
     streamManager.createMaterializedView(streamNode, tableRefId);

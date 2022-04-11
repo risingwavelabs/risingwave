@@ -134,15 +134,11 @@ impl<S: StateStore> Executor for RowSeqScanExecutor<S> {
         }
 
         let iter = self.iter.as_mut().expect("executor not open");
-        let result = iter
+        let chunk = iter
             .collect_data_chunk(&self.table, Some(self.chunk_size))
-            .await;
+            .await?;
         timer.observe_duration();
 
-        let chunk = result?;
-        if let Some(c) = &chunk {
-            debug!("Cardinality of chunk: {}, data: {:?}", c.cardinality(), &c);
-        }
         Ok(chunk)
     }
 

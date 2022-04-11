@@ -154,11 +154,6 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         hummock_manager.clone(),
         meta_metrics.clone(),
     ));
-    {
-        let barrier_manager = barrier_manager.clone();
-        // TODO: join barrier service back to local thread
-        tokio::spawn(async move { barrier_manager.run().await.unwrap() });
-    }
 
     let stream_manager = Arc::new(
         GlobalStreamManager::new(
@@ -239,6 +234,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         sub_tasks.push(
             ClusterManager::start_heartbeat_checker(cluster_manager, Duration::from_secs(1)).await,
         );
+        sub_tasks.push(GlobalBarrierManager::start(barrier_manager).await);
     }
 
     let (shutdown_send, mut shutdown_recv) = mpsc::unbounded_channel();

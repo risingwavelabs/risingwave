@@ -51,8 +51,8 @@ RwBatchSort(sort0=[$1], sort1=[$0], dir0=[DESC], dir1=[ASC], fetch=[100])
     RwBatchHashAgg(group=[{0}], numwait=[COUNT()])
       RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[0]}], collation=[[]])
         RwBatchProject(s_name=[$0])
-          RwBatchNestedLoopJoin(condition=[AND(=($3, $1), <>($4, $2))], joinType=[anti])
-            RwBatchNestedLoopJoin(condition=[AND(=($3, $1), <>($4, $2))], joinType=[semi])
+          RwBatchHashJoin(condition=[AND(=($3, $1), <>($4, $2))], joinType=[anti])
+            RwBatchHashJoin(condition=[AND(=($3, $1), <>($4, $2))], joinType=[semi])
               RwBatchProject(s_name=[$0], l_orderkey=[$2], l_suppkey=[$3])
                 RwBatchHashJoin(condition=[=($1, $4)], joinType=[inner])
                   RwBatchExchange(distribution=[RwDistributionTrait{type=HASH_DISTRIBUTED, keys=[1]}], collation=[[]])
@@ -81,8 +81,7 @@ RwBatchSort(sort0=[$1], sort1=[$0], dir0=[DESC], dir1=[ASC], fetch=[100])
             RwBatchExchange(distribution=[RwDistributionTrait{type=BROADCAST_DISTRIBUTED, keys=[]}], collation=[[]])
               RwBatchProject(l_orderkey=[$0], l_suppkey=[$1])
                 RwBatchFilter(condition=[>($3, $2)])
-                  RwBatchScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_suppkey,l_commitdate,l_receiptdate])
-            ]]>
+                  RwBatchScan(table=[[test_schema, lineitem]], columns=[l_orderkey,l_suppkey,l_commitdate,l_receiptdate])            ]]>
         </Resource>
     </TestCase>
 </Root>
