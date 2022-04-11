@@ -158,9 +158,9 @@ mod tests {
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc};
 
-    use crate::catalog::column_catalog::tests::build_catalogs;
     use crate::catalog::row_id_column_desc;
     use crate::catalog::table_catalog::TableCatalog;
+    use crate::test_utils::build_catalogs;
 
     #[test]
     fn test_into_table_catalog() {

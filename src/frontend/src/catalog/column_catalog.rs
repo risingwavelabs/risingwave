@@ -93,8 +93,7 @@ impl ColumnCatalog {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::ColumnId;
 
     use crate::catalog::column_catalog::ColumnCatalog;
     use crate::test_utils::build_catalogs;
