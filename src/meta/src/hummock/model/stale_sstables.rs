@@ -23,8 +23,8 @@ const HUMMOCK_STALE_SSTABLES_CF_NAME: &str = "cf/hummock_stale_sstables";
 
 /// `HummockStaleSstables` tracks `SSTables` no longer needed after the given version.
 impl MetadataModel for HummockStaleSstables {
-    type ProstType = HummockStaleSstables;
     type KeyType = HummockVersionRefId;
+    type ProstType = HummockStaleSstables;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_STALE_SSTABLES_CF_NAME)

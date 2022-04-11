@@ -126,13 +126,10 @@ pub struct ListArray {
 }
 
 impl Array for ListArray {
-    type RefItem<'a> = ListRef<'a>;
-
-    type OwnedItem = ListValue;
-
     type Builder = ListArrayBuilder;
-
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = ListValue;
+    type RefItem<'a> = ListRef<'a>;
 
     fn value_at(&self, idx: usize) -> Option<ListRef<'_>> {
         if !self.is_null(idx) {

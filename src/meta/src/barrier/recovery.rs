@@ -15,9 +15,10 @@
 use std::collections::HashSet;
 
 use futures::future::try_join_all;
-use log::debug;
+use log::{debug, error};
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::data::Epoch as ProstEpoch;
 use risingwave_pb::stream_service::inject_barrier_response::FinishedCreateMview;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, ForceStopActorsRequest, SyncSourcesRequest,
@@ -39,13 +40,19 @@ where
     S: MetaStore,
 {
     /// Recovery the whole cluster from the latest epoch.
-    pub(crate) async fn recovery(&self, prev_epoch: u64, prev_command: &Command) -> RecoveryResult {
-        let new_epoch = self.env.epoch_generator().generate();
+    pub(crate) async fn recovery(
+        &self,
+        prev_epoch: u64,
+        prev_command: Option<Command>,
+    ) -> RecoveryResult {
+        let mut new_epoch = self.env.epoch_generator().generate();
         // Abort buffered schedules, they might be dirty already.
         self.scheduled_barriers.abort().await;
 
         // clean up the previous command dirty data.
-        self.clean_up(prev_command).await;
+        if let Some(prev_command) = prev_command {
+            self.clean_up(prev_command).await;
+        }
 
         debug!("recovery start!");
         loop {
@@ -53,23 +60,34 @@ where
 
             let info = self.resolve_actor_info(None).await;
 
-            // Reset all compute nodes and wait for online.
-            if self.reset_and_wait_compute_nodes(&info).await.is_err() {
-                debug!("reset_and_wait_compute_nodes failed");
+            // Reset all compute nodes, stop and drop existing actors.
+            if self
+                .reset_compute_nodes(&info, prev_epoch, new_epoch.into_inner())
+                .await
+                .is_err()
+            {
+                error!("reset_and_wait_compute_nodes failed");
                 continue;
             }
 
             // Refresh sources in local source manger of compute node.
-            if self.sync_sources(&info).await.is_err() {
-                debug!("sync_sources failed");
+            if let Err(err) = self.sync_sources(&info).await {
+                error!("sync_sources failed: {}", err);
                 continue;
             }
 
             // update and build all actors.
-            if self.update_actors(&info).await.is_err() || self.build_actors(&info).await.is_err() {
+            if let Err(err) = self.update_actors(&info).await {
+                error!("update_actors failed: {}", err);
+                continue;
+            }
+            if let Err(err) = self.build_actors(&info).await {
+                error!("build_actors failed: {}", err);
                 continue;
             }
 
+            let prev_epoch = new_epoch.into_inner();
+            new_epoch = self.env.epoch_generator().generate();
             // checkpoint, used as init barrier to initialize all executors.
             let command_ctx = CommandContext::new(
                 self.fragment_manager.clone(),
@@ -103,7 +121,7 @@ where
     /// for `CreateMaterializedView`. For `DropMaterializedView`, since we already response fail to
     /// frontend and the actors will be rebuild by follow recovery process, it's okay to retain
     /// it.
-    async fn clean_up(&self, prev_command: &Command) {
+    async fn clean_up(&self, prev_command: Command) {
         if let Some(table_id) = prev_command.creating_table_id() {
             while self
                 .fragment_manager
@@ -214,10 +232,13 @@ where
         Ok(())
     }
 
-    /// Reset all compute nodes and wait for them to be online again.
-    /// While we are waiting, the `NotificationManager` will send a `BeSnapshot` to rebooted nodes
-    /// and build sources.
-    async fn reset_and_wait_compute_nodes(&self, info: &BarrierActorInfo) -> Result<()> {
+    /// Reset all compute nodes by calling `force_stop_actors`.
+    async fn reset_compute_nodes(
+        &self,
+        info: &BarrierActorInfo,
+        prev_epoch: u64,
+        new_epoch: u64,
+    ) -> Result<()> {
         for worker_node in info.node_map.values() {
             loop {
                 // force shutdown actors on running compute nodes
@@ -226,7 +247,11 @@ where
                         if client
                             .to_owned()
                             .force_stop_actors(ForceStopActorsRequest {
-                                request_id: String::new(),
+                                request_id: Uuid::new_v4().to_string(),
+                                epoch: Some(ProstEpoch {
+                                    curr: new_epoch,
+                                    prev: prev_epoch,
+                                }),
                             })
                             .await
                             .is_ok()

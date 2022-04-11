@@ -38,6 +38,7 @@ impl CatalogReader {
     pub fn new(inner: Arc<RwLock<Catalog>>) -> Self {
         CatalogReader(inner)
     }
+
     pub fn read_guard(&self) -> CatalogReadGuard {
         self.0.read_arc()
     }

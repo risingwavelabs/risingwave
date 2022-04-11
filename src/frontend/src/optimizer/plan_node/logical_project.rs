@@ -158,6 +158,7 @@ impl LogicalProject {
             .collect::<Option<Vec<_>>>()
             .unwrap_or_default()
     }
+
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.exprs
     }
@@ -200,9 +201,11 @@ impl PlanTreeNodeUnary for LogicalProject {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
     }
+
     fn rewrite_with_input(
         &self,
         input: PlanRef,

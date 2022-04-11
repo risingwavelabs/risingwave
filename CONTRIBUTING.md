@@ -1,11 +1,15 @@
-# Develop RisingWave
+# Contribution and Development Guidelines
 
-- [Develop RisingWave](#develop-risingwave)
-  - [Communication](#communication)
-  - [Setting Up Development Environment](#setting-up-development-environment)
+Thanks for your interest in contributing to RisingWave! We welcome and appreciate contributions.
+
+If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose) or ask in the RisingWave Community channel on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join the channel.
+
+
+- [Contribution and Development Guidelines](#contribution-and-development-guidelines)
   - [Code Structure](#code-structure)
+  - [Setting Up Development Environment](#setting-up-development-environment)
   - [Start and Monitor a Dev Cluster](#start-and-monitor-a-dev-cluster)
-    - [Adding More Components](#adding-more-components)
+    - [Additional Components](#additional-components)
     - [Start All-In-One Process](#start-all-in-one-process)
   - [Testing and Lint](#testing-and-lint)
     - [Lint](#lint)
@@ -22,21 +26,23 @@
     - [Dashboard](#dashboard)
     - [Logging](#logging)
   - [Misc Check](#misc-check)
-  - [Sending a PR](#sending-a-pr)
+  - [Submit a PR](#submit-a-pr)
     - [Pull Request Title](#pull-request-title)
     - [Pull Request Description](#pull-request-description)
     - [CLA](#cla)
   - [Update CI Workflow](#update-ci-workflow)
   - [When adding new files...](#when-adding-new-files)
   - [When adding new dependencies...](#when-adding-new-dependencies)
+  - [To check-in PRs from forks...](#to-check-in-prs-from-forks)
 
-Thanks for your interest in contributing to RisingWave! Contributions of many kinds are encouraged and most welcome.
+## Code Structure
 
-If you have questions, please [create a Github issue](https://github.com/singularity-data/risingwave/issues/new/choose).
-
-## Communication
-
-RisingWave community is available on Slack. Please use the [invitation link](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw) to join.
+- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
+- The `src` folder contains all of the kernal components, refer to [src/README.md](src/README.md) for more details.
+- The `docker` folder contains Dockerfiles to build and start RisingWave.
+- The `e2e_test` folder contains the latest end-to-end test cases.
+- The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
+- The `dashbaord` folder contains RisingWave dashboard v2.
 
 ## Setting Up Development Environment
 
@@ -64,15 +70,6 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 Then you'll be able to compile and start RisingWave!
-
-## Code Structure
-
-- The `legacy` folder contains RisingWave legacy frontend code. This is to be deprecated, and should not be used in production environment.
-- The `src` folder contains all of the kernal components, read [src/README.md][https://github.com/singularity-data/risingwave/blob/main/src/README.md] for more details.
-- The `docker` folder contains Dockerfiles to build and start RisingWave.
-- The `e2e_test` folder contains the latest end-to-end test cases.
-- The `docs` folder contains user and developer docs. If you want to learn about RisingWave, it's a good place to go!
-- The `dashbaord` folder contains RisingWave dashboard v2.
 
 ## Start and Monitor a Dev Cluster
 
@@ -113,7 +110,7 @@ To clean local data and logs,
 ./risedev clean-data
 ```
 
-### Adding More Components
+### Additional Components
 
 RiseDev supports automatic config of some components. We can add components like etcd, MinIO, Grafana, Prometheus and jaeger to the cluster, so as to persist data and monitor the cluster.
 
@@ -186,7 +183,7 @@ RisingWave's SQL frontend has some tests for plans of specific SQLs. See [Planne
 
 ### End-to-End Testing
 
-Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run our e2e tests.
+Currently, we use [sqllogictest-rs](https://github.com/risinglightdb/sqllogictest-rs) to run RisingWave e2e tests.
 
 sqllogictest installation is included when running `./risedev install-tools`. You may also install it with:
 
@@ -197,7 +194,7 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 To run end-to-end test, you will need to start a full cluster first:
 
 ```shell
-RW_IMPLICIT_FLUSH=1 ./risedev d
+./risedev d
 ```
 
 Then run some e2e tests:
@@ -213,7 +210,7 @@ After running e2e tests, you may kill the cluster and clean data.
 ./risedev clean-data
 ```
 
-As our codebase is constantly changing, and all persistent data might not be in a stable format, if there's
+As RisingWave's codebase is constantly changing, and all persistent data might not be in a stable format, if there's
 some unexpected decode error, try `./risedev clean-data` first.
 
 ### End-to-End Testing on CI
@@ -296,7 +293,7 @@ prototool format -d
 buf lint
 ```
 
-## Sending a PR
+## Submit a PR
 
 ### Pull Request Title
 
@@ -310,7 +307,7 @@ As described in [here](https://github.com/commitizen/conventional-commit-types/b
 - `perf`: A code change that improves performance
 - `test`: Adding missing tests or correcting existing tests
 - `build`: Changes that affect the build system or external dependencies (example scopes: gulp, broccoli, npm)
-- `ci`: Changes to our CI configuration files and scripts (example scopes: Travis, Circle, BrowserStack, SauceLabs)
+- `ci`: Changes to RisingWave CI configuration files and scripts (example scopes: Travis, Circle, BrowserStack, SauceLabs)
 - `chore`: Other changes that don't modify src or test files
 - `revert`: Reverts a previous commit
 
@@ -319,7 +316,7 @@ For example, a PR title could be:
 - `refactor: modify executor protobuf package path`
 - `feat(execution): enable comparison between nullable data arrays`, where `(execution)` means that this PR mainly focuses on the execution component.
 
-You may also check out our previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
+You may also check out previous PRs in the [PR list](https://github.com/singularity-data/risingwave/pulls).
 
 ### Pull Request Description
 
@@ -373,3 +370,14 @@ Also, we use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused 
 workspace.
 
 We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+
+## To check-in PRs from forks...
+
+```
+gh pr checkout <PR id>
+git checkout -b forks/<PR id>
+git push origin HEAD -u
+```
+
+After that, CI checks will begin on branches of RisingWave's main repo,
+and the status will be automatically updated to PRs from forks.

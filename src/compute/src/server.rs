@@ -81,7 +81,7 @@ pub async fn compute_node_serve(
 
     // Register to the cluster. We're not ready to serve until activate is called.
     let worker_id = meta_client
-        .register(client_addr.clone(), WorkerType::ComputeNode)
+        .register(&client_addr, WorkerType::ComputeNode)
         .await
         .unwrap();
     info!("Assigned worker node id {}", worker_id);
@@ -195,7 +195,7 @@ pub async fn compute_node_serve(
     }
 
     // All set, let the meta service know we're ready.
-    meta_client.activate(client_addr.clone()).await.unwrap();
+    meta_client.activate(&client_addr).await.unwrap();
 
     (join_handle, shutdown_send)
 }

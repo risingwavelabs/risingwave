@@ -17,7 +17,7 @@ create materialized view mv3 as select count(v1) as count_v1 from mv1;
 
 ### Broadcast operator
 
-In physical representation, we introduced a new dispatcher operator, *Broadcast*. Broadcast will dispatch every message to multiple downstream. To simplify our design, we can assume that every MViewOperator has a `Broadcast` output, with 0 or more downstreams. The implementation of Broadcast is trivial.
+In physical representation, we introduced a new dispatcher operator, *Broadcast*. Broadcast will dispatch every message to multiple downstreams. To simplify our design, we can assume that every MViewOperator has a `Broadcast` output, with 0 or more downstreams. The implementation of Broadcast is trivial.
 
 ![fig1](../docs/images/mv-on-mv/mv-on-mv-01.svg)
 
@@ -35,8 +35,8 @@ The full process of creation is:
 2. StreamManager creates the new actors.
 3. StreamManager chooses a change epoch e1, pins a snapshot of mv1 at e1, and sends a barrier with e1 and change info.
 4. The broadcast operator receives the barrier, then creates a SnapshotStream of mv1 with e1, and creates a Chain operator, then connects them all. (only changes in the memory).
-5. The broadcast operator sends a normal barrier e1 to all downstreams, and continue.
-6. The chain operator consumes all messages from snapshot and receives EOF, then consumes buffered messages from upstream.
+5. The broadcast operator sends a normal barrier e1 to all downstreams, and continues.
+6. The Chain operator consumes all messages from snapshot and receives EOF, then consumes buffered messages from upstream.
 7. StreamManager discovered that mv2 has almost caught up with the progress of mv1, and the creation success.
 
 ## Drop mview online
@@ -48,5 +48,5 @@ The full process of drop mv3 is:
 1. The frontend parses the query and sends the plan to StreamManager.
 2. StreamManager chooses a change epoch e1, and sends a barrier with e1 and change info.
 3. The broadcast operator sends a normal barrier e1 to all downstreams.
-4. The broadcast operator removes the dropped output from its outputs, and continue.
+4. The broadcast operator removes the dropped output from its outputs, and continues.
 5. StreamManager discovered that mv3 has the epoch e1, then drops extra fragments physically.

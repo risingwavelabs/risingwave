@@ -47,13 +47,26 @@ where
 
     /// stream clients memorization.
     stream_clients: StreamClientsRef,
+
+    /// options read by all services
+    pub opts: Arc<MetaOpts>,
+}
+
+/// Options shared by all meta service instances
+#[derive(Default)]
+pub struct MetaOpts {
+    pub enable_recovery: bool,
 }
 
 impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(meta_store: Arc<S>, epoch_generator: EpochGeneratorRef) -> Self {
+    pub async fn new(
+        opts: MetaOpts,
+        meta_store: Arc<S>,
+        epoch_generator: EpochGeneratorRef,
+    ) -> Self {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_clients = Arc::new(StreamClients::default());
@@ -65,6 +78,7 @@ where
             epoch_generator,
             notification_manager,
             stream_clients,
+            opts: opts.into(),
         }
     }
 
@@ -126,6 +140,7 @@ impl MetaSrvEnv<MemStore> {
             epoch_generator,
             notification_manager,
             stream_clients,
+            opts: MetaOpts::default().into(),
         }
     }
 }

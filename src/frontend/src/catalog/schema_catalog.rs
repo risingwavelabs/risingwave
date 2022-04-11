@@ -43,6 +43,7 @@ impl SchemaCatalog {
         self.table_by_name.try_insert(name.clone(), table).unwrap();
         self.table_name_by_id.try_insert(id, name).unwrap();
     }
+
     pub fn drop_table(&mut self, id: TableId) {
         let name = self.table_name_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&name).unwrap();
@@ -57,6 +58,7 @@ impl SchemaCatalog {
             .unwrap();
         self.source_name_by_id.try_insert(id, name).unwrap();
     }
+
     pub fn drop_source(&mut self, id: SourceId) {
         let name = self.source_name_by_id.remove(&id).unwrap();
         self.source_by_name.remove(&name).unwrap();
@@ -83,6 +85,7 @@ impl SchemaCatalog {
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
         self.table_by_name.get(table_name)
     }
+
     pub fn get_source_by_name(&self, source_name: &str) -> Option<&SourceCatalog> {
         self.source_by_name.get(source_name)
     }

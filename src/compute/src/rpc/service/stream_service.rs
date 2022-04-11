@@ -20,7 +20,7 @@ use risingwave_common::error::{tonic_err, Result as RwResult};
 use risingwave_pb::catalog::Source;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_stream::executor::Barrier;
+use risingwave_stream::executor::{Barrier, Epoch};
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tonic::{Request, Response, Status};
 
@@ -116,8 +116,12 @@ impl StreamService for StreamServiceImpl {
         request: Request<ForceStopActorsRequest>,
     ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
         let req = request.into_inner();
+        let epoch = req.epoch.unwrap();
         self.mgr
-            .stop_all_actors()
+            .stop_all_actors(Epoch {
+                curr: epoch.curr,
+                prev: epoch.prev,
+            })
             .await
             .map_err(|e| e.to_grpc_status())?;
         Ok(Response::new(ForceStopActorsResponse {
@@ -160,7 +164,7 @@ impl StreamService for StreamServiceImpl {
         request: Request<CreateSourceRequest>,
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let source = request.into_inner().source.unwrap();
-        self.create_source_inner(&source).map_err(tonic_err)?;
+        self.create_source_inner(&source).await.map_err(tonic_err)?;
         tracing::debug!(id = %source.id, "create table source");
 
         Ok(Response::new(CreateSourceResponse { status: None }))
@@ -177,7 +181,7 @@ impl StreamService for StreamServiceImpl {
             .clear_sources()
             .map_err(tonic_err)?;
         for source in sources {
-            self.create_source_inner(&source).map_err(tonic_err)?;
+            self.create_source_inner(&source).await.map_err(tonic_err)?;
         }
 
         Ok(Response::new(SyncSourcesResponse { status: None }))
@@ -203,13 +207,18 @@ impl StreamService for StreamServiceImpl {
 }
 
 impl StreamServiceImpl {
-    fn create_source_inner(&self, source: &Source) -> RwResult<()> {
+    async fn create_source_inner(&self, source: &Source) -> RwResult<()> {
         use risingwave_pb::catalog::source::Info;
 
         let id = TableId::new(source.id); // TODO: use SourceId instead
 
         match &source.get_info()? {
-            Info::StreamSource(_) => todo!("ddl v2: create stream source"),
+            Info::StreamSource(info) => {
+                self.env
+                    .source_manager()
+                    .create_source_v2(&id, info.to_owned())
+                    .await?;
+            }
 
             Info::TableSource(info) => {
                 let columns = info

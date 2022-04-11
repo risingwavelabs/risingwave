@@ -13,19 +13,22 @@
 // limitations under the License.
 
 use assert_matches::assert_matches;
+use futures::StreamExt;
 use itertools::Itertools;
-use risingwave_common::array::{I32Array, Op};
+use risingwave_common::array::{I32Array, Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
 use risingwave_common::column_nonnull;
-use risingwave_common::types::deserialize_datum_from;
+use risingwave_common::types::{deserialize_datum_from, DataType};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::Keyspace;
+use risingwave_storage::{Keyspace, StateStore};
 
-use crate::executor::lookup::impl_::LookupExecutorParams;
-use crate::executor::test_utils::*;
-use crate::executor::*;
-use crate::executor_v2::{Executor as ExecutorV2, MaterializeExecutor as MaterializeExecutorV2};
+use crate::executor_v2::lookup::impl_::LookupExecutorParams;
+use crate::executor_v2::lookup::LookupExecutor;
+use crate::executor_v2::test_utils::*;
+use crate::executor_v2::{
+    Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
+};
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
@@ -119,18 +122,14 @@ async fn create_arrangement(
 
     let keyspace = Keyspace::table_root(memory_state_store, &table_id);
 
-    Box::new(
-        Box::new(MaterializeExecutorV2::new_from_v1(
-            Box::new(source),
-            keyspace,
-            arrangement_col_arrange_rules(),
-            column_ids,
-            1,
-            "ArrangeExecutor".to_string(),
-            vec![],
-        ))
-        .v1(),
-    )
+    Box::new(MaterializeExecutor::new(
+        Box::new(source),
+        keyspace,
+        arrangement_col_arrange_rules(),
+        column_ids,
+        1,
+        vec![],
+    ))
 }
 
 /// Create a test source.
@@ -204,8 +203,8 @@ async fn create_source() -> Box<dyn Executor + Send> {
     Box::new(source)
 }
 
-async fn next_msg(buffer: &mut Vec<Message>, executor: &mut dyn Executor) {
-    buffer.push(executor.next().await.unwrap());
+async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) {
+    buffer.push(executor.next().await.unwrap().unwrap());
 }
 
 fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
@@ -220,7 +219,7 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source().await;
-    let mut lookup_executor = LookupExecutor::new(LookupExecutorParams {
+    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
         arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
@@ -230,7 +229,8 @@ async fn test_lookup_this_epoch() {
         use_current_epoch: true,
         stream_join_key_indices: vec![1],
         arrange_join_key_indices: vec![0],
-    });
+    }));
+    let mut lookup_executor = lookup_executor.execute();
 
     let mut msgs = vec![];
     next_msg(&mut msgs, &mut lookup_executor).await;
@@ -291,7 +291,7 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source().await;
-    let mut lookup_executor = LookupExecutor::new(LookupExecutorParams {
+    let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
         arrangement,
         stream,
         arrangement_keyspace: Keyspace::table_root(store.clone(), &table_id),
@@ -301,7 +301,8 @@ async fn test_lookup_last_epoch() {
         use_current_epoch: false,
         stream_join_key_indices: vec![1],
         arrange_join_key_indices: vec![0],
-    });
+    }));
+    let mut lookup_executor = lookup_executor.execute();
 
     let mut msgs = vec![];
 

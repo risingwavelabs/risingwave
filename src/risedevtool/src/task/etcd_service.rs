@@ -56,8 +56,11 @@ impl Task for EtcdService {
         let listen_urls = format!("http://{}:{}", self.config.address, self.config.port);
         let peer_urls = format!("http://{}:{}", self.config.address, self.config.peer_port);
 
+        let path = Path::new(&env::var("PREFIX_DATA")?).join(self.id());
+        std::fs::create_dir_all(&path)?;
+
         cmd.arg("--data-dir")
-            .arg(env::var("META_STORE_PATH")?)
+            .arg(&path)
             .arg("--listen-client-urls")
             .arg(&listen_urls)
             .arg("--advertise-client-urls")

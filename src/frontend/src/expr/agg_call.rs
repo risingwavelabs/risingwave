@@ -99,9 +99,11 @@ impl AggCall {
             inputs,
         })
     }
+
     pub fn decompose(self) -> (AggKind, Vec<ExprImpl>) {
         (self.agg_kind, self.inputs)
     }
+
     pub fn agg_kind(&self) -> AggKind {
         self.agg_kind.clone()
     }

@@ -168,10 +168,12 @@ impl Order {
             plan
         }
     }
+
     pub fn enforce(&self, plan: PlanRef) -> PlanRef {
         assert_eq!(plan.convention(), Convention::Batch);
         BatchSort::new(plan, self.clone()).into()
     }
+
     pub fn satisfies(&self, other: &Order) -> bool {
         if self.field_order.len() < other.field_order.len() {
             return false;
@@ -184,9 +186,11 @@ impl Order {
         }
         true
     }
+
     pub fn any() -> &'static Self {
         &ANY_ORDER
     }
+
     pub fn is_any(&self) -> bool {
         self.field_order.is_empty()
     }

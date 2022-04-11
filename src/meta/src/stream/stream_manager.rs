@@ -434,14 +434,14 @@ mod tests {
             &self,
             _request: Request<ForceStopActorsRequest>,
         ) -> std::result::Result<Response<ForceStopActorsResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(ForceStopActorsResponse::default()))
         }
 
         async fn sync_sources(
             &self,
             _request: Request<SyncSourcesRequest>,
         ) -> std::result::Result<Response<SyncSourcesResponse>, Status> {
-            unimplemented!()
+            Ok(Response::new(SyncSourcesResponse::default()))
         }
     }
 
@@ -449,8 +449,8 @@ mod tests {
         global_stream_manager: GlobalStreamManager<MemStore>,
         fragment_manager: FragmentManagerRef<MemStore>,
         state: Arc<FakeFragmentState>,
-        join_handle: JoinHandle<()>,
-        shutdown_tx: UnboundedSender<()>,
+        join_handles: Vec<JoinHandle<()>>,
+        shutdown_txs: Vec<UnboundedSender<()>>,
     }
 
     impl MockServices {
@@ -514,21 +514,25 @@ mod tests {
             )
             .await?;
 
-            // TODO: join barrier service back to local thread
-            tokio::spawn(async move { barrier_manager.run().await.unwrap() });
+            let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 
             Ok(Self {
                 global_stream_manager: stream_manager,
                 fragment_manager,
                 state,
-                join_handle,
-                shutdown_tx,
+                join_handles: vec![join_handle_2, join_handle],
+                shutdown_txs: vec![shutdown_tx_2, shutdown_tx],
             })
         }
 
         async fn stop(self) {
-            self.shutdown_tx.send(()).unwrap();
-            self.join_handle.await.unwrap();
+            for shutdown_tx in self.shutdown_txs {
+                shutdown_tx.send(()).unwrap();
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+            for join_handle in self.join_handles {
+                join_handle.await.unwrap();
+            }
         }
     }
 

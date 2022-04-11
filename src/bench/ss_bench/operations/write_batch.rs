@@ -42,7 +42,7 @@ impl BatchTaskContext {
         assert!(origin_task_count < (1 << 8));
         Self {
             meta_client,
-            epoch: AtomicU64::new(0),
+            epoch: AtomicU64::new(1),
             task_count: AtomicUsize::new(origin_task_count << 8),
         }
     }
@@ -97,8 +97,15 @@ impl Operations {
         let perf = self.run_batches(store, opts, batches).await;
         if opts.compact_level_after_write > 0 {
             if let Some(context) = context {
-                if let Some(task) = self.meta_client.get_compact_task(1).await {
-                    Compactor::compact(context, task).await;
+                if let Some(task) = self.meta_client.get_compact_task().await {
+                    Compactor::compact(context.clone(), task).await;
+                    let last_pinned = context.local_version_manager.get_version().unwrap();
+                    let version = self
+                        .meta_client
+                        .pin_version(last_pinned.id())
+                        .await
+                        .unwrap();
+                    context.local_version_manager.try_set_version(version);
                 }
             }
         }

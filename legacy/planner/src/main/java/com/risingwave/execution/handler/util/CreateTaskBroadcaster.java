@@ -36,7 +36,7 @@ public class CreateTaskBroadcaster {
       ComputeClient client = clientManager.getOrCreate(node);
       CreateTaskRequest createTaskRequest = Messages.buildCreateTaskRequest(planFragment);
       log.info("Send request to:" + node.getRpcEndPoint().toString());
-      log.info("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
+      log.debug("Create task request:\n" + Messages.jsonFormat(createTaskRequest));
       CreateTaskResponse createTaskResponse = client.createTask(createTaskRequest);
       if (createTaskResponse.getStatus().getCode() != Status.Code.OK) {
         throw new PgException(PgErrorCode.INTERNAL_ERROR, "Create Task failed");

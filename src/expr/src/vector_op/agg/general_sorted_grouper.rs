@@ -151,6 +151,7 @@ where
         }
         Ok(EqGroups(ret))
     }
+
     pub fn update_and_output_with_sorted_groups_concrete(
         &mut self,
         input: &T,
@@ -171,6 +172,7 @@ where
         self.group_value = cur.map(|x| x.to_owned_scalar());
         Ok(())
     }
+
     pub fn output_concrete(&self, builder: &mut T::Builder) -> Result<()> {
         builder.append(self.group_value.as_ref().map(|x| x.as_scalar_ref()))
     }
@@ -190,6 +192,7 @@ macro_rules! impl_sorted_grouper {
                     .into())
                 }
             }
+
             fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
                 if let ArrayBuilderImpl::$input_variant(b) = builder {
                     self.output_concrete(b)
@@ -201,6 +204,7 @@ macro_rules! impl_sorted_grouper {
                     .into())
                 }
             }
+
             fn update_and_output_with_sorted_groups(
                 &mut self,
                 input: &ArrayImpl,

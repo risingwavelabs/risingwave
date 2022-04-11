@@ -18,8 +18,7 @@ use std::ops::DerefMut;
 use std::sync::Arc;
 use std::time::Duration;
 
-use itertools::{enumerate, Itertools};
-use prometheus::core::{AtomicF64, AtomicU64, GenericCounter};
+use itertools::Itertools;
 use prost::Message;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::{
@@ -27,15 +26,16 @@ use risingwave_hummock_sdk::{
     INVALID_EPOCH,
 };
 use risingwave_pb::hummock::{
-    CompactMetrics, CompactTask, CompactTaskAssignment, HummockPinnedSnapshot,
-    HummockPinnedVersion, HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType,
-    SstableIdInfo, SstableInfo, TableSetStatistics, UncommittedEpoch,
+    CompactTask, CompactTaskAssignment, HummockPinnedSnapshot, HummockPinnedVersion,
+    HummockSnapshot, HummockStaleSstables, HummockVersion, Level, LevelType, SstableIdInfo,
+    SstableInfo, UncommittedEpoch,
 };
 use tokio::sync::{Mutex, RwLock};
 
 use crate::cluster::ClusterManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::level_handler::{LevelHandler, SSTableStat};
+use crate::hummock::metrics_utils::{trigger_commit_stat, trigger_rw_stat, trigger_sst_stat};
 use crate::hummock::model::{
     sstable_id_info, CurrentHummockVersionId, HummockPinnedSnapshotExt, HummockPinnedVersionExt,
     INVALID_TIMESTAMP,
@@ -326,158 +326,6 @@ where
         Ok(())
     }
 
-    fn trigger_commit_stat(&self, current_version: &HummockVersion) {
-        self.metrics
-            .max_committed_epoch
-            .set(current_version.max_committed_epoch as i64);
-        let uncommitted_sst_num = current_version
-            .uncommitted_epochs
-            .iter()
-            .fold(0, |accum, elem| accum + elem.tables.len());
-        self.metrics
-            .uncommitted_sst_num
-            .set(uncommitted_sst_num as i64);
-    }
-
-    fn trigger_sst_stat(&self, compact_status: &CompactStatus) {
-        let reduce_compact_cnt = |compacting_key_ranges: &Vec<(
-            risingwave_hummock_sdk::key_range::KeyRange,
-            u64,
-            u64,
-        )>| {
-            compacting_key_ranges
-                .iter()
-                .fold(0, |accum, elem| accum + elem.2)
-        };
-        for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-            let (sst_num, compact_cnt) = match level_handler {
-                LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-                LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                    (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                }
-            };
-            let level_label = String::from("L") + &idx.to_string();
-            self.metrics
-                .level_sst_num
-                .get_metric_with_label_values(&[&level_label])
-                .unwrap()
-                .set(sst_num as i64);
-            self.metrics
-                .level_compact_cnt
-                .get_metric_with_label_values(&[&level_label])
-                .unwrap()
-                .set(compact_cnt as i64);
-        }
-
-        static mut CALLS_AFTER_LAST_OBSERVATION: u32 = 0;
-        unsafe {
-            CALLS_AFTER_LAST_OBSERVATION += 1;
-            if CALLS_AFTER_LAST_OBSERVATION >= 10 {
-                CALLS_AFTER_LAST_OBSERVATION = 0;
-                for (idx, level_handler) in enumerate(compact_status.level_handlers.iter()) {
-                    let (sst_num, compact_cnt) = match level_handler {
-                        LevelHandler::Nonoverlapping(ssts, compacting_key_ranges) => {
-                            (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                        }
-                        LevelHandler::Overlapping(ssts, compacting_key_ranges) => {
-                            (ssts.len(), reduce_compact_cnt(compacting_key_ranges))
-                        }
-                    };
-                    tracing::info!(
-                        "Level {} has {} SSTs, {} of those are being compacted to bottom levels",
-                        idx,
-                        sst_num,
-                        compact_cnt,
-                    );
-                }
-            }
-        }
-    }
-
-    fn single_level_stat_bytes<
-        T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicF64>>,
-    >(
-        mut metric_vec: T,
-        level_stat: &TableSetStatistics,
-    ) {
-        let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().inc_by(level_stat.size_gb);
-    }
-
-    fn single_level_stat_sstn<T: FnMut(String) -> prometheus::Result<GenericCounter<AtomicU64>>>(
-        mut metric_vec: T,
-        level_stat: &TableSetStatistics,
-    ) {
-        let level_label = String::from("L") + &level_stat.level_idx.to_string();
-        metric_vec(level_label).unwrap().inc_by(level_stat.cnt);
-    }
-
-    fn trigger_rw_stat(&self, compact_metrics: &CompactMetrics) {
-        self.metrics
-            .level_compact_frequency
-            .get_metric_with_label_values(&[&(String::from("L")
-                + &compact_metrics
-                    .read_level_n
-                    .as_ref()
-                    .unwrap()
-                    .level_idx
-                    .to_string())])
-            .unwrap()
-            .inc();
-
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_read_curr
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_n.as_ref().unwrap(),
-        );
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_read_next
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_nplus1.as_ref().unwrap(),
-        );
-        Self::single_level_stat_bytes(
-            |label| {
-                self.metrics
-                    .level_compact_write
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.write.as_ref().unwrap(),
-        );
-
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_read_sstn_curr
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_n.as_ref().unwrap(),
-        );
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_read_sstn_next
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.read_level_nplus1.as_ref().unwrap(),
-        );
-        Self::single_level_stat_sstn(
-            |label| {
-                self.metrics
-                    .level_compact_write_sstn
-                    .get_metric_with_label_values(&[&label])
-            },
-            compact_metrics.write.as_ref().unwrap(),
-        );
-    }
-
     pub async fn add_tables(
         &self,
         context_id: HummockContextId,
@@ -566,7 +414,7 @@ where
         )?;
 
         // Update metrics
-        self.trigger_commit_stat(&ret_hummock_version);
+        trigger_commit_stat(&self.metrics, &ret_hummock_version);
 
         #[cfg(test)]
         {
@@ -897,9 +745,9 @@ where
             tracing::debug!("Cancel hummock compaction task id {}", compact_task_id);
         }
 
-        self.trigger_sst_stat(&compaction_guard.compact_status);
+        trigger_sst_stat(&self.metrics, &compaction_guard.compact_status);
         if let Some(compact_task_metrics) = compact_metrics {
-            self.trigger_rw_stat(&compact_task_metrics);
+            trigger_rw_stat(&self.metrics, &compact_task_metrics);
         }
 
         #[cfg(test)]
@@ -996,8 +844,8 @@ where
         )?;
 
         // Update metrics
-        self.trigger_sst_stat(&compact_status_copy);
-        self.trigger_commit_stat(&new_hummock_version_copy);
+        trigger_sst_stat(&self.metrics, &compact_status_copy);
+        trigger_commit_stat(&self.metrics, &new_hummock_version_copy);
 
         tracing::trace!("new committed epoch {}", epoch);
 
