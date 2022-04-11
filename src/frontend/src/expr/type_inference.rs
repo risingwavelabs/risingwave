@@ -372,6 +372,54 @@ lazy_static::lazy_static! {
         build_type_derive_map()
     };
 }
+
+pub enum CastContext {
+    Implicit,
+    Assign,
+    Explicit,
+}
+
+fn build_cast_map() -> HashMap<(DataTypeName, DataTypeName), CastContext> {
+    use DataTypeName as T;
+
+    let mut m = HashMap::new();
+    cast_map_helper(&mut m, &[T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64]);
+    cast_map_helper(&mut m, &[T::Date, T::Timestamp, T::Timestampz]);
+    cast_map_helper(&mut m, &[T::Time, T::Interval]);
+    m.insert((T::Boolean, T::Boolean), CastContext::Explicit);
+    m.insert((T::Varchar, T::Varchar), CastContext::Explicit);
+
+    for t in [T::Boolean, T::Int16, T::Int32, T::Int64, T::Decimal, T::Float32, T::Float64, T::Date, T::Timestamp, T::Timestampz, T::Time, T::Interval] {
+        m.insert((t, T::Varchar), CastContext::Assign);
+        // cast from varchar to type should be explicit once literal is `unknown` type
+        m.insert((T::Varchar, t), CastContext::Assign);
+    }
+
+    m.insert((T::Timestamp, T::Time), CastContext::Assign);
+    m.insert((T::Timestampz, T::Time), CastContext::Assign);
+    m.insert((T::Boolean, T::Int32), CastContext::Explicit);
+    m.insert((T::Int32, T::Boolean), CastContext::Explicit);
+    m
+}
+
+fn cast_map_helper(m: &mut HashMap<(DataTypeName, DataTypeName), CastContext>, ts: &[DataTypeName]) {
+    for (source_idx, source_type) in ts.iter().enumerate() {
+        for (target_idx, target_type) in ts.iter().enumerate() {
+            let cast_context = match source_idx.cmp(&target_idx) {
+                std::cmp::Ordering::Less => CastContext::Implicit,
+                std::cmp::Ordering::Equal => CastContext::Explicit,
+                std::cmp::Ordering::Greater => CastContext::Assign,
+            };
+            m.insert((*source_type, *target_type), cast_context);
+        }
+    }
+}
+
+lazy_static::lazy_static! {
+    static ref CAST_MAP: HashMap<(DataTypeName, DataTypeName), CastContext> = {
+        build_cast_map()
+    };
+}
 #[cfg(test)]
 mod tests {
     use super::*;
