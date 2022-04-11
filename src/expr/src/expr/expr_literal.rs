@@ -18,16 +18,15 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use prost::DecodeError;
-
-use risingwave_common::{ensure, for_all_variants};
 use risingwave_common::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk, read_interval_unit,
+    read_interval_unit, Array, ArrayBuilder, ArrayBuilderImpl, ArrayRef, DataChunk,
 };
-use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, IntervalUnit, Scalar, ScalarImpl};
-use risingwave_pb::data::data_type::{IntervalType, TypeName};
+use risingwave_common::{ensure, for_all_variants};
 use risingwave_pb::data::data_type::IntervalType::*;
+use risingwave_pb::data::data_type::{IntervalType, TypeName};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -77,8 +76,8 @@ fn append_literal_to_arr<'a, A1>(
     v: Option<<<A1 as ArrayBuilder>::ArrayType as Array>::RefItem<'a>>,
     cardinality: usize,
 ) -> Result<()>
-    where
-        A1: ArrayBuilder,
+where
+    A1: ArrayBuilder,
 {
     for _ in 0..cardinality {
         a.append(v)?
@@ -193,13 +192,13 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                     f32::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
                         |e| InternalError(format!("Failed to deserialize f32, reason: {:?}", e)),
                     )?)
-                        .into(),
+                    .into(),
                 ),
                 TypeName::Double => ScalarImpl::Float64(
                     f64::from_be_bytes(prost_value.get_body().as_slice().try_into().map_err(
                         |e| InternalError(format!("Failed to deserialize f64, reason: {:?}", e)),
                     )?)
-                        .into(),
+                    .into(),
                 ),
                 TypeName::Char | TypeName::Symbol => ScalarImpl::Utf8(
                     std::str::from_utf8(prost_value.get_body())
@@ -233,7 +232,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         "Unrecognized type name: {:?}",
                         prost.get_return_type()?.get_type_name()
                     ))
-                        .into());
+                    .into());
                 }
             };
 
@@ -253,14 +252,14 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 mod tests {
     use std::sync::Arc;
 
-    use risingwave_common::array::{I32Array, PrimitiveArray};
     use risingwave_common::array::column::Column;
+    use risingwave_common::array::{I32Array, PrimitiveArray};
     use risingwave_common::array_nonnull;
     use risingwave_common::types::IntoOrdered;
     use risingwave_pb::data::data_type::IntervalType;
     use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::{ConstantValue, ExprNode};
     use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::{ConstantValue, ExprNode};
 
     use super::*;
 
@@ -293,7 +292,7 @@ mod tests {
             Some(bytes.clone()),
             TypeName::Boolean,
         ))
-            .is_err());
+        .is_err());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(v.to_scalar_value(), expr.literal().unwrap());
 

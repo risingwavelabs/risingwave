@@ -14,36 +14,34 @@
 
 use std::any::Any;
 
-use dyn_clone::{self, DynClone};
-
 pub use agg_call::*;
 pub use agg_executor::*;
+use dyn_clone::{self, DynClone};
 pub use foldable::*;
+use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, DecimalArray, F32Array, F64Array,
     I16Array, I32Array, I64Array, Utf8Array,
 };
-use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::*;
 use risingwave_expr::expr::AggKind;
+use risingwave_expr::*;
 pub use row_count::*;
 
+pub use super::aggregation::StreamingRowCountAgg;
 use crate::executor::aggregation::single_value::StreamingSingleValueAgg;
 
-pub use super::aggregation::StreamingRowCountAgg;
-
-mod agg_executor;
 mod agg_call;
+mod agg_executor;
 mod foldable;
 mod row_count;
 mod single_value;
 
 /// `StreamingSumAgg` sums data of the same type.
 pub type StreamingSumAgg<R, I> =
-StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
+    StreamingFoldAgg<R, I, PrimitiveSummable<<R as Array>::OwnedItem, <I as Array>::OwnedItem>>;
 
 /// `StreamingCountAgg` counts data of any type.
 pub type StreamingCountAgg<S> = StreamingFoldAgg<I64Array, S, Countable<<S as Array>::OwnedItem>>;
@@ -252,8 +250,13 @@ pub fn create_streaming_agg_state(
                     Box::new(StreamingRowCountAgg::with_row_cnt(datum))
                 }
                 (AggKind::Count, DataType::Int64, None) => Box::new(StreamingRowCountAgg::new()),
-                _ => return Err(ErrorCode::NotImplemented(
-                    "unsupported aggregate type".to_string(), None.into()).into()),
+                _ => {
+                    return Err(ErrorCode::NotImplemented(
+                        "unsupported aggregate type".to_string(),
+                        None.into(),
+                    )
+                    .into())
+                }
             }
         }
         _ => todo!(),

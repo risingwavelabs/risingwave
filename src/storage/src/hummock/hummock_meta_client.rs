@@ -15,13 +15,12 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tonic::Streaming;
-
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::hummock::{
     CompactTask, HummockVersion, SstableInfo, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
+use tonic::Streaming;
 
 use crate::hummock::{HummockEpoch, HummockError, HummockSSTableId, HummockVersionId};
 use crate::monitor::HummockMetrics;

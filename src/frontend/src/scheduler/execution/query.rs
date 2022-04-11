@@ -227,8 +227,10 @@ impl QueryRunner {
                 }
                 _ => {
                     return Err(ErrorCode::NotImplemented(
-                    "unsupported type for QueryRunner.run".to_string(), None.into(),
-                    ).into())
+                        "unsupported type for QueryRunner.run".to_string(),
+                        None.into(),
+                    )
+                    .into())
                 }
             }
         }

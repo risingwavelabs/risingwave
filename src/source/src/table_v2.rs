@@ -114,15 +114,15 @@ pub struct TableV2BatchReader;
 #[async_trait]
 impl BatchSourceReader for TableV2BatchReader {
     async fn open(&mut self) -> Result<()> {
-       unimplemented!()
+        unimplemented!()
     }
 
     async fn next(&mut self) -> Result<Option<risingwave_common::array::DataChunk>> {
-       unimplemented!()
+        unimplemented!()
     }
 
     async fn close(&mut self) -> Result<()> {
-       unimplemented!()
+        unimplemented!()
     }
 }
 

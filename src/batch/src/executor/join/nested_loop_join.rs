@@ -345,7 +345,11 @@ impl NestedLoopJoinExecutor {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => Err(ErrorCode::NotImplemented("unsupported type for probe_remaining".to_string(), None.into()).into()),
+            _ => Err(ErrorCode::NotImplemented(
+                "unsupported type for probe_remaining".to_string(),
+                None.into(),
+            )
+            .into()),
         }
     }
 
