@@ -89,6 +89,7 @@ impl StreamMaterialize {
             .collect();
         Ok(Schema { fields })
     }
+
     #[must_use]
     pub fn new(input: PlanRef, table: TableCatalog) -> Self {
         let base = Self::derive_plan_base(&input).unwrap();

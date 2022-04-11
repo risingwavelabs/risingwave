@@ -122,6 +122,7 @@ impl FunctionCall {
     pub fn decompose(self) -> (ExprType, Vec<ExprImpl>, DataType) {
         (self.func_type, self.inputs, self.return_type)
     }
+
     pub fn decompose_as_binary(self) -> (ExprType, ExprImpl, ExprImpl) {
         assert_eq!(self.inputs.len(), 2);
         let mut iter = self.inputs.into_iter();
@@ -129,6 +130,7 @@ impl FunctionCall {
         let right = iter.next().unwrap();
         (self.func_type, left, right)
     }
+
     pub fn decompose_as_unary(self) -> (ExprType, ExprImpl) {
         assert_eq!(self.inputs.len(), 1);
         let mut iter = self.inputs.into_iter();

@@ -56,9 +56,11 @@ impl PlanTreeNodeUnary for LogicalTopN {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.limit, self.offset, self.order.clone())
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,
@@ -133,6 +135,7 @@ impl ToStream for LogicalTopN {
     fn to_stream(&self) -> PlanRef {
         todo!()
     }
+
     fn logical_rewrite_for_stream(&self) -> (PlanRef, ColIndexMapping) {
         let (input, input_col_change) = self.input.logical_rewrite_for_stream();
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);

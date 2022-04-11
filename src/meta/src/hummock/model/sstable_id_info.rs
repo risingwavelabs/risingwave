@@ -28,8 +28,8 @@ pub const INVALID_TIMESTAMP: u64 = 0;
 /// `SstableIdInfo` tracks when the sstable id is acquired from meta node and when the corresponding
 /// sstable is tracked in meta node.
 impl MetadataModel for SstableIdInfo {
-    type ProstType = SstableIdInfo;
     type KeyType = SstableRefId;
+    type ProstType = SstableIdInfo;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_SSTABLE_ID_CF_NAME)

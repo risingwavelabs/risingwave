@@ -29,8 +29,8 @@ const CATALOG_DATABASE_CF_NAME: &str = "cf/catalog_database";
 macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
         impl MetadataModel for $name {
-            type ProstType = Self;
             type KeyType = $key_ty;
+            type ProstType = Self;
 
             fn cf_name() -> String {
                 $cf.to_string()
