@@ -1,4 +1,4 @@
-name: CI
+name: Dashboard (main)
 on:
   push:
     branches: [main]
