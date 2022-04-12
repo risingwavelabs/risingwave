@@ -27,6 +27,7 @@ pub use super::executor::{
 mod agg;
 mod barrier_align;
 mod batch_query;
+#[allow(dead_code)]
 mod chain;
 mod filter;
 mod global_simple_agg;
@@ -36,7 +37,6 @@ mod local_simple_agg;
 mod lookup;
 pub mod merge;
 pub(crate) mod mview;
-#[allow(dead_code)]
 mod rearranged_chain;
 pub mod receiver;
 mod simple;
@@ -48,7 +48,6 @@ mod top_n_executor;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
-pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
@@ -57,6 +56,7 @@ pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use rearranged_chain::RearrangedChainExecutor as ChainExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;

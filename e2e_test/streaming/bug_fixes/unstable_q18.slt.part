@@ -1,13 +1,8 @@
 include ../../tpch/create_tables.slt.part
 
-include ../tpch/views/q18.slt.part
-
 statement ok
 INSERT INTO customer (c_custkey, c_name, c_address, c_nationkey, c_phone, c_acctbal, c_mktsegment, c_comment) VALUES
 (56,'Customer#000000056','BJYZYJQk4yD5B',10,'20-895-685-6920',6530.86,'FURNITURE','. notornis wake carefully. carefully fluffy requests are furiously even accounts. slyly expre');
-
-statement ok
-flush;
 
 statement ok
 INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment) VALUES 
@@ -25,24 +20,7 @@ INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity
 (961,97,8,3,42,41877.78,0.06,0.01,'N','O','1995-08-24','1995-08-21','1995-09-10','TAKE BACK RETURN','SHIP','ests do cajole blithely. furiously bo'),
 (961,34,10,4,29,27086.87,0.00,0.07,'N','F','1995-06-10','1995-08-20','1995-06-26','TAKE BACK RETURN','TRUCK','l accounts use blithely against the'),
 (961,26,7,5,38,35188.76,0.03,0.05,'N','O','1995-08-21','1995-07-19','1995-08-27','NONE','RAIL','he blithely special requests. furiousl'),
-(961,197,8,6,30,32915.70,0.09,0.03,'N','O','1995-07-06','1995-07-20','1995-07-26','DELIVER IN PERSON','MAIL','warhorses slee');
-
-statement ok
-flush;
-
-statement ok
-INSERT INTO orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) VALUES
-(6,56,'F',36468.55,'1992-02-21','4-NOT SPECIFIED','Clerk#000000058',0,'ggle. special, final requests are against the furiously specia'),
-(577,56,'F',34768.68,'1994-12-19','5-LOW','Clerk#000000154',0,' deposits engage stealthil'),
-(800,56,'O',87892.38,'1998-07-14','2-HIGH','Clerk#000000213',0,'y alongside of the pending packages? final platelets nag fluffily carefu'),
-(833,56,'F',49033.69,'1994-02-13','3-MEDIUM','Clerk#000000437',0,'ts haggle quickly across the slyl'),
-(961,56,'P',158893.16,'1995-06-04','4-NOT SPECIFIED','Clerk#000000720',0,'ons nag furiously among the quickl');
-
-statement ok
-flush;
-
-statement ok
-INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment) VALUES 
+(961,197,8,6,30,32915.70,0.09,0.03,'N','O','1995-07-06','1995-07-20','1995-07-26','DELIVER IN PERSON','MAIL','warhorses slee'),
 (1922,10,5,1,13,11830.13,0.05,0.03,'N','O','1996-10-24','1996-09-21','1996-11-15','NONE','SHIP','quests. furiously'),
 (1954,152,7,1,31,32616.65,0.06,0.06,'N','O','1997-08-18','1997-07-07','1997-09-03','DELIVER IN PERSON','RAIL','against the packages. bold, ironic e'),
 (1954,182,3,2,1,1082.18,0.03,0.01,'N','O','1997-09-16','1997-07-08','1997-10-07','COLLECT COD','MAIL','te. furiously final deposits hag'),
@@ -63,23 +41,7 @@ INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity
 (2565,115,5,3,34,34513.74,0.06,0.06,'N','O','1998-03-19','1998-04-12','1998-04-17','DELIVER IN PERSON','SHIP','nstructions was carefu'),
 (2565,17,7,4,25,22925.25,0.10,0.08,'N','O','1998-06-27','1998-05-20','1998-07-13','DELIVER IN PERSON','RAIL',', express accounts. final id'),
 (2565,76,7,5,26,25377.82,0.08,0.03,'N','O','1998-03-05','1998-04-11','1998-03-11','TAKE BACK RETURN','AIR','ites wake. ironic acco'),
-(2565,141,4,6,48,49974.72,0.08,0.07,'N','O','1998-06-18','1998-05-06','1998-07-13','DELIVER IN PERSON','TRUCK','r instructions sleep qui');
-
-statement ok
-flush;
-
-statement ok
-INSERT INTO orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) VALUES
-(1922,56,'O',11575.77,'1996-07-13','3-MEDIUM','Clerk#000000984',0,'side of the blithely final re'),
-(1954,56,'O',158853.63,'1997-05-31','4-NOT SPECIFIED','Clerk#000000104',0,' unusual excuses cajole according to the blithely regular theodolites.'),
-(2240,56,'F',174090.30,'1992-03-06','4-NOT SPECIFIED','Clerk#000000622',0,'accounts against the slyly express foxes are after the slyly regular '),
-(2565,56,'O',204438.57,'1998-02-28','3-MEDIUM','Clerk#000000032',0,'x-ray blithely along');
-
-statement ok
-flush;
-
-statement ok
-INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity, l_extendedprice, l_discount, l_tax, l_returnflag, l_linestatus, l_shipdate, l_commitdate, l_receiptdate, l_shipinstruct, l_shipmode, l_comment) VALUES 
+(2565,141,4,6,48,49974.72,0.08,0.07,'N','O','1998-06-18','1998-05-06','1998-07-13','DELIVER IN PERSON','TRUCK','r instructions sleep qui'),
 (2628,106,9,1,44,44268.40,0.07,0.03,'R','F','1994-01-11','1994-01-14','1994-01-13','DELIVER IN PERSON','SHIP','lyly final, pending ide'),
 (2628,106,9,2,14,14085.40,0.01,0.03,'A','F','1994-01-28','1993-11-30','1994-02-20','TAKE BACK RETURN','SHIP','g the furiously unusual pi'),
 (2628,64,9,3,42,40490.52,0.00,0.00,'A','F','1993-11-20','1994-01-04','1993-12-19','DELIVER IN PERSON','TRUCK','ld notornis alongside '),
@@ -100,18 +62,23 @@ INSERT INTO lineitem (l_orderkey, l_partkey, l_suppkey, l_linenumber, l_quantity
 (5824,107,8,5,44,44312.40,0.08,0.03,'N','O','1997-01-24','1997-01-31','1997-02-11','COLLECT COD','TRUCK','fily fluffily bold');
 
 statement ok
-flush;
-
-statement ok
 INSERT INTO orders (o_orderkey, o_custkey, o_orderstatus, o_totalprice, o_orderdate, o_orderpriority, o_clerk, o_shippriority, o_comment) VALUES
+(6,56,'F',36468.55,'1992-02-21','4-NOT SPECIFIED','Clerk#000000058',0,'ggle. special, final requests are against the furiously specia'),
+(577,56,'F',34768.68,'1994-12-19','5-LOW','Clerk#000000154',0,' deposits engage stealthil'),
+(800,56,'O',87892.38,'1998-07-14','2-HIGH','Clerk#000000213',0,'y alongside of the pending packages? final platelets nag fluffily carefu'),
+(833,56,'F',49033.69,'1994-02-13','3-MEDIUM','Clerk#000000437',0,'ts haggle quickly across the slyl'),
+(961,56,'P',158893.16,'1995-06-04','4-NOT SPECIFIED','Clerk#000000720',0,'ons nag furiously among the quickl'),
+(1922,56,'O',11575.77,'1996-07-13','3-MEDIUM','Clerk#000000984',0,'side of the blithely final re'),
+(1954,56,'O',158853.63,'1997-05-31','4-NOT SPECIFIED','Clerk#000000104',0,' unusual excuses cajole according to the blithely regular theodolites.'),
+(2240,56,'F',174090.30,'1992-03-06','4-NOT SPECIFIED','Clerk#000000622',0,'accounts against the slyly express foxes are after the slyly regular '),
+(2565,56,'O',204438.57,'1998-02-28','3-MEDIUM','Clerk#000000032',0,'x-ray blithely along'),
 (2628,56,'F',165655.99,'1993-10-22','5-LOW','Clerk#000000836',0,'ajole across the blithely careful accounts. blithely silent deposits sl'),
 (3526,56,'F',53827.34,'1995-03-16','5-LOW','Clerk#000000364',0,'to the quickly special deposits print agai'),
 (3527,56,'O',145232.09,'1997-06-21','5-LOW','Clerk#000000874',0,'regular ideas across the quickly bold theodo'),
 (5508,56,'O',3808.05,'1996-06-21','1-URGENT','Clerk#000000128',0,'y express packages cajole furiously. slyly unusual requests '),
 (5824,56,'O',169107.85,'1996-12-03','2-HIGH','Clerk#000000171',0,'unusual packages. even ideas along the even requests are along th');
 
-statement ok
-flush;
+include ../tpch/views/q18.slt.part
 
 query TIITRR
 select * from tpch_q18 where o_totalprice >= 197031.52;
