@@ -147,6 +147,7 @@ impl SSTableIteratorBase for SSTableIterator {}
 
 impl SSTableIteratorType for SSTableIterator {
     type SSTableIterator = SSTableIterator;
+
     const DIRECTION: usize = FORWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {

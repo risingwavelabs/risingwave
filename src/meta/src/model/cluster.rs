@@ -29,8 +29,8 @@ pub struct Worker {
 }
 
 impl MetadataModel for Worker {
-    type ProstType = WorkerNode;
     type KeyType = HostAddress;
+    type ProstType = WorkerNode;
 
     fn cf_name() -> String {
         WORKER_CF_NAME.to_string()

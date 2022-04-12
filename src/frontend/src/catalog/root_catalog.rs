@@ -89,6 +89,7 @@ impl Catalog {
             .unwrap()
             .create_table(proto);
     }
+
     pub fn create_source(&mut self, proto: ProstSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()

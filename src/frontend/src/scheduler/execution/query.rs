@@ -17,7 +17,7 @@ use crate::scheduler::execution::query::QueryState::{Failed, Pending};
 use crate::scheduler::execution::StageEvent::Scheduled;
 use crate::scheduler::execution::{StageExecution, ROOT_TASK_ID, ROOT_TASK_OUTPUT_ID};
 use crate::scheduler::plan_fragmenter::{Query, StageId};
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 use crate::scheduler::QueryResultFetcher;
 
 /// Message sent to a `QueryRunner` to control its execution.

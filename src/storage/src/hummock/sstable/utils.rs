@@ -196,6 +196,7 @@ impl From<CompressionAlgorithm> for u64 {
 
 impl TryFrom<u8> for CompressionAlgorithm {
     type Error = HummockError;
+
     fn try_from(v: u8) -> core::result::Result<Self, Self::Error> {
         match v {
             0 => Ok(Self::None),

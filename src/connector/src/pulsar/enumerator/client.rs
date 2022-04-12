@@ -57,6 +57,7 @@ impl PulsarSplitEnumerator {
 #[async_trait]
 impl SplitEnumerator for PulsarSplitEnumerator {
     type Split = PulsarSplit;
+
     async fn list_splits(&mut self) -> anyhow::Result<Vec<PulsarSplit>> {
         let meta = self.admin_client.get_topic_metadata(&self.topic).await?;
 

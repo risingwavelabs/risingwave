@@ -100,6 +100,7 @@ impl<'a> From<&'a Row> for RowRef<'a> {
 
 impl<'a> ops::Index<usize> for RowRef<'a> {
     type Output = DatumRef<'a>;
+
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
@@ -110,6 +111,7 @@ pub struct Row(pub Vec<Datum>);
 
 impl ops::Index<usize> for Row {
     type Output = Datum;
+
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
