@@ -2527,7 +2527,7 @@ impl Parser {
                         }));
                     } else {
                         return self
-                            .expected("VIEWS or SOURCES after materialized", self.peek_token());
+                            .expected("VIEWS or SOURCES after MATERIALIZED", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {

@@ -77,9 +77,6 @@ pub async fn handle_show_object(
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-
     use crate::test_utils::LocalFrontend;
 
     #[tokio::test]
@@ -91,16 +88,8 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
-        let sources = catalog_reader
-            .read_guard()
-            .get_schema_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .unwrap()
-            .iter_source()
-            .map(|s| s.name.clone())
-            .collect_vec();
-        assert_eq!(sources, vec!["t".to_string()]);
+        let rows = frontend.query_formatted_result("SHOW SOURCES").await;
+        assert_eq!(rows, vec!["Row([Some(\"t\")])".to_string()]);
     }
 
     #[tokio::test]
@@ -111,24 +100,14 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
-        let schema_catalog = catalog_reader
-            .read_guard()
-            .get_schema_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
-            .unwrap()
-            .clone();
+        let rows = frontend
+            .query_formatted_result("SHOW SOURCES")
+            .await;
+        assert_eq!(rows, Vec::<String>::new());
 
-        let sources = schema_catalog
-            .iter_source()
-            .map(|s| s.name.clone())
-            .collect_vec();
-        assert_eq!(sources, Vec::<String>::new());
-
-        let sources = schema_catalog
-            .iter_materialized_source()
-            .map(|s| s.name.clone())
-            .collect_vec();
-        assert_eq!(sources, vec!["t".to_string()]);
+        let rows = frontend
+            .query_formatted_result("SHOW MATERIALIZED SOURCES")
+            .await;
+        assert_eq!(rows, vec!["Row([Some(\"t\")])".to_string()]);
     }
 }
