@@ -64,7 +64,6 @@ pub struct ConnectorState {
 #[async_trait]
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> Result<()>;
     async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
     where
         Self: Sized;
