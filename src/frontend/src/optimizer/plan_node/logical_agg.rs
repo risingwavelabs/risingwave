@@ -185,7 +185,8 @@ impl ExprRewriter for ExprHandler {
                 self.group_key_len + self.agg_calls.len() - 1,
                 left_return_type,
             ))
-            .ensure_type(return_type);
+            .cast_implicit(return_type)
+            .unwrap();
 
             let right_return_type =
                 AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
