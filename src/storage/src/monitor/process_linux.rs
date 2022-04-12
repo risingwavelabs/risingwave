@@ -99,10 +99,9 @@ impl Collector for ProcessCollector {
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / 1_000_000 as u64;
+            let total = (p.stat.utime + p.stat.stime) / 1_000_000u64;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
-
             self.cpu_total.collect()
         };
 
