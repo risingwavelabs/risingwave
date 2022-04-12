@@ -100,9 +100,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let rows = frontend
-            .query_formatted_result("SHOW SOURCES")
-            .await;
+        let rows = frontend.query_formatted_result("SHOW SOURCES").await;
         assert_eq!(rows, Vec::<String>::new());
 
         let rows = frontend
