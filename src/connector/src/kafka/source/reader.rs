@@ -96,11 +96,6 @@ impl SourceReader for KafkaSplitReader {
             .create_with_context(DefaultConsumerContext)
             .map_err(|e| RwError::from(InternalError(format!("consumer creation failed {}", e))))?;
 
-        // if let Some(state) = state {
-        //     let identifier = state.identifier;
-        //     serde_json::from_str()
-        // }
-
         Ok(Self {
             consumer: Arc::new(consumer),
             assigned_splits: HashMap::new(),

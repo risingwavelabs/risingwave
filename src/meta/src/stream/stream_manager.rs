@@ -339,37 +339,6 @@ where
                 dispatches,
             })
             .await?;
-        // let mut source_actors_group_by_frag = HashMap::new();
-        //
-        // for (_actor_id, actor) in actor_map {
-        //     let mut node = actor.get_nodes().unwrap();
-        //     while !node.get_input().is_empty() {
-        //         node = node.get_input().get(0).unwrap();
-        //     }
-        //     if let Node::SourceNode(n) = node.get_node().unwrap() {
-        //         let source_type = n.get_source_type().unwrap();
-        //         if matches!(source_type, source_node::SourceType::Source) {
-        //             let source_id = n.table_ref_id.as_ref().unwrap().table_id as u32;
-        //             let frag_id = actor.fragment_id;
-        //             let actor_id = actor.actor_id;
-        //             source_actors_group_by_frag
-        //                 .entry(source_id)
-        //                 .or_insert_with(HashMap::new)
-        //                 .entry(frag_id)
-        //                 .or_insert(vec![])
-        //                 .push(actor_id);
-        //         }
-        //     }
-        // }
-        //
-        // self.source_manager
-        //     .register_source_discovery(
-        //         source_actors_group_by_frag
-        //             .into_iter()
-        //             .map(|(actor_id, frag)| (actor_id, frag.into_values().collect_vec()))
-        //             .collect(),
-        //     )
-        //     .await
 
         Ok(())
     }

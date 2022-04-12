@@ -279,7 +279,6 @@ impl Barrier {
                 )
                 .into(),
             ),
-            ProstMutation::SplitAssign(_) => todo!("split assign is not support!"),
         };
         let epoch = prost.get_epoch().unwrap();
         Ok(Barrier {

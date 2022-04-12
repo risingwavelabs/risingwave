@@ -60,15 +60,3 @@ impl KafkaSplit {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-
-    // #[test]
-    // fn test_serialize() {
-    //     let split = KafkaSplit::new(3, None, Some(123), "test_topic".to_string());
-    //     let bytes = split.to_string().unwrap();
-    //
-    //     println!("bytes {}", bytes);
-    // }
-}

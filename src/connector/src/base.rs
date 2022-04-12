@@ -154,8 +154,8 @@ impl SplitEnumeratorImpl {
 pub fn extract_split_enumerator(
     properties: &HashMap<String, String>,
 ) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get("connector") {
-        None => return Err(anyhow!("connector not found")),
+    let source_type = match properties.get(UPSTREAM_SOURCE_KEY) {
+        None => return Err(anyhow!("{} not found", UPSTREAM_SOURCE_KEY)),
         Some(value) => value,
     };
 
@@ -175,10 +175,6 @@ pub async fn new_connector(
     let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
         KAFKA_SOURCE => Box::new(KafkaSplitReader::new(config, state).await?),
         KINESIS_SOURCE => Box::new(KinesisSplitReader::new(config, state).await?),
-        // PULSAR_SOURCE => {
-        //     let pulsar = PulsarSplitReader::new(config, state).await?;
-        //     Box::new(pulsar)
-        // }
         _other => {
             todo!()
         }
