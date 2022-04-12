@@ -43,7 +43,9 @@ macro_rules! array_impl_literal_append {
                     append_literal_to_arr(inner, None, $cardinality)?;
                 }
             )*
-            (_, _) => unimplemented!("Do not support values in insert values executor"),
+            (_, _) => return Err(ErrorCode::NotImplemented(
+                "Do not support values in insert values executor".to_string(), None.into(),
+            ).into()),
         }
     };
 }
@@ -230,7 +232,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
                         "Unrecognized type name: {:?}",
                         prost.get_return_type()?.get_type_name()
                     ))
-                    .into())
+                    .into());
                 }
             };
 
@@ -288,7 +290,7 @@ mod tests {
         let bytes = v.to_be_bytes().to_vec();
         assert!(LiteralExpression::try_from(&make_expression(
             Some(bytes.clone()),
-            TypeName::Boolean
+            TypeName::Boolean,
         ))
         .is_err());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();

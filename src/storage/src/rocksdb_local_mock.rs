@@ -18,7 +18,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 
 use super::{StateStore, StateStoreIter};
 use crate::define_state_store_associated_type;
@@ -114,7 +114,11 @@ pub struct RocksDBStateStoreIter {}
 
 impl RocksDBStateStoreIter {
     async fn new(_store: RocksDBStateStore, _prefix: Vec<u8>) -> Result<Self> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented(
+            "RocksDBStateStoreIter unimplemented".to_string(),
+            None.into(),
+        )
+        .into())
     }
 }
 

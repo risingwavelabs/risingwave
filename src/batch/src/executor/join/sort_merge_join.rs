@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 
 use risingwave_common::array::{DataChunk, Row, RowRef};
 use risingwave_common::catalog::Schema;
+use risingwave_common::error::ErrorCode;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::OrderType;
@@ -304,7 +305,11 @@ impl BoxedExecutorBuilder for SortMergeJoinExecutor {
                             .fuse(),
                         ))
                     }
-                    _ => unimplemented!("Do not support {:?} join type now.", join_type),
+                    _ => Err(ErrorCode::NotImplemented(
+                        format!("Do not support {:?} join type now.", join_type),
+                        None.into(),
+                    )
+                    .into()),
                 }
             }
             (_, _) => Err(InternalError("Filter must have one children".to_string()).into()),
