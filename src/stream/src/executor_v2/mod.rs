@@ -31,6 +31,7 @@ mod chain;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
+mod hop_window;
 mod local_simple_agg;
 mod lookup;
 pub mod merge;
@@ -51,6 +52,7 @@ pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
+pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use merge::MergeExecutor;
@@ -136,6 +138,13 @@ pub trait Executor: Send + 'static {
             stream: None,
             info,
         }
+    }
+
+    fn boxed(self) -> BoxedExecutor
+    where
+        Self: Sized + Send + 'static,
+    {
+        Box::new(self)
     }
 
     /// Clears the in-memory cache of the executor. It's no-op by default.

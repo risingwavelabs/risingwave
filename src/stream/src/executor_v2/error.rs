@@ -27,6 +27,9 @@ pub enum StreamExecutorError {
         StorageError,
     ),
 
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
     #[error("executor v1 error {0}")]
     ExecutorV1(RwError),
 
