@@ -373,7 +373,7 @@ We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are 
 
 ## To check-in PRs from forks...
 
-Use
+Simply comment
 
 ```
 bors try
