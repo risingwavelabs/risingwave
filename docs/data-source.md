@@ -14,6 +14,8 @@ This page describes RisingWave's Data Source API and the architecture behind it.
 
 RisingWave's data source covers four parts: connectors, enumerators, ConnectorSource and SourceExecutor.
 
+![data source arch](../docs/images/data-source/data-source-arch.svg)
+
 ### Connectors
 
 `Connector` serve as an interface to upstream data pipeline, including the message queue and file system. In the current design, it does not have infinite concurrency. One connector instance only reads from one split from the upstream. For example, if upstream is a Kafka and it has three partitions so, in RisingWave, there should be three connectors.
