@@ -234,7 +234,11 @@ impl Binder {
                 .or_else(|_| {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
-                        .map(|s| (Relation::Source(Box::new(s.into())), s.columns.clone()))
+                        .map(|s| {
+                            let mut source = s.clone();
+                            source.rewrite_columns();
+                            (Relation::Source(Box::new((&source).into())), source.columns)
+                        })
                 })
                 .map_err(|_| {
                     RwError::from(CatalogError::NotFound(

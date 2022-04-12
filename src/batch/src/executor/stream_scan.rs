@@ -65,6 +65,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .map(|col| Field {
                         data_type: col.data_type.clone(),
                         name: col.name.clone(),
+                        sub_fields: vec![],
                     })
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(

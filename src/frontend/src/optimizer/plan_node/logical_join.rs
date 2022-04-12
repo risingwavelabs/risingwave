@@ -436,6 +436,7 @@ mod tests {
             .map(|i| Field {
                 data_type: ty.clone(),
                 name: format!("v{}", i),
+                sub_fields: vec![],
             })
             .collect();
         let left = LogicalValues::new(
@@ -519,6 +520,7 @@ mod tests {
             .map(|i| Field {
                 data_type: ty.clone(),
                 name: format!("v{}", i),
+                sub_fields: vec![],
             })
             .collect();
         let left = LogicalValues::new(
@@ -597,6 +599,7 @@ mod tests {
             .map(|i| Field {
                 data_type: DataType::Int32,
                 name: format!("v{}", i),
+                sub_fields: vec![],
             })
             .collect();
         let left = LogicalValues::new(

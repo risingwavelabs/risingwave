@@ -300,7 +300,11 @@ impl LogicalAgg {
                     .enumerate()
                     .map(|(id, (data_type, alias))| {
                         let name = alias.clone().unwrap_or(format!("agg#{}", id));
-                        Field { data_type, name }
+                        Field {
+                            data_type,
+                            name,
+                            sub_fields: vec![],
+                        }
                     }),
             )
             .collect();
@@ -579,14 +583,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
@@ -713,14 +720,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(
@@ -781,14 +791,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(
@@ -856,14 +869,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(

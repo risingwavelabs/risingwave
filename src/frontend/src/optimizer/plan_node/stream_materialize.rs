@@ -80,6 +80,7 @@ impl StreamMaterialize {
                     let field = Field {
                         data_type: field.data_type.clone(),
                         name: gen_row_id_column_name(row_id_count),
+                        sub_fields: field.sub_fields.clone(),
                     };
                     row_id_count += 1;
                     field
@@ -108,19 +109,18 @@ impl StreamMaterialize {
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
+        println!("{:?}", schema.fields);
         let columns = schema
             .fields()
             .iter()
             .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: field.data_type.clone(),
-                    column_id: (i as i32).into(),
-                    name: field.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                },
-                is_hidden: !user_cols.contains(i),
+            .map(|(i, field)| {
+                let mut column_desc: ColumnDesc = field.into();
+                column_desc.column_id = ColumnId::new(i as i32);
+                ColumnCatalog {
+                    column_desc,
+                    is_hidden: !user_cols.contains(i),
+                }
             })
             .collect_vec();
 

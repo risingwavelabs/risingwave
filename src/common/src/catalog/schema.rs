@@ -14,6 +14,7 @@
 
 use std::ops::Index;
 
+use itertools::Itertools;
 use risingwave_pb::plan::Field as ProstField;
 
 use super::ColumnDesc;
@@ -26,11 +27,16 @@ use crate::types::DataType;
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
+    pub sub_fields: Vec<Field>,
 }
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{:?}", self.name, self.data_type)
+        write!(
+            f,
+            "{}:{:?}",
+            self.name, self.data_type
+        )
     }
 }
 
@@ -110,6 +116,7 @@ impl Field {
         Self {
             data_type,
             name: name.into(),
+            sub_fields: vec![],
         }
     }
 
@@ -117,6 +124,7 @@ impl Field {
         Self {
             data_type,
             name: String::new(),
+            sub_fields: vec![],
         }
     }
 
@@ -130,6 +138,7 @@ impl From<&ProstField> for Field {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
+            sub_fields: vec![],
         }
     }
 }
@@ -139,6 +148,7 @@ impl From<&ColumnDesc> for Field {
         Self {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
         }
     }
 }

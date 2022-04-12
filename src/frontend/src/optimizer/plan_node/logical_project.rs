@@ -137,6 +137,10 @@ impl LogicalProject {
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
+                let sub_fields = match o2i.try_map(id) {
+                    Some(input_idx) => input_schema.fields()[input_idx].sub_fields.clone(),
+                    None => vec![],
+                };
                 let name = alias.clone().unwrap_or(match o2i.try_map(id) {
                     Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
                     None => format!("expr#{}", id),
@@ -144,6 +148,7 @@ impl LogicalProject {
                 Field {
                     name,
                     data_type: expr.return_type(),
+                    sub_fields,
                 }
             })
             .collect();
@@ -350,14 +355,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(

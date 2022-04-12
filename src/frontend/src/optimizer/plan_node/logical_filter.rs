@@ -242,14 +242,17 @@ mod tests {
             Field {
                 data_type: ty.clone(),
                 name: "v1".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v2".to_string(),
+                sub_fields: vec![],
             },
             Field {
                 data_type: ty.clone(),
                 name: "v3".to_string(),
+                sub_fields: vec![],
             },
         ];
         let values = LogicalValues::new(
