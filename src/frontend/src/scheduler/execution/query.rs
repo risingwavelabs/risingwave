@@ -153,11 +153,10 @@ impl QueryExecution {
                 let msg_sender = runner.msg_sender.clone();
                 let task_handle = tokio::spawn(async move {
                     let query_id = runner.query.query_id.clone();
-                    runner.run().await
-                        .map_err(|e| {
-                            error!("Query {:?} failed, reason: {:?}", query_id, e);
-                            e
-                        })
+                    runner.run().await.map_err(|e| {
+                        error!("Query {:?} failed, reason: {:?}", query_id, e);
+                        e
+                    })
                 });
 
                 let root_stage = root_stage_receiver.await.map_err(|e| {
@@ -231,9 +230,14 @@ impl QueryRunner {
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await {
-                                self.get_stage_execution_unchecked(parent).start().await
+                                self.get_stage_execution_unchecked(parent)
+                                    .start()
+                                    .await
                                     .map_err(|e| {
-                                        error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                                        error!(
+                                            "Failed to start stage: {}, reason: {:?}",
+                                            stage_id, e
+                                        );
                                         e
                                     })?;
                             }
