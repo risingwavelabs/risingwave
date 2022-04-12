@@ -28,6 +28,7 @@ pub struct Field {
     pub data_type: DataType,
     pub name: String,
     pub sub_fields: Vec<Field>,
+    pub type_name: String,
 }
 
 impl std::fmt::Debug for Field {
@@ -37,18 +38,6 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn new(data_type: DataType, name: impl Into<String>) -> Field {
-        Field::new_with_sub_fields(data_type, name.into(), vec![])
-    }
-
-    pub fn new_with_sub_fields(data_type: DataType, name: String, sub_fields: Vec<Field>) -> Field {
-        Self {
-            data_type,
-            name,
-            sub_fields,
-        }
-    }
-
     pub fn to_prost(&self) -> ProstField {
         ProstField {
             data_type: Some(self.data_type.to_protobuf()),
@@ -125,6 +114,24 @@ impl Field {
             data_type,
             name: name.into(),
             sub_fields: vec![],
+            type_name: String::new(),
+        }
+    }
+
+    pub fn with_struct<S>(
+        data_type: DataType,
+        name: S,
+        sub_fields: Vec<Field>,
+        type_name: S,
+    ) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            data_type,
+            name: name.into(),
+            sub_fields,
+            type_name: type_name.into(),
         }
     }
 
@@ -133,6 +140,7 @@ impl Field {
             data_type,
             name: String::new(),
             sub_fields: vec![],
+            type_name: String::new(),
         }
     }
 
@@ -147,6 +155,7 @@ impl From<&ProstField> for Field {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),
             sub_fields: vec![],
+            type_name: String::new(),
         }
     }
 }
@@ -157,6 +166,7 @@ impl From<&ColumnDesc> for Field {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
             sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
+            type_name: desc.type_name.clone(),
         }
     }
 }

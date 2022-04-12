@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt;
+use std::string::String;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -137,15 +138,15 @@ impl LogicalProject {
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
-                let sub_fields = match o2i.try_map(id) {
-                    Some(input_idx) => input_schema.fields()[input_idx].sub_fields.clone(),
-                    None => vec![],
+                let (default_name, sub_fields, type_name) = match o2i.try_map(id) {
+                    Some(input_idx) => {
+                        let field = input_schema.fields()[input_idx].clone();
+                        (field.name, field.sub_fields, field.type_name)
+                    }
+                    None => (format!("expr#{}", id), vec![], String::new()),
                 };
-                let name = alias.clone().unwrap_or(match o2i.try_map(id) {
-                    Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
-                    None => format!("expr#{}", id),
-                });
-                Field::new_with_sub_fields(expr.return_type(), name, sub_fields)
+                let name = alias.clone().unwrap_or(default_name);
+                Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
             .collect();
         Schema { fields }
@@ -348,9 +349,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field::new(ty.clone(), "v1"),
-            Field::new(ty.clone(), "v2"),
-            Field::new(ty.clone(), "v3"),
+            Field::with_name(ty.clone(), "v1"),
+            Field::with_name(ty.clone(), "v2"),
+            Field::with_name(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],

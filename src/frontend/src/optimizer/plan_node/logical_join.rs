@@ -433,7 +433,7 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
-            .map(|i| Field::new(ty.clone(), format!("v{}", i)))
+            .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
         let left = LogicalValues::new(
             vec![],
@@ -513,7 +513,7 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
-            .map(|i| Field::new(ty.clone(), format!("v{}", i)))
+            .map(|i| Field::with_name(ty.clone(), format!("v{}", i)))
             .collect();
         let left = LogicalValues::new(
             vec![],
@@ -588,7 +588,7 @@ mod tests {
     async fn test_join_to_batch() {
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = (1..7)
-            .map(|i| Field::new(DataType::Int32, format!("v{}", i)))
+            .map(|i| Field::with_name(DataType::Int32, format!("v{}", i)))
             .collect();
         let left = LogicalValues::new(
             vec![],

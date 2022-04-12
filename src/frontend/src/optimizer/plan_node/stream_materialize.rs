@@ -77,10 +77,11 @@ impl StreamMaterialize {
             .iter()
             .map(|field| match is_row_id_column_name(&field.name) {
                 true => {
-                    let field = Field::new_with_sub_fields(
+                    let field = Field::with_struct(
                         field.data_type.clone(),
                         gen_row_id_column_name(row_id_count),
                         field.sub_fields.clone(),
+                        field.type_name.clone(),
                     );
                     row_id_count += 1;
                     field

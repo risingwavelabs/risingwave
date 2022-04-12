@@ -154,7 +154,7 @@ impl From<&Field> for ColumnDesc {
             column_id: ColumnId::new(0),
             name: field.name.clone(),
             field_descs: field.sub_fields.iter().map(|d| d.into()).collect_vec(),
-            type_name: "".to_string(),
+            type_name: field.type_name.clone(),
         }
     }
 }
