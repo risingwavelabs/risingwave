@@ -56,11 +56,14 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|key| *key as usize)
             .collect::<Vec<_>>();
 
+        let parallel_info = node.get_parallel_info()?;
+
         let v2 = Box::new(BatchQueryExecutorV2::new_from_v1(
             table,
             params.pk_indices,
             params.op_info,
             key_indices,
+            parallel_info.clone(),
         ));
 
         Ok(Box::new(v2.v1_uninited()))

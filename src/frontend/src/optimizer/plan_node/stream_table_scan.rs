@@ -42,7 +42,8 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::Single,
+            Distribution::HashShard(logical.base.pk_indices.clone()),
+            // Distribution::Single,
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
@@ -107,6 +108,8 @@ impl StreamTableScan {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
+            // Will fill when resolving chain node.
+            parallel_info: None,
         };
 
         let pk_indices = self.base.pk_indices.iter().map(|x| *x as u32).collect_vec();

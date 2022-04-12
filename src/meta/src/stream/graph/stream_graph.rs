@@ -23,8 +23,10 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
-    ActorMapping, Dispatcher, DispatcherType, MergeNode, StreamActor, StreamNode,
+    ActorMapping, BatchParallelInfo, BatchPlanNode, Dispatcher, DispatcherType, MergeNode,
+    StreamActor, StreamNode,
 };
+use tracing::info;
 
 use crate::cluster::WorkerId;
 use crate::model::{ActorId, LocalActorId, LocalFragmentId};
@@ -370,8 +372,12 @@ where
                 &mut upstream_node_actors,
                 actor.get_nodes()?,
                 &mut upstream_actors,
+                builder.get_fragment_id(),
+                ctx,
+                builder.get_parallel_degree(),
             )?);
 
+            info!("actor.nodes {:#?}\n", actor.nodes);
             graph
                 .entry(builder.get_fragment_id())
                 .or_insert(vec![])
@@ -420,12 +426,18 @@ where
                 upstream_node_actors,
                 stream_node.input.get(0).unwrap(),
                 upstream_actor_id,
+                fragment_id,
+                ctx,
+                parallel_degree,
             ),
             Node::ChainNode(_) => self.resolve_chain_node(
                 table_sink_map,
                 dispatch_upstreams,
                 upstream_node_actors,
                 stream_node,
+                fragment_id,
+                ctx,
+                parallel_degree,
             ),
             _ => {
                 let mut new_stream_node = stream_node.clone();
@@ -453,6 +465,9 @@ where
                                 dispatch_upstreams,
                                 upstream_node_actors,
                                 input,
+                                fragment_id,
+                                ctx,
+                                parallel_degree,
                             )?;
                         }
                         _ => {
@@ -462,6 +477,9 @@ where
                                 upstream_node_actors,
                                 input,
                                 upstream_actor_id,
+                                fragment_id,
+                                ctx,
+                                parallel_degree,
                             )?;
                         }
                     }
@@ -477,24 +495,17 @@ where
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
+        fragment_id: FragmentId,
+        ctx: &mut CreateMaterializedViewContext,
+        parallel_degree: u32,
     ) -> Result<StreamNode> {
         if let Node::ChainNode(chain_node) = stream_node.get_node().unwrap() {
             let input = stream_node.get_input();
             assert_eq!(input.len(), 2);
             let table_id = TableId::from(&chain_node.table_ref_id);
-            let upstream_actor_ids = HashSet::<ActorId>::from_iter(
-                match table_sink_map.entry(table_id) {
-                    Entry::Vacant(v) => {
-                        let actor_ids = self
-                            .fragment_manager
-                            .blocking_get_table_sink_actor_ids(&table_id)?;
-                        v.insert(actor_ids).clone()
-                    }
-                    Entry::Occupied(o) => o.get().clone(),
-                }
-                .into_iter(),
-            );
 
+            let (upstream_actor_ids, parallel_index) =
+                self.assign_upstream_for_chain(table_id, ctx, fragment_id, table_sink_map)?;
             dispatch_upstreams.extend(upstream_actor_ids.iter());
             let chain_upstream_table_node_actors = self
                 .fragment_manager
@@ -549,5 +560,41 @@ where
         } else {
             unreachable!()
         }
+    }
+
+    /// maintain a <fragment_id, hashset<upstream_actor_id>> mapping
+    /// For each actor beginning with chain, we will assign *at least one* upstream table sink actor
+    /// to this actor. (assert chain actor's parallel degree <= upstream parallel degree).
+    fn assign_upstream_for_chain(
+        &self,
+        table_id: TableId,
+        ctx: &mut CreateMaterializedViewContext,
+        fragment_id: FragmentId,
+        table_sink_map: &mut HashMap<TableId, Vec<ActorId>>,
+    ) -> Result<(HashSet<ActorId>, u32)> {
+        let mut assigned_upstream = HashSet::new();
+
+        let remaining = match ctx.chain_upstream_assignment.entry(fragment_id) {
+            Entry::Vacant(v) => {
+                let mut upstream_actor_ids = match table_sink_map.entry(table_id) {
+                    Entry::Vacant(v) => {
+                        let actor_ids = self
+                            .fragment_manager
+                            .blocking_get_table_sink_actor_ids(&table_id)?;
+                        v.insert(actor_ids).clone()
+                    }
+                    Entry::Occupied(o) => o.get().clone(),
+                };
+                upstream_actor_ids.dedup();
+                v.insert(upstream_actor_ids)
+            }
+            Entry::Occupied(o) => o.into_mut(),
+        };
+
+        // TODO: check parallel degree
+        // choose one upstream from remaining
+        let upstream_id = remaining.pop().unwrap();
+        assigned_upstream.insert(upstream_id);
+        Ok((assigned_upstream, remaining.len() as u32))
     }
 }

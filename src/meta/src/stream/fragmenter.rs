@@ -144,7 +144,8 @@ where
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>()
+            .collect::<Result<BTreeMap<_, _>>>();
+        result
     }
 
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
