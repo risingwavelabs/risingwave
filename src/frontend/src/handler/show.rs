@@ -37,21 +37,29 @@ pub async fn handle_show_object(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowObject::Table { schema } => {
-            catalog_reader.get_all_table_names(session.database(), schema_or_default(&schema))?
-        }
+        ShowObject::Table { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_table()
+            .map(|t| t.name.clone())
+            .collect(),
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowObject::MaterializedView { schema } => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
-        }
-        ShowObject::Source { schema } => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
-        }
-        ShowObject::MaterializedSource { schema } => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
-        }
+        ShowObject::MaterializedView { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_mv()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::Source { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_source()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::MaterializedSource { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_materialized_source()
+            .map(|t| t.name.clone())
+            .collect(),
     };
 
     let rows = names
