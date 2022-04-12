@@ -26,6 +26,8 @@ pub enum KinesisOffset {
     None,
 }
 
+pub const KINESIS_SPLIT_TYPE: &str= "kinesis";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisSplit {
     pub(crate) shard_id: String,
@@ -40,6 +42,14 @@ impl SourceSplit for KinesisSplit {
 
     fn to_string(&self) -> anyhow::Result<String> {
         serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn get_type(&self) -> String {
+        KINESIS_SPLIT_TYPE.to_string()
     }
 }
 

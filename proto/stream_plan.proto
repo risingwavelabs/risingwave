@@ -14,6 +14,7 @@ message ActorMapping {
   repeated uint32 hash_mapping = 1;
 }
 
+// todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
     TABLE = 0;
@@ -22,7 +23,12 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-  repeated bytes stream_source_splits = 4;
+  StreamSourceSplits stream_source_splits = 4;
+}
+
+message StreamSourceSplits {
+  string split_type = 1;
+  repeated bytes stream_source_splits = 2;
 }
 
 message ProjectNode {

@@ -79,7 +79,7 @@ impl ToStreamProst for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
-            stream_source_splits: vec![],
+            stream_source_splits: None,
         })
     }
 }

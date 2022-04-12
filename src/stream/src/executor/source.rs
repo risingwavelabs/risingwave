@@ -26,9 +26,9 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, I64ArrayBuilder, StreamChunk};
 use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::state;
+use risingwave_connector::{SplitImpl, state};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::connector_source::ConnectorStreamSource;
@@ -84,6 +84,11 @@ pub struct SourceExecutor {
 
     // monitor
     metrics: Arc<StreamingMetrics>,
+
+    /// Split info for stream source
+    #[allow(dead_code)]
+    stream_source_splits: Vec<SplitImpl>,
+
     source_identify: String,
 }
 
@@ -106,7 +111,16 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
-        println!("source node {:#?}", node);
+        let stream_source_splits = match &node.stream_source_splits {
+            Some(splits) => {
+                splits.stream_source_splits.iter().map(|split| {
+                    SplitImpl::restore_from_bytes(splits.get_split_type().clone(), split)
+                }).collect::<anyhow::Result<Vec<SplitImpl>>>().to_rw_result()
+            }
+            _ => {
+                Ok(vec![])
+            }
+        }?;
 
         let column_ids: Vec<_> = node
             .get_column_ids()
@@ -140,6 +154,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
+            stream_source_splits
         )?))
     }
 }
@@ -182,6 +197,7 @@ impl SourceExecutor {
         operator_id: u64,
         op_info: String,
         streaming_metrics: Arc<StreamingMetrics>,
+        stream_source_splits: Vec<SplitImpl>,
     ) -> Result<Self> {
         let source = source_desc.clone().source;
         let stream_reader_future: StreamReaderFuture = Box::pin(build_stream_reader(
@@ -207,6 +223,7 @@ impl SourceExecutor {
             op_info,
             reader_stream: None,
             metrics: streaming_metrics,
+            stream_source_splits,
             source_identify: "Table_".to_string() + &source_id.table_id().to_string(),
         })
     }

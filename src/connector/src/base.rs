@@ -29,8 +29,10 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::PulsarSplitEnumerator;
+use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
 use crate::{kafka, kinesis, pulsar};
+use crate::kafka::KafkaSplit;
+use crate::kinesis::split::KinesisSplit;
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
@@ -50,9 +52,11 @@ pub struct InnerMessage {
     pub split_id: String,
 }
 
-pub trait SourceSplit {
+pub trait SourceSplit: Sized {
     fn id(&self) -> String;
     fn to_string(&self) -> Result<String>;
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
+    fn get_type(&self) -> String;
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +109,23 @@ impl SplitImpl {
             SplitImpl::Kinesis(k) => k.to_string(),
         }
     }
+
+    pub fn get_type(&self) -> String {
+        match self {
+            SplitImpl::Kafka(k) => k.get_type(),
+            SplitImpl::Pulsar(p) => p.get_type(),
+            SplitImpl::Kinesis(k) => k.get_type(),
+        }
+    }
+
+    pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
+        match split_type.as_str() {
+            kafka::KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
+            pulsar::PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
+            kinesis::split::KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
+            other => Err(anyhow!("split type {} not supported", other))
+        }
+    }
 }
 
 impl SplitEnumeratorImpl {
@@ -134,7 +155,7 @@ pub fn extract_split_enumerator(
         Some(value) => value,
     };
 
-    match source_type.as_ref() {
+    match source_type.as_str() {
         KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
         PULSAR_SOURCE => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
         KINESIS_SOURCE => todo!(),

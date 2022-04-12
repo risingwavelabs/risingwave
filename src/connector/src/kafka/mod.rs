@@ -16,8 +16,7 @@ use std::time::Duration;
 
 pub(crate) mod enumerator;
 pub mod source;
-mod split;
-
+pub mod split;
 pub use enumerator::*;
 pub use source::*;
 pub use split::*;

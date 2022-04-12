@@ -15,7 +15,7 @@
 mod admin;
 pub(crate) mod enumerator;
 pub mod source;
-mod split;
+pub mod split;
 mod topic;
 
 pub use enumerator::*;

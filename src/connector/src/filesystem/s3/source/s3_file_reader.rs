@@ -15,7 +15,7 @@ use std::borrow::BorrowMut;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use aws_sdk_s3::client as s3_client;
 use aws_smithy_http::byte_stream::ByteStream;
@@ -68,6 +68,10 @@ impl Default for S3File {
         }
     }
 }
+
+
+// todo(zhenzhou): better name
+const S3_SPLIT_TYPE: &str = "s3";
 
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct S3FileSplit {
@@ -126,6 +130,14 @@ impl SourceSplit for S3FileSplit {
         } else {
             Err(anyhow::Error::from(split_str.err().unwrap()))
         }
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn get_type(&self) -> String {
+        S3_SPLIT_TYPE.to_string()
     }
 }
 
