@@ -55,9 +55,9 @@ impl Actor {
 
         // Drive the streaming task with an infinite loop
         loop {
-            let message = self.consumer.next().instrument(span.clone()).await;
+            let message = self.consumer.next().instrument(span.clone()).await?;
             match message {
-                Ok(Some(barrier)) => {
+                Some(barrier) => {
                     // collect barriers to local barrier manager
                     self.context
                         .lock_barrier_manager()
@@ -93,11 +93,7 @@ impl Actor {
                         );
                     }
                 }
-                Ok(None) => {}
-                Err(err) => {
-                    warn!("Actor polling failed: {:?}", err);
-                    return Err(err);
-                }
+                None => {}
             }
         }
         Ok(())

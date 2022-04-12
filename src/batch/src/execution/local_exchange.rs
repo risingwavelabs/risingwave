@@ -100,7 +100,7 @@ mod tests {
         ) -> Result<Response<Self::GetDataStream>, Status> {
             let (tx, rx) = tokio::sync::mpsc::channel(10);
             self.rpc_called.store(true, Ordering::SeqCst);
-            for _ in [0..3] {
+            for _ in 0..3 {
                 tx.send(Ok(GetDataResponse {
                     status: None,
                     record_batch: Some(DataChunk::default()),
@@ -154,7 +154,7 @@ mod tests {
         )
         .await
         .unwrap();
-        for _ in [0..3] {
+        for _ in 0..3 {
             assert!(src.take_data().await.unwrap().is_some());
         }
         assert!(src.take_data().await.unwrap().is_none());

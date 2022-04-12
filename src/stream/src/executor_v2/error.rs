@@ -20,26 +20,32 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum StreamExecutorError {
-    #[error("storage error {0}")]
+    #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
         #[source]
         StorageError,
     ),
 
-    #[error("executor v1 error {0}")]
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("Executor v1 error: {0}")]
     ExecutorV1(RwError),
 
-    #[error("chunk operation error {0}")]
+    #[error("Chunk operation error: {0}")]
     EvalError(RwError),
 
-    #[error("aggregate state error {0}")]
+    #[error("Aggregate state error: {0}")]
     AggStateError(RwError),
 
-    #[error("input error")]
+    #[error("Input error: {0}")]
     InputError(RwError),
 
-    #[error("channel `{0}` closed")]
+    #[error("TopN state error: {0}")]
+    TopNStateError(RwError),
+
+    #[error("Channel `{0}` closed")]
     ChannelClosed(String),
 }
 
@@ -62,6 +68,10 @@ impl StreamExecutorError {
 
     pub fn input_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::InputError(error.into()).into()
+    }
+
+    pub fn top_n_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::TopNStateError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
@@ -102,10 +112,10 @@ impl From<StorageError> for TracedStreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to internal error of `RwResult`.
+/// Always convert [`TracedStreamExecutorError`] to stream error of `RwResult`.
 impl From<TracedStreamExecutorError> for RwError {
     fn from(h: TracedStreamExecutorError) -> Self {
-        ErrorCode::InternalError(h.to_string()).into()
+        ErrorCode::StreamError(h.into()).into()
     }
 }
 
