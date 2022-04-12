@@ -30,6 +30,7 @@ use tokio::spawn;
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::optimizer::plan_node::PlanNodeType;
@@ -163,12 +164,27 @@ impl StageExecution {
                     children: self.children.clone(),
                     state: self.state.clone(),
                 };
-                let handle = spawn(runner.run());
+                let handle = spawn(async move {
+                    if let Err(e) = runner.run().await {
+                        error!("Stage failed: {}", e);
+                        Err(e)
+                    } else {
+                        Ok(())
+                    }
+                });
 
                 *s = StageState::Started { sender, handle };
                 Ok(())
             }
-            _ => Err(InternalError("Staged already started!".to_string()).into()),
+            _ => {
+                // This is possible since we notify stage schedule event to query runner, which may
+                // receive multi events and start stage multi times.
+                info!(
+                    "Staged {:?}-{:?} already started, skipping.",
+                    &self.stage.query_id, &self.stage.id
+                );
+                Ok(())
+            }
         }
     }
 
