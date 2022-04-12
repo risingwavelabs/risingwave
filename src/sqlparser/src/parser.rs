@@ -116,6 +116,10 @@ pub struct Parser {
 }
 
 impl Parser {
+    const BETWEEN_PREC: u8 = 20;
+    const PLUS_MINUS_PREC: u8 = 30;
+    const UNARY_NOT_PREC: u8 = 15;
+
     /// Parse the specified tokens
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, index: 0 }
@@ -1106,10 +1110,6 @@ impl Parser {
             data_type: self.parse_data_type()?,
         })
     }
-
-    const UNARY_NOT_PREC: u8 = 15;
-    const BETWEEN_PREC: u8 = 20;
-    const PLUS_MINUS_PREC: u8 = 30;
 
     /// Get the precedence of the next token
     pub fn get_next_precedence(&self) -> Result<u8, ParserError> {
@@ -2501,23 +2501,33 @@ impl Parser {
         if let Token::Word(w) = self.next_token() {
             match w.keyword {
                 Keyword::TABLES => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Table(
-                        self.parse_from_and_identifier()?,
-                    )));
+                    return Ok(Statement::ShowObjects(ShowObject::Table {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
+                Keyword::SOURCES => {
+                    return Ok(Statement::ShowObjects(ShowObject::Source {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
                 }
                 Keyword::DATABASES => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Database));
+                    return Ok(Statement::ShowObjects(ShowObject::Database));
                 }
                 Keyword::SCHEMAS => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Schema));
+                    return Ok(Statement::ShowObjects(ShowObject::Schema));
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowCommand(ShowCommandObject::MaterializedView(
-                            self.parse_from_and_identifier()?,
-                        )));
+                        return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
+                            schema: self.parse_from_and_identifier()?,
+                        }));
+                    } else if self.parse_keyword(Keyword::SOURCES) {
+                        return Ok(Statement::ShowObjects(ShowObject::MaterializedSource {
+                            schema: self.parse_from_and_identifier()?,
+                        }));
                     } else {
-                        return self.expected("views after materialized", self.peek_token());
+                        return self
+                            .expected("VIEWS or SOURCES after MATERIALIZED", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {

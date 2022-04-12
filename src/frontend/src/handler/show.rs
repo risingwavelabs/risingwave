@@ -18,34 +18,48 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::ShowCommandObject;
+use risingwave_sqlparser::ast::{Ident, ShowObject};
 
 use crate::session::OptimizerContext;
 
-pub async fn handle_show_command(
+fn schema_or_default(schema: &Option<Ident>) -> &str {
+    schema
+        .as_ref()
+        .map_or_else(|| DEFAULT_SCHEMA_NAME, |s| &s.value)
+}
+
+pub async fn handle_show_object(
     context: OptimizerContext,
-    command: ShowCommandObject,
+    command: ShowObject,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowCommandObject::Table(Some(ident)) => {
-            catalog_reader.get_all_table_names(session.database(), &ident.value)?
-        }
-        ShowCommandObject::Table(None) => {
-            catalog_reader.get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
-        }
-        ShowCommandObject::Database => catalog_reader.get_all_database_names(),
-        ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
+        ShowObject::Table { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_table()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::Database => catalog_reader.get_all_database_names(),
+        ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowCommandObject::MaterializedView(Some(ident)) => {
-            catalog_reader.get_all_mv_names(session.database(), &ident.value)?
-        }
-        ShowCommandObject::MaterializedView(None) => {
-            catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
-        }
+        ShowObject::MaterializedView { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_mv()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::Source { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_source()
+            .map(|t| t.name.clone())
+            .collect(),
+        ShowObject::MaterializedSource { schema } => catalog_reader
+            .get_schema_by_name(session.database(), schema_or_default(&schema))?
+            .iter_materialized_source()
+            .map(|t| t.name.clone())
+            .collect(),
     };
 
     let rows = names
@@ -57,6 +71,41 @@ pub async fn handle_show_command(
         StatementType::SHOW_COMMAND,
         rows.len() as i32,
         rows,
-        vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)],
+        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_show_source() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = r#"CREATE SOURCE t1
+        WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+        ROW FORMAT JSON"#;
+        frontend.run_sql(sql).await.unwrap();
+
+        let sql = r#"CREATE MATERIALIZED SOURCE t2
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT JSON"#;
+        frontend.run_sql(sql).await.unwrap();
+
+        let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                "Row([Some(\"t1\")])".to_string(),
+                "Row([Some(\"t2\")])".to_string()
+            ]
+        );
+
+        let rows = frontend
+            .query_formatted_result("SHOW MATERIALIZED SOURCES")
+            .await;
+        assert_eq!(rows, vec!["Row([Some(\"t2\")])".to_string()]);
+    }
 }

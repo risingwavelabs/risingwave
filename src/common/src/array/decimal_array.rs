@@ -43,9 +43,9 @@ impl DecimalArray {
 
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
-    type RefItem<'a> = Decimal;
-    type OwnedItem = Decimal;
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = Decimal;
+    type RefItem<'a> = Decimal;
 
     fn value_at(&self, idx: usize) -> Option<Decimal> {
         if !self.is_null(idx) {

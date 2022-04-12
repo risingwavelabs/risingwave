@@ -185,7 +185,8 @@ impl ExprRewriter for ExprHandler {
                 self.group_key_len + self.agg_calls.len() - 1,
                 left_return_type,
             ))
-            .ensure_type(return_type);
+            .cast_implicit(return_type)
+            .unwrap();
 
             let right_return_type =
                 AggCall::infer_return_type(&AggKind::Count, &[input_refs[0].return_type()])
@@ -215,6 +216,7 @@ impl ExprRewriter for ExprHandler {
             ))
         }
     }
+
     // When there is an InputRef (outside of agg call), it must refers to a group column.
     fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
         let expr = input_ref.into();
@@ -381,6 +383,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(
             self.agg_calls().to_vec(),
@@ -389,6 +392,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
             input,
         )
     }
+
     #[must_use]
     fn rewrite_with_input(
         &self,

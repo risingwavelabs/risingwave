@@ -69,6 +69,15 @@ impl LocalFrontend {
         self.session_ref().run_statement(sql.as_str()).await
     }
 
+    pub async fn query_formatted_result(&self, sql: impl Into<String>) -> Vec<String> {
+        self.run_sql(sql)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| format!("{:?}", row))
+            .collect()
+    }
+
     /// Convert a sql (must be an `Query`) into an unoptimized batch plan.
     pub async fn to_batch_plan(&self, sql: impl Into<String>) -> Result<PlanRef> {
         let statements = Parser::parse_sql(&sql.into()).unwrap();

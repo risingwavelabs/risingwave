@@ -31,6 +31,7 @@ mod chain;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
+mod hop_window;
 mod local_simple_agg;
 mod lookup;
 pub mod merge;
@@ -41,6 +42,9 @@ pub mod receiver;
 mod simple;
 #[cfg(test)]
 mod test_utils;
+mod top_n;
+mod top_n_appendonly;
+mod top_n_executor;
 mod v1_compat;
 
 pub use batch_query::BatchQueryExecutor;
@@ -48,11 +52,14 @@ pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
+pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
+pub use top_n::TopNExecutor;
+pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use v1_compat::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
@@ -131,6 +138,13 @@ pub trait Executor: Send + 'static {
             stream: None,
             info,
         }
+    }
+
+    fn boxed(self) -> BoxedExecutor
+    where
+        Self: Sized + Send + 'static,
+    {
+        Box::new(self)
     }
 
     /// Clears the in-memory cache of the executor. It's no-op by default.

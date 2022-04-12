@@ -22,8 +22,8 @@ const HUMMOCK_COMPACT_TASK_ASSIGNMENT: &str = "cf/compact_task_assignment";
 
 /// `AssignedCompactTasks` tracks compact tasks assigned to context id.
 impl MetadataModel for CompactTaskAssignment {
-    type ProstType = CompactTaskAssignment;
     type KeyType = CompactTaskRefId;
+    type ProstType = CompactTaskAssignment;
 
     fn cf_name() -> String {
         HUMMOCK_COMPACT_TASK_ASSIGNMENT.to_string()

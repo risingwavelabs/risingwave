@@ -128,13 +128,10 @@ pub struct StructArray {
 }
 
 impl Array for StructArray {
-    type RefItem<'a> = StructRef<'a>;
-
-    type OwnedItem = StructValue;
-
     type Builder = StructArrayBuilder;
-
     type Iter<'a> = ArrayIterator<'a, Self>;
+    type OwnedItem = StructValue;
+    type RefItem<'a> = StructRef<'a>;
 
     fn value_at(&self, idx: usize) -> Option<StructRef<'_>> {
         if !self.is_null(idx) {
