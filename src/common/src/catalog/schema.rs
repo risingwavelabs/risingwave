@@ -27,7 +27,10 @@ use crate::types::DataType;
 pub struct Field {
     pub data_type: DataType,
     pub name: String,
+    /// For STRUCT type.
     pub sub_fields: Vec<Field>,
+    /// The user-defined type's name, when the type is created from a protobuf schema file,
+    /// this field will store the message name.
     pub type_name: String,
 }
 
