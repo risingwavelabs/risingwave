@@ -96,7 +96,8 @@ where
     /// Create materialized view, it works as follows:
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
-    /// 3. notify related nodes to update and build the actors.
+    /// (optional) get the split information of the `StreamSource` via source manager and patch
+    /// actors 3. notify related nodes to update and build the actors.
     /// 4. store related meta data.
     pub async fn create_materialized_view(
         &self,

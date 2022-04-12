@@ -23,7 +23,9 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-
+  // split allocation information,
+  // and in the future will distinguish between `StreamSource` and `TableSource`
+  // so that there is no need to put many fields that are not common into the same SourceNode structure
   StreamSourceState stream_source_state = 4;
 }
 

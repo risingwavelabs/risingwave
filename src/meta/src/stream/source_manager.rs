@@ -86,6 +86,10 @@ where
             .to_rw_result()
     }
 
+    /// Perform one-time split scheduling, using the round-robin method to assign splits to the
+    /// source actor under the same fragment Note that the same Materialized View will have
+    /// multiple identical Sources to join, so there will be multiple groups of Actors under same
+    /// `SourceId`
     pub async fn schedule_split_for_actors(
         &self,
         actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
