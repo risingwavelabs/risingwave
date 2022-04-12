@@ -117,39 +117,6 @@ impl FuncSign {
     pub fn new(func: ExprType, inputs_type: Vec<DataTypeName>) -> Self {
         FuncSign { func, inputs_type }
     }
-
-    pub fn new_no_input(func: ExprType) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![],
-        }
-    }
-
-    pub fn new_unary(func: ExprType, p1: DataTypeName) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1],
-        }
-    }
-
-    pub fn new_binary(func: ExprType, p1: DataTypeName, p2: DataTypeName) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1, p2],
-        }
-    }
-
-    pub fn new_ternary(
-        func: ExprType,
-        p1: DataTypeName,
-        p2: DataTypeName,
-        p3: DataTypeName,
-    ) -> Self {
-        FuncSign {
-            func,
-            inputs_type: vec![p1, p2, p3],
-        }
-    }
 }
 
 fn arithmetic_type_derive(t1: DataTypeName, t2: DataTypeName) -> DataTypeName {
@@ -167,7 +134,7 @@ fn build_unary_funcs(
     ret: DataTypeName,
 ) {
     for (expr, a1) in iproduct!(exprs, arg1) {
-        map.insert(FuncSign::new_unary(*expr, *a1), ret);
+        map.insert(FuncSign::new(*expr, vec![*a1]), ret);
     }
 }
 
@@ -179,7 +146,7 @@ fn build_binary_funcs(
     ret: DataTypeName,
 ) {
     for (expr, a1, a2) in iproduct!(exprs, arg1, arg2) {
-        map.insert(FuncSign::new_binary(*expr, *a1, *a2), ret);
+        map.insert(FuncSign::new(*expr, vec![*a1, *a2]), ret);
     }
 }
 
@@ -192,19 +159,6 @@ fn build_commutative_binary_funcs(
 ) {
     build_binary_funcs(map, exprs, arg1, arg2, ret);
     build_binary_funcs(map, exprs, arg2, arg1, ret);
-}
-
-fn build_ternary_funcs(
-    map: &mut HashMap<FuncSign, DataTypeName>,
-    exprs: &[ExprType],
-    arg1: &[DataTypeName],
-    arg2: &[DataTypeName],
-    arg3: &[DataTypeName],
-    ret: DataTypeName,
-) {
-    for (expr, a1, a2, a3) in iproduct!(exprs, arg1, arg2, arg3) {
-        map.insert(FuncSign::new_ternary(*expr, *a1, *a2, *a3), ret);
-    }
 }
 
 fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
@@ -246,12 +200,12 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
     ];
     for (expr, t1, t2) in iproduct!(atm_exprs, num_types.clone(), num_types.clone()) {
         map.insert(
-            FuncSign::new_binary(expr, t1, t2),
+            FuncSign::new(expr, vec![t1, t2]),
             arithmetic_type_derive(t1, t2),
         );
     }
     for t in num_types.clone() {
-        map.insert(FuncSign::new_unary(E::Neg, t), t);
+        map.insert(FuncSign::new(E::Neg, vec![t]), t);
     }
     build_binary_funcs(&mut map, &cmp_exprs, &num_types, &num_types, T::Boolean);
     build_binary_funcs(&mut map, &cmp_exprs, &str_types, &str_types, T::Boolean);
@@ -314,12 +268,8 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Boolean,
     );
     build_binary_funcs(&mut map, &[E::Substr], &str_types, &num_types, T::Varchar);
-    build_ternary_funcs(
-        &mut map,
-        &[E::Substr],
-        &str_types,
-        &num_types,
-        &num_types,
+    map.insert(
+        FuncSign::new(E::Substr, vec![T::Varchar, T::Int32, T::Int32]),
         T::Varchar,
     );
     build_unary_funcs(&mut map, &[E::Length], &str_types, T::Int32);
@@ -337,12 +287,8 @@ fn build_type_derive_map() -> HashMap<FuncSign, DataTypeName> {
         T::Varchar,
     );
     build_binary_funcs(&mut map, &[E::Like], &str_types, &str_types, T::Boolean);
-    build_ternary_funcs(
-        &mut map,
-        &[E::Replace],
-        &str_types,
-        &str_types,
-        &str_types,
+    map.insert(
+        FuncSign::new(E::Replace, vec![T::Varchar, T::Varchar, T::Varchar]),
         T::Varchar,
     );
     build_binary_funcs(
