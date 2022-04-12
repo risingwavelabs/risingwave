@@ -8,7 +8,7 @@ use risingwave_pb::plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdPro
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tokio::task::JoinHandle;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use super::stage::StageEvent;
 use crate::meta_client::FrontendMetaClient;
@@ -151,13 +151,20 @@ impl QueryExecution {
                 root_stage_receiver,
             } => {
                 let msg_sender = runner.msg_sender.clone();
-                let task_handle = tokio::spawn(runner.run());
+                let task_handle = tokio::spawn(async move {
+                    let query_id = runner.query.query_id.clone();
+                    runner.run().await
+                        .map_err(|e| {
+                            error!("Query {:?} failed, reason: {:?}", query_id, e);
+                            e
+                        })
+                });
 
                 let root_stage = root_stage_receiver.await.map_err(|e| {
                     InternalError(format!("Starting query execution failed: {:?}", e))
                 })?;
 
-                debug!(
+                info!(
                     "Received root stage query result fetcher: {:?}, query id: {:?}",
                     root_stage, self.query.query_id
                 );
@@ -197,7 +204,11 @@ impl QueryRunner {
                 .as_ref()
                 .unwrap()
                 .start()
-                .await?;
+                .await
+                .map_err(|e| {
+                    error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                    e
+                })?;
             info!(
                 "Query stage {:?}-{:?} started.",
                 self.query.query_id, stage_id
@@ -208,7 +219,7 @@ impl QueryRunner {
         while let Some(msg) = self.msg_receiver.recv().await {
             match msg {
                 Stage(Scheduled(stage_id)) => {
-                    debug!(
+                    info!(
                         "Query stage {:?}-{:?} scheduled.",
                         self.query.query_id, stage_id
                     );
@@ -220,7 +231,11 @@ impl QueryRunner {
                     } else {
                         for parent in self.query.get_parents(&stage_id) {
                             if self.all_children_scheduled(parent).await {
-                                self.get_stage_execution_unchecked(parent).start().await?;
+                                self.get_stage_execution_unchecked(parent).start().await
+                                    .map_err(|e| {
+                                        error!("Failed to start stage: {}, reason: {:?}", stage_id, e);
+                                        e
+                                    })?;
                             }
                         }
                     }
@@ -235,6 +250,7 @@ impl QueryRunner {
             }
         }
 
+        info!("Query runner {:?} finished.", self.query.query_id);
         Ok(())
     }
 
