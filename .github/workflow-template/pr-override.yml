@@ -8,6 +8,8 @@ on:
   push:
     branches:
       - "forks/*"
+      - staging
+      - trying
 
 concurrency:
   group: environment-${{ github.ref }}
