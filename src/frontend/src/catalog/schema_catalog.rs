@@ -65,14 +65,14 @@ impl SchemaCatalog {
     pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_none())
+            .filter(|(_, v)| v.associated_source_id.is_some())
             .map(|(_, v)| v)
     }
 
     pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
-            .filter(|(_, v)| v.associated_source_id.is_some())
+            .filter(|(_, v)| v.associated_source_id.is_none())
             .map(|(_, v)| v)
     }
 
