@@ -2501,23 +2501,32 @@ impl Parser {
         if let Token::Word(w) = self.next_token() {
             match w.keyword {
                 Keyword::TABLES => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Table(
-                        self.parse_from_and_identifier()?,
-                    )));
+                    return Ok(Statement::ShowObjects(ShowObject::Table {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
+                }
+                Keyword::SOURCES => {
+                    return Ok(Statement::ShowObjects(ShowObject::Source {
+                        schema: self.parse_from_and_identifier()?,
+                    }));
                 }
                 Keyword::DATABASES => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Database));
+                    return Ok(Statement::ShowObjects(ShowObject::Database));
                 }
                 Keyword::SCHEMAS => {
-                    return Ok(Statement::ShowCommand(ShowCommandObject::Schema));
+                    return Ok(Statement::ShowObjects(ShowObject::Schema));
                 }
                 Keyword::MATERIALIZED => {
                     if self.parse_keyword(Keyword::VIEWS) {
-                        return Ok(Statement::ShowCommand(ShowCommandObject::MaterializedView(
-                            self.parse_from_and_identifier()?,
-                        )));
+                        return Ok(Statement::ShowObjects(ShowObject::MaterializedView {
+                            schema: self.parse_from_and_identifier()?,
+                        }));
+                    } else if self.parse_keyword(Keyword::SOURCES) {
+                        return Ok(Statement::ShowObjects(ShowObject::MaterializedSource {
+                            schema: self.parse_from_and_identifier()?,
+                        }));
                     } else {
-                        return self.expected("views after materialized", self.peek_token());
+                        return self.expected("VIEWS or SOURCES after materialized", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {

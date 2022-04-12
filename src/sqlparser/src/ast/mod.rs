@@ -626,46 +626,46 @@ impl fmt::Display for AddDropSync {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ShowCreateObject {
-    Event,
-    Function,
-    Procedure,
-    Table,
-    Trigger,
-}
-
-impl fmt::Display for ShowCreateObject {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ShowCreateObject::Event => f.write_str("EVENT"),
-            ShowCreateObject::Function => f.write_str("FUNCTION"),
-            ShowCreateObject::Procedure => f.write_str("PROCEDURE"),
-            ShowCreateObject::Table => f.write_str("TABLE"),
-            ShowCreateObject::Trigger => f.write_str("TRIGGER"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ShowCommandObject {
-    Table(Option<Ident>),
+pub enum ShowObject {
+    Table {
+        schema: Option<Ident>,
+    },
     Database,
     Schema,
-    MaterializedView(Option<Ident>),
+    MaterializedView {
+        schema: Option<Ident>,
+    },
+    Source {
+        schema: Option<Ident>,
+    },
+    MaterializedSource {
+        schema: Option<Ident>,
+    },
 }
 
-impl fmt::Display for ShowCommandObject {
+impl fmt::Display for ShowObject {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ShowCommandObject::Database => f.write_str("DATABASES"),
-            ShowCommandObject::Schema => f.write_str("SCHEMAS"),
-            ShowCommandObject::MaterializedView(None) => f.write_str("MATERIALIZED VIEWS"),
-            ShowCommandObject::Table(None) => f.write_str("TABLES"),
-            ShowCommandObject::MaterializedView(Some(name)) => {
-                write!(f, "MATERIALIZED VIEWS FROM {}", name)
+        fn fmt_schema(schema: &Option<Ident>) -> String {
+            if let Some(schema) = schema {
+                format!(" FROM {}", schema.value)
+            } else {
+                "".to_string()
             }
-            ShowCommandObject::Table(Some(name)) => write!(f, "TABLES FROM {}", name),
+        }
+
+        match self {
+            ShowObject::Database => f.write_str("DATABASES"),
+            ShowObject::Schema => f.write_str("SCHEMAS"),
+            ShowObject::Table { schema } => {
+                write!(f, "TABLES{}", fmt_schema(schema))
+            }
+            ShowObject::MaterializedView { schema } => {
+                write!(f, "MATERIALIZED VIEWS{}", fmt_schema(schema))
+            }
+            ShowObject::Source { schema } => write!(f, "SOURCES{}", fmt_schema(schema)),
+            ShowObject::MaterializedSource { schema } => {
+                write!(f, "MATERIALIZED SOURCES{}", fmt_schema(schema))
+            }
         }
     }
 }
@@ -786,7 +786,7 @@ pub enum Statement {
         name: ObjectName,
     },
     /// SHOW COMMAND
-    ShowCommand(ShowCommandObject),
+    ShowObjects(ShowObject),
     /// DROP
     Drop(DropStatement),
     /// SET <variable>
@@ -929,7 +929,7 @@ impl fmt::Display for Statement {
                 write!(f, "SHOW COLUMNS FROM {}", name)?;
                 Ok(())
             }
-            Statement::ShowCommand(show_object) => {
+            Statement::ShowObjects(show_object) => {
                 write!(f, "SHOW {}", show_object)?;
                 Ok(())
             }

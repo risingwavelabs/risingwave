@@ -18,33 +18,37 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::ShowCommandObject;
+use risingwave_sqlparser::ast::ShowObject;
 
 use crate::session::OptimizerContext;
 
-pub async fn handle_show_command(
+fn schema_or_default(schema: &Option<Ident>) -> &str {
+    schema.unwrap_or(&DEFAULT_SCHEMA_NAME)
+}
+
+pub async fn handle_show_object(
     context: OptimizerContext,
-    command: ShowCommandObject,
+    command: ShowObject,
 ) -> Result<PgResponse> {
     let session = context.session_ctx;
     let catalog_reader = session.env().catalog_reader().read_guard();
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowCommandObject::Table(Some(ident)) => {
-            catalog_reader.get_all_table_names(session.database(), &ident.value)?
+        ShowObject::Table(ident) => {
+            catalog_reader.get_all_table_names(session.database(), schema_or_default(ident))?
         }
-        ShowCommandObject::Table(None) => {
-            catalog_reader.get_all_table_names(session.database(), DEFAULT_SCHEMA_NAME)?
-        }
-        ShowCommandObject::Database => catalog_reader.get_all_database_names(),
-        ShowCommandObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
+        ShowObject::Database => catalog_reader.get_all_database_names(),
+        ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowCommandObject::MaterializedView(Some(ident)) => {
-            catalog_reader.get_all_mv_names(session.database(), &ident.value)?
+        ShowObject::MaterializedView(ident) => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
         }
-        ShowCommandObject::MaterializedView(None) => {
-            catalog_reader.get_all_mv_names(session.database(), DEFAULT_SCHEMA_NAME)?
+        ShowObject::Source(ident) => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
+        }
+        ShowObject::MaterializedSource(ident) => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
         }
     };
 
@@ -57,6 +61,6 @@ pub async fn handle_show_command(
         StatementType::SHOW_COMMAND,
         rows.len() as i32,
         rows,
-        vec![PgFieldDescriptor::new("name".to_owned(), TypeOid::Varchar)],
+        vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }
