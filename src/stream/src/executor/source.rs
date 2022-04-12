@@ -28,7 +28,7 @@ use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError, ToRwResult};
 use risingwave_common::try_match_expand;
-use risingwave_connector::{SplitImpl, state};
+use risingwave_connector::{state, SplitImpl};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_source::connector_source::ConnectorStreamSource;
@@ -111,15 +111,14 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
-        let stream_source_splits = match &node.stream_source_splits {
-            Some(splits) => {
-                splits.stream_source_splits.iter().map(|split| {
-                    SplitImpl::restore_from_bytes(splits.get_split_type().clone(), split)
-                }).collect::<anyhow::Result<Vec<SplitImpl>>>().to_rw_result()
-            }
-            _ => {
-                Ok(vec![])
-            }
+        let stream_source_splits = match &node.stream_source_state {
+            Some(splits) => splits
+                .stream_source_splits
+                .iter()
+                .map(|split| SplitImpl::restore_from_bytes(splits.get_split_type().clone(), split))
+                .collect::<anyhow::Result<Vec<SplitImpl>>>()
+                .to_rw_result(),
+            _ => Ok(vec![]),
         }?;
 
         let column_ids: Vec<_> = node
@@ -154,7 +153,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             params.operator_id,
             params.op_info,
             params.executor_stats,
-            stream_source_splits
+            stream_source_splits,
         )?))
     }
 }
@@ -476,6 +475,7 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::new(prometheus::Registry::new())),
+            vec![],
         )
         .unwrap();
 
@@ -613,6 +613,7 @@ mod tests {
             1,
             "SourceExecutor".to_string(),
             Arc::new(StreamingMetrics::unused()),
+            vec![],
         )
         .unwrap();
 

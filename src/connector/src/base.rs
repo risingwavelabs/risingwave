@@ -29,10 +29,10 @@ pub enum SourceOffset {
     String(String),
 }
 
-use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
-use crate::{kafka, kinesis, pulsar};
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
+use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::{kafka, kinesis, pulsar};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
@@ -121,9 +121,13 @@ impl SplitImpl {
     pub fn restore_from_bytes(split_type: String, bytes: &[u8]) -> Result<Self> {
         match split_type.as_str() {
             kafka::KAFKA_SPLIT_TYPE => KafkaSplit::restore_from_bytes(bytes).map(SplitImpl::Kafka),
-            pulsar::PULSAR_SPLIT_TYPE => PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar),
-            kinesis::split::KINESIS_SPLIT_TYPE => KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis),
-            other => Err(anyhow!("split type {} not supported", other))
+            pulsar::PULSAR_SPLIT_TYPE => {
+                PulsarSplit::restore_from_bytes(bytes).map(SplitImpl::Pulsar)
+            }
+            kinesis::split::KINESIS_SPLIT_TYPE => {
+                KinesisSplit::restore_from_bytes(bytes).map(SplitImpl::Kinesis)
+            }
+            other => Err(anyhow!("split type {} not supported", other)),
         }
     }
 }

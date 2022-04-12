@@ -24,11 +24,11 @@ use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::StreamSourceState;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
 use uuid::Uuid;
-use risingwave_pb::stream_plan::StreamSourceSplits;
 
 use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
@@ -73,8 +73,8 @@ pub struct GlobalStreamManager<S: MetaStore> {
 }
 
 impl<S> GlobalStreamManager<S>
-    where
-        S: MetaStore,
+where
+    S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
@@ -145,7 +145,7 @@ impl<S> GlobalStreamManager<S>
             let mut source_actors = HashMap::new();
             for actor in &fragment.actors {
                 if let Some(source_id) =
-                TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
                 {
                     source_actors
                         .entry(source_id)
@@ -183,7 +183,7 @@ impl<S> GlobalStreamManager<S>
                     );
 
                     if !splits.is_empty() {
-                        s.stream_source_splits = Some(StreamSourceSplits {
+                        s.stream_source_state = Some(StreamSourceState {
                             split_type: splits.first().unwrap().get_type(),
                             stream_source_splits: splits
                                 .iter()
@@ -606,7 +606,7 @@ mod tests {
                     barrier_manager.clone(),
                     catalog_manager.clone(),
                 )
-                    .await?,
+                .await?,
             );
 
             let stream_manager = GlobalStreamManager::new(
@@ -616,7 +616,7 @@ mod tests {
                 cluster_manager.clone(),
                 source_manager.clone(),
             )
-                .await?;
+            .await?;
 
             let (join_handle_2, shutdown_tx_2) = GlobalBarrierManager::start(barrier_manager).await;
 

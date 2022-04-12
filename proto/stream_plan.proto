@@ -23,10 +23,11 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
-  StreamSourceSplits stream_source_splits = 4;
+
+  StreamSourceState stream_source_state = 4;
 }
 
-message StreamSourceSplits {
+message StreamSourceState {
   string split_type = 1;
   repeated bytes stream_source_splits = 2;
 }

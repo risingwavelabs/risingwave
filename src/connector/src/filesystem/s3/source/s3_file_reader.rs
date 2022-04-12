@@ -69,7 +69,6 @@ impl Default for S3File {
     }
 }
 
-
 // todo(zhenzhou): better name
 const S3_SPLIT_TYPE: &str = "s3";
 

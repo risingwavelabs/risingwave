@@ -26,7 +26,7 @@ pub enum KinesisOffset {
     None,
 }
 
-pub const KINESIS_SPLIT_TYPE: &str= "kinesis";
+pub const KINESIS_SPLIT_TYPE: &str = "kinesis";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KinesisSplit {
