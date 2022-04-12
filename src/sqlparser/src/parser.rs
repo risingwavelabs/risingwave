@@ -2526,7 +2526,8 @@ impl Parser {
                             schema: self.parse_from_and_identifier()?,
                         }));
                     } else {
-                        return self.expected("VIEWS or SOURCES after materialized", self.peek_token());
+                        return self
+                            .expected("VIEWS or SOURCES after materialized", self.peek_token());
                     }
                 }
                 Keyword::COLUMNS => {

@@ -18,12 +18,14 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::catalog::DEFAULT_SCHEMA_NAME;
 use risingwave_common::error::Result;
-use risingwave_sqlparser::ast::ShowObject;
+use risingwave_sqlparser::ast::{Ident, ShowObject};
 
 use crate::session::OptimizerContext;
 
 fn schema_or_default(schema: &Option<Ident>) -> &str {
-    schema.unwrap_or(&DEFAULT_SCHEMA_NAME)
+    schema
+        .as_ref()
+        .map_or_else(|| DEFAULT_SCHEMA_NAME, |s| &s.value)
 }
 
 pub async fn handle_show_object(
@@ -35,20 +37,20 @@ pub async fn handle_show_object(
 
     let names = match command {
         // If not include schema name, use default schema name
-        ShowObject::Table(ident) => {
-            catalog_reader.get_all_table_names(session.database(), schema_or_default(ident))?
+        ShowObject::Table { schema } => {
+            catalog_reader.get_all_table_names(session.database(), schema_or_default(&schema))?
         }
         ShowObject::Database => catalog_reader.get_all_database_names(),
         ShowObject::Schema => catalog_reader.get_all_schema_names(session.database())?,
         // If not include schema name, use default schema name
-        ShowObject::MaterializedView(ident) => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
+        ShowObject::MaterializedView { schema } => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
         }
-        ShowObject::Source(ident) => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
+        ShowObject::Source { schema } => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
         }
-        ShowObject::MaterializedSource(ident) => {
-            catalog_reader.get_all_mv_names(session.database(), schema_or_default(ident))?
+        ShowObject::MaterializedSource { schema } => {
+            catalog_reader.get_all_mv_names(session.database(), schema_or_default(&schema))?
         }
     };
 

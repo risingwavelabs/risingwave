@@ -627,20 +627,12 @@ impl fmt::Display for AddDropSync {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ShowObject {
-    Table {
-        schema: Option<Ident>,
-    },
+    Table { schema: Option<Ident> },
     Database,
     Schema,
-    MaterializedView {
-        schema: Option<Ident>,
-    },
-    Source {
-        schema: Option<Ident>,
-    },
-    MaterializedSource {
-        schema: Option<Ident>,
-    },
+    MaterializedView { schema: Option<Ident> },
+    Source { schema: Option<Ident> },
+    MaterializedSource { schema: Option<Ident> },
 }
 
 impl fmt::Display for ShowObject {
