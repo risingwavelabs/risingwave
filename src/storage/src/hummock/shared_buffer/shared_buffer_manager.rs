@@ -12,30 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ops::RangeBounds;
 use std::sync::atomic::Ordering;
 use std::sync::{atomic, Arc};
 
 use itertools::Itertools;
-use parking_lot::RwLock as PLRwLock;
+use parking_lot::{Mutex, RwLock as PLRwLock};
 use risingwave_common::config::StorageConfig;
+use risingwave_common::error::Result;
+use tokio::sync::watch::Sender as WatchSender;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
+use risingwave_pb::expr::expr_node::Type::Or;
 
 use crate::error::StorageResult;
 use crate::hummock::iterator::variants::*;
-use crate::hummock::key::Epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem,
 };
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
-    SharedBufferUploader, SharedBufferUploaderItem, SyncItem, SyncNotify,
+    SharedBufferUploader, SharedBufferUploaderItem, SyncItem,
 };
 use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
+use crate::hummock::{
+    HummockEpoch, HummockError, HummockResult, SstableStoreRef, INVALID_EPOCH,
+};
 use crate::monitor::StateStoreMetrics;
 
 #[derive(Debug)]
@@ -57,11 +61,12 @@ impl SharedBufferMetrics {
 /// Shared buffer is a node level abstraction to buffer write batches across executors.
 pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
-    shared_buffer: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
+    shared_buffer: PLRwLock<BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
     sync_tx: tokio::sync::watch::Sender<SharedBufferUploaderItem>,
     uploader_handle: JoinHandle<StorageResult<()>>,
     stats: SharedBufferMetrics,
+    ongoing_syncs: Mutex<HashMap<HummockEpoch, (Arc<WatchSender<HummockResult<u64>>>, u32)>>,
 }
 
 impl SharedBufferManager {
@@ -74,8 +79,6 @@ impl SharedBufferManager {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (sync_tx, sync_rx) =
-            tokio::sync::watch::channel(SharedBufferUploaderItem::Sync(SyncItem::default()));
         let stats = SharedBufferMetrics::new(options.as_ref());
 
         let uploader = SharedBufferUploader::new(
@@ -85,20 +88,23 @@ impl SharedBufferManager {
             state_store_stats,
             hummock_meta_client,
             uploader_rx,
-            sync_rx,
         );
         let uploader_handle = tokio::spawn(uploader.run());
         Self {
             shared_buffer: PLRwLock::new(BTreeMap::new()),
             uploader_tx,
-            sync_tx,
             uploader_handle,
             stats,
+            ongoing_syncs: Mutex::new(HashMap::new()),
         }
     }
 
+    fn empty(&self) -> bool {
+        self.stats.shared_buffer_cur_size.load(Ordering::SeqCst) == 0
+    }
+
     /// Allocates a shared buffer budget.
-    async fn allocate_space(&self, batch_size: u64, _epoch: Epoch) -> HummockResult<()> {
+    async fn allocate_space(&self, batch_size: u64) -> HummockResult<()> {
         let mut current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
         let threshold = self.stats.shared_buffer_threshold_size;
 
@@ -107,7 +113,11 @@ impl SharedBufferManager {
         'retry_allocate: loop {
             // flush shared buffer if there is no enough space
             while threshold < current_size + batch_size {
-                log::info!("triggered flush: threshold {}, require {}", threshold, current_size + batch_size);
+                log::info!(
+                    "triggered flush: threshold {}, require {}",
+                    threshold,
+                    current_size + batch_size
+                );
                 self.sync(None).await?;
                 current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
             }
@@ -136,19 +146,12 @@ impl SharedBufferManager {
     pub async fn write_batch(
         &self,
         batch: Vec<SharedBufferItem>,
-        epoch: Epoch,
+        epoch: HummockEpoch,
     ) -> HummockResult<u64> {
         let batch = SharedBufferBatch::new(batch, epoch);
         let size = batch.size;
 
-        self.allocate_space(size, epoch).await?;
-
-        let shared_buffer_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-        log::info!(
-            "ingested batch size: {}, shared_buff_curr_size: {}",
-            size,
-            shared_buffer_size
-        );
+        self.allocate_space(size).await?;
 
         // Write the batch to shared buffer and notify the Uploader
         self.shared_buffer
@@ -178,31 +181,75 @@ impl SharedBufferManager {
     }
 
     // TODO: support time-based syncing
-    pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
-        let sync_notify = SyncNotify::new(Arc::new(tokio::sync::Notify::new()));
-        self.sync_tx
-            .send(SharedBufferUploaderItem::Sync(SyncItem {
-                epoch,
-                notifier: sync_notify.clone(),
-            }))
-            .unwrap();
+    pub async fn sync(&self, epoch_opt: Option<HummockEpoch>) -> HummockResult<()> {
+        if self.empty() {
+            return Ok(())
+        }
 
-        sync_notify.notify.notified().await;
-        let res = sync_notify.result.lock();
-        match res.as_ref() {
+        let epoch = match epoch_opt {
+            None => INVALID_EPOCH,
+            Some(v) => v,
+        };
+
+        let mut watch_rx = {
+            let mut lock_guard = self.ongoing_syncs.lock();
+            match lock_guard.get_mut(&epoch) {
+                // If there is an ongoing sync for the epoch we just subscribe to the result
+                Some((tx, cnt)) => {
+                    *cnt = *cnt + 1;
+                    tx.subscribe()
+                }
+                // Create a watch channel for the epoch and send it to the Uploader
+                // which will notify us of the sync result.
+                None => {
+                    let (tx, rx) = tokio::sync::watch::channel(Ok(0));
+                    let tx_ref = Arc::new(tx);
+                    self.uploader_tx
+                        .send(SharedBufferUploaderItem::Sync(SyncItem {
+                            epoch: epoch_opt,
+                            notifier: tx_ref.clone(),
+                        }))
+                        .unwrap();
+                    lock_guard.insert(epoch, (tx_ref, 1));
+                    rx
+                }
+            }
+        };
+
+        watch_rx
+            .changed()
+            .await
+            .map_err(|e| HummockError::shared_buffer_error(e.to_string()))?;
+        let sync_res = &(*watch_rx.borrow());
+
+        // decrease subscribe count after we get notification
+        {
+            let mut lock_guard = self.ongoing_syncs.lock();
+            let val = lock_guard.get_mut(&epoch);
+            assert!(val.is_some());
+            if let Some((_, cnt)) = val {
+                if *cnt == 1 {
+                    // delete entry
+                    lock_guard.remove(&epoch);
+                } else {
+                    *cnt -= 1;
+                }
+            }
+        }
+
+        match sync_res {
             Ok(sync_size) => {
                 // Update the shared buffer size count
                 let shared_buff_prev_size = self
                     .stats
                     .shared_buffer_cur_size
                     .fetch_sub(*sync_size, Ordering::SeqCst);
-                log::info!(
-                    "shared_buffer_prev_size {}, sync_size {}",
+                log::debug!(
+                    "sync success shared_buffer_old_size {}, sync_size {}",
                     shared_buff_prev_size,
                     sync_size
                 );
                 assert!(shared_buff_prev_size >= *sync_size);
-
                 Ok(())
             }
             Err(_) => Err(HummockError::shared_buffer_error(

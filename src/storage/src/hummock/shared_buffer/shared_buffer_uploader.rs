@@ -17,8 +17,10 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::watch::Sender as WatchSender;
 
 use crate::error::StorageResult;
 use crate::hummock::compactor::{Compactor, CompactorContext};
@@ -33,7 +35,7 @@ pub struct SyncItem {
     /// Epoch to sync. None means syncing all epochs.
     pub(super) epoch: Option<u64>,
     /// Notifier to notify on sync finishes
-    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<()>>>,
+    pub(super) notifier: Arc<WatchSender<HummockResult<u64>>>,
 }
 
 #[derive(Debug)]
@@ -198,7 +200,7 @@ impl SharedBufferUploader {
     }
 
     pub async fn run(mut self) -> StorageResult<()> {
-        while let Some(m) = self.rx.recv().await {
+        while let Some(m) = self.uploader_rx.recv().await {
             if let Err(e) = self.handle(m).await {
                 return Err(e);
             }

@@ -14,7 +14,6 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
@@ -199,7 +198,6 @@ async fn test_state_store_sync() {
     .await
     .unwrap();
 
-    let mut time_interval = tokio::time::interval(Duration::from_millis(100));
     let mut epoch: Epoch = 1;
 
     // ingest 16B batch
@@ -211,8 +209,6 @@ async fn test_state_store_sync() {
     // Make sure the batch is sorted.
     batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage.ingest_batch(batch1, epoch).await.unwrap();
-
-    time_interval.tick().await;
 
     // check sync state store metrics
     // Note: epoch(8B) will be appended to keys, thus the ingested batch
@@ -233,8 +229,6 @@ async fn test_state_store_sync() {
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage.ingest_batch(batch2, epoch).await.unwrap();
-
-    time_interval.tick().await;
 
     // shared buffer threshold size should have been reached
     assert_eq!(
