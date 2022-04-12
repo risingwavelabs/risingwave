@@ -3658,6 +3658,7 @@ dependencies = [
  "hyper",
  "itertools",
  "lazy_static",
+ "libc",
  "log",
  "lz4",
  "memcomparable",

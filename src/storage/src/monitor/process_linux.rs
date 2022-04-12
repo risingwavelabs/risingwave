@@ -9,9 +9,6 @@ use std::io::{Error, ErrorKind, Result};
 use prometheus::core::{Collector, Desc};
 use prometheus::{proto, IntCounter, IntGauge, Opts, Registry};
 
-#[cfg(target_os = "linux")]
-use crate::sys::thread;
-
 /// Monitors current process.
 pub fn monitor_process(registry: &Registry) -> Result<()> {
     let pc = ProcessCollector::new();
@@ -67,9 +64,7 @@ impl ProcessCollector {
         {
             if let Ok(boot_time) = procfs::boot_time_secs() {
                 if let Ok(p) = procfs::process::Process::myself() {
-                    start_time.set(
-                        p.stat.starttime as i64 / thread::ticks_per_second() + boot_time as i64,
-                    );
+                    start_time.set(p.stat.starttime as i64 / 1_000_000 + boot_time as i64);
                 }
             }
         }
@@ -104,7 +99,7 @@ impl Collector for ProcessCollector {
 
         // cpu
         let cpu_total_mfs = {
-            let total = (p.stat.utime + p.stat.stime) / thread::ticks_per_second() as u64;
+            let total = (p.stat.utime + p.stat.stime) / 1_000_000 as u64;
             let past = self.cpu_total.get();
             self.cpu_total.inc_by(total - past);
 

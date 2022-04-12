@@ -26,6 +26,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
 lazy_static = "1"
+libc = "0.2"
 log = "0.4"
 lz4 = "1.23.1"
 memcomparable = { path = "../utils/memcomparable" }
