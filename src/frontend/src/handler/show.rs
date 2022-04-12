@@ -74,3 +74,61 @@ pub async fn handle_show_object(
         vec![PgFieldDescriptor::new("Name".to_owned(), TypeOid::Varchar)],
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_show_source() {
+        let sql = r#"CREATE SOURCE t
+        WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+        ROW FORMAT JSON"#;
+
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        let sources = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .unwrap()
+            .iter_source()
+            .map(|s| s.name.clone())
+            .collect_vec();
+        assert_eq!(sources, vec!["t".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn test_show_materialized_source() {
+        let sql = r#"CREATE MATERIALIZED SOURCE t
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT JSON"#;
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+        let schema_catalog = catalog_reader
+            .read_guard()
+            .get_schema_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME)
+            .unwrap()
+            .clone();
+
+        let sources = schema_catalog
+            .iter_source()
+            .map(|s| s.name.clone())
+            .collect_vec();
+        assert_eq!(sources, Vec::<String>::new());
+
+        let sources = schema_catalog
+            .iter_materialized_source()
+            .map(|s| s.name.clone())
+            .collect_vec();
+        assert_eq!(sources, vec!["t".to_string()]);
+    }
+}
