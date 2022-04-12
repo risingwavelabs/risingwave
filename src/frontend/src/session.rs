@@ -42,7 +42,7 @@ use crate::handler::query::IMPLICIT_FLUSH;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::observer::observer_manager::ObserverManager;
 use crate::optimizer::plan_node::PlanNodeId;
-use crate::scheduler::schedule::{WorkerNodeManager, WorkerNodeManagerRef};
+use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::QueryManager;
 use crate::FrontendOpts;
 
