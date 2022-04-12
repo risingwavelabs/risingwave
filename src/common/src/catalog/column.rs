@@ -145,6 +145,15 @@ impl ColumnDesc {
             type_name: type_name.to_string(),
         }
     }
+
+    /// Generate incremental `column_id` for `column_desc` and `field_descs`
+    pub fn generate_increment_id(&mut self, index: &mut i32) {
+        self.column_id = ColumnId::new(*index);
+        *index += 1;
+        for field in &mut self.field_descs {
+            field.generate_increment_id(index);
+        }
+    }
 }
 
 impl From<&Field> for ColumnDesc {

@@ -30,6 +30,7 @@ pub struct SourceCatalog {
 }
 
 impl SourceCatalog {
+    /// Extract `field_descs` from `column_desc` and add in source catalog.
     pub fn rewrite_columns(&mut self) {
         let mut catalogs = vec![];
         for col in &self.columns {

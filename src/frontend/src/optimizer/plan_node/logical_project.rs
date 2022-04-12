@@ -138,6 +138,7 @@ impl LogicalProject {
             .zip_eq(expr_alias.iter())
             .enumerate()
             .map(|(id, (expr, alias))| {
+                // Get field info from o2i.
                 let (default_name, sub_fields, type_name) = match o2i.try_map(id) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
