@@ -25,8 +25,6 @@ impl Rule for ApplyProjectRule {
         let project = right.as_logical_project()?;
         let new_right = project.input();
 
-        println!("ApplyProjectRule is used");
-
         let mut lift_correlated_input_ref = LiftCorrelatedInputRef {};
         let mut shift_input_ref = ColIndexMapping::with_shift_offset(
             project.input().schema().len(),

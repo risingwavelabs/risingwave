@@ -24,8 +24,6 @@ impl Rule for ApplyFilterRule {
         let filter = right.as_logical_filter()?;
         let new_right = filter.input();
 
-        println!("ApplyFilterRule is used");
-
         // For correlated_input_ref, we should NOT change its index, because it actually points to
         // the left child of LogicalApply,
         // while for uncorrelated_input_ref, we should shift it with the offset.
@@ -42,9 +40,8 @@ impl Rule for ApplyFilterRule {
             .rewrite_expr(&mut shift_input_ref)
             .rewrite_expr(&mut lift_correlated_input_ref);
 
-        let new_apply = apply.clone_with_left_right(apply.left(), new_right);
-        let lifted_filter: PlanRef = LogicalFilter::new(new_apply.into(), predicate).into();
-        Some(lifted_filter)
+        let join = LogicalJoin::new(apply.left(), new_right, apply.join_type(), predicate);
+        Some(join.into())
     }
 }
 

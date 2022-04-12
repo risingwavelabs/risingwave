@@ -42,8 +42,6 @@ mod apply_project;
 pub use apply_project::*;
 mod apply_filter;
 pub use apply_filter::*;
-mod apply_scan;
-pub use apply_scan::*;
 
 struct LiftCorrelatedInputRef {}
 

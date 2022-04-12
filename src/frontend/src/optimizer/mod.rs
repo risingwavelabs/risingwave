@@ -117,13 +117,7 @@ impl PlanRoot {
 
         // Subquery Unnesting
         plan = {
-            let rules = vec![
-                // Apply Push-down
-                ApplyProjectRule::create(),
-                ApplyFilterRule::create(),
-                // Apply Eliminate
-                ApplyScanRule::create(),
-            ];
+            let rules = vec![ApplyProjectRule::create(), ApplyFilterRule::create()];
             let heuristic_optimizer =
                 HeuristicOptimizer::new(ApplyOrder::BottomUpAndThenTopDown, rules);
             heuristic_optimizer.optimize(plan)
