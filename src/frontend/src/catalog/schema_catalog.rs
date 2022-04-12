@@ -78,16 +78,15 @@ impl SchemaCatalog {
             .map(|(_, v)| v)
     }
 
+    /// Iterate all sources, including the materialized sources.
     pub fn iter_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()
-            .filter(|(name, v)| {
-                matches!(v.source_type, SourceType::Source)
-                    && self.table_by_name.get(*name).is_none()
-            })
+            .filter(|(_, v)| matches!(v.source_type, SourceType::Source))
             .map(|(_, v)| v)
     }
 
+    /// Iterate the materialized sources.
     pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
         self.source_by_name
             .iter()

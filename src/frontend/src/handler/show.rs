@@ -81,31 +81,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_show_source() {
-        let sql = r#"CREATE SOURCE t
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        let sql = r#"CREATE SOURCE t1
         WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
         ROW FORMAT JSON"#;
-
-        let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let rows = frontend.query_formatted_result("SHOW SOURCES").await;
-        assert_eq!(rows, vec!["Row([Some(\"t\")])".to_string()]);
-    }
-
-    #[tokio::test]
-    async fn test_show_materialized_source() {
-        let sql = r#"CREATE MATERIALIZED SOURCE t
+        let sql = r#"CREATE MATERIALIZED SOURCE t2
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT JSON"#;
-        let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let rows = frontend.query_formatted_result("SHOW SOURCES").await;
-        assert_eq!(rows, Vec::<String>::new());
+        let mut rows = frontend.query_formatted_result("SHOW SOURCES").await;
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![
+                "Row([Some(\"t1\")])".to_string(),
+                "Row([Some(\"t2\")])".to_string()
+            ]
+        );
 
         let rows = frontend
             .query_formatted_result("SHOW MATERIALIZED SOURCES")
             .await;
-        assert_eq!(rows, vec!["Row([Some(\"t\")])".to_string()]);
+        assert_eq!(rows, vec!["Row([Some(\"t2\")])".to_string()]);
     }
 }
