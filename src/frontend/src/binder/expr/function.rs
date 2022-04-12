@@ -117,8 +117,14 @@ impl Binder {
             let digits = inputs.pop().unwrap();
             let input = inputs.pop().unwrap();
             vec![
-                input.ensure_type(DataType::Decimal),
-                digits.ensure_type(DataType::Int32),
+                input
+                    .clone()
+                    .cast_implicit(DataType::Decimal)
+                    .unwrap_or(input),
+                digits
+                    .clone()
+                    .cast_implicit(DataType::Int32)
+                    .unwrap_or(digits),
             ]
         } else {
             inputs

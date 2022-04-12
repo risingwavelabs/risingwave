@@ -401,6 +401,7 @@ define_keywords!(
     SOME,
     SORT,
     SOURCE,
+    SOURCES,
     SPECIFIC,
     SPECIFICTYPE,
     SQL,

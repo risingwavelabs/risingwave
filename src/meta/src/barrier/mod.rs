@@ -163,8 +163,6 @@ impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
-    const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-
     /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,

@@ -804,7 +804,11 @@ where
                         .for_each(|t| version_first_level.table_infos.push(t.clone()));
                 }
                 LevelType::Nonoverlapping => {
-                    unimplemented!()
+                    return Err(ErrorCode::NotImplemented(
+                        "unsupported LevelType::Nonoverlapping".to_string(),
+                        None.into(),
+                    )
+                    .into())
                 }
             };
 
