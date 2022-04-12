@@ -21,38 +21,75 @@ use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
 
 use crate::base::SplitEnumerator;
-use crate::kafka::split::{KafkaOffset, KafkaSplit};
-use crate::kafka::{KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT};
+use crate::kafka::split::KafkaSplit;
+use crate::kafka::{
+    KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_SCAN_STARTUP_MODE, KAFKA_CONFIG_TIME_OFFSET,
+    KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT,
+};
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum KafkaEnumeratorOffset {
+    Earliest,
+    Latest,
+    Offset(i64),
+    Timestamp(i64),
+    None,
+}
 
 pub struct KafkaSplitEnumerator {
     broker_address: String,
     topic: String,
     admin_client: BaseConsumer,
-    start_offset: KafkaOffset,
-    stop_offset: KafkaOffset,
+    start_offset: KafkaEnumeratorOffset,
+
+    // maybe used in the future for batch processing
+    stop_offset: KafkaEnumeratorOffset,
+}
+
+macro_rules! extract_properties {
+    ($node_type:expr, $source:expr) => {
+        $node_type
+            .get($source)
+            .ok_or_else(|| anyhow::anyhow!("property {} not found", $source))?
+    };
 }
 
 impl KafkaSplitEnumerator {
     pub fn new(properties: &HashMap<String, String>) -> Result<KafkaSplitEnumerator> {
-        let broker_address = properties
-            .get(KAFKA_CONFIG_BROKER_KEY)
-            .ok_or_else(|| anyhow!("broker_address not found"))?;
-        let topic = properties
-            .get(KAFKA_CONFIG_TOPIC_KEY)
-            .ok_or_else(|| anyhow!("topic not found"))?;
+        let broker_address = extract_properties!(properties, KAFKA_CONFIG_BROKER_KEY);
+        let topic = extract_properties!(properties, KAFKA_CONFIG_TOPIC_KEY);
+
+        let mut scan_start_offset = match properties
+            .get(KAFKA_CONFIG_SCAN_STARTUP_MODE)
+            .map(String::as_str)
+        {
+            Some("earliest") => KafkaEnumeratorOffset::Earliest,
+            Some("latest") => KafkaEnumeratorOffset::Latest,
+            None => KafkaEnumeratorOffset::Earliest,
+            _ => {
+                return Err(anyhow!(
+                    "properties {} only support earliest and latest or leave it empty",
+                    KAFKA_CONFIG_SCAN_STARTUP_MODE
+                ));
+            }
+        };
+
+        if let Some(s) = properties.get(KAFKA_CONFIG_TIME_OFFSET) {
+            let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
+            scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
+        }
 
         let client: BaseConsumer = rdkafka::ClientConfig::new()
             .set("bootstrap.servers", broker_address)
             .create_with_context(DefaultConsumerContext)
-            .unwrap();
+            .map_err(|e| anyhow!(e))?;
 
         Ok(Self {
             broker_address: broker_address.clone(),
             topic: topic.clone(),
             admin_client: client,
-            // todo
-            start_offset: KafkaOffset::Earliest,
-            stop_offset: KafkaOffset::None,
+            start_offset: scan_start_offset,
+            stop_offset: KafkaEnumeratorOffset::None,
         })
     }
 }
@@ -87,55 +124,55 @@ impl SplitEnumerator for KafkaSplitEnumerator {
 }
 
 impl KafkaSplitEnumerator {
-    fn fetch_stop_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, KafkaOffset>> {
+    fn fetch_stop_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.stop_offset {
-            KafkaOffset::Earliest => unreachable!(),
-            KafkaOffset::Latest => partitions
+            KafkaEnumeratorOffset::Earliest => unreachable!(),
+            KafkaEnumeratorOffset::Latest => partitions
                 .iter()
                 .map(|partition| {
                     self.admin_client
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
-                        .map(|watermark| (*partition, KafkaOffset::Offset(watermark.1)))
+                        .map(|watermark| (*partition, Some(watermark.1)))
                 })
                 .collect(),
-            KafkaOffset::Offset(offset) => partitions
+            KafkaEnumeratorOffset::Offset(offset) => partitions
                 .iter()
-                .map(|partition| Ok((*partition, KafkaOffset::Offset(offset))))
+                .map(|partition| Ok((*partition, Some(offset))))
                 .collect(),
-            KafkaOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
-            KafkaOffset::None => partitions
+            KafkaEnumeratorOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
+            KafkaEnumeratorOffset::None => partitions
                 .iter()
-                .map(|partition| Ok((*partition, KafkaOffset::None)))
+                .map(|partition| Ok((*partition, None)))
                 .collect(),
         }
     }
 
-    fn fetch_start_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, KafkaOffset>> {
+    fn fetch_start_offset(&self, partitions: &[i32]) -> KafkaResult<HashMap<i32, Option<i64>>> {
         match self.start_offset {
-            KafkaOffset::Earliest | KafkaOffset::Latest => partitions
+            KafkaEnumeratorOffset::Earliest | KafkaEnumeratorOffset::Latest => partitions
                 .iter()
                 .map(|partition| {
                     self.admin_client
                         .fetch_watermarks(self.topic.as_str(), *partition, KAFKA_SYNC_CALL_TIMEOUT)
                         .map(|watermark| match self.start_offset {
-                            KafkaOffset::Earliest => KafkaOffset::Offset(watermark.0),
-                            KafkaOffset::Latest => KafkaOffset::Offset(watermark.1),
+                            KafkaEnumeratorOffset::Earliest => Some(watermark.0),
+                            KafkaEnumeratorOffset::Latest => Some(watermark.1),
                             _ => unreachable!(),
                         })
                         .map(|offset| (*partition, offset))
                 })
                 .collect(),
 
-            KafkaOffset::Offset(offset) => partitions
+            KafkaEnumeratorOffset::Offset(offset) => partitions
                 .iter()
-                .map(|partition| Ok((*partition, KafkaOffset::Offset(offset))))
+                .map(|partition| Ok((*partition, Some(offset))))
                 .collect(),
 
-            KafkaOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
+            KafkaEnumeratorOffset::Timestamp(time) => self.fetch_offset_for_time(partitions, time),
 
-            KafkaOffset::None => partitions
+            KafkaEnumeratorOffset::None => partitions
                 .iter()
-                .map(|partition| Ok((*partition, KafkaOffset::None)))
+                .map(|partition| Ok((*partition, None)))
                 .collect(),
         }
     }
@@ -144,7 +181,7 @@ impl KafkaSplitEnumerator {
         &self,
         partitions: &[i32],
         time: i64,
-    ) -> KafkaResult<HashMap<i32, KafkaOffset>> {
+    ) -> KafkaResult<HashMap<i32, Option<i64>>> {
         let mut tpl = TopicPartitionList::new();
 
         for partition in partitions {
@@ -160,7 +197,7 @@ impl KafkaSplitEnumerator {
         for elem in offsets.elements_for_topic(self.topic.as_str()) {
             match elem.offset() {
                 Offset::Offset(offset) => {
-                    result.insert(elem.partition(), KafkaOffset::Offset(offset));
+                    result.insert(elem.partition(), Some(offset));
                 }
                 _ => {
                     let (_, high_watermark) = self.admin_client.fetch_watermarks(
@@ -168,7 +205,7 @@ impl KafkaSplitEnumerator {
                         elem.partition(),
                         KAFKA_SYNC_CALL_TIMEOUT,
                     )?;
-                    result.insert(elem.partition(), KafkaOffset::Offset(high_watermark));
+                    result.insert(elem.partition(), Some(high_watermark));
                 }
             }
         }

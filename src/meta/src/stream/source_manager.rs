@@ -267,6 +267,7 @@ where
         let mut result = HashMap::new();
 
         for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {
+            log::debug!("found {} splits", splits.len());
             for actors in fragments {
                 let actor_count = actors.len();
                 let mut chunks = vec![vec![]; actor_count];
@@ -402,7 +403,6 @@ where
             tokio::select! {
             _ = interval.tick() => {
                     let mut core = self.core.lock().await;
-                    log::debug!("Source manager tick! total {} sources", core.managed_sources.len());
                     if let Err(e) = core.tick().await {
                         log::error!("source manager tick failed! {}", e);
                     }

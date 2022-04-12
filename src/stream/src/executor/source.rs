@@ -106,6 +106,8 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let source_id = TableId::from(&node.table_ref_id);
         let source_desc = params.env.source_manager().get_source(&source_id)?;
 
+        println!("source node {:#?}", node);
+
         let column_ids: Vec<_> = node
             .get_column_ids()
             .iter()

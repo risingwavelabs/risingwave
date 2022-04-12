@@ -175,6 +175,11 @@ where
                 }
 
                 if let Some(Node::SourceNode(s)) = node.node.as_mut() {
+                    log::debug!(
+                        "patching source node #{} with splits {:?}",
+                        actor_id,
+                        splits
+                    );
                     s.stream_source_splits = splits
                         .iter()
                         .map(|split| split.to_string().unwrap().as_bytes().to_vec())

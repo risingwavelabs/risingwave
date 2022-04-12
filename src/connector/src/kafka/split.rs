@@ -17,22 +17,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SourceSplit;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum KafkaOffset {
-    Earliest,
-    Latest,
-    Offset(i64),
-    Timestamp(i64),
-    None,
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct KafkaSplit {
     pub(crate) topic: String,
     pub(crate) partition: i32,
-    pub(crate) start_offset: KafkaOffset,
-    pub(crate) stop_offset: KafkaOffset,
+    pub(crate) start_offset: Option<i64>,
+    pub(crate) stop_offset: Option<i64>,
 }
 
 impl SourceSplit for KafkaSplit {
@@ -48,8 +38,8 @@ impl SourceSplit for KafkaSplit {
 impl KafkaSplit {
     pub fn new(
         partition: i32,
-        start_offset: KafkaOffset,
-        stop_offset: KafkaOffset,
+        start_offset: Option<i64>,
+        stop_offset: Option<i64>,
         topic: String,
     ) -> KafkaSplit {
         KafkaSplit {
@@ -59,4 +49,16 @@ impl KafkaSplit {
             stop_offset,
         }
     }
+}
+
+#[cfg(test)]
+mod test {
+
+    // #[test]
+    // fn test_serialize() {
+    //     let split = KafkaSplit::new(3, None, Some(123), "test_topic".to_string());
+    //     let bytes = split.to_string().unwrap();
+    //
+    //     println!("bytes {}", bytes);
+    // }
 }

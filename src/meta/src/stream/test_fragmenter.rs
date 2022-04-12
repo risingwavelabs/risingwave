@@ -123,7 +123,7 @@ fn make_stream_node() -> StreamNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
-            stream_source_splits: vec![]
+            stream_source_splits: vec![],
         })),
         pk_indices: vec![2],
         ..Default::default()

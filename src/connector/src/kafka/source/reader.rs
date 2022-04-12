@@ -27,18 +27,13 @@ use risingwave_common::error::RwError;
 
 use crate::base::{InnerMessage, SourceReader};
 use crate::kafka::split::KafkaSplit;
+use crate::kafka::KAFKA_CONFIG_BROKER_KEY;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
-
-const KAFKA_CONFIG_TOPIC_KEY: &str = "kafka.topic";
-const KAFKA_CONFIG_BOOTSTRAP_SERVER_KEY: &str = "kafka.bootstrap.servers";
 
 pub struct KafkaSplitReader {
     consumer: Arc<StreamConsumer<DefaultConsumerContext>>,
     assigned_splits: HashMap<String, Vec<KafkaSplit>>,
-    // partition_queue: StreamPartitionQueue<DefaultConsumerContext>,
-    // topic: String,
-    // assigned_split: KafkaSplit,
 }
 
 #[async_trait]
@@ -54,47 +49,26 @@ impl SourceReader for KafkaSplitReader {
             Some(chunk) => chunk,
         };
 
-        let mut ret = Vec::with_capacity(chunk.len());
-
-        for msg in chunk {
-            let msg = msg.map_err(|e| anyhow!(e))?;
-
-            // let offset = msg.offset();
-            //
-            // let topic =
-            //
-            // if let KafkaOffset::Offset(stopping_offset) = self.assigned_split.stop_offset {
-            //     if offset >= stopping_offset {
-            //         // `self.partition_queue` will expire when it's done
-            //         // FIXME(chen): error handling
-            //         self.consumer
-            //             .assign(&TopicPartitionList::new())
-            //             .map_err(|e| anyhow!(e))?;
-            //
-            //         break;
-            //     }
-            // }
-
-            ret.push(InnerMessage::from(msg));
-        }
-
-        Ok(Some(ret))
+        chunk
+            .into_iter()
+            .map(|msg| msg.map_err(|e| anyhow!(e)).map(InnerMessage::from))
+            .collect::<Result<Vec<InnerMessage>>>()
+            .map(Some)
     }
 
     async fn new(
         properties: HashMap<String, String>,
         _state: Option<crate::ConnectorState>,
     ) -> Result<Self>
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
-        let bootstrap_servers =
-            properties
-                .get(KAFKA_CONFIG_BOOTSTRAP_SERVER_KEY)
-                .ok_or_else(|| RwError::from(ProtocolError(format!(
-                    "could not found config {}",
-                    KAFKA_CONFIG_BOOTSTRAP_SERVER_KEY
-                ))))?;
+        let bootstrap_servers = properties.get(KAFKA_CONFIG_BROKER_KEY).ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "could not found config {}",
+                KAFKA_CONFIG_BROKER_KEY
+            )))
+        })?;
 
         let mut config = ClientConfig::new();
 
@@ -133,36 +107,3 @@ impl SourceReader for KafkaSplitReader {
         })
     }
 }
-
-// impl KafkaSplitReader {
-//     fn create_consumer(&self) -> Result<StreamConsumer<DefaultConsumerContext>> {
-//         let mut config = ClientConfig::new();
-//
-//         config.set("topic.metadata.refresh.interval.ms", "30000");
-//         config.set("fetch.message.max.bytes", "134217728");
-//         config.set("auto.offset.reset", "earliest");
-//
-//         if config.get("group.id").is_none() {
-//             config.set(
-//                 "group.id",
-//                 format!(
-//                     "consumer-{}",
-//                     SystemTime::now()
-//                         .duration_since(UNIX_EPOCH)
-//                         .unwrap()
-//                         .as_micros()
-//                 ),
-//             );
-//         }
-//
-//         // disable partition eof
-//         config.set("enable.partition.eof", "false");
-//         config.set("enable.auto.commit", "false");
-//         // config.set("bootstrap.servers", self.bootstrap_servers.join(","));
-//
-//         config
-//             .set_log_level(RDKafkaLogLevel::Debug)
-//             .create_with_context(DefaultConsumerContext)
-//             .map_err(|e| anyhow!(e))
-//     }
-// }
