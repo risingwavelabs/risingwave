@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::future::Future;
 
 use bytes::Bytes;
 use futures::future::try_join_all;
@@ -28,41 +29,57 @@ pub struct InMemObjectStore {
     objects: Mutex<HashMap<String, Bytes>>,
 }
 
-#[async_trait::async_trait]
+// #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        if obj.is_empty() {
-            Err(ObjectError::internal("upload empty object"))
-        } else {
-            self.objects.lock().await.insert(path.into(), obj);
+    type EmptyFuture<'a> = impl Future<Output = ObjectResult<()>>;
+    type BytesFuture<'a> = impl Future<Output = ObjectResult<Bytes>>;
+    type BytesVecFuture<'a> = impl Future<Output = ObjectResult<Vec<Bytes>>>;
+    type ObjectMetaFuture<'a> = impl Future<Output = ObjectResult<ObjectMetadata>>;
+    type DeleteFuture<'a> = impl Future<Output = ObjectResult<()>>;
+
+    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::EmptyFuture<'_> {
+        async move {
+            if obj.is_empty() {
+                Err(ObjectError::internal("upload empty object"))
+            } else {
+                self.objects.lock().await.insert(path.into(), obj);
+                Ok(())
+            }
+        }
+    }
+
+    fn read<'a>(&'a self, path: &'a str, block: Option<BlockLocation>) -> Self::BytesFuture<'a> {
+        async move {
+            if let Some(loc) = block {
+                self.get_object(path, |obj| find_block(obj, loc)).await?
+            } else {
+                self.get_object(path, |obj| Ok(obj.clone())).await?
+            }
+        }
+    }
+
+    fn readv<'a>(&'a self, path: &'a str, block_locs: Vec<BlockLocation>) -> Self::BytesVecFuture<'_> {
+        async move {
+            let futures = block_locs
+                .into_iter()
+                .map(|block_loc| self.read(path, Some(block_loc)))
+                .collect_vec();
+            try_join_all(futures).await
+        }
+    }
+
+    fn metadata<'a>(&'a self, path: &'a str) -> Self::ObjectMetaFuture<'_> {
+        async move {
+            let total_size = self.get_object(path, |v| v.len()).await?;
+            Ok(ObjectMetadata { total_size })
+        }
+    }
+
+    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_> {
+        async move {
+            self.objects.lock().await.remove(path);
             Ok(())
         }
-    }
-
-    async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        if let Some(loc) = block {
-            self.get_object(path, |obj| find_block(obj, loc)).await?
-        } else {
-            self.get_object(path, |obj| Ok(obj.clone())).await?
-        }
-    }
-
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .into_iter()
-            .map(|block_loc| self.read(path, Some(block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
-    }
-
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let total_size = self.get_object(path, |v| v.len()).await?;
-        Ok(ObjectMetadata { total_size })
-    }
-
-    async fn delete(&self, path: &str) -> ObjectResult<()> {
-        self.objects.lock().await.remove(path);
-        Ok(())
     }
 }
 

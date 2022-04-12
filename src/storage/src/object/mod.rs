@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -47,24 +48,33 @@ impl BlockLocation {
 }
 
 /// The implementation must be thread-safe.
-#[async_trait::async_trait]
+// #[async_trait::async_trait]
 pub trait ObjectStore: Send + Sync {
+    type EmptyFuture<'a>: Future<Output = ObjectResult<()>> where Self:'a;
+    type DeleteFuture<'a>: Future<Output = ObjectResult<()>> where Self:'a;
+    type BytesFuture<'a>: Future<Output = ObjectResult<Bytes>>
+    where
+        Self: 'a;
+    type BytesVecFuture<'a>: Future<Output = ObjectResult<Vec<Bytes>>>
+    where
+        Self: 'a;
+    type ObjectMetaFuture<'a>: Future<Output = ObjectResult<ObjectMetadata>> where Self:'a;
     /// Uploads the object to `ObjectStore`.
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()>;
+    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::EmptyFuture<'_>;
 
     /// If the `block_loc` is None, the whole object will be return.
     /// If objects are PUT using a multipart upload, it’s a good practice to GET them in the same
     /// part sizes (or at least aligned to part boundaries) for best performance.
     /// <https://d1.awsstatic.com/whitepapers/AmazonS3BestPractices.pdf?stod_obj2>
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes>;
+    fn read<'a>(&'a self, path: &'a str, block_loc: Option<BlockLocation>) -> Self::BytesFuture<'_>;
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>>;
+    fn readv<'a>(&'a self, path: &'a str, block_locs: Vec<BlockLocation>) -> Self::BytesVecFuture<'a>;
 
     /// Obtains the object metadata.
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata>;
+    fn metadata<'a>(&'a self, path: &'a str) -> Self::ObjectMetaFuture<'_>;
 
     /// Deletes blob permanently.
-    async fn delete(&self, path: &str) -> ObjectResult<()>;
+    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_>;
 }
 
 pub type ObjectStoreRef = Arc<ObjectStoreImpl>;

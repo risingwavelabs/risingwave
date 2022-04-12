@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
+
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
 use futures::future::try_join_all;
 use itertools::Itertools;
+use risingwave_common::error::{BoxedError, ErrorCode, RwError};
 
 use super::{BlockLocation, ObjectError, ObjectMetadata, ObjectResult};
 use crate::object::{Bytes, ObjectStore};
@@ -26,80 +29,100 @@ pub struct S3ObjectStore {
     bucket: String,
 }
 
-#[async_trait::async_trait]
+fn err(err: impl Into<BoxedError>) -> RwError {
+    ErrorCode::StorageError(err.into()).into()
+}
+
 impl ObjectStore for S3ObjectStore {
-    async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
-        self.client
-            .put_object()
-            .bucket(&self.bucket)
-            .body(SdkBody::from(obj).into())
-            .key(path)
-            .send()
-            .await?;
-        Ok(())
+    type EmptyFuture<'a> = impl Future<Output = ObjectResult<()>>;
+    type BytesFuture<'a> = impl Future<Output = ObjectResult<Bytes>>;
+    type BytesVecFuture<'a> = impl Future<Output = ObjectResult<Vec<Bytes>>>;
+    type ObjectMetaFuture<'a> = impl Future<Output = ObjectResult<ObjectMetadata>>;
+    type DeleteFuture<'a> = impl Future<Output = ObjectResult<()>>;
+
+    fn upload<'a>(&'a self, path: &'a str, obj: Bytes) -> Self::EmptyFuture<'_> {
+        async move {
+            self.client
+                .put_object()
+                .bucket(&self.bucket)
+                .body(SdkBody::from(obj).into())
+                .key(path)
+                .send()
+                .await?;
+            Ok(())
+        }
     }
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
-    async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
-        let req = self.client.get_object().bucket(&self.bucket).key(path);
+    fn read<'a>(&'a self, path: &'a str, block_loc: Option<BlockLocation>) -> Self::BytesFuture<'a> {
+        async move {
+            let req = self.client.get_object().bucket(&self.bucket).key(path);
 
-        let range = match block_loc.as_ref() {
-            None => None,
-            Some(block_location) => block_location.byte_range_specifier(),
-        };
+            let range = match block_loc.as_ref() {
+                None => None,
+                Some(block_location) => block_location.byte_range_specifier(),
+            };
 
-        let req = if let Some(range) = range {
-            req.range(range)
-        } else {
-            req
-        };
+            let req = if let Some(range) = range {
+                req.range(range)
+            } else {
+                req
+            };
 
-        let resp = req.send().await?;
-        let val = resp.body.collect().await?.into_bytes();
+            let resp = req.send().await?;
 
-        if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
-            return Err(ObjectError::internal(format!(
-                "mismatched size: expected {}, found {} when reading {} at {:?}",
-                block_loc.as_ref().unwrap().size,
-                val.len(),
-                path,
-                block_loc.as_ref().unwrap()
-            )));
+            let val = resp.body.collect().await?.into_bytes();
+
+            if block_loc.is_some() && block_loc.as_ref().unwrap().size != val.len() {
+                return Err(ObjectError::internal(format!(
+                    "mismatched size: expected {}, found {} when reading {} at {:?}",
+                    block_loc.as_ref().unwrap().size,
+                    val.len(),
+                    path,
+                    block_loc.as_ref().unwrap()
+                )));
+            }
+            Ok(val)
         }
-        Ok(val)
     }
 
-    async fn readv(&self, path: &str, block_locs: Vec<BlockLocation>) -> ObjectResult<Vec<Bytes>> {
-        let futures = block_locs
-            .into_iter()
-            .map(|block_loc| self.read(path, Some(block_loc)))
-            .collect_vec();
-        try_join_all(futures).await
+    fn readv<'a>(&'a self, path: &'a str, block_locs: Vec<BlockLocation>) -> Self::BytesVecFuture<'a> {
+        async move {
+            let futures = block_locs
+                .into_iter()
+                .map(|block_loc| self.read(path, Some(block_loc)))
+                .collect_vec();
+            try_join_all(futures).await
+        }
     }
 
-    async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let resp = self
-            .client
-            .head_object()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await?;
-        Ok(ObjectMetadata {
-            total_size: resp.content_length as usize,
-        })
+    fn metadata<'a>(&'a self, path: &'a str) -> Self::ObjectMetaFuture<'_> {
+        async move {
+            let resp = self
+                .client
+                .head_object()
+                .bucket(&self.bucket)
+                .key(path)
+                .send()
+                .await?;
+            Ok(ObjectMetadata {
+                total_size: resp.content_length as usize,
+            })
+        }
     }
 
     /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
-    async fn delete(&self, path: &str) -> ObjectResult<()> {
-        self.client
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(path)
-            .send()
-            .await?;
-        Ok(())
+    fn delete<'a>(&'a self, path: &'a str) -> Self::DeleteFuture<'_> {
+        async move {
+            self.client
+                .delete_object()
+                .bucket(&self.bucket)
+                .key(path)
+                .send()
+                .await?;
+            Ok(())
+        }
     }
 }
 
