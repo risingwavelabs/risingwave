@@ -129,18 +129,6 @@ impl Catalog {
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
     }
 
-    pub fn get_all_table_names(&self, db_name: &str, schema_name: &str) -> Result<Vec<String>> {
-        Ok(self
-            .get_schema_by_name(db_name, schema_name)?
-            .get_all_table_names())
-    }
-
-    pub fn get_all_mv_names(&self, db_name: &str, schema_name: &str) -> Result<Vec<String>> {
-        Ok(self
-            .get_schema_by_name(db_name, schema_name)?
-            .get_all_mv_names())
-    }
-
     pub fn get_all_schema_names(&self, db_name: &str) -> Result<Vec<String>> {
         Ok(self.get_database_by_name(db_name)?.get_all_schema_names())
     }
