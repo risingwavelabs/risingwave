@@ -69,14 +69,13 @@ impl HopWindowExecutor {
             window_size,
             ..
         } = *self;
-        let units = self
-            .window_size
-            .exact_div(&self.window_slide)
+        let units = window_size
+            .exact_div(&window_slide)
             .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
             .ok_or_else(|| {
                 StreamExecutorError::InvalidArgument(format!(
                     "window_size {} cannot be divided by window_slide {}",
-                    window_size, self.window_slide
+                    window_size, window_slide
                 ))
             })?
             .get();
@@ -135,27 +134,24 @@ impl HopWindowExecutor {
             // SAFETY: Already compacted.
             assert!(visibility.is_none());
             for i in 0..units {
-                let window_start_offset =
-                    self.window_slide.checked_mul_int(i).ok_or_else(|| {
-                        StreamExecutorError::InvalidArgument(format!(
-                            "window_slide {} cannot be multiplied by {}",
-                            self.window_slide, i
-                        ))
-                    })?;
+                let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
+                    StreamExecutorError::InvalidArgument(format!(
+                        "window_slide {} cannot be multiplied by {}",
+                        window_slide, i
+                    ))
+                })?;
                 let window_start_offset_expr = LiteralExpression::new(
                     DataType::Interval,
                     Some(ScalarImpl::Interval(window_start_offset)),
                 )
                 .boxed();
                 let window_end_offset =
-                    self.window_slide
-                        .checked_mul_int(i + units)
-                        .ok_or_else(|| {
-                            StreamExecutorError::InvalidArgument(format!(
-                                "window_slide {} cannot be multiplied by {}",
-                                self.window_slide, i
-                            ))
-                        })?;
+                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                        StreamExecutorError::InvalidArgument(format!(
+                            "window_slide {} cannot be multiplied by {}",
+                            window_slide, i
+                        ))
+                    })?;
                 let window_end_offset_expr = LiteralExpression::new(
                     DataType::Interval,
                     Some(ScalarImpl::Interval(window_end_offset)),
