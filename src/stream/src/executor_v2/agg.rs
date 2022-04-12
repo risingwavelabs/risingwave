@@ -37,6 +37,20 @@ pub trait AggExecutor: Send + 'static {
     /// Flush the buffered chunk to the storage backend, and get the edits of the states. If there's
     /// no dirty states to flush, return `Ok(None)`.
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>>;
+
+    /// See [`Executor::schema`].
+    fn schema(&self) -> &Schema;
+
+    /// See [`Executor::pk_indices`].
+    fn pk_indices(&self) -> PkIndicesRef;
+
+    /// See [`Executor::identity`].
+    fn identity(&self) -> &str;
+
+    /// See [`Executor::clear_cache`].
+    fn clear_cache(&mut self) -> super::Result<()> {
+        Ok(())
+    }
 }
 
 /// The struct wraps a [`AggExecutor`]
@@ -47,7 +61,7 @@ pub struct AggExecutorWrapper<E> {
 
 impl<E> Executor for AggExecutorWrapper<E>
 where
-    E: AggExecutor + Executor,
+    E: AggExecutor,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.agg_executor_execute().boxed()
@@ -64,19 +78,9 @@ where
     fn identity(&self) -> &str {
         self.inner.identity()
     }
-}
 
-#[async_trait]
-impl<E> AggExecutor for AggExecutorWrapper<E>
-where
-    E: AggExecutor,
-{
-    async fn apply_chunk(&mut self, chunk: StreamChunk, epoch: u64) -> StreamExecutorResult<()> {
-        self.inner.apply_chunk(chunk, epoch).await
-    }
-
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
-        self.inner.flush_data(epoch).await
+    fn clear_cache(&mut self) -> super::Result<()> {
+        self.inner.clear_cache()
     }
 }
 
