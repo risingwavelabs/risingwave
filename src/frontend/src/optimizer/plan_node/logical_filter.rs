@@ -239,21 +239,9 @@ mod tests {
         let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],

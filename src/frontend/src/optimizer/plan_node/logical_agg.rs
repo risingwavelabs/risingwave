@@ -300,11 +300,7 @@ impl LogicalAgg {
                     .enumerate()
                     .map(|(id, (data_type, alias))| {
                         let name = alias.clone().unwrap_or(format!("agg#{}", id));
-                        Field {
-                            data_type,
-                            name,
-                            sub_fields: vec![],
-                        }
+                        Field::new(data_type, name)
                     }),
             )
             .collect();
@@ -580,21 +576,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let input = Rc::new(values);
@@ -717,21 +701,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -788,21 +760,9 @@ mod tests {
         let ctx = OptimizerContext::mock().await;
         let ty = DataType::Int32;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],
@@ -866,21 +826,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],

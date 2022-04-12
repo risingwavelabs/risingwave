@@ -145,11 +145,7 @@ impl LogicalProject {
                     Some(input_idx) => input_schema.fields()[input_idx].name.clone(),
                     None => format!("expr#{}", id),
                 });
-                Field {
-                    name,
-                    data_type: expr.return_type(),
-                    sub_fields,
-                }
+                Field::new_with_sub_fields(expr.return_type(), name, sub_fields)
             })
             .collect();
         Schema { fields }
@@ -352,21 +348,9 @@ mod tests {
         let ty = DataType::Int32;
         let ctx = OptimizerContext::mock().await;
         let fields: Vec<Field> = vec![
-            Field {
-                data_type: ty.clone(),
-                name: "v1".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v2".to_string(),
-                sub_fields: vec![],
-            },
-            Field {
-                data_type: ty.clone(),
-                name: "v3".to_string(),
-                sub_fields: vec![],
-            },
+            Field::new(ty.clone(), "v1"),
+            Field::new(ty.clone(), "v2"),
+            Field::new(ty.clone(), "v3"),
         ];
         let values = LogicalValues::new(
             vec![],

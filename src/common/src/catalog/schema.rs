@@ -32,15 +32,23 @@ pub struct Field {
 
 impl std::fmt::Debug for Field {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{:?}",
-            self.name, self.data_type
-        )
+        write!(f, "{}:{:?}", self.name, self.data_type)
     }
 }
 
 impl Field {
+    pub fn new(data_type: DataType, name: impl Into<String>) -> Field {
+        Field::new_with_sub_fields(data_type, name.into(), vec![])
+    }
+
+    pub fn new_with_sub_fields(data_type: DataType, name: String, sub_fields: Vec<Field>) -> Field {
+        Self {
+            data_type,
+            name,
+            sub_fields,
+        }
+    }
+
     pub fn to_prost(&self) -> ProstField {
         ProstField {
             data_type: Some(self.data_type.to_protobuf()),
