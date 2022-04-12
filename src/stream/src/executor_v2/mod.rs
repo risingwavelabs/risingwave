@@ -42,6 +42,7 @@ mod simple;
 #[cfg(test)]
 mod test_utils;
 mod top_n;
+mod top_n_appendonly;
 mod top_n_executor;
 mod v1_compat;
 
@@ -56,6 +57,7 @@ pub use merge::MergeExecutor;
 pub use mview::*;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
+pub use top_n_appendonly::AppendOnlyTopNExecutor;
 pub use v1_compat::StreamExecutorV1;
 
 pub type BoxedExecutor = Box<dyn Executor>;
