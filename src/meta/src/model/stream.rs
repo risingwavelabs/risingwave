@@ -45,8 +45,8 @@ pub struct TableFragments {
 }
 
 impl MetadataModel for TableFragments {
-    type ProstType = ProstTableFragments;
     type KeyType = u32;
+    type ProstType = ProstTableFragments;
 
     fn cf_name() -> String {
         TABLE_FRAGMENTS_CF_NAME.to_string()

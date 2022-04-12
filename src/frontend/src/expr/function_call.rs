@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 
-use super::{infer_type, Expr, ExprImpl};
+use super::{cast_ok, infer_type, CastContext, Expr, ExprImpl, Literal};
 use crate::expr::ExprType;
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -106,6 +106,29 @@ impl FunctionCall {
         Some(Self::new_with_return_type(func_type, inputs, return_type))
     }
 
+    /// Create a cast expr over `child` to `target` type in `allows` context.
+    pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
+        let source = child.return_type();
+        if child.is_null() {
+            Ok(Literal::new(None, target).into())
+        } else if source == target {
+            Ok(child)
+        } else if cast_ok(&source, &target, &allows) {
+            Ok(Self {
+                func_type: ExprType::Cast,
+                return_type: target,
+                inputs: vec![child],
+            }
+            .into())
+        } else {
+            Err(ErrorCode::BindError(format!(
+                "cannot cast type {:?} to {:?} in {:?} context",
+                source, target, allows
+            ))
+            .into())
+        }
+    }
+
     /// used for expressions like cast
     pub fn new_with_return_type(
         func_type: ExprType,
@@ -122,6 +145,7 @@ impl FunctionCall {
     pub fn decompose(self) -> (ExprType, Vec<ExprImpl>, DataType) {
         (self.func_type, self.inputs, self.return_type)
     }
+
     pub fn decompose_as_binary(self) -> (ExprType, ExprImpl, ExprImpl) {
         assert_eq!(self.inputs.len(), 2);
         let mut iter = self.inputs.into_iter();
@@ -129,6 +153,7 @@ impl FunctionCall {
         let right = iter.next().unwrap();
         (self.func_type, left, right)
     }
+
     pub fn decompose_as_unary(self) -> (ExprType, ExprImpl) {
         assert_eq!(self.inputs.len(), 1);
         let mut iter = self.inputs.into_iter();

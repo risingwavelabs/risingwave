@@ -1,3 +1,7 @@
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
 statement ok
 create table texplain (v1 int not null);
 

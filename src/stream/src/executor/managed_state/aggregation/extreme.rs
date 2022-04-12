@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -228,7 +228,11 @@ where
                                     }
                                 }
                             }
-                            _ => unimplemented!(),
+                            _ => {
+                                return Err(
+                                    ErrorCode::NotImplemented("".to_string(), None.into()).into()
+                                )
+                            }
                         }
                     }
 

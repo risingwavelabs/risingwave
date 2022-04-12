@@ -475,10 +475,12 @@ impl<T: Float + Signed> Signed for OrderedFloat<T> {
     fn signum(&self) -> Self {
         OrderedFloat(self.0.signum())
     }
+
     #[inline]
     fn is_positive(&self) -> bool {
         self.0.is_positive()
     }
+
     #[inline]
     fn is_negative(&self) -> bool {
         self.0.is_negative()
@@ -565,36 +567,47 @@ impl<T: FromPrimitive> FromPrimitive for OrderedFloat<T> {
     fn from_i64(n: i64) -> Option<Self> {
         T::from_i64(n).map(OrderedFloat)
     }
+
     fn from_u64(n: u64) -> Option<Self> {
         T::from_u64(n).map(OrderedFloat)
     }
+
     fn from_isize(n: isize) -> Option<Self> {
         T::from_isize(n).map(OrderedFloat)
     }
+
     fn from_i8(n: i8) -> Option<Self> {
         T::from_i8(n).map(OrderedFloat)
     }
+
     fn from_i16(n: i16) -> Option<Self> {
         T::from_i16(n).map(OrderedFloat)
     }
+
     fn from_i32(n: i32) -> Option<Self> {
         T::from_i32(n).map(OrderedFloat)
     }
+
     fn from_usize(n: usize) -> Option<Self> {
         T::from_usize(n).map(OrderedFloat)
     }
+
     fn from_u8(n: u8) -> Option<Self> {
         T::from_u8(n).map(OrderedFloat)
     }
+
     fn from_u16(n: u16) -> Option<Self> {
         T::from_u16(n).map(OrderedFloat)
     }
+
     fn from_u32(n: u32) -> Option<Self> {
         T::from_u32(n).map(OrderedFloat)
     }
+
     fn from_f32(n: f32) -> Option<Self> {
         T::from_f32(n).map(OrderedFloat)
     }
+
     fn from_f64(n: f64) -> Option<Self> {
         T::from_f64(n).map(OrderedFloat)
     }
@@ -604,36 +617,47 @@ impl<T: ToPrimitive> ToPrimitive for OrderedFloat<T> {
     fn to_i64(&self) -> Option<i64> {
         self.0.to_i64()
     }
+
     fn to_u64(&self) -> Option<u64> {
         self.0.to_u64()
     }
+
     fn to_isize(&self) -> Option<isize> {
         self.0.to_isize()
     }
+
     fn to_i8(&self) -> Option<i8> {
         self.0.to_i8()
     }
+
     fn to_i16(&self) -> Option<i16> {
         self.0.to_i16()
     }
+
     fn to_i32(&self) -> Option<i32> {
         self.0.to_i32()
     }
+
     fn to_usize(&self) -> Option<usize> {
         self.0.to_usize()
     }
+
     fn to_u8(&self) -> Option<u8> {
         self.0.to_u8()
     }
+
     fn to_u16(&self) -> Option<u16> {
         self.0.to_u16()
     }
+
     fn to_u32(&self) -> Option<u32> {
         self.0.to_u32()
     }
+
     fn to_f32(&self) -> Option<f32> {
         self.0.to_f32()
     }
+
     fn to_f64(&self) -> Option<f64> {
         self.0.to_f64()
     }
@@ -643,172 +667,228 @@ impl<T: Float> Float for OrderedFloat<T> {
     fn nan() -> Self {
         OrderedFloat(T::nan())
     }
+
     fn infinity() -> Self {
         OrderedFloat(T::infinity())
     }
+
     fn neg_infinity() -> Self {
         OrderedFloat(T::neg_infinity())
     }
+
     fn neg_zero() -> Self {
         OrderedFloat(T::neg_zero())
     }
+
     fn min_value() -> Self {
         OrderedFloat(T::min_value())
     }
+
     fn min_positive_value() -> Self {
         OrderedFloat(T::min_positive_value())
     }
+
     fn max_value() -> Self {
         OrderedFloat(T::max_value())
     }
+
     fn is_nan(self) -> bool {
         self.0.is_nan()
     }
+
     fn is_infinite(self) -> bool {
         self.0.is_infinite()
     }
+
     fn is_finite(self) -> bool {
         self.0.is_finite()
     }
+
     fn is_normal(self) -> bool {
         self.0.is_normal()
     }
+
     fn classify(self) -> FpCategory {
         self.0.classify()
     }
+
     fn floor(self) -> Self {
         OrderedFloat(self.0.floor())
     }
+
     fn ceil(self) -> Self {
         OrderedFloat(self.0.ceil())
     }
+
     fn round(self) -> Self {
         OrderedFloat(self.0.round())
     }
+
     fn trunc(self) -> Self {
         OrderedFloat(self.0.trunc())
     }
+
     fn fract(self) -> Self {
         OrderedFloat(self.0.fract())
     }
+
     fn abs(self) -> Self {
         OrderedFloat(self.0.abs())
     }
+
     fn signum(self) -> Self {
         OrderedFloat(self.0.signum())
     }
+
     fn is_sign_positive(self) -> bool {
         self.0.is_sign_positive()
     }
+
     fn is_sign_negative(self) -> bool {
         self.0.is_sign_negative()
     }
+
     fn mul_add(self, a: Self, b: Self) -> Self {
         OrderedFloat(self.0.mul_add(a.0, b.0))
     }
+
     fn recip(self) -> Self {
         OrderedFloat(self.0.recip())
     }
+
     fn powi(self, n: i32) -> Self {
         OrderedFloat(self.0.powi(n))
     }
+
     fn powf(self, n: Self) -> Self {
         OrderedFloat(self.0.powf(n.0))
     }
+
     fn sqrt(self) -> Self {
         OrderedFloat(self.0.sqrt())
     }
+
     fn exp(self) -> Self {
         OrderedFloat(self.0.exp())
     }
+
     fn exp2(self) -> Self {
         OrderedFloat(self.0.exp2())
     }
+
     fn ln(self) -> Self {
         OrderedFloat(self.0.ln())
     }
+
     fn log(self, base: Self) -> Self {
         OrderedFloat(self.0.log(base.0))
     }
+
     fn log2(self) -> Self {
         OrderedFloat(self.0.log2())
     }
+
     fn log10(self) -> Self {
         OrderedFloat(self.0.log10())
     }
+
     fn max(self, other: Self) -> Self {
         OrderedFloat(self.0.max(other.0))
     }
+
     fn min(self, other: Self) -> Self {
         OrderedFloat(self.0.min(other.0))
     }
+
     fn abs_sub(self, other: Self) -> Self {
         OrderedFloat(self.0.abs_sub(other.0))
     }
+
     fn cbrt(self) -> Self {
         OrderedFloat(self.0.cbrt())
     }
+
     fn hypot(self, other: Self) -> Self {
         OrderedFloat(self.0.hypot(other.0))
     }
+
     fn sin(self) -> Self {
         OrderedFloat(self.0.sin())
     }
+
     fn cos(self) -> Self {
         OrderedFloat(self.0.cos())
     }
+
     fn tan(self) -> Self {
         OrderedFloat(self.0.tan())
     }
+
     fn asin(self) -> Self {
         OrderedFloat(self.0.asin())
     }
+
     fn acos(self) -> Self {
         OrderedFloat(self.0.acos())
     }
+
     fn atan(self) -> Self {
         OrderedFloat(self.0.atan())
     }
+
     fn atan2(self, other: Self) -> Self {
         OrderedFloat(self.0.atan2(other.0))
     }
+
     fn sin_cos(self) -> (Self, Self) {
         let (a, b) = self.0.sin_cos();
         (OrderedFloat(a), OrderedFloat(b))
     }
+
     fn exp_m1(self) -> Self {
         OrderedFloat(self.0.exp_m1())
     }
+
     fn ln_1p(self) -> Self {
         OrderedFloat(self.0.ln_1p())
     }
+
     fn sinh(self) -> Self {
         OrderedFloat(self.0.sinh())
     }
+
     fn cosh(self) -> Self {
         OrderedFloat(self.0.cosh())
     }
+
     fn tanh(self) -> Self {
         OrderedFloat(self.0.tanh())
     }
+
     fn asinh(self) -> Self {
         OrderedFloat(self.0.asinh())
     }
+
     fn acosh(self) -> Self {
         OrderedFloat(self.0.acosh())
     }
+
     fn atanh(self) -> Self {
         OrderedFloat(self.0.atanh())
     }
+
     fn integer_decode(self) -> (u64, i16, i8) {
         self.0.integer_decode()
     }
+
     fn epsilon() -> Self {
         OrderedFloat(T::epsilon())
     }
+
     fn to_degrees(self) -> Self {
         OrderedFloat(self.0.to_degrees())
     }
+
     fn to_radians(self) -> Self {
         OrderedFloat(self.0.to_radians())
     }
@@ -816,6 +896,7 @@ impl<T: Float> Float for OrderedFloat<T> {
 
 impl<T: Float + Num> Num for OrderedFloat<T> {
     type FromStrRadixErr = T::FromStrRadixErr;
+
     fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
         T::from_str_radix(str, radix).map(OrderedFloat)
     }
@@ -894,6 +975,7 @@ mod impl_rand {
         ($f:ty) => {
             impl UniformSampler for UniformOrdered<$f> {
                 type X = OrderedFloat<$f>;
+
                 fn new<B1, B2>(low: B1, high: B2) -> Self
                 where
                     B1: SampleBorrow<Self::X> + Sized,
@@ -901,6 +983,7 @@ mod impl_rand {
                 {
                     UniformOrdered(UniformFloat::<$f>::new(low.borrow().0, high.borrow().0))
                 }
+
                 fn new_inclusive<B1, B2>(low: B1, high: B2) -> Self
                 where
                     B1: SampleBorrow<Self::X> + Sized,
@@ -908,6 +991,7 @@ mod impl_rand {
                 {
                     UniformSampler::new(low, high)
                 }
+
                 fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Self::X {
                     OrderedFloat(self.0.sample(rng))
                 }

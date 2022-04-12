@@ -541,6 +541,7 @@ mod tests {
                 join_type,
             }
         }
+
         fn create_left_executor(&self) -> BoxedExecutor {
             let schema = Schema {
                 fields: vec![

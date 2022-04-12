@@ -27,6 +27,9 @@ pub enum StreamExecutorError {
         StorageError,
     ),
 
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
+
     #[error("executor v1 error {0}")]
     ExecutorV1(RwError),
 
@@ -38,6 +41,9 @@ pub enum StreamExecutorError {
 
     #[error("input error")]
     InputError(RwError),
+
+    #[error("top n state error {0}")]
+    TopNStateError(RwError),
 
     #[error("channel `{0}` closed")]
     ChannelClosed(String),
@@ -62,6 +68,10 @@ impl StreamExecutorError {
 
     pub fn input_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
         Self::InputError(error.into()).into()
+    }
+
+    pub fn top_n_state_error(error: impl Into<RwError>) -> TracedStreamExecutorError {
+        Self::TopNStateError(error.into()).into()
     }
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {

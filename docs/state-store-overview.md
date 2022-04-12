@@ -16,11 +16,11 @@
 
 ## Overview
 
-In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, a cloud-native LSM-tree based storage engine. Hummock provides KV API, and stores all data on S3-compatible service. However, it is not a key-value store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
+In RisingWave, all streaming executors store their data into a state store. This state store is backed by a service called Hummock, a cloud-native LSM-Tree-based storage engine. Hummock provides key-value API, and stores all data on S3-compatible service. However, it is not a KV store for general purpose, but a storage engine co-designed with RisingWave streaming engine and optimized for streaming workload.
 
 ## Architecture
 
-Reading this document requires prior knowledge of LSM-based KV storage engine, like RocksDB, LevelDB, etc.
+Reading this document requires prior knowledge of LSM-Tree-based KV storage engines, like RocksDB, LevelDB, etc.
 
 ![Overview of Architecture](images/state-store-overview/state-store-overview-01.svg)
 
@@ -29,7 +29,7 @@ Hummock consists of manager service on meta node, clients on compute nodes, and 
 Streaming state store has distinguished workload characteristics.
 
 * Every streaming executor will only ***read and write its own portion of data***, which are multiple consecutive non-overlapping ranges of keys (we call it ***key space***).
-* Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, all Hummock API like get, scan only guarantees writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
+* Data (generally) ***won’t be shared across nodes***, so every worker node will only read and write its own data. Therefore, every Hummock API, like `get` or `scan`, only guarantees writes on one node can be immediately read from the same node. In some cases, if we want to read data written from other nodes, we will need to ***wait for the epoch***.
 * Streaming data are ***committed in serial***. Based on the [barrier-based checkpoint algorithm](https://en.wikipedia.org/wiki/Chandy%E2%80%93Lamport_algorithm), the states are persisted epoch by epoch. We can tailor the write path specifically for the epoch-based checkpoint workload.
 
 This leads to the design of Hummock, the cloud-native KV-based streaming state store. We’ll explain concepts like “epoch”, “key space” and “barrier” in the following chapters.
@@ -93,15 +93,15 @@ After compaction (w/ min watermark = 0), there will eventually be an SST with th
 (b, 1) => 2
 ```
 
-The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the VersionedComparator to get the correct result.
+The final written key (aka. full key) is encoded by appending the 8-byte epoch after the user key. When doing full key comparison in Hummock, we should always compare full keys using the `VersionedComparator` to get the correct result.
 
 ### Write Path
 
-Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatiable service. The SST consists of two files: 
-- <id>.data: Data file composed of ~64KB blocks, each of which contains actual key value pairs.
-- <id>.meta: Meta file containing large metadata including min-max index, bloom filter as well as data block metadata.
+Hummock client will batch writes and generate SSTs to sync to the underlying S3-compatible service. An SST consists of two files:
+- <id>`.data`: Data file composed of ~64KB blocks, each of which contains actual key-value pairs.
+- <id>`.meta`: Meta file containing large metadata including min-max index, Bloom filter as well as data block metadata.
 
-After the SST is uploaded to S3, Hummock client will let the Hummock manager know there’s a new table.
+After the SST is uploaded to an S3-compatible service, Hummock client will let the Hummock manager know there’s a new table.
 The list of all SSTs along with some metadata forms a ***version***. When Hummock client adds new SSTs to the Hummock manager, a new version will be generated with the new set of SST files.
 
 ![Write Path](images/state-store-overview/state-store-overview-02.svg)
@@ -110,9 +110,9 @@ The list of all SSTs along with some metadata forms a ***version***. When Hummoc
 
 To read from Hummock, we need a ***version*** (a consistent state of list of SSTs we can read) and ***epoch*** to generate a consistent read snapshot. To avoid RPC with Hummock manager in every user read, the Hummock client will cache a most recent ***version*** locally. Local version will be updated when 1) client initiates a write batch and 2) background refresher triggers.
 
-For every read operation (scan, get), we will first select SSTs that might contain a key.
+For every read operation (`scan`, `get`), we will first select SSTs that might contain the required keys.
 
-For scan, we simply select by overlapping key range. For point get, we will filter SSTs further by bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epoch. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key that have epoch <= read epoch. Therefore, users can perform snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
+For `scan`, we simply select by overlapping key range. For point get, we will filter SSTs further by Bloom filter. After that, we will compose a single `MergeIterator` over all SSTs. The `MergeIterator` will return all keys in range along with their epoches. Then, we will create `UserIterator` over `MergeIterator`, and for all user keys, the user iterator will pick the first full key whose epoch <= read epoch. Therefore, users can perform snapshot read from Hummock based on the given epoch. The snapshot should be acquired beforehand and released afterwards.
 
 ![Read Path](images/state-store-overview/state-store-overview-03.svg)
 
@@ -121,7 +121,7 @@ Hummock implements the following iterators:
 - `SSTableIterator`: iterates an SSTable.
 - `ConcatIterator`: iterates SSTables with non-overlapping keyspaces.
 - `MergeIterator`: iterates SSTables with overlapping keyspaces.
-- `UserIterator`: wraps internal iterators and outputs user key-value with epoch <= read epoch
+- `UserIterator`: wraps internal iterators and outputs user key-value with epoch <= read epoch.
 
 [iterators source code](https://github.com/singularity-data/risingwave/tree/main/src/storage/src/hummock/iterator)
 
@@ -138,11 +138,11 @@ To support MVCC read without affecting compaction, we track the epoch low waterm
 
 In this part, we discuss how Hummock coordinates between multiple compute nodes. We will introduce key concepts like “snapshot”, “version”, and give examples on how Hummock manages them.
 
-Every operation on the LSM tree yields a new ***version*** on Hummock manager, e.g., adding new L0 SSTs and compactions. In streaming, each stream barrier is associated with an ***epoch***. When the barrier flows across the system and collected by the stream manager, we can start doing ***checkpoint*** on this epoch. SSTs produced in a single checkpoint are associated with an ***uncommitted epoch***. After all worker nodes complete compacting L0 SSTs to Hummock, Hummock manager considers the epoch committed. Therefore, apart from the list of files in LSM, a version also contains committed epoch number `max_committed_epoch` and SSTs in uncommitted epochs. As a result, both an ***operation on LSM*** and a ***streaming checkpoint*** will yield a new ***version*** in Hummock manager.
+Every operation on the LSM-tree yields a new ***version*** on Hummock manager, e.g., adding new L0 SSTs and compactions. In streaming, each stream barrier is associated with an ***epoch***. When the barrier flows across the system and collected by the stream manager, we can start doing ***checkpoint*** on this epoch. SSTs produced in a single checkpoint are associated with an ***uncommitted epoch***. After all worker nodes complete compacting L0 SSTs to Hummock, Hummock manager considers the epoch committed. Therefore, apart from the list of files in LSM, a version also contains committed epoch number `max_committed_epoch` and SSTs in uncommitted epochs. As a result, both an ***operation on LSM*** and a ***streaming checkpoint*** will yield a new ***version*** in Hummock manager.
 
-Currently, there is only one checkpoint happening in the system at the same time. In the future, we might will support more checkpoint optimizations including concurrent checkpoint.
+Currently, there is only one checkpoint happening in the system at the same time. In the future, we might support more checkpoint optimizations including concurrent checkpointing.
 
-As mentioned in [Read Path](#read-path), reads are performed on a ***version*** based on a given ***epoch***. During the whole read process, data from the specified read epoch cannot be removed by compaction, which is guaranteed by ***pinning an snapshot***; SSTs within a ***version*** cannot be vacuumed by compaction, which is guaranteed by ***pinning a version***.
+As mentioned in [Read Path](#read-path), reads are performed on a ***version*** based on a given ***epoch***. During the whole read process, data from the specified read epoch cannot be removed by compaction, which is guaranteed by ***pinning a snapshot***; SSTs within a ***version*** cannot be vacuumed by compaction, which is guaranteed by ***pinning a version***.
 
 The SQL frontend will get the latest epoch from meta service. Then, it will embed the epoch number into SQL plans, so that all compute nodes will read from that epoch. In theory, both SQL frontend and compute nodes will ***pin the snapshot***, to handle the case that frontend goes down and the compute nodes are still reading from Hummock (#622). However, to simplify the process, currently we *only pin on the frontend side**.*
 

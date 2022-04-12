@@ -1,4 +1,7 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t1 (v1 int not null, v2 int not null);
 
 statement ok
