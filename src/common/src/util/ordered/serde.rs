@@ -31,7 +31,7 @@ use crate::types::{
 use crate::util::sort_util::{OrderPair, OrderType};
 use crate::util::value_encoding::serialize_cell;
 
-/// The special `cell_id` reserved for a whole null row is `i32::MIN`.
+/// The sentinel cell id is `-1_i32`, which is ensure to be the first kvpair in storage
 pub const SENTINEL_CELL_ID: ColumnId = ColumnId::new(-1_i32);
 
 /// We can use memcomparable serialization to serialize data

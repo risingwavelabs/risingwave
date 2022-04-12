@@ -182,27 +182,6 @@ impl<S: StateStore> CellBasedTable<S> {
         }
     }
 
-    pub async fn delete_row(
-        &mut self,
-        _pk: &Row,
-        _old_value: &Row,
-        _epoch: u64,
-    ) -> StorageResult<()> {
-        // TODO(wcy-fdu): TODO: support only serialize key mode. We only need keys in this case to
-        // delete.
-        todo!()
-    }
-
-    pub async fn update_row(
-        &mut self,
-        _pk: &Row,
-        _old_value: Option<Row>,
-        _new_value: Option<Row>,
-        _epoch: u64,
-    ) -> StorageResult<()> {
-        todo!()
-    }
-
     pub async fn batch_write_rows(
         &mut self,
         rows: Vec<(Row, Option<Row>)>,
