@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::{Result, RwError};
+use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::watch::Sender as WatchSender;
@@ -35,7 +35,7 @@ pub struct SyncItem {
     /// Epoch to sync. None means syncing all epochs.
     pub(super) epoch: Option<u64>,
     /// Notifier to notify on sync finishes
-    pub(super) notifier: Arc<WatchSender<HummockResult<u64>>>,
+    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<u64>>>,
 }
 
 #[derive(Debug)]
