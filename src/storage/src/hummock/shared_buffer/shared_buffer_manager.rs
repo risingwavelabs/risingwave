@@ -78,11 +78,7 @@ impl OnGoingFlush {
 
     pub fn subscribe(&self) -> Option<WatchReceiver<bool>> {
         let guard = self.data.lock();
-        if let Some(tx) = guard.as_ref() {
-            Some(tx.subscribe())
-        } else {
-            None
-        }
+        guard.as_ref().map(|tx| tx.subscribe())
     }
 
     pub fn init(&self) {

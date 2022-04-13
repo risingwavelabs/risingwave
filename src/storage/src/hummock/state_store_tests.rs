@@ -175,7 +175,7 @@ async fn test_basic() {
 
 #[tokio::test]
 async fn test_state_store_sync() {
-    let object_client = Arc::new(InMemObjectStore::new());
+    let object_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
 
     let mut config = default_config_for_test();
@@ -183,11 +183,13 @@ async fn test_state_store_sync() {
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
-    let meta_client = Arc::new(MockHummockMetaClient::new(Arc::new(
-        MockHummockMetaService::new(),
-    )));
+    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
+        setup_compute_env(8080).await;
+    let meta_client = Arc::new(MockHummockMetaClient::new(
+        hummock_manager_ref.clone(),
+        worker_node.id,
+    ));
     let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,
         sstable_store,
