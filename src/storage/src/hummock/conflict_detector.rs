@@ -14,51 +14,63 @@
 
 //! This mod implements a `ConflictDetector` that  detect write key conflict in each epoch
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use bytes::Bytes;
-use crossbeam::atomic::AtomicCell;
 use dashmap::DashMap;
 
 use crate::hummock::value::HummockValue;
 use crate::hummock::HummockEpoch;
+use crate::store::StorageTableId;
 
 pub struct ConflictDetector {
-    // epoch -> key-sets
-    epoch_history: DashMap<HummockEpoch, HashSet<Bytes>>,
-    epoch_watermark: AtomicCell<HummockEpoch>,
+    // epoch -> table_id -> key-sets
+    epoch_history: DashMap<HummockEpoch, HashMap<StorageTableId, HashSet<Vec<u8>>>>,
+    table_epoch_watermark: DashMap<StorageTableId, HummockEpoch>,
 }
 
 impl ConflictDetector {
     pub fn new() -> ConflictDetector {
         ConflictDetector {
             epoch_history: DashMap::new(),
-            epoch_watermark: AtomicCell::new(HummockEpoch::MIN),
+            table_epoch_watermark: DashMap::new(),
         }
     }
 
-    pub fn get_epoch_watermark(&self) -> HummockEpoch {
-        self.epoch_watermark.load()
+    pub fn get_epoch_watermark(&self, table_id: StorageTableId) -> HummockEpoch {
+        self.table_epoch_watermark
+            .get(&table_id)
+            .map(|entry| *entry.value())
+            .unwrap_or(HummockEpoch::MIN)
     }
 
-    // Sets the new watermark with CAS to enable detection in concurrent update
-    pub fn set_watermark(&self, epoch: HummockEpoch) {
-        loop {
-            let current_watermark = self.get_epoch_watermark();
-            assert!(
-                epoch > current_watermark,
-                "not allowed to set epoch watermark to equal to or lower than current watermark: current is {}, epoch to set {}",
-                current_watermark,
-                epoch
-            );
-            if self
-                .epoch_watermark
-                .compare_exchange(current_watermark, epoch)
-                .is_ok()
-            {
-                return;
-            }
-        }
+    pub fn set_single_table_watermark(&self, epoch: HummockEpoch, table_id: StorageTableId) {
+        let mut table_watermark = self
+            .table_epoch_watermark
+            .entry(table_id)
+            .or_insert(HummockEpoch::MIN);
+
+        assert!(
+            epoch > *table_watermark.value(),
+            "not allowed to set epoch watermark to equal to or lower than current watermark: current is {}, epoch to set {}",
+            *table_watermark.value(),
+            epoch
+        );
+
+        *table_watermark = epoch;
+    }
+
+    pub fn set_watermark(&self, epoch: HummockEpoch, table_ids: &Option<Vec<StorageTableId>>) {
+        let table_ids = table_ids.clone().unwrap_or_else(|| {
+            self.table_epoch_watermark
+                .iter()
+                .map(|entry| *entry.key())
+                .collect()
+        });
+
+        table_ids.iter().for_each(|table_id| {
+            self.set_single_table_watermark(epoch, *table_id);
+        });
     }
 
     /// Checks whether there is key conflict for the given `kv_pairs` and adds the key in `kv_pairs`
@@ -68,18 +80,35 @@ impl ConflictDetector {
         &self,
         kv_pairs: &[(Bytes, HummockValue<Bytes>)],
         epoch: HummockEpoch,
+        table_id: StorageTableId,
     ) {
         assert!(
-            epoch > self.get_epoch_watermark(),
+            epoch > self.get_epoch_watermark(table_id),
             "write to an archived epoch: {}",
             epoch
         );
 
-        let mut written_key = self.epoch_history.entry(epoch).or_insert(HashSet::new());
+        let mut epoch_written_key = self.epoch_history.entry(epoch).or_insert(HashMap::new());
+        // check whether the key has been written in the epoch in any table
+        epoch_written_key.values().for_each(|table_written_key| {
+            for (key, value) in kv_pairs {
+                assert!(
+                    !table_written_key.contains(&key.to_vec()),
+                    "key {:?} is written again after previously written, value is {:?}",
+                    key,
+                    value,
+                );
+            }
+        });
 
+        let table_written_key = epoch_written_key
+            .entry(table_id)
+            .or_insert_with(HashSet::new);
+
+        // add the keys to history
         for (key, value) in kv_pairs.iter() {
             assert!(
-                written_key.insert(key.clone()),
+                table_written_key.insert(key.to_vec()),
                 "key {:?} is written again after previously written, value is {:?}",
                 key,
                 value,
@@ -87,10 +116,24 @@ impl ConflictDetector {
         }
     }
 
-    /// Archives an epoch. An archived epoch cannot be written anymore.
-    pub fn archive_epoch(&self, epoch: HummockEpoch) {
-        self.epoch_history.remove(&epoch);
-        self.set_watermark(epoch);
+    /// Archives an epoch for a storage table. An archived epoch cannot be written anymore in the
+    /// storage table.
+    ///
+    /// `table_ids` is an optional parameter that specifies which storage tables to archive. If
+    /// `None`, all tables are archived.
+    pub fn archive_epoch(&self, epoch: HummockEpoch, table_ids: &Option<Vec<StorageTableId>>) {
+        if let Some(mut epoch_history) = self.epoch_history.get_mut(&epoch) {
+            if let Some(table_ids) = &table_ids {
+                for table_id in table_ids {
+                    epoch_history.remove(table_id);
+                }
+            } else {
+                epoch_history.clear();
+            }
+        }
+        self.epoch_history
+            .remove_if(&epoch, |_, epoch_history| epoch_history.is_empty());
+        self.set_watermark(epoch, table_ids);
     }
 }
 
@@ -103,6 +146,7 @@ mod test {
 
     use crate::hummock::conflict_detector::ConflictDetector;
     use crate::hummock::value::HummockValue;
+    use crate::store::GLOBAL_STORAGE_TABLE_ID;
 
     #[test]
     #[should_panic]
@@ -120,6 +164,7 @@ mod test {
                 .collect_vec()
                 .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
     }
 
@@ -135,6 +180,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
         detector.check_conflict_and_track_write_batch(
             once((
@@ -144,6 +190,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
     }
 
@@ -158,6 +205,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
         detector.check_conflict_and_track_write_batch(
             once((
@@ -167,8 +215,9 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233);
+        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -177,6 +226,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             234,
+            GLOBAL_STORAGE_TABLE_ID,
         );
     }
 
@@ -192,8 +242,9 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233);
+        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -202,6 +253,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
     }
 
@@ -216,9 +268,10 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
         assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
-        detector.archive_epoch(233);
+        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
@@ -234,8 +287,9 @@ mod test {
             .collect_vec()
             .as_slice(),
             233,
+            GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233);
+        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -244,6 +298,7 @@ mod test {
             .collect_vec()
             .as_slice(),
             232,
+            GLOBAL_STORAGE_TABLE_ID,
         );
     }
 }

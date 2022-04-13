@@ -17,7 +17,6 @@ byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = "0.4"
 crc32fast = "1"
-crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
 enum-as-inner = "0.4"

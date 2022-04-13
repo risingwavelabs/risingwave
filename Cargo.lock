@@ -912,20 +912,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ae5588f6b3c3cb05239e90bd110f257254aecd01e4635400391aeae07497845"
-dependencies = [
- "cfg-if 1.0.0",
- "crossbeam-channel",
- "crossbeam-deque",
- "crossbeam-epoch 0.9.8",
- "crossbeam-queue",
- "crossbeam-utils 0.8.8",
-]
-
-[[package]]
 name = "crossbeam-channel"
 version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -973,16 +959,6 @@ dependencies = [
  "lazy_static",
  "memoffset 0.6.5",
  "scopeguard",
-]
-
-[[package]]
-name = "crossbeam-queue"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f25d8400f4a7a5778f0e4e52384a48cbd9b5c495d110786187fc750075277a2"
-dependencies = [
- "cfg-if 1.0.0",
- "crossbeam-utils 0.8.8",
 ]
 
 [[package]]
@@ -3620,7 +3596,6 @@ dependencies = [
  "chrono",
  "crc32fast",
  "criterion",
- "crossbeam",
  "dashmap",
  "either",
  "enum-as-inner",
@@ -4945,8 +4920,6 @@ dependencies = [
  "axum",
  "bstr",
  "bytes",
- "crossbeam-deque",
- "crossbeam-utils 0.8.8",
  "either",
  "fixedbitset",
  "futures",
