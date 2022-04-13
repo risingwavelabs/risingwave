@@ -140,25 +140,18 @@ where
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             if kv_pairs.is_empty() {
-                return Ok(());
+                return Ok(0);
             }
 
             self.stats
                 .write_batch_tuple_counts
                 .inc_by(kv_pairs.len() as _);
-
-            let total_size = kv_pairs
-                .iter()
-                .map(|(k, v)| k.len() + v.size())
-                .sum::<usize>();
-
             let timer = self.stats.write_batch_duration.start_timer();
-            self.inner.ingest_batch(kv_pairs, epoch).await?;
+            let batch_size = self.inner.ingest_batch(kv_pairs, epoch).await?;
             timer.observe_duration();
 
-            self.stats.write_batch_size.observe(total_size as _);
-
-            Ok(())
+            self.stats.write_batch_size.observe(batch_size as _);
+            Ok(batch_size)
         }
     }
 

@@ -377,12 +377,13 @@ impl StateStore for HummockStorage {
                     )
                 })
                 .collect_vec();
-            self.shared_buffer_manager.write_batch(batch, epoch)?;
+
+            let batch_size = self.shared_buffer_manager.write_batch(batch, epoch).await?;
 
             if !self.options.async_checkpoint_enabled {
                 self.shared_buffer_manager.sync(Some(epoch)).await?;
             }
-            Ok(())
+            Ok(batch_size)
         }
     }
 
