@@ -28,7 +28,15 @@ pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + S
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
 
-/// Group id of storage group. A storage group
+/// Table id of storage table, which is a logical concept representing the kvs written by a specific
+/// relational table. A storage table usually stores the kvs written from a specific
+/// stateful operator. Each storage table has its own `max committed epoch`
+///
+/// A storage table id is usually the operator id, or also the table id of the relational table.
+///
+/// Such concept is introduced for finer-grained tracking about where the kvs are written from, so
+/// that we are able to support partial checkpoint, vertical grouping and shared arrangement in the
+/// future.
 pub type StorageTableId = u64;
 // TODO: should only use this in test after partial checkpoint is fully implemented
 pub const GLOBAL_STORAGE_TABLE_ID: StorageTableId = 0x2333abcd;

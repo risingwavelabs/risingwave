@@ -120,6 +120,8 @@ impl SharedBufferUploader {
                 } else {
                     self.batches_to_upload
                         .remove(&epoch)
+                        // existence of `epoch` has previously been checked, so it's safe to use
+                        // unwrap
                         .unwrap()
                         .into_values()
                         .flat_map(Vec::into_iter)

@@ -253,6 +253,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
+        // TODO(partial checkpoint): use the table id obtained locally.
         keyspace
             .state_store()
             .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch)]))

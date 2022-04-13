@@ -147,7 +147,7 @@ impl<S: StateStore> Keyspace<S> {
     /// Scans `limit` keys from the sub keyspace specified by `subspace_key` and get their values.
     /// If `limit` is None, all keys of the given prefix will be scanned.
     ///
-    /// The subspace is [`prefix`, `subspace_prefix`]..`next_key`([`prefix`, `subspace_prefix`]).
+    /// The subspace is `[prefix, subspace_prefix]..next_key([prefix, subspace_prefix])`.
     pub async fn scan_subspace(
         &self,
         subspace_prefix: Vec<u8>,

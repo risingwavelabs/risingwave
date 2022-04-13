@@ -169,6 +169,8 @@ impl StateStore for MemoryStateStore {
             if !kv_pairs.is_empty() {
                 let mut inner = self.inner.lock().await;
                 #[allow(clippy::mutable_key_type)]
+                // TODO: may want to use `Vec<u8>` as the key instead of `Bytes` to avoid warning on
+                // `mutable_key_type`.
                 let table_store = inner.entry(table_id).or_insert_with(BTreeMap::new);
                 for (key, value) in kv_pairs {
                     table_store.insert((key, Reverse(epoch)), value.user_value);
