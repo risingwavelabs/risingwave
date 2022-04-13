@@ -95,7 +95,7 @@ pub async fn gen_iterator_test_sstable_base(
     .await
 }
 
-pub async fn gen_iterator_test_sstable_base_without_buff(
+pub async fn gen_iterator_test_sstable_base_without_buf(
     sst_id: u64,
     opts: SSTableBuilderOptions,
     idx_mapping: impl Fn(usize) -> usize,
