@@ -1,4 +1,3 @@
-use itertools::Itertools;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,6 +11,7 @@ use itertools::Itertools;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+use itertools::Itertools;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -31,7 +31,7 @@ pub struct SourceCatalog {
 
 impl SourceCatalog {
     /// Extract `field_descs` from `column_desc` and add in source catalog.
-    pub fn rewrite_columns(&mut self) {
+    pub fn flatten(mut self) -> Self {
         let mut catalogs = vec![];
         for col in &self.columns {
             // Extract `field_descs` and return `column_catalogs`.
@@ -48,6 +48,7 @@ impl SourceCatalog {
             )
         }
         self.columns = catalogs.clone();
+        self
     }
 }
 
