@@ -41,21 +41,21 @@ impl super::DebugExecutor for UpdateCheckExecutor {
         let message = self.input.next().await?;
 
         if let Message::Chunk(chunk) = &message {
-            for (row1, row2) in chunk.rows().map(Some).chain(once(None)).tuple_windows() {
-                match (row1, row2) {
-                    (Some(row1), row2) => {
-                        if row1.op() == Op::UpdateDelete {
-                            assert_eq!(
-                                row2.as_ref().map(|r| r.op()),
-                                Some(Op::UpdateInsert),
-                                "update check failed on `{}`: expect an `UpdateInsert` after the `UpdateDelete`:\n first row: {:?}\nsecond row: {:?}",
-                                self.input.logical_operator_info(),
-                                row1,
-                                row2
-                            );
-                        }
-                    }
-                    _ => unreachable!(),
+            for ((op1, row1), (op2, row2)) in once(None)
+                .chain(chunk.rows().map(Some))
+                .chain(once(None))
+                .map(|r| (r.as_ref().map(|r| r.op()), r))
+                .tuple_windows()
+            {
+                if (op1 == None && op2 == Some(Op::UpdateInsert)) // the first row is U+
+                    || (op1 == Some(Op::UpdateDelete) && op2 != Some(Op::UpdateInsert))
+                {
+                    panic!(
+                        "update check failed on `{}`: expect U+ after  U-:\n first row: {:?}\nsecond row: {:?}",
+                        self.input.logical_operator_info(),
+                        row1,
+                        row2
+                    )
                 }
             }
         }
@@ -105,6 +105,22 @@ mod tests {
 
     #[should_panic]
     #[tokio::test]
+    async fn test_first_one_update_insert() {
+        let chunk = StreamChunk::new(
+            vec![Op::UpdateInsert],
+            vec![column_nonnull! { I64Array, [114] }],
+            None,
+        );
+
+        let mut source = MockSource::new(Default::default(), vec![]);
+        source.push_chunks(once(chunk));
+
+        let mut checked = UpdateCheckExecutor::new(Box::new(source));
+        checked.next().await.unwrap(); // should panic
+    }
+
+    #[should_panic]
+    #[tokio::test]
     async fn test_last_one_update_delete() {
         let chunk = StreamChunk::new(
             vec![Op::UpdateDelete, Op::UpdateInsert, Op::UpdateDelete],
@@ -117,5 +133,16 @@ mod tests {
 
         let mut checked = UpdateCheckExecutor::new(Box::new(source));
         checked.next().await.unwrap(); // should panic
+    }
+
+    #[tokio::test]
+    async fn test_empty_chunk() {
+        let chunk = StreamChunk::default();
+
+        let mut source = MockSource::new(Default::default(), vec![]);
+        source.push_chunks(once(chunk));
+
+        let mut checked = UpdateCheckExecutor::new(Box::new(source));
+        checked.next().await.unwrap();
     }
 }
