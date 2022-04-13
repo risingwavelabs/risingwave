@@ -96,7 +96,7 @@ impl OnGoingFlush {
         let mut guard = self.data.lock();
         assert!(guard.is_some());
         if let Some(watch_tx) = guard.take() {
-            watch_tx.send(success).ok();    // ignore send error
+            watch_tx.send(success).ok(); // ignore send error
         }
     }
 }
