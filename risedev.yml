@@ -359,7 +359,7 @@ template:
     address: "127.0.0.1"
 
     # Listen port of Kafka
-    port: 39092
+    port: 29092
 
     # ZooKeeper used by this Kafka instance
     provide-zookeeper: "zookeeper*"
@@ -379,7 +379,7 @@ template:
     address: "127.0.0.1"
 
     # Listen port of ZooKeeper
-    port: 32888
+    port: 2181
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
