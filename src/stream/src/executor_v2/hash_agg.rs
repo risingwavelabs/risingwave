@@ -366,15 +366,6 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
     fn identity(&self) -> &str {
         self.info.identity.as_str()
     }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while states of hash agg are dirty"
-        );
-        self.state_map.clear();
-        Ok(())
-    }
 }
 
 #[cfg(test)]

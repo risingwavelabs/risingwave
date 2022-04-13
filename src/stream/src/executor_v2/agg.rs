@@ -46,11 +46,6 @@ pub trait AggExecutor: Send + 'static {
 
     /// See [`Executor::identity`].
     fn identity(&self) -> &str;
-
-    /// See [`Executor::clear_cache`].
-    fn clear_cache(&mut self) -> super::Result<()> {
-        Ok(())
-    }
 }
 
 /// The struct wraps a [`AggExecutor`]
@@ -77,10 +72,6 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
-    }
-
-    fn clear_cache(&mut self) -> super::Result<()> {
-        self.inner.clear_cache()
     }
 }
 
