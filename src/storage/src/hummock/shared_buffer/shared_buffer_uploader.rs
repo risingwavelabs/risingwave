@@ -17,10 +17,8 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::watch::Sender as WatchSender;
 
 use crate::error::StorageResult;
 use crate::hummock::compactor::{Compactor, CompactorContext};

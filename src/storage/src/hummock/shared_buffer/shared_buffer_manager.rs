@@ -20,8 +20,6 @@ use std::sync::{atomic, Arc};
 use itertools::Itertools;
 use parking_lot::{Mutex, RwLock as PLRwLock};
 use risingwave_common::config::StorageConfig;
-use risingwave_common::error::Result;
-use tokio::sync::watch::Sender as WatchSender;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
 use tokio::task::JoinHandle;
@@ -61,7 +59,6 @@ pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
     shared_buffer: PLRwLock<BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
-    sync_tx: tokio::sync::watch::Sender<SharedBufferUploaderItem>,
     uploader_handle: JoinHandle<StorageResult<()>>,
     stats: SharedBufferMetrics,
     ongoing_flush: OnGoingFlush,
