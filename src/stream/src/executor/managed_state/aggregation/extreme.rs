@@ -1010,9 +1010,7 @@ mod tests {
         keyspace: &Keyspace<S>,
         epoch: u64,
     ) {
-        let mut write_batch = keyspace
-            .state_store()
-            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
     }

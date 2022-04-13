@@ -273,7 +273,6 @@ mod tests {
     use risingwave_common::array::{I64Array, Op, Utf8Array};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
-    use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
     use risingwave_storage::{Keyspace, StateStore};
 
     use super::*;
@@ -311,7 +310,6 @@ mod tests {
     #[tokio::test]
     async fn test_managed_string_agg_state() {
         let keyspace = create_in_memory_keyspace();
-        let store = keyspace.state_store();
         let mut managed_state = create_managed_state(&keyspace, 0).await;
         assert!(!managed_state.is_dirty());
         let mut epoch: u64 = 0;
@@ -341,7 +339,7 @@ mod tests {
             Some(ScalarImpl::Utf8("ghi||def||abc".to_string()))
         );
 
-        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
@@ -372,7 +370,7 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
@@ -404,7 +402,7 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
@@ -489,7 +487,7 @@ mod tests {
             .unwrap();
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());
@@ -518,7 +516,7 @@ mod tests {
         );
 
         epoch += 1;
-        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = keyspace.start_write_batch();
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
         assert!(!managed_state.is_dirty());

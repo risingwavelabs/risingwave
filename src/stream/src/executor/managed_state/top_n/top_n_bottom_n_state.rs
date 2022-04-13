@@ -26,7 +26,6 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::ordered::*;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::BtreeMapFlushStatus as FlushStatus;
@@ -301,11 +300,7 @@ impl<S: StateStore> ManagedTopNBottomNState<S> {
             return Ok(());
         }
 
-        // TODO(partial checkpoint): use the table id obtained locally.
-        let mut write_batch = self
-            .keyspace
-            .state_store()
-            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = self.keyspace.start_write_batch();
         let mut local = write_batch.prefixify(&self.keyspace);
 
         for (pk, cells) in std::mem::take(&mut self.flush_buffer) {

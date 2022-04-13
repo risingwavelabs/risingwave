@@ -18,7 +18,6 @@ use anyhow::{anyhow, Result};
 use bytes::Bytes;
 use log::error;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 /// `SourceState` Represents an abstraction of state,
@@ -109,10 +108,7 @@ impl<S: StateStore> SourceStateHandler<S> {
             // TODO should be a clear Error Code
             Err(anyhow!("states require not null"))
         } else {
-            let mut write_batch = self
-                .keyspace
-                .state_store()
-                .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+            let mut write_batch = self.keyspace.start_write_batch();
             let mut local_batch = write_batch.prefixify(&self.keyspace);
             states.iter().for_each(|state| {
                 // state inner key format (state_identifier | epoch)

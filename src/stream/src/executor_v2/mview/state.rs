@@ -20,7 +20,6 @@ use risingwave_common::error::Result;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::managed_state::flush_status::HashMapFlushStatus as FlushStatus;
@@ -78,11 +77,7 @@ impl<S: StateStore> ManagedMViewState<S> {
     }
 
     pub async fn flush(&mut self, epoch: u64) -> Result<()> {
-        // TODO(partial checkpoint): use the table id obtained locally.
-        let mut batch = self
-            .keyspace
-            .state_store()
-            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut batch = self.keyspace.start_write_batch();
         batch.reserve(self.cache.len() * self.column_ids.len());
         let mut local = batch.prefixify(&self.keyspace);
 

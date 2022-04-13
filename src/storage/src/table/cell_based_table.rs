@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -30,7 +29,6 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
-use crate::store::GLOBAL_STORAGE_TABLE_ID;
 use crate::{Keyspace, StateStore};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -183,11 +181,7 @@ impl<S: StateStore> CellBasedTable<S> {
         rows: Vec<(Row, Option<Row>)>,
         epoch: u64,
     ) -> StorageResult<()> {
-        // TODO(partial checkpoint): use the table id obtained locally.
-        let mut batch = self
-            .keyspace
-            .state_store()
-            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut batch = self.keyspace.start_write_batch();
         let mut local = batch.prefixify(&self.keyspace);
         for (pk, cell_values) in rows {
             let arrange_key_buf =
@@ -253,11 +247,7 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
-        // TODO(partial checkpoint): use the table id obtained locally.
-        keyspace
-            .state_store()
-            .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch)]))
-            .await?;
+        keyspace.wait_epoch(epoch).await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 

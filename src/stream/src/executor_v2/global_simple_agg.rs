@@ -20,7 +20,6 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
@@ -194,11 +193,7 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
             _ => return Ok(None), // Nothing to flush.
         };
 
-        // TODO(partial checkpoint): use the table id obtained locally.
-        let mut write_batch = self
-            .keyspace
-            .state_store()
-            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
+        let mut write_batch = self.keyspace.start_write_batch();
         for state in &mut states.managed_states {
             state
                 .flush(&mut write_batch)

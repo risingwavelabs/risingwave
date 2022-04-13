@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
 
 use crate::error::StorageResult;
+use crate::store::{StorageTableId, GLOBAL_STORAGE_TABLE_ID};
+use crate::write_batch::WriteBatch;
 use crate::StateStore;
 
 /// Provides API to read key-value pairs of a prefix in the storage backend.
@@ -26,6 +30,8 @@ pub struct Keyspace<S: StateStore> {
 
     /// Encoded representation for all segments.
     prefix: Vec<u8>,
+
+    table_id: StorageTableId,
 }
 
 impl<S: StateStore> Keyspace<S> {
@@ -44,7 +50,12 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u64(operator_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            // TODO(partial checkpoint): use the table id obtained locally.
+            table_id: GLOBAL_STORAGE_TABLE_ID,
+        }
     }
 
     /// Creates a root [`Keyspace`] for an executor.
@@ -55,7 +66,12 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u64(executor_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            // TODO(partial checkpoint): use the table id obtained locally.
+            table_id: GLOBAL_STORAGE_TABLE_ID,
+        }
     }
 
     /// Creates a root [`Keyspace`] for a table.
@@ -66,7 +82,12 @@ impl<S: StateStore> Keyspace<S> {
             buf.put_u32(id.table_id);
             buf.to_vec()
         };
-        Self { store, prefix }
+        Self {
+            store,
+            prefix,
+            // TODO(partial checkpoint): use the table id obtained locally.
+            table_id: GLOBAL_STORAGE_TABLE_ID,
+        }
     }
 
     /// Appends more bytes to the prefix and returns a new `Keyspace`
@@ -77,6 +98,7 @@ impl<S: StateStore> Keyspace<S> {
         Self {
             store: self.store.clone(),
             prefix,
+            table_id: self.table_id,
         }
     }
 
@@ -182,8 +204,12 @@ impl<S: StateStore> Keyspace<S> {
         self.store.iter(range, epoch).await
     }
 
-    /// Gets the underlying state store.
-    pub fn state_store(&self) -> S {
-        self.store.clone()
+    pub fn start_write_batch(&self) -> WriteBatch<S> {
+        self.store.start_write_batch(self.table_id)
+    }
+
+    pub fn wait_epoch(&self, epoch: u64) -> S::WaitEpochFuture<'_> {
+        self.store
+            .wait_epoch(BTreeMap::from([(self.table_id, epoch)]))
     }
 }
