@@ -434,6 +434,18 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
     }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
+    }
 }
 
 #[cfg(test)]
