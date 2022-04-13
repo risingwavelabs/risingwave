@@ -161,14 +161,12 @@ impl TestCase {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
 
-        let mut result = None;
-
         let placeholder_empty_vec = vec![];
 
         // Since temp file will be deleted when it goes out of scope, so create source advance.
-        self.create_source_advance(session.clone(), do_check_result)
-            .await?;
+        self.create_source_advance(session.clone()).await?;
 
+        let mut result: Option<TestCaseResult> = None;
         for sql in self
             .before_statements
             .as_ref()
@@ -176,10 +174,9 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(&self.sql))
         {
-            if result.is_some() {
-                panic!("two queries in one test case");
-            }
-            result = self.run_sql(sql, session.clone(), do_check_result).await?;
+            result = self
+                .run_sql(sql, session.clone(), do_check_result, result)
+                .await?;
         }
 
         Ok(result.unwrap_or_default())
@@ -190,7 +187,6 @@ impl TestCase {
     async fn create_source_advance(
         &self,
         session: Arc<SessionImpl>,
-        do_check_result: bool,
     ) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
@@ -205,11 +201,12 @@ impl TestCase {
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
                         session.clone(),
-                        do_check_result,
+                        false,
+                        None,
                     )
                     .await
                 } else if let Some(file) = source.file_location {
-                    self.run_sql(&(sql + &file + "'"), session.clone(), do_check_result)
+                    self.run_sql(&(sql + &file + "'"), session.clone(), false, None)
                         .await
                 } else {
                     panic!(
@@ -227,9 +224,9 @@ impl TestCase {
         sql: &str,
         session: Arc<SessionImpl>,
         do_check_result: bool,
+        mut result: Option<TestCaseResult>,
     ) -> Result<Option<TestCaseResult>> {
         let statements = Parser::parse_sql(sql).unwrap();
-        let mut result = None;
         for stmt in statements {
             let context = OptimizerContext::new(session.clone());
             match stmt.clone() {
