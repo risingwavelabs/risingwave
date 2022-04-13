@@ -54,6 +54,8 @@ where
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
+    // TODO: extract common factors fromm the conjunctions with OR expression.
+    // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
     split_expr_by(expr, ExprType::And, &mut rets);
     rets
 }
