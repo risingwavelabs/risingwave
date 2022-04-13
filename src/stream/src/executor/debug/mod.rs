@@ -28,7 +28,6 @@ pub use self::epoch_check::*;
 pub use self::schema_check::*;
 pub use self::trace::*;
 pub use self::update_check::*;
-
 use super::{Executor, Message};
 
 /// [`DebugExecutor`] is an abstraction of wrapper executors, generally used for debug purpose. Data
