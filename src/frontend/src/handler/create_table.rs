@@ -118,8 +118,10 @@ pub async fn handle_create_table(
 
     let (plan, source, table) = {
         let (plan, source, table) =
-            gen_create_table_plan(&*session, context.into(), table_name, columns)?;
-        (plan.to_stream_prost(), source, table)
+            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
+        let plan = plan.to_stream_prost();
+
+        (plan, source, table)
     };
 
     log::trace!(
