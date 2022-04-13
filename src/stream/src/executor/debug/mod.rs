@@ -16,6 +16,7 @@ mod cache_clear;
 mod epoch_check;
 mod schema_check;
 mod trace;
+mod update_check;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
@@ -26,6 +27,8 @@ pub use self::cache_clear::*;
 pub use self::epoch_check::*;
 pub use self::schema_check::*;
 pub use self::trace::*;
+pub use self::update_check::*;
+
 use super::{Executor, Message};
 
 /// [`DebugExecutor`] is an abstraction of wrapper executors, generally used for debug purpose. Data
