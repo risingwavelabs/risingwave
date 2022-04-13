@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_pb::plan::JoinType;
+
 use super::super::plan_node::*;
-use super::{BoxedRule, LiftCorrelatedInputRef, Rule};
+use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::utils::ColIndexMapping;
 
@@ -25,34 +27,44 @@ impl Rule for ApplyProjectRule {
         let project = right.as_logical_project()?;
         let new_right = project.input();
 
-        let mut lift_correlated_input_ref = LiftCorrelatedInputRef {};
-        let mut shift_input_ref = ColIndexMapping::with_shift_offset(
-            project.input().schema().len(),
-            apply.left().schema().len() as isize,
-        );
+        match apply.join_type() {
+            JoinType::LeftOuter => {
+                // For LeftOuter, we pull the LogicalProject up on top of LogicalApply.
+                // Wrong!
+                let mut shift_input_ref = ColIndexMapping::with_shift_offset(
+                    project.input().schema().len(),
+                    apply.left().schema().len() as isize,
+                );
 
-        // All the columns in the left.
-        let mut exprs: Vec<ExprImpl> = apply
-            .left()
-            .schema()
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| InputRef::new(i, field.data_type()).into())
-            .collect();
-        // Extend with the project columns in the right.
-        exprs.extend(project.exprs().clone().into_iter().map(|mut expr| {
-            expr = lift_correlated_input_ref.rewrite_expr(expr);
-            expr = shift_input_ref.rewrite_expr(expr);
-            expr
-        }));
-        let mut expr_alias = vec![None; apply.left().schema().len()];
-        expr_alias.extend(project.expr_alias().iter().cloned());
+                // All the columns in the left.
+                let mut exprs: Vec<ExprImpl> = apply
+                    .left()
+                    .schema()
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, field)| InputRef::new(i, field.data_type()).into())
+                    .collect();
+                // Extend with the project columns in the right.
+                exprs.extend(project.exprs().clone().into_iter().map(|expr| {
+                    // We currently assume that there is no correlated variable in LogicalProject.
+                    shift_input_ref.rewrite_expr(expr)
+                }));
+                let mut expr_alias = vec![None; apply.left().schema().len()];
+                expr_alias.extend(project.expr_alias().iter().cloned());
 
-        let new_apply = apply.clone_with_left_right(apply.left(), new_right);
-        let lifted_project: PlanRef =
-            LogicalProject::new(new_apply.into(), exprs, expr_alias).into();
-        Some(lifted_project)
+                let new_apply = apply.clone_with_left_right(apply.left(), new_right);
+                let lifted_project: PlanRef =
+                    LogicalProject::new(new_apply.into(), exprs, expr_alias).into();
+                Some(lifted_project)
+            }
+            JoinType::LeftSemi => {
+                // For LeftSemi, we just remove LogicalProject.
+                let new_apply = apply.clone_with_left_right(apply.left(), new_right);
+                Some(new_apply.into())
+            }
+            _ => Some(plan),
+        }
     }
 }
 
