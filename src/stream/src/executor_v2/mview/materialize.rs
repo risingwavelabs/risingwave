@@ -157,13 +157,14 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 mod tests {
 
     use futures::stream::StreamExt;
-    use risingwave_common::array::{I32Array, Op};
-    use risingwave_common::catalog::{Field, Schema, TableId};
+    use risingwave_common::array::{I32Array, Op, Row};
+    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::{Keyspace, StateStore};
+    use risingwave_storage::table::cell_based_table::CellBasedTable;
+    use risingwave_storage::Keyspace;
 
     use crate::executor_v2::test_utils::*;
     use crate::executor_v2::*;
@@ -211,7 +212,9 @@ mod tests {
         );
 
         let keyspace = Keyspace::table_root(memory_state_store.clone(), &table_id);
-
+        let order_types = vec![OrderType::Ascending];
+        let column_descs = vec![ColumnDesc::unnamed(column_ids[1], DataType::Int32)];
+        let table = CellBasedTable::new_for_test(keyspace.clone(), column_descs, order_types);
         let mut materialize_executor = Box::new(MaterializeExecutor::new(
             Box::new(source),
             keyspace,
@@ -227,50 +230,23 @@ mod tests {
         // First stream chunk. We check the existence of (3) -> (3,6)
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
-                // Simply assert there is 3 rows (9 elements) in state store instead of doing full
-                // comparison, each row contains one sentinel cell.
-                assert_eq!(
-                    memory_state_store
-                        .scan::<_, Vec<u8>>(.., None, u64::MAX)
-                        .await
-                        .unwrap()
-                        .len(),
-                    9
-                );
-
-                // FIXME(Bugen): restore this test by using new `RowTable` interface
-                // let datum = table
-                //     .get(Row(vec![Some(3_i32.into())]), 1, u64::MAX)
-                //     .await
-                //     .unwrap()
-                //     .unwrap();
-                // assert_eq!(*datum.unwrap().as_int32(), 6_i32);
+                let row = table
+                    .get_row(&Row(vec![Some(3_i32.into())]), u64::MAX)
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(6_i32.into())])));
             }
             _ => unreachable!(),
         }
-
         materialize_executor.next().await.transpose().unwrap();
         // Second stream chunk. We check the existence of (7) -> (7,8)
         match materialize_executor.next().await.transpose().unwrap() {
             Some(Message::Barrier(_)) => {
-                // Simply assert there is  3 +1 -1 = 3 rows (6 element) in state store instead of
-                // doing full comparison
-                assert_eq!(
-                    memory_state_store
-                        .scan::<_, Vec<u8>>(.., None, u64::MAX)
-                        .await
-                        .unwrap()
-                        .len(),
-                    9
-                );
-
-                // FIXME(Bugen): restore this test by using new `RowTable` interface
-                // let datum = table
-                //     .get(Row(vec![Some(7_i32.into())]), 1, u64::MAX)
-                //     .await
-                //     .unwrap()
-                //     .unwrap();
-                // assert_eq!(*datum.unwrap().as_int32(), 8);
+                let row = table
+                    .get_row(&Row(vec![Some(7_i32.into())]), u64::MAX)
+                    .await
+                    .unwrap();
+                assert_eq!(row, Some(Row(vec![Some(8_i32.into())])));
             }
             _ => unreachable!(),
         }
