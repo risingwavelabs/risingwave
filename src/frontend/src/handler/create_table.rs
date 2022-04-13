@@ -20,17 +20,19 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
-use risingwave_pb::plan::ColumnCatalog;
+use risingwave_pb::catalog::{Table as ProstTable, TableSourceInfo};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
-use super::create_source::make_prost_source;
 use crate::binder::expr::bind_data_type;
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{check_valid_column_name, row_id_column_desc};
+use crate::handler::create_source::CreateObject;
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use crate::session::{OptimizerContext, OptimizerContextRef};
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
@@ -64,50 +66,41 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
     Ok(columns_catalog)
 }
 
+/// This function is both used by explaining and creating table.
 pub(crate) fn gen_create_table_plan(
-    session: &SessionImpl,
     context: OptimizerContextRef,
-    table_name: ObjectName,
-    columns: Vec<ColumnDef>,
-) -> Result<(PlanRef, ProstSource, ProstTable)> {
-    let source = make_prost_source(
-        session,
-        table_name,
-        Info::TableSource(TableSourceInfo {
-            columns: bind_sql_columns(columns)?,
-        }),
-    )?;
-    let (plan, table) = gen_materialized_source_plan(context, source.clone())?;
-    Ok((plan, source, table))
+    object: CreateObject,
+    columns: Vec<ColumnCatalog>,
+) -> Result<(PlanRef, ProstTable)> {
+    let source_catalog = object.to_table_source_catalog(columns.clone());
+    let table_catalog = object.to_table_catalog(columns);
+    let table = object.to_prost_table(&table_catalog);
+    let plan = gen_materialized_source_plan(context, source_catalog, table_catalog)?;
+    Ok((plan, table))
 }
 
 /// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it ressembles a
 /// `CREATE MATERIALIZED VIEW AS SELECT * FROM <source>`.
 pub(crate) fn gen_materialized_source_plan(
     context: OptimizerContextRef,
-    source: ProstSource,
-) -> Result<(PlanRef, ProstTable)> {
-    let materialize = {
-        // Manually assemble the materialization plan for the table.
-        let source_node: PlanRef =
-            StreamSource::new(LogicalSource::new(Rc::new((&source).into()), context)).into();
-        let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
-        required_cols.toggle_range(..);
-        required_cols.toggle(0);
+    source: SourceCatalog,
+    table: TableCatalog,
+) -> Result<PlanRef> {
+    // Manually assemble the materialization plan for the table.
+    let source_node: PlanRef =
+        StreamSource::new(LogicalSource::new(Rc::new(source), context)).into();
+    let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
+    required_cols.toggle_range(..);
+    required_cols.toggle(0);
 
-        PlanRoot::new(
-            source_node,
-            Distribution::HashShard(vec![0]),
-            Order::any().clone(),
-            required_cols,
-        )
-        .gen_create_mv_plan(source.name.clone())?
-    };
-    let table = materialize
-        .table()
-        .to_prost(source.schema_id, source.database_id);
-
-    Ok((materialize.into(), table))
+    let plan = PlanRoot::new(
+        source_node,
+        Distribution::HashShard(vec![0]),
+        Order::any().clone(),
+        required_cols,
+    )
+    .gen_create_mv_plan(table)?;
+    Ok(PlanRef::from(plan))
 }
 
 pub async fn handle_create_table(
@@ -117,17 +110,19 @@ pub async fn handle_create_table(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let (plan, source, table) = {
-        let (plan, source, table) =
-            gen_create_table_plan(&session, context.into(), table_name.clone(), columns)?;
-        let plan = plan.to_stream_prost();
-
-        (plan, source, table)
+    let object = CreateObject::new(&session, table_name)?;
+    let columns = bind_sql_columns(columns)?;
+    let source = object.to_prost_source(Info::TableSource(TableSourceInfo {
+        columns: columns.iter().map(|c| c.to_protobuf()).collect(),
+    }));
+    let (plan, table) = {
+        let (plan, table) = gen_create_table_plan(context.into(), object, columns)?;
+        (plan.to_stream_prost(), table)
     };
 
     log::trace!(
         "name={}, plan=\n{}",
-        table_name,
+        table.name,
         serde_json::to_string_pretty(&plan).unwrap()
     );
 

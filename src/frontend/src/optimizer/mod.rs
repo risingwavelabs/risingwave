@@ -24,12 +24,14 @@ mod rule;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools as _;
 use property::{Distribution, Order};
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 
 use self::heuristic::{ApplyOrder, HeuristicOptimizer};
 use self::plan_node::{Convention, LogicalProject, StreamMaterialize};
 use self::rule::*;
+use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::expr::InputRef;
 
 /// `PlanRoot` is used to describe a plan. planner will construct a `PlanRoot` with `LogicalNode`.
@@ -166,11 +168,33 @@ impl PlanRoot {
         plan.to_distributed_with_required(&self.required_order, &self.required_dist)
     }
 
+    /// Derive a complete schema from the query. It can be used to determine the schema of an MV.
+    pub fn derive_schema(&self) -> Vec<ColumnCatalog> {
+        self.schema
+            .fields()
+            .iter()
+            .enumerate()
+            .map(|(i, field)| {
+                let desc = ColumnDesc {
+                    data_type: field.data_type.clone(),
+                    column_id: (i as i32).into(),
+                    name: field.name.clone(),
+                    field_descs: vec![],
+                    type_name: "".to_string(),
+                };
+                ColumnCatalog {
+                    column_desc: desc,
+                    is_hidden: !self.out_fields.contains(i),
+                }
+            })
+            .collect_vec()
+    }
+
     /// Optimize and generate a create materialize view plan.
     ///
     /// The `MaterializeExecutor` won't be generated at this stage, and will be attached in
     /// `gen_create_mv_plan`.
-    pub fn gen_create_mv_plan(&mut self, mv_name: String) -> Result<StreamMaterialize> {
+    pub fn gen_create_mv_plan(&mut self, table: TableCatalog) -> Result<StreamMaterialize> {
         let stream_plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan();
@@ -197,12 +221,7 @@ impl PlanRoot {
         // Convert to physical plan node, using distribution of the input node
         // After that, we will need to wrap a `MaterializeExecutor` on it in `gen_create_mv_plan`.
 
-        StreamMaterialize::create(
-            stream_plan,
-            mv_name,
-            self.required_order.clone(),
-            self.out_fields.clone(),
-        )
+        StreamMaterialize::create(stream_plan, table, self.required_order.clone())
     }
 
     /// Set the plan root's required dist.

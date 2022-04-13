@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{Field, OrderedColumnDesc, Schema};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
@@ -26,7 +26,6 @@ use risingwave_pb::plan::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::Node as ProstStreamNode;
 
 use super::{PlanRef, PlanTreeNodeUnary, ToStreamProst};
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{gen_row_id_column_name, is_row_id_column_name, ColumnId};
 use crate::optimizer::plan_node::{PlanBase, PlanNode};
@@ -97,35 +96,15 @@ impl StreamMaterialize {
     }
 
     /// Create a materialize node.
-    pub fn create(
-        input: PlanRef,
-        mv_name: String,
-        user_order_by: Order,
-        user_cols: FixedBitSet,
-    ) -> Result<Self> {
+    pub fn create(input: PlanRef, mut table: TableCatalog, user_order_by: Order) -> Result<Self> {
         let base = Self::derive_plan_base(&input)?;
         let schema = &base.schema;
         let pk_indices = &base.pk_indices;
-        // Materialize executor won't change the append-only behavior of the stream, so it depends
-        // on input's `append_only`.
-        let columns = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: field.data_type.clone(),
-                    column_id: (i as i32).into(),
-                    name: field.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                },
-                is_hidden: !user_cols.contains(i),
-            })
-            .collect_vec();
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];
+
+        let columns = &table.columns;
         for field in &user_order_by.field_order {
             let idx = field.index;
             pk_desc.push(OrderedColumnDesc {
@@ -144,14 +123,7 @@ impl StreamMaterialize {
             });
             in_pk.insert(idx);
         }
-
-        let table = TableCatalog {
-            id: TableId::placeholder(),
-            associated_source_id: None,
-            name: mv_name,
-            columns,
-            pk_desc,
-        };
+        table.pk_desc = pk_desc;
 
         Ok(Self { base, input, table })
     }

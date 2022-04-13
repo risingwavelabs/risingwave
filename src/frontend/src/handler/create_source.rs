@@ -16,11 +16,13 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::error::ErrorCode::ProtocolError;
 use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
-use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, Table as ProstTable};
+use risingwave_pb::plan::RowFormatType;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_source::ProtobufParser;
 use risingwave_sqlparser::ast::{
     CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, SqlOption, Value,
@@ -29,39 +31,90 @@ use risingwave_sqlparser::ast::{
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
 use crate::binder::Binder;
 use crate::catalog::column_catalog::ColumnCatalog;
+use crate::catalog::source_catalog::SourceCatalog;
+use crate::catalog::table_catalog::TableCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub(crate) fn make_prost_source(
-    session: &SessionImpl,
-    name: ObjectName,
-    source_info: Info,
-) -> Result<ProstSource> {
-    let (schema_name, name) = Binder::resolve_table_name(name)?;
+/// The created object under a schema.
+pub struct CreateObject {
+    pub database_id: u32,
+    pub schema_id: u32,
+    pub name: String,
+}
 
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+impl CreateObject {
+    pub fn new(session: &SessionImpl, name: ObjectName) -> Result<Self> {
+        let (schema_name, name) = Binder::resolve_table_name(name)?;
 
-    Ok(ProstSource {
-        id: 0,
-        schema_id,
-        database_id,
-        name,
-        info: Some(source_info),
-    })
+        let (database_id, schema_id) = session
+            .env()
+            .catalog_reader()
+            .read_guard()
+            .check_relation_name_duplicated(session.database(), &schema_name, &name)?;
+
+        Ok(Self {
+            database_id,
+            schema_id,
+            name,
+        })
+    }
+
+    pub fn to_prost_source(&self, source_info: Info) -> ProstSource {
+        ProstSource {
+            id: 0,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
+            name: self.name.clone(),
+            info: Some(source_info),
+        }
+    }
+
+    pub fn to_prost_table(&self, table: &TableCatalog) -> ProstTable {
+        table.to_prost(self.schema_id, self.database_id)
+    }
+
+    pub fn to_table_source_catalog(&self, columns: Vec<ColumnCatalog>) -> SourceCatalog {
+        self.to_source_catalog_inner(columns, SourceType::Table)
+    }
+
+    pub fn to_source_catalog(&self, columns: Vec<ColumnCatalog>) -> SourceCatalog {
+        self.to_source_catalog_inner(columns, SourceType::Source)
+    }
+
+    fn to_source_catalog_inner(
+        &self,
+        columns: Vec<ColumnCatalog>,
+        source_type: SourceType,
+    ) -> SourceCatalog {
+        SourceCatalog {
+            id: 0,
+            name: self.name.clone(),
+            columns,
+            pk_col_ids: vec![ColumnId::new(0)],
+            source_type,
+        }
+    }
+
+    pub fn to_table_catalog(&self, columns: Vec<ColumnCatalog>) -> TableCatalog {
+        TableCatalog {
+            id: TableId::placeholder(),
+            associated_source_id: None,
+            name: self.name.clone(),
+            columns,
+            pk_desc: vec![],
+        }
+    }
 }
 
 /// Map a protobuf schema to a relational schema.
-fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstColumnCatalog>> {
+fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ColumnCatalog>> {
     let parser = ProtobufParser::new(&schema.row_schema_location.0, &schema.message_name.0)?;
     let column_descs = parser.map_to_columns()?;
 
     Ok(column_descs
         .into_iter()
-        .map(|col| ProstColumnCatalog {
-            column_desc: Some(col),
+        .map(|col| ColumnCatalog {
+            column_desc: col,
             is_hidden: false,
         })
         .collect_vec())
@@ -84,37 +137,42 @@ pub(super) async fn handle_create_source(
     is_materialized: bool,
     stmt: CreateSourceStatement,
 ) -> Result<PgResponse> {
-    let source = match &stmt.source_schema {
+    let (row_format, row_schema_location, columns) = match &stmt.source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
-            let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
+            let mut columns = vec![ColumnCatalog::row_id_column()];
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
-            StreamSourceInfo {
-                properties: handle_source_with_properties(stmt.with_properties.0)?,
-                row_format: RowFormatType::Protobuf as i32,
-                row_schema_location: protobuf_schema.row_schema_location.0.clone(),
-                row_id_index: 0,
+            (
+                RowFormatType::Protobuf,
+                protobuf_schema.row_schema_location.0.clone(),
                 columns,
-                pk_column_ids: vec![0],
-            }
+            )
         }
-        SourceSchema::Json => StreamSourceInfo {
-            properties: handle_source_with_properties(stmt.with_properties.0)?,
-            row_format: RowFormatType::Json as i32,
-            row_schema_location: "".to_string(),
-            row_id_index: 0,
-            columns: bind_sql_columns(stmt.columns)?,
-            pk_column_ids: vec![0],
-        },
+        SourceSchema::Json => (
+            RowFormatType::Json,
+            "".to_string(),
+            bind_sql_columns(stmt.columns)?,
+        ),
     };
 
     let session = context.session_ctx.clone();
-    let source = make_prost_source(&session, stmt.source_name, Info::StreamSource(source))?;
+    let object = CreateObject::new(&session, stmt.source_name)?;
+    let source = object.to_prost_source(Info::StreamSource(StreamSourceInfo {
+        properties: handle_source_with_properties(stmt.with_properties.0)?,
+        row_format: row_format as i32,
+        row_schema_location,
+        row_id_index: 0,
+        columns: columns.iter().map(|c| c.to_protobuf()).collect(),
+        pk_column_ids: vec![0],
+    }));
+
     let catalog_writer = session.env().catalog_writer();
     if is_materialized {
-        let (plan, table) = {
-            let (plan, table) = gen_materialized_source_plan(context.into(), source.clone())?;
-            let plan = plan.to_stream_prost();
-            (plan, table)
+        let source_catalog = object.to_source_catalog(columns.clone());
+        let table_catalog = object.to_table_catalog(columns);
+        let table = object.to_prost_table(&table_catalog);
+        let plan = {
+            let plan = gen_materialized_source_plan(context.into(), source_catalog, table_catalog)?;
+            plan.to_stream_prost()
         };
         catalog_writer
             .create_materialized_source(source, table, plan)

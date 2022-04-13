@@ -17,10 +17,10 @@ use std::path::Path;
 use protobuf::descriptor::FileDescriptorSet;
 use protobuf::RepeatedField;
 use risingwave_common::array::Op;
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::ErrorCode::{self, InternalError, ItemNotFound, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{DataType, Datum, Decimal, OrderedF32, OrderedF64, ScalarImpl};
-use risingwave_pb::plan::ColumnDesc;
 use serde::de::Deserialize;
 use serde_protobuf::de::Deserializer;
 use serde_protobuf::descriptor::{Descriptors, FieldDescriptor, FieldType};
@@ -141,8 +141,8 @@ impl ProtobufParser {
     ) -> Result<ColumnDesc> {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
-        if let FieldType::Message(m) = field_type {
-            let column_vec = m
+        let (field_descs, type_name) = if let FieldType::Message(m) = field_type {
+            let field_descs = m
                 .fields()
                 .iter()
                 .map(|f| {
@@ -154,23 +154,19 @@ impl ProtobufParser {
                     )
                 })
                 .collect::<Result<Vec<_>>>()?;
-            *index += 1;
-            Ok(ColumnDesc {
-                column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
-                column_type: Some(data_type.to_protobuf()),
-                field_descs: column_vec,
-                type_name: m.name().to_string(),
-            })
+            let type_name = m.name().to_string();
+            (field_descs, type_name)
         } else {
-            *index += 1;
-            Ok(ColumnDesc {
-                column_id: *index, // need increment
-                name: lastname + field_descriptor.name(),
-                column_type: Some(data_type.to_protobuf()),
-                ..Default::default()
-            })
-        }
+            (vec![], "".to_string())
+        };
+        *index += 1;
+        Ok(ColumnDesc {
+            data_type, // need increment
+            column_id: ColumnId::new(*index),
+            name: lastname + field_descriptor.name(),
+            field_descs,
+            type_name,
+        })
     }
 }
 
@@ -291,10 +287,9 @@ mod tests {
     use std::io::Write;
 
     use maplit::hashmap;
-    use risingwave_common::catalog::ColumnId;
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
     use risingwave_common::error::Result;
     use risingwave_common::types::{DataType, ScalarImpl};
-    use risingwave_pb::plan::ColumnDesc;
     use serde_value::Value;
     use tempfile::Builder;
 
@@ -483,21 +478,21 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 3),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 4),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.address", 2),
             ColumnDesc::new_struct("country.city", 5, ".test.City", city),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
-                ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
+                ColumnDesc::new_atomic(DataType::Int32, "id", 1),
                 ColumnDesc::new_struct("country", 7, ".test.Country", country),
-                ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
-                ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
+                ColumnDesc::new_atomic(DataType::Int64, "zipcode", 8),
+                ColumnDesc::new_atomic(DataType::Float32, "rate", 9),
             ]
         );
     }

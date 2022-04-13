@@ -17,6 +17,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_sqlparser::ast::{ObjectName, Query};
 
+use super::create_source::CreateObject;
 use crate::binder::Binder;
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
@@ -30,13 +31,6 @@ pub fn gen_create_mv_plan(
     query: Box<Query>,
     name: ObjectName,
 ) -> Result<(PlanRef, ProstTable)> {
-    let (schema_name, table_name) = Binder::resolve_table_name(name)?;
-    let (database_id, schema_id) = session
-        .env()
-        .catalog_reader()
-        .read_guard()
-        .check_relation_name_duplicated(session.database(), &schema_name, &table_name)?;
-
     let bound = {
         let mut binder = Binder::new(
             session.env().catalog_reader().read_guard(),
@@ -47,8 +41,12 @@ pub fn gen_create_mv_plan(
 
     let mut plan_root = Planner::new(context).plan_query(bound)?;
     plan_root.set_required_dist(Distribution::any().clone());
-    let materialize = plan_root.gen_create_mv_plan(table_name)?;
-    let table = materialize.table().to_prost(schema_id, database_id);
+
+    let object = CreateObject::new(session, name)?;
+    let columns = plan_root.derive_schema();
+
+    let materialize = plan_root.gen_create_mv_plan(object.to_table_catalog(columns))?;
+    let table = object.to_prost_table(materialize.table());
     let plan: PlanRef = materialize.into();
 
     Ok((plan, table))

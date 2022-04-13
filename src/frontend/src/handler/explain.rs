@@ -19,7 +19,8 @@ use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::Statement;
 
 use super::create_mv::gen_create_mv_plan;
-use super::create_table::gen_create_table_plan;
+use super::create_source::CreateObject;
+use super::create_table::{bind_sql_columns, gen_create_table_plan};
 use crate::binder::Binder;
 use crate::planner::Planner;
 use crate::session::OptimizerContext;
@@ -43,7 +44,9 @@ pub(super) fn handle_explain(
         } => gen_create_mv_plan(&*session, planner.ctx(), query, name)?.0,
 
         Statement::CreateTable { name, columns, .. } => {
-            gen_create_table_plan(&*session, planner.ctx(), name, columns)?.0
+            let object = CreateObject::new(&session, name)?;
+            let columns = bind_sql_columns(columns)?;
+            gen_create_table_plan(planner.ctx(), object, columns)?.0
         }
 
         stmt => {
