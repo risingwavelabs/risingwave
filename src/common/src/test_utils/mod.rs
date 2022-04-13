@@ -13,3 +13,4 @@
 // limitations under the License.
 
 pub mod rand_array;
+pub mod test_stream_chunk;
