@@ -57,7 +57,7 @@ impl SimpleProjectExecutor {
         };
         Self {
             info: ExecutorInfo {
-                schema: schema,
+                schema,
                 pk_indices: input_info.pk_indices,
                 identity: format!("ProjectExecutor {:X}", executor_id),
             },

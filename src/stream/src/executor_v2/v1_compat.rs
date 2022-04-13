@@ -31,7 +31,7 @@ use super::filter::SimpleFilterExecutor;
 use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
-    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor
+    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor::AggCall;
@@ -165,7 +165,7 @@ impl ProjectExecutor {
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
-            pk_indices: pk_indices,
+            pk_indices,
             identity: "Project".to_owned(),
         };
         let input = Box::new(ExecutorV1AsV2(input));

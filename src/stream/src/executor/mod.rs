@@ -510,24 +510,6 @@ pub fn create_executor(
     Ok(real_executor)
 }
 
-/// `SimpleExecutor` accepts a single chunk as input.
-pub trait SimpleExecutor: Executor {
-    fn consume_chunk(&mut self, chunk: StreamChunk) -> Result<Message>;
-    fn input(&mut self) -> &mut dyn Executor;
-}
-
-/// Most executors don't care about the control messages, and therefore
-/// this method provides a default implementation helper for them.
-async fn simple_executor_next<E: SimpleExecutor>(executor: &mut E) -> Result<Message> {
-    match executor.input().next().await {
-        Ok(message) => match message {
-            Message::Chunk(chunk) => executor.consume_chunk(chunk),
-            Message::Barrier(_) => Ok(message),
-        },
-        Err(e) => Err(e),
-    }
-}
-
 /// `StreamConsumer` is the last step in an actor
 #[async_trait]
 pub trait StreamConsumer: Send + Debug + 'static {
