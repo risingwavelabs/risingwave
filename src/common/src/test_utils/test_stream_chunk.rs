@@ -34,10 +34,14 @@ pub trait TestStreamChunk {
 
     fn op_at(idx: usize) -> Op;
 
-    fn expected_row_at(idx: usize) -> Row;
+    fn row_at(idx: usize) -> Row;
 
-    fn expected_value_at(row_idx: usize, col_idx: usize) -> Datum {
-        Self::expected_row_at(row_idx)[col_idx].clone()
+    fn row_with_op_at(idx: usize) -> (Op, Row) {
+        (Self::op_at(idx), Self::row_at(idx))
+    }
+
+    fn value_at(row_idx: usize, col_idx: usize) -> Datum {
+        Self::row_at(row_idx)[col_idx].clone()
     }
 }
 
@@ -89,13 +93,13 @@ impl TestStreamChunk for WhatEverStreamChunk {
         match idx {
             0 => Op::Insert,
             1 => Op::Delete,
-            2 => Op::UpdateInsert,
-            3 => Op::UpdateDelete,
+            2 => Op::UpdateDelete,
+            3 => Op::UpdateInsert,
             _ => unreachable!(),
         }
     }
 
-    fn expected_row_at(idx: usize) -> Row {
+    fn row_at(idx: usize) -> Row {
         match idx {
             0 => Row(vec![
                 Some(1i32.into()),

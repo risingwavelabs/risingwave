@@ -173,28 +173,19 @@ mod tests {
     #[test]
     fn test_chunk_rows() {
         let chunk = WhatEverStreamChunk::stream_chunk();
-        let mut rows = chunk.rows_v2();
         let row_to_owned = |row: RowRefV2| {
-            Row(row
-                .iter()
-                .map(ToOwnedDatum::to_owned_datum)
-                .collect::<Vec<_>>())
+            (
+                row.op(),
+                Row(row
+                    .iter()
+                    .map(ToOwnedDatum::to_owned_datum)
+                    .collect::<Vec<_>>()),
+            )
         };
-        assert_eq!(
-            Some(WhatEverStreamChunk::expected_row_at(0)),
-            rows.next().map(row_to_owned)
-        );
-        assert_eq!(
-            Some(WhatEverStreamChunk::expected_row_at(1)),
-            rows.next().map(row_to_owned)
-        );
-        assert_eq!(
-            Some(WhatEverStreamChunk::expected_row_at(2)),
-            rows.next().map(row_to_owned)
-        );
-        assert_eq!(
-            Some(WhatEverStreamChunk::expected_row_at(3)),
-            rows.next().map(row_to_owned)
-        );
+        let mut rows = chunk.rows_v2().map(row_to_owned);
+        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(0)), rows.next());
+        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(1)), rows.next());
+        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(2)), rows.next());
+        assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(3)), rows.next());
     }
 }
