@@ -89,23 +89,18 @@ where
     ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
         let source_ref = &affiliated_source;
         let source_splits = try_join_all(actors.keys().map(|source_id| async move {
-            let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-            match catalog_guard.get_source(*source_id).await? {
-                Some(source) => self.fetch_splits_for_source(&source).await,
-                None => {
-                    let source = source_ref.as_ref().ok_or_else(|| {
+            if let Some(affiliated_source) = source_ref && *source_id == affiliated_source.get_id() {
+                // we are creating materialized source
+                self.fetch_splits_for_source(affiliated_source).await
+            } else {
+                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+                let source = catalog_guard.get_source(*source_id).await?.ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "could not find source catalog for {}",
                             source_id
                         )))
                     })?;
-                    assert_eq!(
-                        source.get_id(),
-                        *source_id,
-                        "optional source from `create_materialized_view` does not match source_id"
-                    );
-                    self.fetch_splits_for_source(source).await
-                }
+                self.fetch_splits_for_source(&source).await
             }
         }))
         .await?;
