@@ -47,7 +47,7 @@ impl super::DebugExecutor for UpdateCheckExecutor {
                             assert_eq!(
                                 row2.as_ref().map(|r| r.op()),
                                 Some(Op::UpdateInsert),
-                                "expect an `UpdateInsert` after the `UpdateDelete`:\n{:?}\n{:?}",
+                                "expect an `UpdateInsert` after the `UpdateDelete`:\n first: {:?}\nsecond: {:?}",
                                 row1,
                                 row2
                             );
