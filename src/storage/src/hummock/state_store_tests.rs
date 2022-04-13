@@ -29,8 +29,6 @@ use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::StateStore;
-use crate::storage_value::{StorageValue, VALUE_META_SIZE};
-use crate::StateStoreIter;
 
 #[tokio::test]
 async fn test_basic() {
