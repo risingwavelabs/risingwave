@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_hummock_sdk::key::user_key;
 
 use crate::hummock::iterator::test_utils::{
-    gen_iterator_test_sstable_base_without_buff, iterator_test_key_of, iterator_test_value_of,
+    gen_iterator_test_sstable_base_without_buf, iterator_test_key_of, iterator_test_value_of,
     mock_sstable_store, TEST_KEYS_COUNT,
 };
 use crate::hummock::iterator::{
@@ -34,7 +34,7 @@ use crate::monitor::StateStoreMetrics;
 async fn test_failpoint_concat_read_err() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -42,7 +42,7 @@ async fn test_failpoint_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -87,7 +87,7 @@ async fn test_failpoint_concat_read_err() {
 async fn test_failpoint_reverse_concat_read_err() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x * 2,
@@ -95,7 +95,7 @@ async fn test_failpoint_reverse_concat_read_err() {
         TEST_KEYS_COUNT,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| (TEST_KEYS_COUNT + x) * 2,
@@ -137,7 +137,7 @@ async fn test_failpoint_reverse_concat_read_err() {
 async fn test_failpoint_merge_invalid_key() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -145,7 +145,7 @@ async fn test_failpoint_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -179,7 +179,7 @@ async fn test_failpoint_merge_invalid_key() {
 async fn test_failpoint_reverse_merge_invalid_key() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -187,7 +187,7 @@ async fn test_failpoint_reverse_merge_invalid_key() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -224,7 +224,7 @@ async fn test_failpoint_reverse_merge_invalid_key() {
 async fn test_failpoint_user_read_err() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -232,7 +232,7 @@ async fn test_failpoint_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
@@ -280,7 +280,7 @@ async fn test_failpoint_user_read_err() {
 async fn test_failpoint_reverse_user_read_err() {
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let table0 = gen_iterator_test_sstable_base_without_buff(
+    let table0 = gen_iterator_test_sstable_base_without_buf(
         0,
         default_builder_opt_for_test(),
         |x| x,
@@ -288,7 +288,7 @@ async fn test_failpoint_reverse_user_read_err() {
         200,
     )
     .await;
-    let table1 = gen_iterator_test_sstable_base_without_buff(
+    let table1 = gen_iterator_test_sstable_base_without_buf(
         1,
         default_builder_opt_for_test(),
         |x| 200 + x,
