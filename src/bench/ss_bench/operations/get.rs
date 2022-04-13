@@ -100,10 +100,12 @@ impl Operations {
                 let mut sizes: Vec<usize> = vec![];
                 for key in keys {
                     let start = Instant::now();
-                    let size = match store.get(&key, u64::MAX).await.unwrap() {
+                    let val_size = match store.get(&key, u64::MAX).await.unwrap() {
                         Some(v) => v.len(),
                         None => 0,
                     };
+                    // account sizes from both key and value
+                    let size = key.len() + val_size;
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
                     sizes.push(size);
