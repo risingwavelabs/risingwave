@@ -255,7 +255,7 @@ async fn test_fragmenter() -> Result<()> {
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
-    let mut fragmenter =
+    let fragmenter =
         StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager, hash_mapping);
 
     let mut ctx = CreateMaterializedViewContext::default();
