@@ -455,12 +455,9 @@ impl StateStore for HummockStorage {
                                 as BoxedHummockIterator);
                         }
                     }
-                    LevelType::Nonoverlapping => {
-                        overlapped_sstable_iters.push(Box::new(ConcatIterator::new(
-                            tables,
-                            self.sstable_store.clone(),
-                        )));
-                    }
+                    LevelType::Nonoverlapping => overlapped_sstable_iters.push(Box::new(
+                        ConcatIterator::new(tables, self.sstable_store.clone()),
+                    )),
                 }
             }
             self.stats
@@ -585,7 +582,7 @@ impl StateStore for HummockStorage {
                         key_range.start_bound().map(|b| b.as_ref().to_owned()),
                     ),
                     epoch,
-                    None,
+                    Some(version),
                 ));
 
             reverse_user_iter.rewind().await?;
