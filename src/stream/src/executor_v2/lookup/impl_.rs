@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef, StreamChunk};
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{ColumnDesc, Schema};
+use risingwave_common::error::Result;
 use risingwave_common::util::ordered::OrderedRowSerializer;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
-use risingwave_storage::Keyspace;
+use risingwave_storage::{Keyspace, StateStore};
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use super::*;
 use crate::common::StreamChunkBuilder;
+use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
+use crate::executor_v2::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
+use crate::executor_v2::lookup::LookupExecutor;
+use crate::executor_v2::{Barrier, Executor, Message, PkIndices};
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
@@ -167,9 +171,15 @@ impl<S: StateStore> LookupExecutor<S> {
             pk_indices,
             last_barrier: None,
             input: if use_current_epoch {
-                Box::pin(stream_lookup_arrange_this_epoch(stream, arrangement))
+                Some(Box::pin(stream_lookup_arrange_this_epoch(
+                    stream,
+                    arrangement,
+                )))
             } else {
-                Box::pin(stream_lookup_arrange_prev_epoch(stream, arrangement))
+                Some(Box::pin(stream_lookup_arrange_prev_epoch(
+                    stream,
+                    arrangement,
+                )))
             },
             stream: StreamJoinSide {
                 key_indices: stream_join_key_indices,
@@ -195,21 +205,35 @@ impl<S: StateStore> LookupExecutor<S> {
     /// messages until there's one.
     ///
     /// If we can use `async_stream` to write this part, things could be easier.
-    pub async fn next_inner(&mut self) -> Result<Option<Message>> {
-        match self.input.next().await.expect("unexpected end of stream")? {
-            ArrangeMessage::Barrier(barrier) => {
-                self.process_barrier(barrier.clone()).await?;
-                Ok(Some(Message::Barrier(barrier)))
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    pub async fn execute_inner(mut self: Box<Self>) {
+        let input = std::mem::take(&mut self.input);
+        #[for_await]
+        for msg in input.unwrap() {
+            let msg = msg.map_err(StreamExecutorError::input_error)?;
+            match msg {
+                ArrangeMessage::Barrier(barrier) => {
+                    self.process_barrier(barrier.clone())
+                        .await
+                        .map_err(StreamExecutorError::eval_error)?;
+                    yield Message::Barrier(barrier)
+                }
+                ArrangeMessage::Arrange(_) => {
+                    // TODO: replicate batch
+                    //
+                    // As we assume currently all lookups are on the same worker node of
+                    // arrangements, the data would always be available in the
+                    // local shared buffer. Therefore, there's no need to
+                    // replicate batch.
+                }
+                ArrangeMessage::Stream(chunk) => {
+                    yield Message::Chunk(
+                        self.lookup(chunk)
+                            .await
+                            .map_err(StreamExecutorError::eval_error)?,
+                    )
+                }
             }
-            ArrangeMessage::Arrange(_) => {
-                // TODO: replicate batch
-                //
-                // As we assume currently all lookups are on the same worker node of arrangements,
-                // the data would always be available in the local shared buffer. Therefore, there's
-                // no need to replicate batch.
-                Ok(None)
-            }
-            ArrangeMessage::Stream(chunk) => Ok(Some(Message::Chunk(self.lookup(chunk).await?))),
         }
     }
 

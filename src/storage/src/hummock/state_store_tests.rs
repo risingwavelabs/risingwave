@@ -20,16 +20,12 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
 use super::HummockStorage;
-use crate::hummock::iterator::test_utils::{
-    mock_sstable_store, mock_sstable_store_with_object_store,
-};
+use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::test_utils::default_config_for_test;
-use crate::hummock::HummockStateStoreIter;
+use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
-use crate::store::StateStoreIter;
 use crate::StateStore;
 
 #[tokio::test]
@@ -173,96 +169,6 @@ async fn test_basic() {
         .await
         .unwrap();
     assert!(value.is_none());
-}
-
-async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
-    let mut c: usize = 0;
-    while iter.next().await.unwrap().is_some() {
-        c += 1
-    }
-    c
-}
-
-#[tokio::test]
-async fn test_failpoint_read_upload() {
-    let mem_upload_err = "mem_upload_err";
-    let mem_read_err = "mem_read_err";
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (_env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
-
-    let hummock_storage = HummockStorage::with_default_stats(
-        hummock_options,
-        sstable_store,
-        local_version_manager.clone(),
-        meta_client.clone(),
-        Arc::new(StateStoreMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let anchor = Bytes::from("aa");
-    let mut batch1 = vec![
-        (anchor.clone(), StorageValue::new_default_put("111")),
-        (Bytes::from("cc"), StorageValue::new_default_put("222")),
-    ];
-    batch1.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-
-    let mut batch2 = vec![
-        (Bytes::from("cc"), StorageValue::new_default_put("333")),
-        (anchor.clone(), StorageValue::new_default_delete()),
-    ];
-    // Make sure the batch is sorted.
-    batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage.ingest_batch(batch1, 1).await.unwrap();
-
-    // Get the value after flushing to remote.
-    let value = hummock_storage.get(&anchor, 1).await.unwrap().unwrap();
-    assert_eq!(value, Bytes::from("111"));
-    // // Write second batch.
-    hummock_storage.ingest_batch(batch2, 3).await.unwrap();
-
-    // sync epoch1 test the read_error
-    hummock_storage.sync(Some(1)).await.unwrap();
-    meta_client.commit_epoch(1).await.unwrap();
-    local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
-
-    fail::cfg(mem_read_err, "return").unwrap();
-
-    let result = hummock_storage.get(b"bb".as_ref(), 2).await;
-    assert!(result.is_err());
-    let result = hummock_storage.iter(..=b"ee".to_vec(), 2).await;
-    assert!(result.is_err());
-
-    let value = hummock_storage.get(b"ee".as_ref(), 2).await.unwrap();
-    assert!(value.is_none());
-    fail::remove(mem_read_err);
-    // test the upload_error
-    fail::cfg(mem_upload_err, "return").unwrap();
-
-    let result = hummock_storage.sync(Some(3)).await;
-    assert!(result.is_err());
-    meta_client.abort_epoch(3).await.unwrap();
-    meta_client.commit_epoch(4).await.unwrap();
-    local_version_manager
-        .refresh_version(meta_client.as_ref())
-        .await;
-    fail::remove(mem_upload_err);
-
-    let value = hummock_storage.get(&anchor, 5).await.unwrap().unwrap();
-    assert_eq!(value, Bytes::from("111"));
-    let mut iters = hummock_storage.iter(..=b"ee".to_vec(), 5).await.unwrap();
-    let len = count_iter(&mut iters).await;
-    assert_eq!(len, 2);
 }
 #[tokio::test]
 /// Fix this when we finished epoch management.

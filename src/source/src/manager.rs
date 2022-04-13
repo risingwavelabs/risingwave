@@ -40,6 +40,7 @@ pub type SourceRef = Arc<SourceImpl>;
 // necessary
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
+const KAFKA_SOURCE: &str = "kafka";
 
 const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
@@ -101,6 +102,18 @@ pub type SourceManagerRef = Arc<dyn SourceManager>;
 #[derive(Debug)]
 pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
+}
+
+fn get_properties<'a>(properties: &'a HashMap<String, String>, key: &'a str) -> Result<&'a str> {
+    Ok(properties
+        .get(key)
+        .ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "property {} not found",
+                UPSTREAM_SOURCE_KEY
+            )))
+        })?
+        .as_str())
 }
 
 #[async_trait]
@@ -175,14 +188,14 @@ impl SourceManager for MemSourceManager {
             .enumerate()
             .map(|(idx, c)| {
                 let c = c.column_desc.as_ref().unwrap().clone();
-                Ok(SourceColumnDesc {
+                SourceColumnDesc {
                     name: c.name.clone(),
                     data_type: DataType::from(&c.column_type.unwrap()),
                     column_id: ColumnId::from(c.column_id),
                     skip_parse: idx as i32 == info.row_id_index,
-                })
+                }
             })
-            .collect::<Result<Vec<SourceColumnDesc>>>()?;
+            .collect::<Vec<SourceColumnDesc>>();
 
         assert!(
             info.row_id_index >= 0,
@@ -191,19 +204,10 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match info
-            .properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .ok_or_else(|| {
-                RwError::from(ProtocolError(format!(
-                    "property {} not found",
-                    UPSTREAM_SOURCE_KEY
-                )))
-            })?
-            .as_str()
-        {
+        let config = match get_properties(&info.properties, UPSTREAM_SOURCE_KEY)? {
             // TODO support more connector here
             KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
+            KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other

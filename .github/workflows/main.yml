@@ -13,10 +13,9 @@ on:
       - "v*"
   workflow_dispatch:
 env:
-  RUST_TOOLCHAIN: nightly-2022-03-09
-  CACHE_KEY_SUFFIX: v20220331
+  RUST_TOOLCHAIN: nightly-2022-04-09
+  CACHE_KEY_SUFFIX: v20220412
   CARGO_TERM_COLOR: always
-  RW_CI: true
   RW_SQLLOGICTEST_URL: https://github.com/risinglightdb/sqllogictest-rs/releases/download/v0.3.3/sqllogictest-linux-amd64.tar.gz
   RW_CARGO_MAKE_URL: https://github.com/sagiegurari/cargo-make/releases/download/0.35.10/cargo-make-v0.35.10-x86_64-unknown-linux-musl.zip
   RW_CARGO_MAKE_DIRECTORY: cargo-make-v0.35.10-x86_64-unknown-linux-musl
@@ -268,7 +267,7 @@ jobs:
       - name: e2e test, batch, Rust frontend, 1 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          ~/cargo-make/makers ci-start ci-1cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
@@ -276,7 +275,7 @@ jobs:
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
-          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -388,7 +387,7 @@ jobs:
       - name: e2e test, batch, Rust frontend, 1 node
         timeout-minutes: 2
         run: |
-          RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-1cn-1fe
+          ~/cargo-make/makers ci-start ci-1cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
       - name: Kill cluster
@@ -396,7 +395,7 @@ jobs:
       - name: e2e test w/ Rust frontend ci-3node, batch, distributed
         timeout-minutes: 2
         run: |
-          RW_DIST_QUERY=1 RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers ci-start ci-3cn-1fe
+          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-3cn-1fe
           sqllogictest -p 4566 './e2e_test/v2/batch_distributed/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
@@ -458,14 +457,12 @@ jobs:
         uses: docker/login-action@f054a8b539a109f9f41c372932f1ae047eff08c9
         with:
           registry: ghcr.io
-          username: ${{ secrets.GHCR_ACTOR }}
-          password: ${{ secrets.WUTAO_PAT }}
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
       - name: Install required components
         run: |
           sudo apt-get update -yy -o Acquire::Retries=3
           sudo apt-get install --upgrade -yy tmux postgresql -o Acquire::Retries=3
-      - name: Setup kafka cluster
-        run: ./scripts/source/prepare_source.sh
       - name: Download sqllogictest
         run: |
           wget ${RW_SQLLOGICTEST_URL} -O - | tar xz && mv ${BINARY} ${DIR}/${BINARY}
@@ -504,8 +501,9 @@ jobs:
           chmod +x ./target/debug/risedev-playground
           chmod +x ./target/debug/risingwave_regress_test
       - name: Run batch tests on Postgresql
+        timeout-minutes: 10
         run: |
-          timeout 10m sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
+          sqllogictest -p ${{ env.PG_PORT }} './e2e_test/batch/**/*.slt'
       - name: Generate RiseDev CI config
         run: |
           cp risedev-components.ci.env risedev-components.user.env
@@ -514,35 +512,16 @@ jobs:
           ~/cargo-make/makers link-all-in-one-binaries
           ~/cargo-make/makers pre-start-playground
       - name: regress test batch 3-node
+        timeout-minutes: 1
         run: |
           ~/cargo-make/makers clean-data
           RW_IMPLICIT_FLUSH=1 ~/cargo-make/makers dev ci-3node
           psql --version
-          RUST_LOG=info timeout 40s target/debug/risingwave_regress_test -h 127.0.0.1 \
+          RUST_LOG=info target/debug/risingwave_regress_test -h 127.0.0.1 \
             -p ${{ env.RW_PORT }} \
             --input `pwd`/src/tests/regress/data \
             --output `pwd`/src/tests/regress/output \
             --schedule `pwd`/src/tests/regress/data/schedule
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          # ~/cargo-make/makers check-logs # regression test is bound to produce errors, so we don't check logs
-      - name: e2e test source
-        run: |
-          ~/cargo-make/makers clean-data
-          ~/cargo-make/makers dev ci-1node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source/**/*.slt'
-      - name: Kill cluster
-        run: |
-          ~/cargo-make/makers k
-          ~/cargo-make/makers logs
-          ~/cargo-make/makers check-logs
-      - name: e2e test source 3-node
-        run: |
-          ~/cargo-make/makers clean-data
-          ~/cargo-make/makers dev ci-3node
-          timeout 5m sqllogictest -p ${{ env.RW_PORT }} -d dev './e2e_test/source_distributed/**/*.slt'
       - name: Kill cluster
         run: |
           ~/cargo-make/makers k

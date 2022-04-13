@@ -24,9 +24,8 @@ mod tests {
 
     use super::*;
     use crate::hummock::iterator::test_utils::{
-        default_builder_opt_for_test, gen_iterator_test_sstable_base,
-        gen_iterator_test_sstable_base_without_buff, iterator_test_key_of, iterator_test_value_of,
-        mock_sstable_store, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
+        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::HummockIterator;
 
@@ -223,57 +222,5 @@ mod tests {
             val.into_user_value().unwrap(),
             iterator_test_value_of(TEST_KEYS_COUNT * 4).as_slice()
         );
-    }
-    #[tokio::test]
-    async fn test_failpoint_read_err() {
-        let mem_read_err = "mem_read_err";
-        let sstable_store = mock_sstable_store();
-        let table0 = gen_iterator_test_sstable_base_without_buff(
-            0,
-            default_builder_opt_for_test(),
-            |x| x * 2,
-            sstable_store.clone(),
-            TEST_KEYS_COUNT,
-        )
-        .await;
-        let table1 = gen_iterator_test_sstable_base_without_buff(
-            1,
-            default_builder_opt_for_test(),
-            |x| (TEST_KEYS_COUNT + x) * 2,
-            sstable_store.clone(),
-            TEST_KEYS_COUNT,
-        )
-        .await;
-        let mut iter = ConcatIterator::new(vec![Arc::new(table0), Arc::new(table1)], sstable_store);
-        iter.rewind().await.unwrap();
-        fail::cfg(mem_read_err, "return").unwrap();
-        let result = iter.seek(iterator_test_key_of(22).as_slice()).await;
-        assert!(result.is_err());
-        let result = iter
-            .seek(iterator_test_key_of(4 * TEST_KEYS_COUNT).as_slice())
-            .await;
-        assert!(result.is_err());
-        let result = iter.seek(iterator_test_key_of(23).as_slice()).await;
-        assert!(result.is_err());
-        iter.rewind().await.unwrap();
-        let mut i = 0;
-        while iter.is_valid() {
-            let key = iter.key();
-            let val = iter.value();
-            assert_eq!(key, iterator_test_key_of(i * 2).as_slice());
-            assert_eq!(
-                val.into_user_value().unwrap(),
-                iterator_test_value_of(i * 2).as_slice()
-            );
-            i += 1;
-            let result = iter.next().await;
-            if result.is_err() {
-                assert!(i < 2 * TEST_KEYS_COUNT);
-                break;
-            }
-        }
-        assert!(i < 2 * TEST_KEYS_COUNT);
-        assert!(!iter.is_valid());
-        fail::remove(mem_read_err);
     }
 }

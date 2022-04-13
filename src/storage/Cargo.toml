@@ -73,9 +73,9 @@ risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
-default = ["fail/failpoints"]
-#rocksdb-local = ["rocksdb"]
-#tikv = ["tikv-client"]
+# rocksdb-local = ["rocksdb"]
+# tikv = ["tikv-client"]
+failpoints = ["fail/failpoints"]
 
 [[bench]]
 name = "bench_block_iter"

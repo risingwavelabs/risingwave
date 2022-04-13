@@ -28,9 +28,11 @@ use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    CachePolicy, HummockStorage, SSTableBuilder, SSTableBuilderOptions, Sstable, SstableStoreRef,
+    CachePolicy, HummockStateStoreIter, HummockStorage, SSTableBuilder, SSTableBuilderOptions,
+    Sstable, SstableStoreRef,
 };
 use crate::monitor::StateStoreMetrics;
+use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
@@ -146,4 +148,12 @@ pub async fn gen_default_test_sstable(
         sstable_store,
     )
     .await
+}
+
+pub async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
+    let mut c: usize = 0;
+    while iter.next().await.unwrap().is_some() {
+        c += 1
+    }
+    c
 }

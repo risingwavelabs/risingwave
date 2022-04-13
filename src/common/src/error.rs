@@ -86,8 +86,14 @@ pub enum ErrorCode {
     NotImplemented(String, TrackingIssue),
     #[error(transparent)]
     IoError(IoError),
-    #[error("Storage error: {0}")]
+    #[error("Storage error: {0:?}")]
     StorageError(
+        #[backtrace]
+        #[source]
+        BoxedError,
+    ),
+    #[error("Stream error: {0:?}")]
+    StreamError(
         #[backtrace]
         #[source]
         BoxedError,
@@ -249,6 +255,7 @@ impl ErrorCode {
             ErrorCode::OK => 0,
             ErrorCode::InternalError(_) => 1,
             ErrorCode::MemoryError { .. } => 2,
+            ErrorCode::StreamError(_) => 3,
             ErrorCode::NotImplemented(..) => 4,
             ErrorCode::IoError(_) => 5,
             ErrorCode::StorageError(_) => 6,

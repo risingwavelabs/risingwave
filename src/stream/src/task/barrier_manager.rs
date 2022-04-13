@@ -133,6 +133,11 @@ impl LocalBarrierManager {
         self.senders.insert(actor_id, sender);
     }
 
+    /// Return all senders.
+    pub fn all_senders(&self) -> HashSet<ActorId> {
+        self.senders.keys().cloned().collect()
+    }
+
     /// Broadcast a barrier to all senders. Returns a receiver which will get notified when this
     /// barrier is finished, in managed mode.
     pub fn send_barrier(

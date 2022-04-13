@@ -39,6 +39,7 @@ impl StreamSource {
         );
         Self { base, logical }
     }
+
     pub fn column_names(&self) -> Vec<String> {
         self.schema()
             .fields()
@@ -78,6 +79,7 @@ impl ToStreamProst for StreamSource {
                 .map(|c| c.column_id().into())
                 .collect(),
             source_type: self.logical.source_catalog.source_type as i32,
+            stream_source_state: None,
         })
     }
 }

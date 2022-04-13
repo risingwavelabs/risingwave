@@ -52,6 +52,7 @@ impl PlanTreeNodeUnary for BatchExchange {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
+
     fn clone_with_input(&self, input: PlanRef) -> Self {
         Self::new(input, self.order().clone(), self.distribution().clone())
     }

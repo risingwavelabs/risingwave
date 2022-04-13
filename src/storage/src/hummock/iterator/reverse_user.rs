@@ -433,62 +433,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_failpoint_reverse_user_read_err() {
-        let mem_read_err = "mem_read_err";
-        let sstable_store = mock_sstable_store();
-        let table0 = gen_iterator_test_sstable_base_without_buff(
-            0,
-            default_builder_opt_for_test(),
-            |x| x,
-            sstable_store.clone(),
-            200,
-        )
-        .await;
-        let table1 = gen_iterator_test_sstable_base_without_buff(
-            1,
-            default_builder_opt_for_test(),
-            |x| 200 + x,
-            sstable_store.clone(),
-            200,
-        )
-        .await;
-        let iters: Vec<BoxedHummockIterator> = vec![
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table0),
-                sstable_store.clone(),
-            )),
-            Box::new(ReverseSSTableIterator::new(
-                Arc::new(table1),
-                sstable_store.clone(),
-            )),
-        ];
-
-        let mi = ReverseMergeIterator::new(iters, Arc::new(StateStoreMetrics::unused()));
-        let mut ui = ReverseUserIterator::new(mi, (Unbounded, Unbounded));
-        ui.rewind().await.unwrap();
-
-        fail::cfg(mem_read_err, "return").unwrap();
-        let mut i = 2 * 200;
-        while ui.is_valid() {
-            i -= 1;
-            let key = ui.key();
-            let val = ui.value();
-            assert_eq!(key, user_key(iterator_test_key_of(i).as_slice()));
-            assert_eq!(val, iterator_test_value_of(i).as_slice());
-            let result = ui.next().await;
-            if result.is_err() {
-                assert!(i > 0);
-            }
-        }
-        assert!(i > 0);
-        ui.seek(user_key(iterator_test_key_of(10).as_slice()))
-            .await
-            .unwrap();
-        assert!(!ui.is_valid());
-        fail::remove(mem_read_err);
-    }
-
-    #[tokio::test]
     async fn test_reverse_user_delete() {
         let sstable_store = mock_sstable_store();
         // key=[idx, epoch], value

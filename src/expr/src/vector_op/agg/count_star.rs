@@ -37,16 +37,19 @@ impl Aggregator for CountStar {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
+
     fn update(&mut self, input: &DataChunk) -> Result<()> {
         self.result += input.cardinality();
         Ok(())
     }
+
     fn output(&self, builder: &mut ArrayBuilderImpl) -> Result<()> {
         match builder {
             ArrayBuilderImpl::Int64(b) => b.append(Some(self.result as i64)),
             _ => Err(ErrorCode::InternalError("Unexpected builder for count(*).".into()).into()),
         }
     }
+
     fn update_and_output_with_sorted_groups(
         &mut self,
         input: &DataChunk,

@@ -22,9 +22,10 @@ use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
 use crate::array::column::Column;
 use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
-use crate::array::DataChunk;
+use crate::array::{DataChunk, Row};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
+use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
 
 /// `Op` represents three operations in `StreamChunk`.
@@ -95,6 +96,34 @@ impl StreamChunk {
             visibility,
             cardinality,
         }
+    }
+
+    /// Build a `StreamChunk` from rows.
+    // TODO: introducing something like `StreamChunkBuilder` maybe better.
+    pub fn from_rows(rows: &[(Op, Row)], data_types: &[DataType]) -> Result<Self> {
+        let mut array_builders = data_types
+            .iter()
+            .map(|data_type| data_type.create_array_builder(1))
+            .collect::<Result<Vec<_>>>()?;
+        let mut ops = vec![];
+
+        for (op, row) in rows {
+            ops.push(*op);
+            for (datum, builder) in row.0.iter().zip_eq(array_builders.iter_mut()) {
+                builder.append_datum(datum)?;
+            }
+        }
+
+        let new_arrays = array_builders
+            .into_iter()
+            .map(|builder| builder.finish())
+            .collect::<Result<Vec<_>>>()?;
+
+        let new_columns = new_arrays
+            .into_iter()
+            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .collect::<Vec<_>>();
+        Ok(StreamChunk::new(ops, new_columns, None))
     }
 
     /// `cardinality` return the number of visible tuples
@@ -249,22 +278,21 @@ impl StreamChunk {
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
     pub fn to_pretty_string(&self) -> String {
-        use prettytable::format::Alignment;
-        use prettytable::{format, Cell, Row, Table};
+        use comfy_table::{Cell, CellAlignment, Table};
 
         let mut table = Table::new();
-        table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
+        table.load_preset("||--+-++|    ++++++");
         for row in self.rows() {
             let mut cells = Vec::with_capacity(row.size() + 1);
-            cells.push(Cell::new_align(
-                match row.op() {
+            cells.push(
+                Cell::new(match row.op() {
                     Op::Insert => "+",
                     Op::Delete => "-",
                     Op::UpdateDelete => "U-",
                     Op::UpdateInsert => "U+",
-                },
-                Alignment::RIGHT,
-            ));
+                })
+                .set_alignment(CellAlignment::Right),
+            );
             for datum in &row.values {
                 let str = match datum {
                     None => "".to_owned(), // NULL
@@ -272,7 +300,7 @@ impl StreamChunk {
                 };
                 cells.push(Cell::new(&str));
             }
-            table.add_row(Row::new(cells));
+            table.add_row(cells);
         }
         table.to_string()
     }
@@ -314,8 +342,7 @@ mod tests {
 |  - | 2 |   |
 | U- | 3 | 7 |
 | U+ | 4 |   |
-+----+---+---+
-"
++----+---+---+"
         );
     }
 }

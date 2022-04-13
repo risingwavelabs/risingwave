@@ -43,6 +43,7 @@ impl StreamSimpleAgg {
         let base = PlanBase::new_stream(ctx, logical.schema().clone(), pk_indices, dist, false);
         StreamSimpleAgg { base, logical }
     }
+
     pub fn agg_calls(&self) -> &[PlanAggCall] {
         self.logical.agg_calls()
     }

@@ -58,6 +58,9 @@ pub mod rocksdb_local;
 #[path = "rocksdb_local_mock.rs"]
 pub mod rocksdb_local;
 
+#[cfg(test)]
+#[cfg(feature = "failpoints")]
+mod storage_failpoints;
 #[cfg(feature = "tikv")]
 pub mod tikv;
 #[cfg(not(feature = "tikv"))]

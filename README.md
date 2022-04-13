@@ -1,4 +1,4 @@
-# RisingWave
+![RisingWave Logo](./docs/images/logo-title.svg)
 
 [![Slack](https://badgen.net/badge/Slack/Join%20RisingWave/0abd59?icon=slack)](https://join.slack.com/t/risingwave-community/shared_invite/zt-120rft0mr-d8uGk3d~NZiZAQWPnElOfw)
 [![CI](https://github.com/singularity-data/risingwave/actions/workflows/main.yml/badge.svg)](https://github.com/singularity-data/risingwave/actions/workflows/main.yml)
@@ -6,9 +6,9 @@
 
 RisingWave is a cloud-native streaming database that uses SQL as the interface language. It is designed to reduce the complexity and cost of building real-time applications. RisingWave consumes streaming data, performs continuous queries, and updates results dynamically. As a database system, RisingWave maintains results inside its own storage and allows users to access data efficiently.
 
-RisingWave ingests data from sources like Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
+RisingWave ingests data from sources like Apache Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
-Learn more at [Introduction to RisingWave](https://singularity-data.com/risingwave-docs/docs/latest/intro/).
+Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/latest/intro/).
 
 ## Quick Start
 
@@ -19,7 +19,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 **Use a Pre-built Package (Linux)**
 
 ```shell
+# Download the pre-built binary
 wget https://github.com/singularity-data/risingwave/releases/download/v0.1.5/risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
+# Unzip the binary
 tar xvf risingwave-v0.1.5-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
@@ -59,7 +61,7 @@ create materialized view mv1 as select sum(v1) as sum_v1 from t1;
 /* insert some data into the source table */
 insert into t1 values (1), (2), (3);
 
-/* ensure materialized view has been incrementally updated */
+/* (optional) ensure the materialized view has been updated */
 flush;
 
 /* the materialized view should reflect the changes in source table */
@@ -79,11 +81,11 @@ in the terminal.
 
 ### Connecting to an External Source
 
-Please refer to [getting started guide](https://singularity-data.com/risingwave-docs/docs/latest/getting-started/) for more information.
+Please refer to [getting started guide](https://www.risingwave.dev/docs/latest/getting-started/) for more information.
 
 ## Documentation
 
-To learn about how to use RisingWave, refer to [RisingWave docs](https://singularity-data.com/risingwave-docs/). To learn about how we design and implement RisingWave, refer to [our developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
+To learn about how to use RisingWave, refer to [RisingWave docs](https://www.risingwave.dev/). To learn about how we design and implement RisingWave, refer to [RisingWave developer docs](https://github.com/singularity-data/risingwave/tree/main/docs).
 
 ## License
 

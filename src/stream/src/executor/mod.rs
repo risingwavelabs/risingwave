@@ -31,7 +31,6 @@ pub use global_simple_agg::*;
 pub use hash_agg::*;
 pub use hash_join::*;
 pub use local_simple_agg::*;
-pub use lookup::*;
 pub use merge::*;
 pub use monitor::*;
 pub use mview::*;
@@ -72,7 +71,6 @@ mod global_simple_agg;
 mod hash_agg;
 mod hash_join;
 mod local_simple_agg;
-mod lookup;
 pub(crate) mod managed_state;
 mod merge;
 pub mod monitor;
@@ -179,6 +177,16 @@ impl Barrier {
 
     pub fn is_to_stop_actor(&self, actor_id: ActorId) -> bool {
         matches!(self.mutation.as_deref(), Some(Mutation::Stop(actors)) if actors.contains(&actor_id))
+    }
+
+    pub fn is_to_add_output(&self, actor_id: ActorId) -> bool {
+        matches!(
+            self.mutation.as_deref(),
+            Some(Mutation::AddOutput(map)) if map
+                .values()
+                .flatten()
+                .any(|info| info.actor_id == actor_id)
+        )
     }
 }
 
