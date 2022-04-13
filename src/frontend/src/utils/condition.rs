@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -73,9 +72,9 @@ impl Condition {
         self.conjunctions.is_empty()
     }
 
-    pub fn to_expr(self) -> ExprImpl {
+    pub fn into_expr(self) -> ExprImpl {
         merge_expr_by_binary(
-            self.conjunctions.into_iter().map(Cow::Owned),
+            self.conjunctions.into_iter(),
             ExprType::And,
             ExprImpl::literal_bool(true),
         )
@@ -83,9 +82,9 @@ impl Condition {
 
     // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
     // rather than using `AND` to combine them.
-    pub fn as_expr(&self) -> ExprImpl {
+    pub fn to_expr(&self) -> ExprImpl {
         merge_expr_by_binary(
-            self.conjunctions.iter().map(Cow::Borrowed),
+            self.conjunctions.iter().cloned(),
             ExprType::And,
             ExprImpl::literal_bool(true),
         )
@@ -96,7 +95,7 @@ impl Condition {
         if self.always_true() {
             None
         } else {
-            Some(self.as_expr())
+            Some(self.to_expr())
         }
     }
 

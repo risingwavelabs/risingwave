@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
-
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
@@ -33,16 +31,14 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by_binary<'a, I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
-    I: Iterator<Item = Cow<'a, ExprImpl>>,
+    I: Iterator<Item = ExprImpl>,
 {
     if let Some(e) = exprs.next() {
-        let mut ret = e.into_owned();
+        let mut ret = e;
         for expr in exprs {
-            ret = FunctionCall::new(op, vec![ret, expr.into_owned()])
-                .unwrap()
-                .into();
+            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
         }
         ret
     } else {

@@ -214,7 +214,7 @@ mod tests {
         assert_eq!(filter.schema().fields()[1], fields[2]);
         assert_eq!(filter.id().0, 3);
 
-        let expr = filter.predicate.clone().to_expr();
+        let expr = filter.predicate.clone().into_expr();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
         let values = filter.input();
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(filter.schema().fields().len(), 2);
         assert_eq!(filter.schema().fields()[0], fields[1]);
         assert_eq!(filter.schema().fields()[1], fields[2]);
-        let expr = filter.predicate.clone().to_expr();
+        let expr = filter.predicate.clone().into_expr();
         let call = expr.as_function_call().unwrap();
         assert_eq_input_ref!(&call.inputs()[0], 0);
 

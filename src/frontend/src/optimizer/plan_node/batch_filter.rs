@@ -75,7 +75,7 @@ impl ToDistributedBatch for BatchFilter {
 impl ToBatchProst for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
-            search_condition: Some(self.logical.predicate().as_expr().to_protobuf()),
+            search_condition: Some(self.logical.predicate().to_expr().to_protobuf()),
         })
     }
 }
