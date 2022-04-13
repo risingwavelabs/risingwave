@@ -61,15 +61,7 @@ where
         })
     }
 
-    async fn fetch_splits_for_source(&self, source_id: SourceId) -> Result<Vec<SplitImpl>> {
-        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
-        let source = catalog_guard.get_source(source_id).await?.ok_or_else(|| {
-            RwError::from(InternalError(format!(
-                "could not find source catalog for {}",
-                source_id
-            )))
-        })?;
-
+    async fn fetch_splits_for_source(&self, source: &Source) -> Result<Vec<SplitImpl>> {
         let info = match source.get_info()? {
             Info::StreamSource(s) => s,
             _ => {
@@ -93,12 +85,24 @@ where
     pub async fn schedule_split_for_actors(
         &self,
         actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
+        affiliated_source: Option<Source>,
     ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
-        let source_splits = try_join_all(
-            actors
-                .keys()
-                .map(|source_id| self.fetch_splits_for_source(*source_id)),
-        )
+        let source_ref = &affiliated_source;
+        let source_splits = try_join_all(actors.keys().map(|source_id| async move {
+            if let Some(affiliated_source) = source_ref && *source_id == affiliated_source.get_id() {
+                // we are creating materialized source
+                self.fetch_splits_for_source(affiliated_source).await
+            } else {
+                let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+                let source = catalog_guard.get_source(*source_id).await?.ok_or_else(|| {
+                        RwError::from(InternalError(format!(
+                            "could not find source catalog for {}",
+                            source_id
+                        )))
+                    })?;
+                self.fetch_splits_for_source(&source).await
+            }
+        }))
         .await?;
         let mut result = HashMap::new();
 
