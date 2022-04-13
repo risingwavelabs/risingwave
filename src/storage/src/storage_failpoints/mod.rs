@@ -12,5 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod rand_array;
-pub mod test_stream_chunk;
+mod test_hummock;
+mod test_iterator;
+mod test_sstable;

@@ -208,15 +208,6 @@ impl<S: StateStore> Executor for InnerTopNExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lowest_state.clear_cache();
-        self.managed_middle_state.clear_cache();
-        self.managed_highest_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
 }
 
 #[async_trait]
@@ -442,6 +433,18 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 

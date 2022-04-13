@@ -77,8 +77,4 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
     fn identity(&self) -> &str {
         "<unknown>"
     }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        Ok(())
-    }
 }

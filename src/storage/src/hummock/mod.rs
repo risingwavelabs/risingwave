@@ -37,7 +37,7 @@ mod compactor_tests;
 mod conflict_detector;
 mod error;
 pub mod hummock_meta_client;
-mod iterator;
+pub(crate) mod iterator;
 pub mod local_version_manager;
 mod shared_buffer;
 #[cfg(test)]
@@ -45,8 +45,9 @@ mod snapshot_tests;
 mod sstable_store;
 #[cfg(test)]
 mod state_store_tests;
+pub mod test_runner;
 #[cfg(test)]
-mod test_utils;
+pub(crate) mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
@@ -377,12 +378,13 @@ impl StateStore for HummockStorage {
                     )
                 })
                 .collect_vec();
-            self.shared_buffer_manager.write_batch(batch, epoch)?;
+
+            let batch_size = self.shared_buffer_manager.write_batch(batch, epoch).await?;
 
             if !self.options.async_checkpoint_enabled {
                 self.shared_buffer_manager.sync(Some(epoch)).await?;
             }
-            Ok(())
+            Ok(batch_size)
         }
     }
 

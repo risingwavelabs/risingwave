@@ -85,15 +85,13 @@ message HashJoinNode {
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
-  // The schema of input columns.
+  // The schema of input columns. TODO: remove this field.
   repeated plan.Field fields = 2;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  // The schema of input columns.
-  repeated plan.Field fields = 1;
   DispatchStrategy strategy = 2;
 }
 
@@ -140,13 +138,24 @@ message StreamNode {
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
   string identity = 18;
+  // The schema of the plan node
+  repeated plan.Field fields = 19;
 }
 
 enum DispatcherType {
   INVALID = 0;
+  // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
+  // Broadcast to all downstreams.
+  // TODO: we don't need this as we now support multi-dispatcher per actor.
   BROADCAST = 2;
+  // Only one downstream.
+  // TODO: seems that same as broadcast dispatch (with only one downstream actor).
   SIMPLE = 3;
+  // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
+  // piped into the downstream actor, if there are the same number of actors. If number of actors
+  // are not the same, should use hash instead. Should be only used when distribution is the same.
+  NO_SHUFFLE = 4;
 }
 
 message DispatchStrategy {
