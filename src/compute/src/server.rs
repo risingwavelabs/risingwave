@@ -101,10 +101,6 @@ pub async fn compute_node_serve(
     // Initialize state store.
     let storage_config = Arc::new(config.storage.clone());
     let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
-    log::info!(
-        "State store shared buffer threshold {} MB",
-        storage_config.shared_buffer_threshold_size
-    );
 
     let state_store = StateStoreImpl::new(
         &opts.state_store,
