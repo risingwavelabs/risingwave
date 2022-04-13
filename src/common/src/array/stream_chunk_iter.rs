@@ -106,13 +106,14 @@ impl<'a> Iterator for StreamChunkRefIterV2<'a> {
                 }
             }
             None => {
-                if self.idx >= self.chunk.capacity() {
+                let idx = self.idx;
+                if idx >= self.chunk.capacity() {
                     return None;
                 }
                 self.idx += 1;
                 Some(RowRefV2 {
                     chunk: self.chunk,
-                    idx: self.idx,
+                    idx,
                 })
             }
         }
@@ -126,11 +127,13 @@ pub struct RowRefV2<'a> {
 
 impl RowRefV2<'_> {
     pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
+        debug_assert!(self.idx < self.chunk.capacity());
         // TODO: It's safe to use value_at_unchecked here.
         self.chunk.columns()[pos].array_ref().value_at(self.idx)
     }
 
     pub fn op(&self) -> Op {
+        debug_assert!(self.idx < self.chunk.capacity());
         // SAFETY: idx is checked while creating `RowRefV2`.
         unsafe { *self.chunk.ops().get_unchecked(self.idx) }
     }
@@ -140,6 +143,7 @@ impl RowRefV2<'_> {
     }
 
     pub fn values(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        debug_assert!(self.idx < self.chunk.capacity());
         RowRefV2Iter {
             columns: self.chunk.columns().iter(),
             row_idx: self.idx,
