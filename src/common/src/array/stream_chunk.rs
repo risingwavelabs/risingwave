@@ -282,7 +282,7 @@ impl StreamChunk {
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
-        for row in self.rows() {
+        for row in self.rows_v2() {
             let mut cells = Vec::with_capacity(row.size() + 1);
             cells.push(
                 Cell::new(match row.op() {
@@ -293,7 +293,7 @@ impl StreamChunk {
                 })
                 .set_alignment(CellAlignment::Right),
             );
-            for datum in &row.values {
+            for datum in row.values() {
                 let str = match datum {
                     None => "".to_owned(), // NULL
                     Some(scalar) => scalar.to_string(),

@@ -139,7 +139,7 @@ impl RowRefV2<'_> {
         self.chunk.columns().len()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+    pub fn values(&self) -> impl Iterator<Item = DatumRef<'_>> {
         RowRefV2Iter {
             columns: self.chunk.columns().iter(),
             row_idx: self.idx,
@@ -177,7 +177,7 @@ mod tests {
             (
                 row.op(),
                 Row(row
-                    .iter()
+                    .values()
                     .map(ToOwnedDatum::to_owned_datum)
                     .collect::<Vec<_>>()),
             )
