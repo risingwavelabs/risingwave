@@ -14,6 +14,7 @@
 
 use aws_sdk_s3::{Client, Endpoint, Region};
 use aws_smithy_http::body::SdkBody;
+use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 
@@ -29,6 +30,9 @@ pub struct S3ObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for S3ObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        fail_point!("s3_upload_err", |_| Err(ObjectError::internal(
+            "s3 upload error"
+        )));
         self.client
             .put_object()
             .bucket(&self.bucket)
@@ -41,6 +45,9 @@ impl ObjectStore for S3ObjectStore {
 
     /// Amazon S3 doesn't support retrieving multiple ranges of data per GET request.
     async fn read(&self, path: &str, block_loc: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        fail_point!("s3_read_err", |_| Err(ObjectError::internal(
+            "s3 read error"
+        )));
         let req = self.client.get_object().bucket(&self.bucket).key(path);
 
         let range = match block_loc.as_ref() {
@@ -78,6 +85,9 @@ impl ObjectStore for S3ObjectStore {
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
+        fail_point!("s3_metadata_err", |_| Err(ObjectError::internal(
+            "s3 metadata error"
+        )));
         let resp = self
             .client
             .head_object()
@@ -93,6 +103,9 @@ impl ObjectStore for S3ObjectStore {
     /// Permanently deletes the whole object.
     /// According to Amazon S3, this will simply return Ok if the object does not exist.
     async fn delete(&self, path: &str) -> ObjectResult<()> {
+        fail_point!("s3_delete_err", |_| Err(ObjectError::internal(
+            "s3 delete error"
+        )));
         self.client
             .delete_object()
             .bucket(&self.bucket)

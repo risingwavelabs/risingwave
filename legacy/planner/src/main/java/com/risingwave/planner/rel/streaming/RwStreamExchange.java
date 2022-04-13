@@ -60,7 +60,6 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     var exchangeBuilder = ExchangeNode.newBuilder();
     var primaryKeyIndices =
         ((RisingWaveRelMetadataQuery) getCluster().getMetadataQuery()).getPrimaryKeyIndices(this);
-    exchangeBuilder.addAllFields(this.getFields());
 
     // Add dispatcher.
     RelDistribution distribution = getDistribution();
@@ -78,6 +77,7 @@ public class RwStreamExchange extends Exchange implements RisingWaveStreamingRel
     return StreamNode.newBuilder()
         .setExchangeNode(exchangeBuilder)
         .addAllPkIndices(primaryKeyIndices)
+        .addAllFields(this.getFields())
         .build();
   }
 

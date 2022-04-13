@@ -20,11 +20,13 @@ use risingwave_common::error::Result;
 use risingwave_pb::meta::table_fragments::fragment::FragmentType;
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus, Fragment};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{StreamActor, StreamNode};
 
 use super::{ActorId, FragmentId};
 use crate::cluster::WorkerId;
+use crate::manager::SourceId;
 use crate::model::MetadataModel;
 
 /// Column family name for table fragments.
@@ -150,6 +152,22 @@ impl TableFragments {
         }
 
         false
+    }
+
+    pub fn fetch_stream_source_id(stream_node: &StreamNode) -> Option<SourceId> {
+        if let Some(Node::SourceNode(s)) = stream_node.node.as_ref() {
+            if s.source_type == SourceType::Source as i32 {
+                return Some(s.table_ref_id.as_ref().unwrap().table_id as SourceId);
+            }
+        }
+
+        for child in &stream_node.input {
+            if let Some(source_id) = Self::fetch_stream_source_id(child) {
+                return Some(source_id);
+            }
+        }
+
+        None
     }
 
     /// Returns actors that contains Chain node.

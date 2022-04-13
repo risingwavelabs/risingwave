@@ -197,14 +197,6 @@ impl<S: StateStore> Executor for InnerAppendOnlyTopNExecutor<S> {
     fn identity(&self) -> &str {
         &self.info.identity
     }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache();
-        self.managed_higher_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
 }
 
 #[async_trait]

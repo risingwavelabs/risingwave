@@ -17,22 +17,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::base::SourceSplit;
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum KafkaOffset {
-    Earliest,
-    Latest,
-    Offset(i64),
-    Timestamp(i64),
-    None,
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct KafkaSplit {
+    pub(crate) topic: String,
+    pub(crate) partition: i32,
+    pub(crate) start_offset: Option<i64>,
+    pub(crate) stop_offset: Option<i64>,
 }
 
-#[derive(Copy, Clone, Serialize, Deserialize)]
-pub struct KafkaSplit {
-    pub(crate) partition: i32,
-    pub(crate) start_offset: KafkaOffset,
-    pub(crate) stop_offset: KafkaOffset,
-}
+pub const KAFKA_SPLIT_TYPE: &str = "kafka";
 
 impl SourceSplit for KafkaSplit {
     fn id(&self) -> String {
@@ -42,11 +35,25 @@ impl SourceSplit for KafkaSplit {
     fn to_string(&self) -> anyhow::Result<String> {
         serde_json::to_string(self).map_err(|e| anyhow!(e))
     }
+
+    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn get_type(&self) -> String {
+        KAFKA_SPLIT_TYPE.to_string()
+    }
 }
 
 impl KafkaSplit {
-    pub fn new(partition: i32, start_offset: KafkaOffset, stop_offset: KafkaOffset) -> KafkaSplit {
+    pub fn new(
+        partition: i32,
+        start_offset: Option<i64>,
+        stop_offset: Option<i64>,
+        topic: String,
+    ) -> KafkaSplit {
         KafkaSplit {
+            topic,
             partition,
             start_offset,
             stop_offset,

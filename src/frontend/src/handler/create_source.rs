@@ -16,12 +16,15 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::error::Result;
+use risingwave_common::error::ErrorCode::ProtocolError;
+use risingwave_common::error::{Result, RwError};
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
 use risingwave_pb::plan::{ColumnCatalog as ProstColumnCatalog, RowFormatType};
 use risingwave_source::ProtobufParser;
-use risingwave_sqlparser::ast::{CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema};
+use risingwave_sqlparser::ast::{
+    CreateSourceStatement, ObjectName, ProtobufSchema, SourceSchema, SqlOption, Value,
+};
 
 use super::create_table::{bind_sql_columns, gen_materialized_source_plan};
 use crate::binder::Binder;
@@ -64,6 +67,18 @@ fn extract_protobuf_table_schema(schema: &ProtobufSchema) -> Result<Vec<ProstCol
         .collect_vec())
 }
 
+fn handle_source_with_properties(options: Vec<SqlOption>) -> Result<HashMap<String, String>> {
+    options
+        .into_iter()
+        .map(|x| match x.value {
+            Value::SingleQuotedString(s) => Ok((x.name.value, s)),
+            _ => Err(RwError::from(ProtocolError(
+                "with properties only support single quoted string value".to_string(),
+            ))),
+        })
+        .collect()
+}
+
 pub(super) async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
@@ -74,7 +89,7 @@ pub(super) async fn handle_create_source(
             let mut columns = vec![ColumnCatalog::row_id_column().to_protobuf()];
             columns.extend(extract_protobuf_table_schema(protobuf_schema)?.into_iter());
             StreamSourceInfo {
-                properties: HashMap::from(stmt.with_properties),
+                properties: handle_source_with_properties(stmt.with_properties.0)?,
                 row_format: RowFormatType::Protobuf as i32,
                 row_schema_location: protobuf_schema.row_schema_location.0.clone(),
                 row_id_index: 0,
@@ -83,7 +98,7 @@ pub(super) async fn handle_create_source(
             }
         }
         SourceSchema::Json => StreamSourceInfo {
-            properties: HashMap::from(stmt.with_properties),
+            properties: handle_source_with_properties(stmt.with_properties.0)?,
             row_format: RowFormatType::Json as i32,
             row_schema_location: "".to_string(),
             row_id_index: 0,
@@ -113,50 +128,16 @@ pub(super) async fn handle_create_source(
 #[cfg(test)]
 pub mod tests {
     use std::collections::HashMap;
-    use std::io::Write;
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
     use risingwave_common::types::DataType;
-    use tempfile::NamedTempFile;
 
     use crate::catalog::gen_row_id_column_name;
-    use crate::test_utils::LocalFrontend;
-
-    /// Returns the file.
-    /// (`NamedTempFile` will automatically delete the file when it goes out of scope.)
-    pub fn create_proto_file() -> NamedTempFile {
-        static PROTO_FILE_DATA: &str = r#"
-    syntax = "proto3";
-    package test;
-    message TestRecord {
-      int32 id = 1;
-      Country country = 3;
-      int64 zipcode = 4;
-      float rate = 5;
-    }
-    message Country {
-      string address = 1;
-      City city = 2;
-      string zipcode = 3;
-    }
-    message City {
-      string address = 1;
-      string zipcode = 2;
-    }"#;
-        let temp_file = tempfile::Builder::new()
-            .prefix("temp")
-            .suffix(".proto")
-            .rand_bytes(5)
-            .tempfile()
-            .unwrap();
-        let mut file = temp_file.as_file();
-        file.write_all(PROTO_FILE_DATA.as_ref()).unwrap();
-        temp_file
-    }
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_create_source_handler() {
-        let proto_file = create_proto_file();
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')

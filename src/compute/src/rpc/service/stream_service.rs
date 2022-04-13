@@ -219,7 +219,6 @@ impl StreamServiceImpl {
                     .create_source_v2(&id, info.to_owned())
                     .await?;
             }
-
             Info::TableSource(info) => {
                 let columns = info
                     .columns
