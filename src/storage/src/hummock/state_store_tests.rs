@@ -20,15 +20,15 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 
-use super::{HummockStateStoreIter, HummockStorage, StateStore};
+use super::HummockStorage;
 use crate::hummock::iterator::test_utils::mock_sstable_store_with_object_store;
 use crate::hummock::key::Epoch;
 use crate::hummock::local_version_manager::LocalVersionManager;
-use crate::hummock::test_utils::default_config_for_test;
+use crate::hummock::test_utils::{count_iter, default_config_for_test};
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::{StorageValue, VALUE_META_SIZE};
-use crate::StateStoreIter;
+use crate::StateStore;
 
 #[tokio::test]
 async fn test_basic() {
@@ -271,14 +271,6 @@ async fn test_state_store_sync() {
             .shared_buffer_cur_size
             .load(Ordering::SeqCst)
     );
-}
-
-async fn count_iter(iter: &mut HummockStateStoreIter<'_>) -> usize {
-    let mut c: usize = 0;
-    while iter.next().await.unwrap().is_some() {
-        c += 1
-    }
-    c
 }
 
 #[tokio::test]
