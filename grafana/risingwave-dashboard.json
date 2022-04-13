@@ -227,7 +227,7 @@
 			"yaxes": [
 				{
 					"$$hashKey": "object:98",
-					"format": "percent",
+					"format": "percentunit",
 					"logBase": 1,
 					"show": true
 				},

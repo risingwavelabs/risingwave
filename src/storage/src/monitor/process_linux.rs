@@ -1,8 +1,16 @@
 // Copyright 2022 Singularity Data
-// Copyright 2020 TiKV Project Authors. Licensed under Apache-2.0.
-
-//! This module is a subset of rust-prometheus's process collector, without the fd collector
-//! to avoid memory fragmentation issues when open fd is large.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 use std::io::{Error, ErrorKind, Result};
 
@@ -23,7 +31,6 @@ pub struct ProcessCollector {
     cpu_total: IntCounter,
     vsize: IntGauge,
     rss: IntGauge,
-    start_time: IntGauge,
 }
 
 impl ProcessCollector {
@@ -52,28 +59,11 @@ impl ProcessCollector {
         .unwrap();
         descs.extend(rss.desc().into_iter().cloned());
 
-        let start_time = IntGauge::with_opts(Opts::new(
-            "process_start_time_seconds",
-            "Start time of the process since unix epoch \
-                 in seconds.",
-        ))
-        .unwrap();
-        descs.extend(start_time.desc().into_iter().cloned());
-        // proc_start_time init once because it is immutable
-        #[cfg(target_os = "linux")]
-        {
-            if let Ok(boot_time) = procfs::boot_time_secs() {
-                if let Ok(p) = procfs::process::Process::myself() {
-                    start_time.set(p.stat.starttime as i64 / 1_000_000 + boot_time as i64);
-                }
-            }
-        }
         Self {
             descs,
             cpu_total,
             vsize,
             rss,
-            start_time,
         }
     }
 }
@@ -110,7 +100,6 @@ impl Collector for ProcessCollector {
         mfs.extend(cpu_total_mfs);
         mfs.extend(self.vsize.collect());
         mfs.extend(self.rss.collect());
-        mfs.extend(self.start_time.collect());
         mfs
     }
 }
@@ -122,12 +111,13 @@ impl Collector for ProcessCollector {
     }
 
     fn collect(&self) -> Vec<proto::MetricFamily> {
-        self.vsize.set(1000 * 1000);
-        self.rss.set(1000 * 1000 * 1000);
+        // fake number
+        self.vsize.set(100 * 1000);
+        self.rss.set(100 * 1000);
 
         // cpu
         let cpu_total_mfs = {
-            self.cpu_total.inc_by(80);
+            self.cpu_total.inc_by(10);
             self.cpu_total.collect()
         };
 
@@ -136,7 +126,6 @@ impl Collector for ProcessCollector {
         mfs.extend(cpu_total_mfs);
         mfs.extend(self.vsize.collect());
         mfs.extend(self.rss.collect());
-        mfs.extend(self.start_time.collect());
         mfs
     }
 }
