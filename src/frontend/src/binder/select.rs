@@ -156,6 +156,7 @@ impl Binder {
     pub fn bind_columns(columns: &[ColumnBinding]) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
+            .filter(|c|!c.column_name.contains('.'))
             .map(|column| {
                 (
                     InputRef::new(column.index, column.data_type.clone()).into(),
@@ -171,6 +172,7 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
+            .filter(|c|!c.column_name.contains('.'))
             .filter_map(|column| {
                 if !column.is_hidden {
                     Some((

@@ -100,7 +100,7 @@ pub mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
-        let sql = "create materialized view mv1 as select t1.country from t1";
+        let sql = "create materialized view mv1 as select country as c from t1";
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();
@@ -140,12 +140,12 @@ pub mod tests {
         let row_id_col_name = gen_row_id_column_name(0);
         let expected_columns = maplit::hashmap! {
             row_id_col_name.as_str() => DataType::Int64,
-            "country.zipcode" => DataType::Varchar,
-            "country.city.address" => DataType::Varchar,
-            "country.address" => DataType::Varchar,
-            "country.city" => city_type.clone(),
-            "country.city.zipcode" => DataType::Varchar,
-            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+            "c.zipcode" => DataType::Varchar,
+            "c.city.address" => DataType::Varchar,
+            "c.address" => DataType::Varchar,
+            "c.city" => city_type.clone(),
+            "c.city.zipcode" => DataType::Varchar,
+            "c" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
         };
         assert_eq!(columns, expected_columns);
     }
