@@ -218,6 +218,7 @@ impl fmt::Debug for HummockStorage {
 
 impl StateStore for HummockStorage {
     type Iter<'a> = HummockStateStoreIter<'a>;
+
     define_state_store_associated_type!();
 
     /// Gets the value of a specified `key`.
@@ -631,7 +632,9 @@ impl<'a> HummockStateStoreIter<'a> {
 impl<'a> StateStoreIter for HummockStateStoreIter<'a> {
     // TODO: directly return `&[u8]` to user instead of `Bytes`.
     type Item = (Bytes, Bytes);
+
     type NextFuture<'b> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self:'b;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let iter = &mut self.inner;

@@ -38,7 +38,9 @@ use crate::barrier::GlobalBarrierManager;
 use crate::cluster::ClusterManager;
 use crate::dashboard::DashboardService;
 use crate::hummock;
-use crate::manager::{CatalogManager, MemEpochGenerator, MetaSrvEnv, StoredCatalogManager};
+use crate::manager::{
+    CatalogManager, MemEpochGenerator, MetaOpts, MetaSrvEnv, StoredCatalogManager,
+};
 use crate::rpc::metrics::MetaMetrics;
 use crate::rpc::service::catalog_service::CatalogServiceImpl;
 use crate::rpc::service::cluster_service::ClusterServiceImpl;
@@ -47,7 +49,7 @@ use crate::rpc::service::heartbeat_service::HeartbeatServiceImpl;
 use crate::rpc::service::hummock_service::HummockServiceImpl;
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore};
-use crate::stream::{FragmentManager, GlobalSourceManager, GlobalStreamManager};
+use crate::stream::{FragmentManager, GlobalStreamManager, SourceManager};
 
 #[derive(Debug)]
 pub enum MetaStoreBackend {
@@ -62,6 +64,7 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
+    opts: MetaOpts,
 ) -> Result<(JoinHandle<()>, UnboundedSender<()>)> {
     Ok(match meta_store_backend {
         MetaStoreBackend::Etcd { endpoints } => {
@@ -82,6 +85,7 @@ pub async fn rpc_serve(
                 meta_store,
                 max_heartbeat_interval,
                 ui_path,
+                opts,
             )
             .await
         }
@@ -94,6 +98,7 @@ pub async fn rpc_serve(
                 meta_store,
                 max_heartbeat_interval,
                 ui_path,
+                opts,
             )
             .await
         }
@@ -107,10 +112,11 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     meta_store: Arc<S>,
     max_heartbeat_interval: Duration,
     ui_path: Option<String>,
+    opts: MetaOpts,
 ) -> (JoinHandle<()>, UnboundedSender<()>) {
     let listener = TcpListener::bind(addr).await.unwrap();
     let epoch_generator = Arc::new(MemEpochGenerator::new());
-    let env = MetaSrvEnv::<S>::new(meta_store.clone(), epoch_generator.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone(), epoch_generator.clone()).await;
 
     let fragment_manager = Arc::new(FragmentManager::new(meta_store.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
@@ -155,27 +161,12 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
         meta_metrics.clone(),
     ));
 
-    let stream_manager = Arc::new(
-        GlobalStreamManager::new(
-            env.clone(),
-            fragment_manager.clone(),
-            barrier_manager.clone(),
-            cluster_manager.clone(),
-        )
-        .await
-        .unwrap(),
-    );
-
-    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
-        hummock_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
     let source_manager = Arc::new(
-        GlobalSourceManager::new(
+        SourceManager::new(
             env.clone(),
             cluster_manager.clone(),
             barrier_manager.clone(),
+            catalog_manager_v2.clone(),
         )
         .await
         .unwrap(),
@@ -187,6 +178,23 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             source_manager.run().await.unwrap();
         });
     }
+
+    let stream_manager = Arc::new(
+        GlobalStreamManager::new(
+            env.clone(),
+            fragment_manager.clone(),
+            barrier_manager.clone(),
+            cluster_manager.clone(),
+            source_manager.clone(),
+        )
+        .await
+        .unwrap(),
+    );
+
+    let vacuum_trigger = Arc::new(hummock::VacuumTrigger::new(
+        hummock_manager.clone(),
+        compactor_manager.clone(),
+    ));
 
     let epoch_srv = EpochServiceImpl::new(epoch_generator.clone());
     let heartbeat_srv = HeartbeatServiceImpl::new(cluster_manager.clone());

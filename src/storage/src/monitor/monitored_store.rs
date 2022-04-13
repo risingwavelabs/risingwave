@@ -38,6 +38,7 @@ impl<S> MonitoredStateStore<S> {
     pub fn new(inner: S, stats: Arc<StateStoreMetrics>) -> Self {
         Self { inner, stats }
     }
+
     pub fn inner(&self) -> &S {
         &self.inner
     }
@@ -70,6 +71,7 @@ where
     S: StateStore,
 {
     type Iter<'a> = MonitoredStateStoreIter<S::Iter<'a>> where Self: 'a;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
@@ -225,7 +227,9 @@ where
     I: StateStoreIter<Item = (Bytes, Bytes)>,
 {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>> where Self: 'a;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move {
             let pair = self.inner.next().await?;

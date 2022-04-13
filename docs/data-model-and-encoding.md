@@ -29,7 +29,7 @@ Primitive data types:
 Composite data types (WIP):
 
 - `Struct`: A structure with a list of named, strong-typed fields.
-- `List`: A variable-length list of values with same data type
+- `List`: A variable-length list of values with same data type.
 
 ## In-Memory Encoding
 

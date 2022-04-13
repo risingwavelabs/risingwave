@@ -20,7 +20,7 @@ use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk, Row};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::{DataChunkBuilder, SlicedDataChunk};
 use risingwave_expr::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
@@ -145,11 +145,12 @@ impl Executor for NestedLoopJoinExecutor {
                         Ok(Some(data_chunk))
                     } else {
                         Ok(None)
-                    }
+                    };
                 }
             }
         }
     }
+
     async fn close(&mut self) -> Result<()> {
         Ok(())
     }
@@ -265,7 +266,11 @@ impl BoxedExecutorBuilder for NestedLoopJoinExecutor {
                             .fuse(),
                         ))
                     }
-                    _ => unimplemented!("Do not support {:?} join type now.", join_type),
+                    _ => Err(ErrorCode::NotImplemented(
+                        format!("Do not support {:?} join type now.", join_type),
+                        None.into(),
+                    )
+                    .into()),
                 }
             }
             (_, _) => Err(InternalError("Filter must have one children".to_string()).into()),
@@ -297,7 +302,11 @@ impl NestedLoopJoinExecutor {
                 JoinType::RightOuter => self.do_right_outer_join(),
                 JoinType::RightSemi => self.do_right_semi_join(),
                 JoinType::RightAnti => self.do_right_anti_join(),
-                _ => unimplemented!("Do not support other join types!"),
+                _ => Err(ErrorCode::NotImplemented(
+                    "Do not support other join types!".to_string(),
+                    None.into(),
+                )
+                .into()),
             }?;
 
             if probe_result.cur_row_finished {
@@ -337,7 +346,11 @@ impl NestedLoopJoinExecutor {
         match self.join_type {
             JoinType::RightOuter => self.do_probe_remaining_right_outer(),
             JoinType::RightAnti => self.do_probe_remaining_right_anti(),
-            _ => unimplemented!(""),
+            _ => Err(ErrorCode::NotImplemented(
+                "unsupported type for probe_remaining".to_string(),
+                None.into(),
+            )
+            .into()),
         }
     }
 
@@ -550,9 +563,12 @@ impl NestedLoopJoinExecutor {
             (None, _) => right.visibility().clone(),
             (_, None) => left.visibility().clone(),
             (Some(_), Some(_)) => {
-                unimplemented!(
+                return Err(ErrorCode::NotImplemented(
                     "The concatenate behaviour of two chunk with visibility is undefined"
+                        .to_string(),
+                    None.into(),
                 )
+                .into())
             }
         };
         let builder = DataChunk::builder().columns(concated_columns);
@@ -857,7 +873,7 @@ mod tests {
         let test_fixture = TestFixture::with_join_type(JoinType::LeftOuter);
 
         let column1 = Column::new(Arc::new(
-        array! {I32Array, [Some(1), Some(2), Some(3), Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
+            array! {I32Array, [Some(1), Some(2), Some(3), Some(3), Some(4), Some(6), Some(6), Some(8)]}.into(),
         ));
 
         let column2 = Column::new(Arc::new(array! {F32Array, [Some(6.1f32), Some(8.4f32), Some(3.9f32), Some(6.6f32), Some(0.7f32), Some(5.5f32), Some(5.6f32), Some(7.0f32)]}.into()));

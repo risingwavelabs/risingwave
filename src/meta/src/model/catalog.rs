@@ -37,8 +37,8 @@ const FIRST_VERSION_ID: CatalogVersion = 1;
 macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
         impl MetadataModel for $name {
-            type ProstType = Self;
             type KeyType = $key_ty;
+            type ProstType = Self;
 
             fn cf_name() -> String {
                 $cf.to_string()
@@ -93,8 +93,8 @@ impl CatalogVersionGenerator {
 }
 
 impl MetadataModel for CatalogVersionGenerator {
-    type ProstType = CatalogVersion;
     type KeyType = String;
+    type ProstType = CatalogVersion;
 
     fn cf_name() -> String {
         CATALOG_VERSION_CF_NAME.to_string()

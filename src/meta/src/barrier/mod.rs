@@ -21,6 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -35,7 +36,7 @@ pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
-use crate::cluster::ClusterManagerRef;
+use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::model::BarrierManagerState;
@@ -139,6 +140,9 @@ pub struct GlobalBarrierManager<S: MetaStore> {
     /// The maximal interval for sending a barrier.
     interval: Duration,
 
+    /// Enable recovery or not when failover.
+    enable_recovery: bool,
+
     /// The queue of scheduled barriers.
     scheduled_barriers: ScheduledBarriers,
 
@@ -159,8 +163,6 @@ impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
-    const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-
     /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -170,12 +172,14 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make this configurable
+        // TODO: make interval configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
+        let enable_recovery = env.opts.enable_recovery;
 
         Self {
             interval,
+            enable_recovery,
             cluster_manager,
             catalog_manager,
             fragment_manager,
@@ -202,22 +206,24 @@ where
         let mut min_interval = tokio::time::interval(self.interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut unfinished = UnfinishedNotifiers::default();
-
-        // handle init, here we simply trigger a recovery process to achieve the consistency. We
-        // may need to avoid this when we have more state persisted in meta store.
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
-        let new_epoch = self.env.epoch_generator().generate().into_inner();
-        assert!(new_epoch > state.prev_epoch);
-        state.prev_epoch = new_epoch;
 
-        let (new_epoch, actors_to_finish, finished_create_mviews) =
-            self.recovery(state.prev_epoch, None).await;
-        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
-        for finished in finished_create_mviews {
-            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+        if self.enable_recovery {
+            // handle init, here we simply trigger a recovery process to achieve the consistency. We
+            // may need to avoid this when we have more state persisted in meta store.
+            let new_epoch = self.env.epoch_generator().generate().into_inner();
+            assert!(new_epoch > state.prev_epoch);
+            state.prev_epoch = new_epoch;
+
+            let (new_epoch, actors_to_finish, finished_create_mviews) =
+                self.recovery(state.prev_epoch, None).await;
+            unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+            for finished in finished_create_mviews {
+                unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+            }
+            state.prev_epoch = new_epoch.into_inner();
+            state.update(self.env.meta_store()).await.unwrap();
         }
-        state.prev_epoch = new_epoch.into_inner();
-        state.update(self.env.meta_store()).await.unwrap();
 
         loop {
             tokio::select! {
@@ -266,16 +272,20 @@ where
                     notifiers
                         .into_iter()
                         .for_each(|notifier| notifier.notify_collection_failed(e.clone()));
-                    // If failed, enter recovery mode.
-                    let (new_epoch, actors_to_finish, finished_create_mviews) =
-                        self.recovery(state.prev_epoch, Some(command)).await;
-                    unfinished = UnfinishedNotifiers::default();
-                    unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
-                    for finished in finished_create_mviews {
-                        unfinished.finish_actors(finished.epoch, once(finished.actor_id));
-                    }
+                    if self.enable_recovery {
+                        // If failed, enter recovery mode.
+                        let (new_epoch, actors_to_finish, finished_create_mviews) =
+                            self.recovery(state.prev_epoch, Some(command)).await;
+                        unfinished = UnfinishedNotifiers::default();
+                        unfinished.add(new_epoch.into_inner(), actors_to_finish, vec![]);
+                        for finished in finished_create_mviews {
+                            unfinished.finish_actors(finished.epoch, once(finished.actor_id));
+                        }
 
-                    state.prev_epoch = new_epoch.into_inner();
+                        state.prev_epoch = new_epoch.into_inner();
+                    } else {
+                        panic!("failed to execute barrier: {:?}", e);
+                    }
                 }
             }
 
@@ -428,6 +438,8 @@ where
         let (collect_tx, collect_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
 
+        let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
@@ -439,7 +451,22 @@ where
         .await?;
 
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
-        finish_rx.await.unwrap(); // Wait for this command to be finished.
+
+        // TODO: refactor this
+        if is_create_mv {
+            // The snapshot ingestion may last for several epochs, we should pin the epoch here.
+            // TODO: this should be done in `post_collect`
+            let snapshot = self
+                .hummock_manager
+                .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
+                .await?;
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+            self.hummock_manager
+                .unpin_snapshot(META_NODE_ID, [snapshot])
+                .await?;
+        } else {
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+        }
 
         Ok(())
     }

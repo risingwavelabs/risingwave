@@ -81,6 +81,7 @@ impl TaskId {
 
 impl TryFrom<&ProstOutputId> for TaskOutputId {
     type Error = RwError;
+
     fn try_from(prost: &ProstOutputId) -> Result<Self> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),

@@ -15,6 +15,7 @@
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
+use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, Scalar};
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::ExprNode;
@@ -42,7 +43,7 @@ pub type ExprType = risingwave_pb::expr::expr_node::Type;
 
 pub use expr_rewriter::ExprRewriter;
 pub use expr_visitor::ExprVisitor;
-pub use type_inference::infer_type;
+pub use type_inference::{cast_ok, infer_type, least_restrictive, CastContext};
 pub use utils::*;
 
 /// the trait of bound exprssions
@@ -99,20 +100,19 @@ impl ExprImpl {
         matches!(self, ExprImpl::Literal(literal) if literal.get_data().is_none())
     }
 
-    /// Check if cast needs to be inserted.
-    /// TODO: check castiblility with context.
-    pub fn ensure_type(self, ty: DataType) -> ExprImpl {
-        if self.is_null() {
-            ExprImpl::Literal(Box::new(Literal::new(None, ty)))
-        } else if ty == self.return_type() {
-            self
-        } else {
-            ExprImpl::FunctionCall(Box::new(FunctionCall::new_with_return_type(
-                ExprType::Cast,
-                vec![self],
-                ty,
-            )))
-        }
+    /// Shorthand to create cast expr to `target` type in implicit context.
+    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Implicit)
+    }
+
+    /// Shorthand to create cast expr to `target` type in assign context.
+    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Assign)
+    }
+
+    /// Shorthand to create cast expr to `target` type in explicit context.
+    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
+        FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 }
 

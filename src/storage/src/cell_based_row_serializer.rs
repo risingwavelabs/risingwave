@@ -30,6 +30,7 @@ impl CellBasedRowSerializer {
     pub fn new() -> Self {
         Self {}
     }
+
     pub fn serialize(
         &mut self,
         pk: &[u8],

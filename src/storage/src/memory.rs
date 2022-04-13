@@ -90,6 +90,7 @@ impl MemoryStateStore {
 
 impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, key: &'a [u8], epoch: HummockEpoch) -> Self::GetFuture<'_> {
@@ -167,6 +168,7 @@ impl StateStore for MemoryStateStore {
         async move {
             if !kv_pairs.is_empty() {
                 let mut inner = self.inner.lock().await;
+                #[allow(clippy::mutable_key_type)]
                 let table_store = inner.entry(table_id).or_insert_with(BTreeMap::new);
                 for (key, value) in kv_pairs {
                     table_store.insert((key, Reverse(epoch)), value.user_value);
@@ -242,7 +244,9 @@ impl MemoryStateStoreIter {
 
 impl StateStoreIter for MemoryStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { Ok(self.inner.next()) }
     }

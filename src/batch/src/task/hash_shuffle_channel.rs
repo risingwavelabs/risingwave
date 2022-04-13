@@ -88,6 +88,7 @@ fn generate_new_data_chunks(
 
 impl ChanSender for HashShuffleSender {
     type SendFuture<'a> = impl Future<Output = Result<()>>;
+
     fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
         async move {
             match chunk {
@@ -130,6 +131,7 @@ impl HashShuffleSender {
 
 impl ChanReceiver for HashShuffleReceiver {
     type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunk>>>;
+
     fn recv(&mut self) -> Self::RecvFuture<'_> {
         async move {
             match self.receiver.recv().await {

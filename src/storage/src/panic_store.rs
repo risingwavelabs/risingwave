@@ -30,6 +30,7 @@ pub struct PanicStateStore;
 
 impl StateStore for PanicStateStore {
     type Iter<'a> = PanicStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
@@ -133,7 +134,9 @@ pub struct PanicStateStoreIter {}
 
 impl StateStoreIter for PanicStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+
     fn next(&'_ mut self) -> Self::NextFuture<'_> {
         async move { unreachable!() }
     }

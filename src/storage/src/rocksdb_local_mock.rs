@@ -19,7 +19,7 @@ use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{StateStore, StateStoreIter};
@@ -38,6 +38,7 @@ impl RocksDBStateStore {
 
 impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
+
     define_state_store_associated_type!();
 
     fn get<'a>(&'a self, _key: &'a [u8], _epoch: HummockEpoch) -> Self::GetFuture<'_> {
@@ -127,13 +128,19 @@ pub struct RocksDBStateStoreIter {}
 
 impl RocksDBStateStoreIter {
     async fn new(_store: RocksDBStateStore, _prefix: Vec<u8>) -> Result<Self> {
-        unimplemented!()
+        Err(ErrorCode::NotImplemented(
+            "RocksDBStateStoreIter unimplemented".to_string(),
+            None.into(),
+        )
+        .into())
     }
 }
 
 impl StateStoreIter for RocksDBStateStoreIter {
     type Item = (Bytes, Bytes);
+
     type NextFuture<'a> = impl Future<Output = crate::error::StorageResult<Option<Self::Item>>>;
+
     fn next(&mut self) -> Self::NextFuture<'_> {
         async move { unimplemented!() }
     }

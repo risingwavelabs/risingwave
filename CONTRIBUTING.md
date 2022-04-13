@@ -194,7 +194,7 @@ cargo install --git https://github.com/risinglightdb/sqllogictest-rs --features 
 To run end-to-end test, you will need to start a full cluster first:
 
 ```shell
-RW_IMPLICIT_FLUSH=1 ./risedev d
+./risedev d
 ```
 
 Then run some e2e tests:
@@ -373,11 +373,10 @@ We use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are 
 
 ## To check-in PRs from forks...
 
+Use
+
 ```
-gh pr checkout <PR id>
-git checkout -b forks/<PR id>
-git push origin HEAD -u
+bors try
 ```
 
-After that, CI checks will begin on branches of RisingWave's main repo,
-and the status will be automatically updated to PRs from forks.
+in PR to run tests in forks. Note that we don't use bors to merge PRs.
