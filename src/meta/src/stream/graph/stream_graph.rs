@@ -115,14 +115,8 @@ impl StreamActorBuilder {
             dispatcher.hash_mapping.is_none(),
             "should leave hash_mapping empty, will be filled later"
         );
-        self.downstreams.push((
-            Dispatcher {
-                r#type: DispatcherType::Simple as i32,
-                ..Default::default()
-            },
-            downstream_actors,
-            mapping,
-        ));
+        self.downstreams
+            .push((dispatcher, downstream_actors, mapping));
     }
 
     /// Build an actor from given information. At the same time, convert local actor id to global
