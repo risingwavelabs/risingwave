@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::mem::size_of_val;
 use std::time::Instant;
 
 use bytes::Buf;
@@ -68,7 +67,10 @@ impl Operations {
                         )
                         .await
                         .unwrap();
-                    let size = size_of_val(&kv_pairs);
+                    let size = kv_pairs
+                        .iter()
+                        .map(|(k, v)| k.len() + v.len())
+                        .sum::<usize>();
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
                     sizes.push(size);
@@ -96,7 +98,7 @@ impl Operations {
             })
             .collect_vec();
         let stat = LatencyStat::new(total_latencies);
-        let qps = opts.reads as u128 * 1_000_000_000 / total_time_nano as u128;
+        let qps = opts.scans as u128 * 1_000_000_000 / total_time_nano as u128;
         let bytes_pre_sec = total_sizes as u128 * 1_000_000_000 / total_time_nano as u128;
 
         println!(
