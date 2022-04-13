@@ -119,6 +119,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // cell-based interface
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+        // get row by state_store get
         // TODO: use multi-get for cell_based get_row
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = &serialize_pk(pk, pk_serializer).map_err(err)?[..];
