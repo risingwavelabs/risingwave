@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
+use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
