@@ -131,6 +131,89 @@ fn boolean_constant_fold_or(constant_lhs: ExprImpl, rhs: ExprImpl) -> ExprImpl {
     }
 }
 
+/// Expand [`Type::Not`] expressions.
+/// e.g. Not(A And B) will become (Not A) Or (Not B)
+pub fn push_down_not(expr: ExprImpl) -> ExprImpl {
+    let mut not_push_down = NotPushDown {};
+    not_push_down.rewrite_expr(expr)
+}
+
+struct NotPushDown {}
+
+impl ExprRewriter for NotPushDown {
+    /// Rewrite [`Type::Not`] function call.
+    /// This function will first rewrite the current node, then recursively rewrite its children.
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        let (func_type, mut inputs, ret) = func_call.decompose();
+
+        if func_type != Type::Not {
+            let inputs = inputs
+                .into_iter()
+                .map(|expr| self.rewrite_expr(expr))
+                .collect();
+            FunctionCall::new_with_return_type(func_type, inputs, ret).into()
+        } else {
+            // func_type == Type::Not here
+
+            // [`Type::Not`] is an unary function
+            assert_eq!(inputs.len(), 1);
+
+            let input = inputs.pop().unwrap();
+            let rewritten_not_expr = match input {
+                ExprImpl::FunctionCall(func) => {
+                    let (func_type, mut inputs, ret) = func.decompose();
+                    match func_type {
+                        // unary functions
+                        Type::Not => {
+                            // Not(Not(A)) <=> A
+                            assert_eq!(inputs.len(), 1);
+                            Ok(inputs.pop().unwrap())
+                        }
+                        // binary functions
+                        Type::And => {
+                            // Not(A And B) <=> Not(A) Or Not(B)
+                            assert_eq!(inputs.len(), 2);
+                            let rhs = inputs.pop().unwrap();
+                            let lhs = inputs.pop().unwrap();
+                            let rhs_not: ExprImpl =
+                                FunctionCall::new(Type::Not, vec![rhs]).unwrap().into();
+                            let lhs_not: ExprImpl =
+                                FunctionCall::new(Type::Not, vec![lhs]).unwrap().into();
+                            Ok(FunctionCall::new(Type::Or, vec![lhs_not, rhs_not])
+                                .unwrap()
+                                .into())
+                        }
+                        Type::Or => {
+                            // Not(A Or B) <=> Not(A) And Not(B)
+                            assert_eq!(inputs.len(), 2);
+                            let rhs = inputs.pop().unwrap();
+                            let lhs = inputs.pop().unwrap();
+                            let rhs_not: ExprImpl =
+                                FunctionCall::new(Type::Not, vec![rhs]).unwrap().into();
+                            let lhs_not: ExprImpl =
+                                FunctionCall::new(Type::Not, vec![lhs]).unwrap().into();
+                            Ok(FunctionCall::new(Type::And, vec![lhs_not, rhs_not])
+                                .unwrap()
+                                .into())
+                        }
+                        _ => Err(FunctionCall::new_with_return_type(func_type, inputs, ret).into()),
+                    }
+                }
+                _ => Err(input),
+            };
+            match rewritten_not_expr {
+                // Rewrite success. Keep rewriting current node.
+                Ok(res) => self.rewrite_expr(res),
+                // Rewrite failed(Current node is not a `Not` node, or cannot be pushed down).
+                // Then recursively rewrite children.
+                Err(input) => FunctionCall::new(Type::Not, vec![self.rewrite_expr(input)])
+                    .unwrap()
+                    .into(),
+            }
+        }
+    }
+}
+
 /// give a expression, and check all columns in its `input_ref` expressions less than the input
 /// column number.
 macro_rules! assert_input_ref {
@@ -181,7 +264,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::expr::expr_node::Type;
 
-    use super::fold_boolean_constant;
+    use super::{fold_boolean_constant, push_down_not};
     use crate::expr::{ExprImpl, FunctionCall, InputRef};
 
     #[test]
@@ -292,5 +375,79 @@ mod tests {
         assert!(res.as_literal().is_some());
         let res = res.as_literal().unwrap();
         assert_eq!(*res.get_data(), Some(ScalarImpl::Bool(false)));
+    }
+
+    #[test]
+    fn not_push_down_test() {
+        // Not(Not(A))
+        let expr: ExprImpl = FunctionCall::new(
+            Type::Not,
+            vec![
+                FunctionCall::new(Type::Not, vec![InputRef::new(0, DataType::Boolean).into()])
+                    .unwrap()
+                    .into(),
+            ],
+        )
+        .unwrap()
+        .into();
+        let res = push_down_not(expr);
+        assert!(res.as_input_ref().is_some());
+        // Not(A And Not(B)) <=> Not(A) Or B
+        let expr: ExprImpl = FunctionCall::new(
+            Type::Not,
+            vec![FunctionCall::new(
+                Type::And,
+                vec![
+                    InputRef::new(0, DataType::Boolean).into(),
+                    FunctionCall::new(Type::Not, vec![InputRef::new(1, DataType::Boolean).into()])
+                        .unwrap()
+                        .into(),
+                ],
+            )
+            .unwrap()
+            .into()],
+        )
+        .unwrap()
+        .into();
+        let res = push_down_not(expr);
+        assert!(res.as_function_call().is_some());
+        let res = res.as_function_call().unwrap().clone();
+        let (func, lhs, rhs) = res.decompose_as_binary();
+        assert_eq!(func, Type::Or);
+        assert!(rhs.as_input_ref().is_some());
+        assert!(lhs.as_function_call().is_some());
+        let lhs = lhs.as_function_call().unwrap().clone();
+        let (func, input) = lhs.decompose_as_unary();
+        assert_eq!(func, Type::Not);
+        assert!(input.as_input_ref().is_some());
+        // Not(A Or B) <=> Not(A) And Not(B)
+        let expr: ExprImpl = FunctionCall::new(
+            Type::Not,
+            vec![FunctionCall::new(
+                Type::Or,
+                vec![
+                    InputRef::new(0, DataType::Boolean).into(),
+                    InputRef::new(1, DataType::Boolean).into(),
+                ],
+            )
+            .unwrap()
+            .into()],
+        )
+        .unwrap()
+        .into();
+        let res = push_down_not(expr);
+        assert!(res.as_function_call().is_some());
+        let (func_type, lhs, rhs) = res
+            .as_function_call()
+            .unwrap()
+            .clone()
+            .decompose_as_binary();
+        assert_eq!(func_type, Type::And);
+        let (lhs_type, lhs_input) = lhs.as_function_call().unwrap().clone().decompose_as_unary();
+        assert_eq!(lhs_type, Type::Not);
+        assert!(lhs_input.as_input_ref().is_some());
+        let (rhs_type, rhs_input) = rhs.as_function_call().unwrap().clone().decompose_as_unary();
+        assert_eq!(rhs_type, Type::Not);
+        assert!(rhs_input.as_input_ref().is_some());
     }
 }

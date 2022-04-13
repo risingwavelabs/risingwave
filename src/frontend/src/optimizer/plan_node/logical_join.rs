@@ -148,6 +148,7 @@ impl LogicalJoin {
             self.join_type(),
         )
     }
+
     pub fn o2r_col_mapping(&self) -> ColIndexMapping {
         Self::o2r_col_mapping_inner(
             self.left().schema().len(),
@@ -155,6 +156,7 @@ impl LogicalJoin {
             self.join_type(),
         )
     }
+
     pub fn l2o_col_mapping(&self) -> ColIndexMapping {
         Self::l2o_col_mapping_inner(
             self.left().schema().len(),
@@ -162,6 +164,7 @@ impl LogicalJoin {
             self.join_type(),
         )
     }
+
     pub fn r2o_col_mapping(&self) -> ColIndexMapping {
         Self::r2o_col_mapping_inner(
             self.left().schema().len(),
@@ -207,6 +210,7 @@ impl LogicalJoin {
             .flatten()
             .collect()
     }
+
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
         &self.on

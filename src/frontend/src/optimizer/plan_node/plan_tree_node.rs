@@ -126,6 +126,7 @@ macro_rules! impl_plan_tree_node_for_binary {
             fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
                 smallvec::smallvec![self.left(), self.right()]
             }
+
             fn clone_with_inputs(
                 &self,
                 inputs: &[crate::optimizer::PlanRef],

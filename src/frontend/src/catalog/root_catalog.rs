@@ -89,6 +89,7 @@ impl Catalog {
             .unwrap()
             .create_table(proto);
     }
+
     pub fn create_source(&mut self, proto: ProstSource) {
         self.get_database_mut(proto.database_id)
             .unwrap()
@@ -126,18 +127,6 @@ impl Catalog {
         self.database_by_name
             .get(db_name)
             .ok_or_else(|| CatalogError::NotFound("database", db_name.to_string()).into())
-    }
-
-    pub fn get_all_table_names(&self, db_name: &str, schema_name: &str) -> Result<Vec<String>> {
-        Ok(self
-            .get_schema_by_name(db_name, schema_name)?
-            .get_all_table_names())
-    }
-
-    pub fn get_all_mv_names(&self, db_name: &str, schema_name: &str) -> Result<Vec<String>> {
-        Ok(self
-            .get_schema_by_name(db_name, schema_name)?
-            .get_all_mv_names())
     }
 
     pub fn get_all_schema_names(&self, db_name: &str) -> Result<Vec<String>> {

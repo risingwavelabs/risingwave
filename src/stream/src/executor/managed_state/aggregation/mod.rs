@@ -14,24 +14,23 @@
 
 //! Aggregators with state store support
 
-mod value;
-
-use risingwave_expr::expr::AggKind;
-pub use value::*;
-mod extreme;
-mod extreme_serializer;
-mod string_agg;
-
 pub use extreme::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::ArrayImpl;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::Datum;
+use risingwave_expr::expr::AggKind;
 use risingwave_storage::write_batch::WriteBatch;
 use risingwave_storage::{Keyspace, StateStore};
+pub use value::*;
 
 use super::super::{AggCall, PkDataTypes};
+
+mod extreme;
+mod extreme_serializer;
+mod string_agg;
+mod value;
 
 /// Verify if the data going through the state is valid by checking if `ops.len() ==
 /// visibility.len() == data[x].len()`.
@@ -125,7 +124,12 @@ impl<S: StateStore> ManagedStateImpl<S> {
             }
             AggKind::StringAgg => {
                 // TODO, It seems with `order by`, `StringAgg` needs more stuff from `AggCall`
-                unimplemented!()
+                Err(ErrorCode::NotImplemented(
+                    "It seems with `order by`, `StringAgg` needs more stuff from `AggCall`"
+                        .to_string(),
+                    None.into(),
+                )
+                .into())
             }
             // TODO: for append-only lists, we can create `ManagedValueState` instead of
             // `ManagedExtremeState`.

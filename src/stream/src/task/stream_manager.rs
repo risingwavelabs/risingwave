@@ -556,6 +556,8 @@ impl LocalStreamManagerCore {
         if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
             executor = Box::new(CacheClearExecutor::new(executor));
         }
+        // Update check
+        executor = Box::new(UpdateCheckExecutor::new(executor));
 
         Ok(executor)
     }
@@ -741,7 +743,8 @@ impl LocalStreamManagerCore {
             self.handles.insert(
                 actor_id,
                 tokio::spawn(async move {
-                    actor.run().await.unwrap(); // unwrap the actor result to panic on error
+                    // unwrap the actor result to panic on error
+                    actor.run().await.expect("actor failed");
                 }),
             );
         }

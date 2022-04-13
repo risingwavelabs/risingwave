@@ -12,10 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures::future::try_join_all;
-use risingwave_common::error::{Result, ToRwResult};
+use itertools::Itertools;
+use risingwave_common::error::ErrorCode::InternalError;
+use risingwave_common::error::{Result, RwError, ToRwResult};
+use risingwave_connector::{extract_split_enumerator, SplitImpl};
+use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
@@ -26,33 +31,97 @@ use risingwave_pb::stream_service::{
 
 use crate::barrier::BarrierManagerRef;
 use crate::cluster::ClusterManagerRef;
-use crate::manager::{MetaSrvEnv, SourceId, StreamClient};
+use crate::manager::{CatalogManagerRef, MetaSrvEnv, SourceId, StreamClient};
+use crate::model::ActorId;
 use crate::storage::MetaStore;
 
-pub type GlobalSourceManagerRef<S> = Arc<GlobalSourceManager<S>>;
+pub type SourceManagerRef<S> = Arc<SourceManager<S>>;
 
 #[allow(dead_code)]
-pub struct GlobalSourceManager<S: MetaStore> {
+pub struct SourceManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
-
     cluster_manager: ClusterManagerRef<S>,
-    barrier_manager: BarrierManagerRef<S>,
+    catalog_manager: CatalogManagerRef<S>,
 }
 
-impl<S> GlobalSourceManager<S>
+impl<S> SourceManager<S>
 where
     S: MetaStore,
 {
     pub async fn new(
         env: MetaSrvEnv<S>,
         cluster_manager: ClusterManagerRef<S>,
-        barrier_manager: BarrierManagerRef<S>,
+        _barrier_manager: BarrierManagerRef<S>,
+        catalog_manager: CatalogManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             env,
             cluster_manager,
-            barrier_manager,
+            catalog_manager,
         })
+    }
+
+    async fn fetch_splits_for_source(&self, source_id: SourceId) -> Result<Vec<SplitImpl>> {
+        let catalog_guard = self.catalog_manager.get_catalog_core_guard().await;
+        let source = catalog_guard.get_source(source_id).await?.ok_or_else(|| {
+            RwError::from(InternalError(format!(
+                "could not find source catalog for {}",
+                source_id
+            )))
+        })?;
+
+        let info = match source.get_info()? {
+            Info::StreamSource(s) => s,
+            _ => {
+                return Err(RwError::from(InternalError(
+                    "for now we only support StreamSource in source manager".to_string(),
+                )));
+            }
+        };
+
+        extract_split_enumerator(&info.properties)
+            .to_rw_result()?
+            .list_splits()
+            .await
+            .to_rw_result()
+    }
+
+    /// Perform one-time split scheduling, using the round-robin method to assign splits to the
+    /// source actor under the same fragment Note that the same Materialized View will have
+    /// multiple identical Sources to join, so there will be multiple groups of Actors under same
+    /// `SourceId`
+    pub async fn schedule_split_for_actors(
+        &self,
+        actors: HashMap<SourceId, Vec<Vec<ActorId>>>,
+    ) -> Result<HashMap<ActorId, Vec<SplitImpl>>> {
+        let source_splits = try_join_all(
+            actors
+                .keys()
+                .map(|source_id| self.fetch_splits_for_source(*source_id)),
+        )
+        .await?;
+        let mut result = HashMap::new();
+
+        for (splits, fragments) in source_splits.into_iter().zip_eq(actors.into_values()) {
+            log::debug!("found {} splits", splits.len());
+            for actors in fragments {
+                let actor_count = actors.len();
+                let mut chunks = vec![vec![]; actor_count];
+                for (i, split) in splits.iter().enumerate() {
+                    chunks[i % actor_count].push(split.clone());
+                }
+
+                actors
+                    .into_iter()
+                    .zip_eq(chunks)
+                    .into_iter()
+                    .for_each(|(actor_id, splits)| {
+                        result.insert(actor_id, splits.to_vec());
+                    })
+            }
+        }
+
+        Ok(result)
     }
 
     async fn all_stream_clients(&self) -> Result<impl Iterator<Item = StreamClient>> {
@@ -107,7 +176,7 @@ where
     }
 
     pub async fn run(&self) -> Result<()> {
-        // todo: fill me
+        // todo: in the future, split change will be pushed as a long running service
         Ok(())
     }
 }

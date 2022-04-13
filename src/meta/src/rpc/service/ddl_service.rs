@@ -31,7 +31,7 @@ use crate::manager::{CatalogManagerRef, IdCategory, MetaSrvEnv, SourceId, TableI
 use crate::model::TableFragments;
 use crate::storage::MetaStore;
 use crate::stream::{
-    FragmentManagerRef, GlobalSourceManagerRef, GlobalStreamManagerRef, StreamFragmenter,
+    FragmentManagerRef, GlobalStreamManagerRef, SourceManagerRef, StreamFragmenter,
 };
 
 #[derive(Clone)]
@@ -40,7 +40,7 @@ pub struct DdlServiceImpl<S: MetaStore> {
 
     catalog_manager: CatalogManagerRef<S>,
     stream_manager: GlobalStreamManagerRef<S>,
-    source_manager: GlobalSourceManagerRef<S>,
+    source_manager: SourceManagerRef<S>,
     cluster_manager: ClusterManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -53,7 +53,7 @@ where
         env: MetaSrvEnv<S>,
         catalog_manager: CatalogManagerRef<S>,
         stream_manager: GlobalStreamManagerRef<S>,
-        source_manager: GlobalSourceManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
@@ -171,12 +171,14 @@ where
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
+        source.id = id;
 
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
 
+        // QUESTION(patrick): why do we need to contact compute node on create source
         if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
@@ -185,7 +187,6 @@ where
             return Err(e.to_grpc_status());
         }
 
-        source.id = id;
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
@@ -405,7 +406,7 @@ where
         // Resolve fragments.
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
         let mut ctx = CreateMaterializedViewContext::default();
-        let mut fragmenter = StreamFragmenter::new(
+        let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             hash_mapping,

@@ -21,7 +21,7 @@ use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, Result, RwError, ToRwResult};
-use risingwave_common::util::env_var::env_var_is_true;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::data::Barrier;
@@ -36,7 +36,7 @@ pub use self::command::Command;
 use self::command::CommandContext;
 use self::info::BarrierActorInfo;
 use self::notifier::{Notifier, UnfinishedNotifiers};
-use crate::cluster::ClusterManagerRef;
+use crate::cluster::{ClusterManagerRef, META_NODE_ID};
 use crate::hummock::HummockManagerRef;
 use crate::manager::{CatalogManagerRef, MetaSrvEnv, INVALID_EPOCH};
 use crate::model::BarrierManagerState;
@@ -163,8 +163,6 @@ impl<S> GlobalBarrierManager<S>
 where
     S: MetaStore,
 {
-    const RECOVERY_RETRY_INTERVAL: Duration = Duration::from_millis(500);
-
     /// Create a new [`crate::barrier::GlobalBarrierManager`].
     pub fn new(
         env: MetaSrvEnv<S>,
@@ -174,10 +172,10 @@ where
         hummock_manager: HummockManagerRef<S>,
         metrics: Arc<MetaMetrics>,
     ) -> Self {
-        // TODO: make interval and enable_recovery configurable.
+        // TODO: make interval configurable.
         // TODO: when tracing is on, warn the developer on this short interval.
         let interval = Duration::from_millis(100);
-        let enable_recovery = !env_var_is_true("RW_CI");
+        let enable_recovery = env.opts.enable_recovery;
 
         Self {
             interval,
@@ -440,6 +438,8 @@ where
         let (collect_tx, collect_rx) = oneshot::channel();
         let (finish_tx, finish_rx) = oneshot::channel();
 
+        let is_create_mv = matches!(command, Command::CreateMaterializedView { .. });
+
         self.do_schedule(
             command,
             Notifier {
@@ -451,7 +451,22 @@ where
         .await?;
 
         collect_rx.await.unwrap()?; // Throw the error if it occurs when collecting this barrier.
-        finish_rx.await.unwrap(); // Wait for this command to be finished.
+
+        // TODO: refactor this
+        if is_create_mv {
+            // The snapshot ingestion may last for several epochs, we should pin the epoch here.
+            // TODO: this should be done in `post_collect`
+            let snapshot = self
+                .hummock_manager
+                .pin_snapshot(META_NODE_ID, HummockEpoch::MAX)
+                .await?;
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+            self.hummock_manager
+                .unpin_snapshot(META_NODE_ID, [snapshot])
+                .await?;
+        } else {
+            finish_rx.await.unwrap(); // Wait for this command to be finished.
+        }
 
         Ok(())
     }

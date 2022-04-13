@@ -23,6 +23,8 @@ use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
+use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_pb::stream_plan::StreamSourceState;
 use risingwave_pb::stream_service::{
     BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
 };
@@ -34,7 +36,7 @@ use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
 use crate::model::{ActorId, TableFragments};
 use crate::storage::MetaStore;
-use crate::stream::{FragmentManagerRef, Scheduler};
+use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
 pub type GlobalStreamManagerRef<S> = Arc<GlobalStreamManager<S>>;
 
@@ -60,6 +62,9 @@ pub struct GlobalStreamManager<S: MetaStore> {
     /// Maintains information of the cluster
     cluster_manager: ClusterManagerRef<S>,
 
+    /// Maintains streaming sources from external system like kafka
+    source_manager: SourceManagerRef<S>,
+
     /// Schedules streaming actors into compute nodes
     scheduler: Scheduler<S>,
 
@@ -76,6 +81,7 @@ where
         fragment_manager: FragmentManagerRef<S>,
         barrier_manager: BarrierManagerRef<S>,
         cluster_manager: ClusterManagerRef<S>,
+        source_manager: SourceManagerRef<S>,
     ) -> Result<Self> {
         Ok(Self {
             fragment_manager,
@@ -83,13 +89,15 @@ where
             scheduler: Scheduler::new(cluster_manager.clone()),
             cluster_manager,
             clients: env.stream_clients_ref(),
+            source_manager,
         })
     }
 
     /// Create materialized view, it works as follows:
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
-    /// 3. notify related nodes to update and build the actors.
+    /// (optional) get the split information of the `StreamSource` via source manager and patch
+    /// actors 3. notify related nodes to update and build the actors.
     /// 4. store related meta data.
     pub async fn create_materialized_view(
         &self,
@@ -131,7 +139,62 @@ where
             .collect();
 
         table_fragments.set_actor_status(actor_info);
-        let actor_map = table_fragments.actor_map();
+        let mut actor_map = table_fragments.actor_map();
+
+        let mut source_actors_group_by_fragment = HashMap::new();
+        for fragment in table_fragments.fragments() {
+            let mut source_actors = HashMap::new();
+            for actor in &fragment.actors {
+                if let Some(source_id) =
+                    TableFragments::fetch_stream_source_id(actor.nodes.as_ref().unwrap())
+                {
+                    source_actors
+                        .entry(source_id)
+                        .or_insert(vec![])
+                        .push(actor.actor_id as ActorId)
+                }
+            }
+
+            for (source_id, actors) in source_actors {
+                source_actors_group_by_fragment
+                    .entry(source_id)
+                    .or_insert(vec![])
+                    .push(actors)
+            }
+        }
+
+        let split_assignment = self
+            .source_manager
+            .schedule_split_for_actors(source_actors_group_by_fragment)
+            .await?;
+
+        // patch source actors with splits
+        for (actor_id, actor) in &mut actor_map {
+            if let Some(splits) = split_assignment.get(actor_id) {
+                let mut node = actor.nodes.as_mut().unwrap();
+                while !node.input.is_empty() {
+                    node = node.input.first_mut().unwrap();
+                }
+
+                if let Some(Node::SourceNode(s)) = node.node.as_mut() {
+                    log::debug!(
+                        "patching source node #{} with splits {:?}",
+                        actor_id,
+                        splits
+                    );
+
+                    if !splits.is_empty() {
+                        s.stream_source_state = Some(StreamSourceState {
+                            split_type: splits.first().unwrap().get_type(),
+                            stream_source_splits: splits
+                                .iter()
+                                .map(|split| split.to_string().unwrap().as_bytes().to_vec())
+                                .collect(),
+                        });
+                    }
+                }
+            }
+        }
 
         // Actors on each stream node will need to know where their upstream lies. `actor_info`
         // includes such information. It contains: 1. actors in the current create
@@ -341,7 +404,7 @@ mod tests {
     use crate::model::ActorId;
     use crate::rpc::metrics::MetaMetrics;
     use crate::storage::MemStore;
-    use crate::stream::FragmentManager;
+    use crate::stream::{FragmentManager, SourceManager};
 
     struct FakeFragmentState {
         actor_streams: Mutex<HashMap<ActorId, StreamActor>>,
@@ -500,17 +563,28 @@ mod tests {
             let barrier_manager = Arc::new(GlobalBarrierManager::new(
                 env.clone(),
                 cluster_manager.clone(),
-                catalog_manager,
+                catalog_manager.clone(),
                 fragment_manager.clone(),
                 hummock_manager,
                 meta_metrics.clone(),
             ));
+
+            let source_manager = Arc::new(
+                SourceManager::new(
+                    env.clone(),
+                    cluster_manager.clone(),
+                    barrier_manager.clone(),
+                    catalog_manager.clone(),
+                )
+                .await?,
+            );
 
             let stream_manager = GlobalStreamManager::new(
                 env.clone(),
                 fragment_manager.clone(),
                 barrier_manager.clone(),
                 cluster_manager.clone(),
+                source_manager.clone(),
             )
             .await?;
 

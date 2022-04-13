@@ -34,6 +34,7 @@ impl BatchMetrics {
             row_seq_scan_next_duration,
         }
     }
+
     /// Create a new `BatchMetrics` instance used in tests or other places.
     pub fn unused() -> Self {
         Self::new(prometheus::Registry::new())

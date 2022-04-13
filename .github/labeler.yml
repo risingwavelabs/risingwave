@@ -1,16 +1,16 @@
 version: 1
 labels:
-- label: "feature"
+- label: "type/feature"
   title: "^feat*"
-- label: "fix"
+- label: "type/fix"
   title: "^fix*"
-- label: "test"
+- label: "component/test"
   title: "^test*"
-- label: "refactor"
+- label: "type/refactor"
   title: "^refactor*"
-- label: "style"
+- label: "type/style"
   title: "^style*"
-- label: "chore"
+- label: "type/chore"
   title: "^chore*"
-- label: doc
+- label: "component/doc"
   title: "^doc*"

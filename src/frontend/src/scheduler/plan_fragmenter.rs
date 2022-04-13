@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::optimizer::plan_node::{PlanNodeId, PlanNodeType};
 use crate::optimizer::property::Distribution;
 use crate::optimizer::PlanRef;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct QueryId {
@@ -405,7 +405,7 @@ mod tests {
     use crate::optimizer::property::{Distribution, Order};
     use crate::optimizer::PlanRef;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, StageId};
-    use crate::scheduler::schedule::WorkerNodeManager;
+    use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::session::OptimizerContext;
     use crate::utils::Condition;
 

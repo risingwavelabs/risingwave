@@ -2,37 +2,49 @@ SHOW DATABASES
 ---
 SHOW DATABASES
 =>
-ShowCommand(Database)
+ShowObjects(Database)
 
 SHOW SCHEMAS
 ---
 SHOW SCHEMAS
 =>
-ShowCommand(Schema)
+ShowObjects(Schema)
 
 SHOW TABLES
 ---
 SHOW TABLES
 =>
-ShowCommand(Table(None))
+ShowObjects(Table { schema: None })
 
 SHOW TABLES FROM t
 ---
 SHOW TABLES FROM t
 =>
-ShowCommand(Table(Some(Ident { value: "t", quote_style: None })))
+ShowObjects(Table { schema: Some(Ident { value: "t", quote_style: None }) })
 
 SHOW MATERIALIZED VIEWS
 ---
 SHOW MATERIALIZED VIEWS
 =>
-ShowCommand(MaterializedView(None))
+ShowObjects(MaterializedView { schema: None })
 
 SHOW MATERIALIZED VIEWS FROM t
 ---
 SHOW MATERIALIZED VIEWS FROM t
 =>
-ShowCommand(MaterializedView(Some(Ident { value: "t", quote_style: None })))
+ShowObjects(MaterializedView { schema: Some(Ident { value: "t", quote_style: None }) })
+
+SHOW SOURCES FROM t
+---
+SHOW SOURCES FROM t
+=>
+ShowObjects(Source { schema: Some(Ident { value: "t", quote_style: None }) })
+
+SHOW MATERIALIZED SOURCES FROM t
+---
+SHOW MATERIALIZED SOURCES FROM t
+=>
+ShowObjects(MaterializedSource { schema: Some(Ident { value: "t", quote_style: None }) })
 
 DESCRIBE schema.t
 ---

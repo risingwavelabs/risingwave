@@ -40,6 +40,7 @@ pub type SourceRef = Arc<SourceImpl>;
 // necessary
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
+const KAFKA_SOURCE: &str = "kafka";
 
 const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
@@ -206,6 +207,7 @@ impl SourceManager for MemSourceManager {
         let config = match get_properties(&info.properties, UPSTREAM_SOURCE_KEY)? {
             // TODO support more connector here
             KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
+            KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
