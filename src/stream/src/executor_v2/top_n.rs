@@ -261,6 +261,8 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
                 .iter()
                 .map(|idx| row_ref.0[*idx].to_owned_datum())
                 .collect::<Vec<_>>());
+
+            tracing::warn!(?op, ?row_ref, "top n row");
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
             let row = row_ref.into();
             match *op {

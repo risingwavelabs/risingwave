@@ -105,7 +105,7 @@ impl super::DebugExecutor for TraceExecutor {
                             .actor_row_count
                             .with_label_values(&[self.actor_id_string.as_str()])
                             .inc_by(chunk.cardinality() as u64);
-                        event!(tracing::Level::TRACE, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
+                        event!(tracing::Level::WARN, prev = %input_desc, msg = "chunk", "input = \n{:#?}", chunk);
                     }
                 }
                 Ok(message)

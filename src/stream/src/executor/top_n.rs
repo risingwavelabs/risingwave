@@ -46,7 +46,7 @@ impl ExecutorBuilder for TopNExecutorBuilder {
         } else {
             Some(node.limit as usize)
         };
-        let cache_size = Some(1024);
+        let cache_size = Some(10);
         let total_count = (0, 0, 0);
         let keyspace = Keyspace::executor_root(store, params.executor_id);
         let key_indices = node

@@ -103,11 +103,15 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Chunk(chunk) => self.inner.apply_chunk(chunk, epoch).await?,
+                Message::Chunk(chunk) => {
+                    tracing::warn!(?chunk, "agg apply");
+                    self.inner.apply_chunk(chunk, epoch).await?
+                },
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
                     if let Some(chunk) = self.inner.flush_data(epoch).await? {
                         assert_eq!(epoch, barrier.epoch.prev);
+                        tracing::warn!(?chunk, "agg next");
                         yield Message::Chunk(chunk);
                     }
                     yield Message::Barrier(barrier);
