@@ -28,9 +28,10 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use super::error::{StreamExecutorError, TracedStreamExecutorError};
 use super::filter::SimpleFilterExecutor;
+use super::project::SimpleProjectExecutor;
 use super::{
     BatchQueryExecutor, BoxedExecutor, ChainExecutor, Executor, ExecutorInfo, FilterExecutor,
-    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor,
+    HashAggExecutor, LocalSimpleAggExecutor, MaterializeExecutor, ProjectExecutor,
 };
 pub use super::{BoxedMessageStream, ExecutorV1, Message, PkIndices, PkIndicesRef};
 use crate::executor::AggCall;
@@ -150,6 +151,27 @@ impl FilterExecutor {
         super::SimpleExecutorWrapper {
             input,
             inner: SimpleFilterExecutor::new(info, expr, executor_id),
+        }
+    }
+}
+
+impl ProjectExecutor {
+    pub fn new_from_v1(
+        input: Box<dyn ExecutorV1>,
+        pk_indices: PkIndices,
+        exprs: Vec<BoxedExpression>,
+        executor_id: u64,
+        _op_info: String,
+    ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
+        let input = Box::new(ExecutorV1AsV2(input));
+        super::SimpleExecutorWrapper {
+            input,
+            inner: SimpleProjectExecutor::new(info, exprs, executor_id),
         }
     }
 }

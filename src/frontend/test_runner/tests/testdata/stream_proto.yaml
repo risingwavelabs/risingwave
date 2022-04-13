@@ -42,6 +42,15 @@
                 - 0
         pkIndices:
           - 1
+        fields:
+          - dataType:
+              typeName: INT32
+              isNullable: true
+            name: v1
+          - dataType:
+              typeName: INT64
+              isNullable: true
+            name: "_row_id#0"
         filterNode:
           searchCondition:
             exprType: LESS_THAN
@@ -63,6 +72,15 @@
                     body: AAAAAQ==
     pkIndices:
       - 1
+    fields:
+      - dataType:
+          typeName: INT32
+          isNullable: true
+        name: v1
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: "_row_id#0"
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -137,6 +155,15 @@
             - 0
     pkIndices:
       - 1
+    fields:
+      - dataType:
+          typeName: INT32
+          isNullable: true
+        name: v1
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: "_row_id#0"
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -215,6 +242,15 @@
             - 0
     pkIndices:
       - 1
+    fields:
+      - dataType:
+          typeName: INT32
+          isNullable: true
+        name: v1
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: "_row_id#0"
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -291,6 +327,15 @@
         pkIndices:
           - 0
           - 1
+        fields:
+          - dataType:
+              typeName: INT64
+              isNullable: true
+            name: "agg#0"
+          - dataType:
+              typeName: INT64
+              isNullable: true
+            name: "agg#1"
         globalSimpleAggNode:
           aggCalls:
             - type: COUNT
@@ -309,6 +354,15 @@
     pkIndices:
       - 0
       - 1
+    fields:
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: "agg#0"
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: "agg#1"
     materializeNode:
       columnOrders:
         - orderType: ASCENDING
@@ -404,26 +458,39 @@
                             - 0
                     pkIndices:
                       - 2
+                    fields:
+                      - dataType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v1
+                      - dataType:
+                          typeName: INT32
+                          isNullable: true
+                        name: v2
+                      - dataType:
+                          typeName: INT64
+                          isNullable: true
+                        name: "_row_id#0"
                     exchangeNode:
-                      fields:
-                        - dataType:
-                            typeName: INT32
-                            isNullable: true
-                          name: v1
-                        - dataType:
-                            typeName: INT32
-                            isNullable: true
-                          name: v2
-                        - dataType:
-                            typeName: INT64
-                            isNullable: true
-                          name: "_row_id#0"
                       strategy:
                         type: HASH
                         columnIndices:
                           - 1
                 pkIndices:
                   - 2
+                fields:
+                  - dataType:
+                      typeName: INT32
+                      isNullable: true
+                    name: v2
+                  - dataType:
+                      typeName: INT32
+                      isNullable: true
+                    name: v1
+                  - dataType:
+                      typeName: INT64
+                      isNullable: true
+                    name: "_row_id#0"
                 projectNode:
                   selectList:
                     - exprType: INPUT_REF
@@ -445,6 +512,19 @@
                         columnIdx: 2
             pkIndices:
               - 0
+            fields:
+              - dataType:
+                  typeName: INT32
+                  isNullable: true
+                name: v2
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "agg#0"
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "agg#1"
             hashAggNode:
               distributionKeys:
                 - 0
@@ -465,6 +545,15 @@
                     isNullable: true
         pkIndices:
           - 1
+        fields:
+          - dataType:
+              typeName: INT64
+              isNullable: true
+            name: sum_v1
+          - dataType:
+              typeName: INT32
+              isNullable: true
+            name: v2
         projectNode:
           selectList:
             - exprType: INPUT_REF
@@ -480,6 +569,15 @@
               inputRef: {}
     pkIndices:
       - 1
+    fields:
+      - dataType:
+          typeName: INT64
+          isNullable: true
+        name: sum_v1
+      - dataType:
+          typeName: INT32
+          isNullable: true
+        name: v2
     materializeNode:
       columnOrders:
         - orderType: ASCENDING

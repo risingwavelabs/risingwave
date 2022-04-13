@@ -119,6 +119,7 @@ impl<S: StateStore> CellBasedTable<S> {
 
     // cell-based interface
     pub async fn get_row(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
+        // get row by state_store get
         // TODO: use multi-get for cell_based get_row
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
         let serialized_pk = &serialize_pk(pk, pk_serializer).map_err(err)?[..];
@@ -180,27 +181,6 @@ impl<S: StateStore> CellBasedTable<S> {
             Some(_) => Ok(pk_and_row.map(|(_pk, row)| row)),
             None => Ok(None),
         }
-    }
-
-    pub async fn delete_row(
-        &mut self,
-        _pk: &Row,
-        _old_value: &Row,
-        _epoch: u64,
-    ) -> StorageResult<()> {
-        // TODO(wcy-fdu): TODO: support only serialize key mode. We only need keys in this case to
-        // delete.
-        todo!()
-    }
-
-    pub async fn update_row(
-        &mut self,
-        _pk: &Row,
-        _old_value: Option<Row>,
-        _new_value: Option<Row>,
-        _epoch: u64,
-    ) -> StorageResult<()> {
-        todo!()
     }
 
     pub async fn batch_write_rows(

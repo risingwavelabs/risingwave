@@ -36,6 +36,7 @@ use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
+        shared_buffer_threshold_size: 67108864, // 64MB
         sstable_size: 256 * (1 << 20),
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,

@@ -441,7 +441,7 @@ impl LocalStreamManagerCore {
                 actor_id,
                 self.context.clone(),
             )),
-            Simple => {
+            Simple | NoShuffle => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(
@@ -556,6 +556,8 @@ impl LocalStreamManagerCore {
         if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
             executor = Box::new(CacheClearExecutor::new(executor));
         }
+        // Update check
+        executor = Box::new(UpdateCheckExecutor::new(executor));
 
         Ok(executor)
     }
