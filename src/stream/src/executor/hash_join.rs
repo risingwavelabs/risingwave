@@ -485,7 +485,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     )?;
                                 } else {
                                     // concat with the matched_row and append the new row
-                                    stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
+                                    // FIXME: we always use `Op::Delete` here to avoid violating
+                                    // the assumption for update rows.
+                                    stream_chunk_builder.append_row(
+                                        Op::Insert,
+                                        &row,
+                                        &matched_row.row,
+                                    )?;
                                 }
                                 matched_row.inc_degree();
                             } else {
@@ -531,8 +537,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                         )?;
                                     } else {
                                         // concat with the matched_row and append the new row
+                                        // FIXME: we always use `Op::Delete` here to avoid violating
+                                        // the assumption for update rows.
                                         stream_chunk_builder.append_row(
-                                            *op,
+                                            Op::Delete,
                                             &row,
                                             &matched_row.row,
                                         )?;
