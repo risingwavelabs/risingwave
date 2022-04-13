@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -25,7 +25,6 @@ use risingwave_common::types::Datum;
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_cell;
-use risingwave_hummock_sdk::key::next_key;
 
 use super::TableIter;
 use crate::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -33,6 +32,7 @@ use crate::cell_based_row_serializer::CellBasedRowSerializer;
 use crate::error::{StorageError, StorageResult};
 use crate::monitor::StateStoreMetrics;
 use crate::storage_value::StorageValue;
+use crate::store::GLOBAL_STORAGE_TABLE_ID;
 use crate::{Keyspace, StateStore};
 
 /// `CellBasedTable` is the interface accessing relational data in KV(`StateStore`) with encoding
@@ -133,16 +133,10 @@ impl<S: StateStore> CellBasedTable<S> {
     pub async fn get_row_by_scan(&self, pk: &Row, epoch: u64) -> StorageResult<Option<Row>> {
         // get row by state_store scan
         let pk_serializer = self.pk_serializer.as_ref().expect("pk_serializer is None");
-        let start_key = self
-            .keyspace
-            .prefixed_key(&serialize_pk(pk, pk_serializer).map_err(err)?);
-        let end_key = next_key(&start_key);
+        let sub_prefix = serialize_pk(pk, pk_serializer).map_err(err)?;
 
-        let state_store_range_scan_res = self
-            .keyspace
-            .state_store()
-            .scan(start_key..end_key, None, epoch)
-            .await?;
+        let state_store_range_scan_res =
+            self.keyspace.scan_subspace(sub_prefix, None, epoch).await?;
         let mut cell_based_row_deserializer =
             CellBasedRowDeserializer::new(self.column_descs.clone());
         for (key, value) in state_store_range_scan_res {
@@ -183,7 +177,11 @@ impl<S: StateStore> CellBasedTable<S> {
         rows: Vec<(Row, Option<Row>)>,
         epoch: u64,
     ) -> StorageResult<()> {
-        let mut batch = self.keyspace.state_store().start_write_batch();
+        // TODO(partial checkpoint): use the table id obtained locally.
+        let mut batch = self
+            .keyspace
+            .state_store()
+            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         let mut local = batch.prefixify(&self.keyspace);
         for (pk, cell_values) in rows {
             let arrange_key_buf =
@@ -296,7 +294,10 @@ impl<S: StateStore> CellBasedTableRowIter<S> {
         epoch: u64,
         _stats: Arc<StateStoreMetrics>,
     ) -> StorageResult<Self> {
-        keyspace.state_store().wait_epoch(epoch).await?;
+        keyspace
+            .state_store()
+            .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch)]))
+            .await?;
 
         let cell_based_row_deserializer = CellBasedRowDeserializer::new(table_descs);
 

@@ -466,6 +466,7 @@ mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
     use smallvec::smallvec;
 
     use super::*;
@@ -501,7 +502,7 @@ mod tests {
         assert!(managed_state.is_dirty());
 
         // flush to write batch and write to state store
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -529,7 +530,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -556,7 +557,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -579,7 +580,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -602,7 +603,7 @@ mod tests {
 
         // flush to write batch and write to state store
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -715,7 +716,7 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -730,7 +731,7 @@ mod tests {
 
         // flush
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -816,7 +817,7 @@ mod tests {
             .unwrap();
 
         // flush
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -831,7 +832,7 @@ mod tests {
 
         // flush
         epoch += 1;
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 
@@ -880,7 +881,7 @@ mod tests {
                 // only ingest after insert in some cases
                 // flush to write batch and write to state store
                 epoch += 1;
-                let mut write_batch = store.start_write_batch();
+                let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
                 managed_state.flush(&mut write_batch).unwrap();
                 write_batch.ingest(epoch).await.unwrap();
             }
@@ -892,7 +893,7 @@ mod tests {
 
             // flush to write batch and write to state store
             epoch += 1;
-            let mut write_batch = store.start_write_batch();
+            let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
             managed_state.flush(&mut write_batch).unwrap();
             write_batch.ingest(epoch).await.unwrap();
 
@@ -982,7 +983,7 @@ mod tests {
                 .unwrap();
 
             // flush to write batch and write to state store
-            let mut write_batch = store.start_write_batch();
+            let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
             managed_state.flush(&mut write_batch).unwrap();
             write_batch.ingest(epoch).await.unwrap();
 
@@ -1005,7 +1006,9 @@ mod tests {
         keyspace: &Keyspace<S>,
         epoch: u64,
     ) {
-        let mut write_batch = keyspace.state_store().start_write_batch();
+        let mut write_batch = keyspace
+            .state_store()
+            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
     }

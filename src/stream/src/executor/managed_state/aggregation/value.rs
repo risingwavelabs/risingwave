@@ -120,6 +120,7 @@ impl<S: StateStore> ManagedValueState<S> {
 mod tests {
     use risingwave_common::array::{I64Array, Op};
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 
     use super::*;
     use crate::executor::test_utils::create_in_memory_keyspace;
@@ -157,7 +158,9 @@ mod tests {
 
         // flush to write batch and write to state store
         let epoch: u64 = 0;
-        let mut write_batch = keyspace.state_store().start_write_batch();
+        let mut write_batch = keyspace
+            .state_store()
+            .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 

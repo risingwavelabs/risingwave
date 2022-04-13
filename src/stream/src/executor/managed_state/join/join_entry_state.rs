@@ -216,6 +216,7 @@ mod tests {
     use risingwave_common::column_nonnull;
     use risingwave_common::types::ScalarImpl;
     use risingwave_storage::memory::MemoryStateStore;
+    use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 
     use super::*;
 
@@ -261,7 +262,7 @@ mod tests {
         }
 
         // flush to write batch and write to state store
-        let mut write_batch = store.start_write_batch();
+        let mut write_batch = store.start_write_batch(GLOBAL_STORAGE_TABLE_ID);
         managed_state.flush(&mut write_batch).unwrap();
         write_batch.ingest(epoch).await.unwrap();
 

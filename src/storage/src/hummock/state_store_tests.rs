@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -26,6 +27,7 @@ use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
 use crate::storage_value::StorageValue;
+use crate::store::GLOBAL_STORAGE_TABLE_ID;
 use crate::StateStoreIter;
 
 #[tokio::test]
@@ -83,7 +85,10 @@ async fn test_basic() {
     let epoch1: u64 = 1;
 
     // Write the first batch.
-    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
+    hummock_storage
+        .ingest_batch(batch1, epoch1, GLOBAL_STORAGE_TABLE_ID)
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch1).await.unwrap().unwrap();
@@ -104,7 +109,10 @@ async fn test_basic() {
 
     // Write the second batch.
     let epoch2 = epoch1 + 1;
-    hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
+    hummock_storage
+        .ingest_batch(batch2, epoch2, GLOBAL_STORAGE_TABLE_ID)
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();
@@ -112,7 +120,10 @@ async fn test_basic() {
 
     // Write the third batch.
     let epoch3 = epoch2 + 1;
-    hummock_storage.ingest_batch(batch3, epoch3).await.unwrap();
+    hummock_storage
+        .ingest_batch(batch3, epoch3, GLOBAL_STORAGE_TABLE_ID)
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch3).await.unwrap();
@@ -155,9 +166,15 @@ async fn test_basic() {
         .unwrap();
     let len = count_iter(&mut iter).await;
     assert_eq!(len, 4);
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch1), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     meta_client.commit_epoch(epoch1).await.unwrap();
-    hummock_storage.wait_epoch(epoch1).await.unwrap();
+    hummock_storage
+        .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch1)]))
+        .await
+        .unwrap();
     let value = hummock_storage
         .get(&Bytes::from("bb"), epoch2)
         .await
@@ -227,7 +244,10 @@ async fn test_reload_storage() {
     let epoch1: u64 = 1;
 
     // Write the first batch.
-    hummock_storage.ingest_batch(batch1, epoch1).await.unwrap();
+    hummock_storage
+        .ingest_batch(batch1, epoch1, GLOBAL_STORAGE_TABLE_ID)
+        .await
+        .unwrap();
 
     // Mock something happened to storage internal, and storage is reloaded.
     drop(hummock_storage);
@@ -254,7 +274,10 @@ async fn test_reload_storage() {
 
     // Write the second batch.
     let epoch2 = epoch1 + 1;
-    hummock_storage.ingest_batch(batch2, epoch2).await.unwrap();
+    hummock_storage
+        .ingest_batch(batch2, epoch2, GLOBAL_STORAGE_TABLE_ID)
+        .await
+        .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage.get(&anchor, epoch2).await.unwrap().unwrap();

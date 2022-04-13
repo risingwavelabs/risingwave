@@ -31,6 +31,7 @@ use risingwave_pb::common::ActorInfo;
 use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
+use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -179,7 +180,14 @@ impl LocalStreamManager {
 
         // Sync states from shared buffer to S3 before telling meta service we've done.
         dispatch_state_store!(self.state_store(), store, {
-            match store.sync(Some(barrier.epoch.prev)).await {
+            // TODO(partial checkpoint): use the table id obtained locally.
+            match store
+                .sync(
+                    Some(barrier.epoch.prev),
+                    Some(vec![GLOBAL_STORAGE_TABLE_ID]),
+                )
+                .await
+            {
                 Ok(_) => {}
                 // TODO: Handle sync failure by propagating it
                 // back to global barrier manager

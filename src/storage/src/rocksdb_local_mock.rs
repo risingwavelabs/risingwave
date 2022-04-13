@@ -14,11 +14,13 @@
 
 #![allow(dead_code)]
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use risingwave_common::error::Result;
+use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{StateStore, StateStoreIter};
 use crate::define_state_store_associated_type;
@@ -38,7 +40,7 @@ impl StateStore for RocksDBStateStore {
     type Iter<'a> = RocksDBStateStoreIter;
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, _key: &'a [u8], _epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, _key: &'a [u8], _epoch: HummockEpoch) -> Self::GetFuture<'_> {
         async move { unimplemented!() }
     }
 
@@ -46,7 +48,7 @@ impl StateStore for RocksDBStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -59,7 +61,7 @@ impl StateStore for RocksDBStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
     ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -71,7 +73,8 @@ impl StateStore for RocksDBStateStore {
     fn ingest_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
+        _table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move { unimplemented!() }
     }
@@ -79,12 +82,12 @@ impl StateStore for RocksDBStateStore {
     fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, _key_range: R, _epoch: HummockEpoch) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -92,7 +95,11 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn reverse_iter<R, B>(
+        &self,
+        _key_range: R,
+        _epoch: HummockEpoch,
+    ) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -100,11 +107,18 @@ impl StateStore for RocksDBStateStore {
         async move { unimplemented!() }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(
+        &self,
+        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> Self::WaitEpochFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(
+        &self,
+        _epoch: Option<HummockEpoch>,
+        _table_id: Option<Vec<StorageTableId>>,
+    ) -> Self::SyncFuture<'_> {
         async move { unimplemented!() }
     }
 }

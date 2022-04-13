@@ -28,6 +28,7 @@ mod tests {
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStoreImpl};
     use crate::storage_value::StorageValue;
+    use crate::store::GLOBAL_STORAGE_TABLE_ID;
     use crate::StateStore;
 
     async fn get_hummock_storage(
@@ -102,10 +103,14 @@ mod tests {
                 .ingest_batch(
                     vec![(key.clone(), StorageValue::new_default_put(val.clone()))],
                     epoch,
+                    GLOBAL_STORAGE_TABLE_ID,
                 )
                 .await
                 .unwrap();
-            storage.sync(Some(epoch)).await.unwrap();
+            storage
+                .sync(Some(epoch), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+                .await
+                .unwrap();
             hummock_meta_client.commit_epoch(epoch).await.unwrap();
         }
 

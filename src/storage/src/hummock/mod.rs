@@ -15,6 +15,7 @@
 //! Hummock is the state store of the streaming system.
 
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::ops::RangeBounds;
@@ -130,7 +131,13 @@ impl HummockStorage {
             shared_buffer_manager.clone(),
         );
         // Ensure at least one available version in cache.
-        local_version_manager.wait_epoch(HummockEpoch::MIN).await?;
+        // TODO(partial checkpoint): wait epoch for all tables?
+        local_version_manager
+            .wait_epoch(BTreeMap::from([(
+                GLOBAL_STORAGE_TABLE_ID,
+                HummockEpoch::MIN,
+            )]))
+            .await?;
 
         let instance = Self {
             options: options.clone(),
@@ -365,6 +372,7 @@ impl StateStore for HummockStorage {
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
+        table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             let batch = kv_pairs
@@ -376,10 +384,13 @@ impl StateStore for HummockStorage {
                     )
                 })
                 .collect_vec();
-            self.shared_buffer_manager.write_batch(batch, epoch)?;
+            self.shared_buffer_manager
+                .write_batch(batch, epoch, table_id)?;
 
             if !self.options.async_checkpoint_enabled {
-                self.shared_buffer_manager.sync(Some(epoch)).await?;
+                self.shared_buffer_manager
+                    .sync(Some(epoch), Some(vec![table_id]))
+                    .await?;
             }
             Ok(())
         }
@@ -588,13 +599,20 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.wait_epoch(epoch).await?) }
+    fn wait_epoch(
+        &self,
+        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> Self::WaitEpochFuture<'_> {
+        async move { Ok(self.local_version_manager.wait_epoch(table_epoch).await?) }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(
+        &self,
+        epoch: Option<u64>,
+        table_ids: Option<Vec<StorageTableId>>,
+    ) -> Self::SyncFuture<'_> {
         async move {
-            self.shared_buffer_manager.sync(epoch).await?;
+            self.shared_buffer_manager.sync(epoch, table_ids).await?;
             Ok(())
         }
     }

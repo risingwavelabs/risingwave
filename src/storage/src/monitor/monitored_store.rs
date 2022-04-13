@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::Future;
+use risingwave_hummock_sdk::HummockEpoch;
 
 use super::StateStoreMetrics;
 use crate::error::StorageResult;
@@ -135,6 +137,7 @@ where
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
         epoch: u64,
+        table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             if kv_pairs.is_empty() {
@@ -151,7 +154,7 @@ where
                 .sum::<usize>();
 
             let timer = self.stats.write_batch_duration.start_timer();
-            self.inner.ingest_batch(kv_pairs, epoch).await?;
+            self.inner.ingest_batch(kv_pairs, epoch, table_id).await?;
             timer.observe_duration();
 
             self.stats.write_batch_size.observe(total_size as _);
@@ -179,14 +182,21 @@ where
         }
     }
 
-    fn wait_epoch(&self, epoch: u64) -> Self::WaitEpochFuture<'_> {
-        async move { self.inner.wait_epoch(epoch).await }
+    fn wait_epoch(
+        &self,
+        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> Self::WaitEpochFuture<'_> {
+        async move { self.inner.wait_epoch(table_epoch).await }
     }
 
-    fn sync(&self, epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(
+        &self,
+        epoch: Option<u64>,
+        table_id: Option<Vec<StorageTableId>>,
+    ) -> Self::SyncFuture<'_> {
         async move {
             let timer = self.stats.shared_buffer_to_l0_duration.start_timer();
-            self.inner.sync(epoch).await?;
+            self.inner.sync(epoch, table_id).await?;
             timer.observe_duration();
             Ok(())
         }

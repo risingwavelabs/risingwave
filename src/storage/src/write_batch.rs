@@ -17,6 +17,7 @@ use bytes::Bytes;
 use crate::error::StorageResult;
 use crate::hummock::HummockError;
 use crate::storage_value::StorageValue;
+use crate::store::StorageTableId;
 use crate::{Keyspace, StateStore};
 
 /// [`WriteBatch`] wraps a list of key-value pairs and an associated [`StateStore`].
@@ -24,6 +25,8 @@ pub struct WriteBatch<S: StateStore> {
     store: S,
 
     batch: Vec<(Bytes, StorageValue)>,
+
+    table_id: StorageTableId,
 }
 
 impl<S> WriteBatch<S>
@@ -31,18 +34,20 @@ where
     S: StateStore,
 {
     /// Constructs a new, empty [`WriteBatch`] with the given `store`.
-    pub fn new(store: S) -> Self {
+    pub fn new(store: S, table_id: StorageTableId) -> Self {
         Self {
             store,
             batch: Vec::new(),
+            table_id,
         }
     }
 
     /// Constructs a new, empty [`WriteBatch`] with the given `store` and specified capacity.
-    pub fn with_capacity(store: S, capacity: usize) -> Self {
+    pub fn with_capacity(store: S, capacity: usize, table_id: StorageTableId) -> Self {
         Self {
             store,
             batch: Vec::with_capacity(capacity),
+            table_id,
         }
     }
 
@@ -82,7 +87,9 @@ where
     /// Ingests this batch into the associated state store.
     pub async fn ingest(mut self, epoch: u64) -> StorageResult<()> {
         self.preprocess()?;
-        self.store.ingest_batch(self.batch, epoch).await?;
+        self.store
+            .ingest_batch(self.batch, epoch, self.table_id)
+            .await?;
         Ok(())
     }
 
@@ -154,12 +161,13 @@ mod tests {
     use super::WriteBatch;
     use crate::memory::MemoryStateStore;
     use crate::storage_value::StorageValue;
+    use crate::store::GLOBAL_STORAGE_TABLE_ID;
     use crate::Keyspace;
 
     #[tokio::test]
     async fn test_invalid_write_batch() {
         let state_store = MemoryStateStore::new();
-        let mut write_batch = WriteBatch::new(state_store.clone());
+        let mut write_batch = WriteBatch::new(state_store.clone(), GLOBAL_STORAGE_TABLE_ID);
         let key_space = Keyspace::executor_root(state_store, 0x118);
 
         assert!(write_batch.is_empty());

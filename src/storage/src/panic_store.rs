@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::RangeBounds;
 
 use bytes::Bytes;
+use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
@@ -70,6 +72,7 @@ impl StateStore for PanicStateStore {
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
         _epoch: u64,
+        _table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
             panic!("should not write the state store!");
@@ -106,13 +109,20 @@ impl StateStore for PanicStateStore {
         }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(
+        &self,
+        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
         }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(
+        &self,
+        _epoch: Option<u64>,
+        _table_id: Option<Vec<StorageTableId>>,
+    ) -> Self::SyncFuture<'_> {
         async move {
             panic!("should not sync from the panic state store!");
         }

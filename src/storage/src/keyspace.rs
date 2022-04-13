@@ -133,14 +133,30 @@ impl<S: StateStore> Keyspace<S> {
         limit: Option<usize>,
         epoch: u64,
     ) -> StorageResult<Vec<(Bytes, Bytes)>> {
-        assert!(
-            start_key[..self.prefix.len()] == self.prefix,
+        assert_eq!(
+            start_key[..self.prefix.len()],
+            self.prefix,
             "{:?} does not start with prefix {:?}",
             start_key,
             self.prefix
         );
         let range = start_key..next_key(self.prefix.as_slice());
         self.store.scan(range, limit, epoch).await
+    }
+
+    /// Scans `limit` keys from the sub keyspace specified by `subspace_key` and get their values.
+    /// If `limit` is None, all keys of the given prefix will be scanned.
+    ///
+    /// The subspace is [`prefix`, `subspace_prefix`]..`next_key`([`prefix`, `subspace_prefix`]).
+    pub async fn scan_subspace(
+        &self,
+        subspace_prefix: Vec<u8>,
+        limit: Option<usize>,
+        epoch: u64,
+    ) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let start_key = self.prefixed_key(subspace_prefix);
+        let end_key = next_key(start_key.as_slice());
+        self.store.scan(start_key..end_key, limit, epoch).await
     }
 
     /// Scans from the keyspace, and then strips the prefix of this keyspace.

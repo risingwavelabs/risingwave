@@ -32,6 +32,7 @@ use crate::hummock::utils::validate_table_key_range;
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockVersionId, Sstable, INVALID_VERSION_ID,
 };
+use crate::store::{StorageTableId, GLOBAL_STORAGE_TABLE_ID};
 
 #[derive(Debug)]
 pub struct ScopedLocalVersion {
@@ -154,16 +155,23 @@ impl LocalVersionManager {
     }
 
     /// Waits until the local hummock version contains the given committed epoch
-    pub async fn wait_epoch(&self, epoch: HummockEpoch) -> HummockResult<()> {
-        if epoch == HummockEpoch::MAX {
-            panic!("epoch should not be u64::MAX");
-        }
+    pub async fn wait_epoch(
+        &self,
+        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> HummockResult<()> {
+        table_epoch.values().for_each(|epoch| {
+            assert_ne!(*epoch, HummockEpoch::MAX, "epoch should not be u64::MAX")
+        });
         let mut receiver = self.update_notifier_tx.subscribe();
+        // TODO: use some signal to wake up on version change instead of waiting in a loop
         loop {
             {
                 let current_version = self.current_version.read();
                 if let Some(version) = current_version.as_ref() {
-                    if version.version.max_committed_epoch >= epoch {
+                    // TODO(partial checkpoint): check all versions
+                    if version.version.max_committed_epoch
+                        >= *table_epoch.get(&GLOBAL_STORAGE_TABLE_ID).unwrap()
+                    {
                         return Ok(());
                     }
                 }
@@ -381,6 +389,7 @@ mod tests {
     use crate::hummock::value::HummockValue;
     use crate::monitor::StateStoreMetrics;
     use crate::object::{InMemObjectStore, ObjectStoreImpl};
+    use crate::store::GLOBAL_STORAGE_TABLE_ID;
 
     fn gen_dummy_batch(epoch: u64) -> Vec<(Bytes, HummockValue<Bytes>)> {
         vec![(
@@ -412,7 +421,11 @@ mod tests {
 
         // Fill shared buffer with a dummy empty batch in epochs[0]
         shared_buffer_manager
-            .write_batch(gen_dummy_batch(epochs[0]), epochs[0])
+            .write_batch(
+                gen_dummy_batch(epochs[0]),
+                epochs[0],
+                GLOBAL_STORAGE_TABLE_ID,
+            )
             .unwrap();
         assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
 
@@ -431,7 +444,7 @@ mod tests {
         // Fill shared buffer with a dummy empty batch in epochs[1..=3] and ref them
         for epoch in epochs.iter().skip(1) {
             shared_buffer_manager
-                .write_batch(gen_dummy_batch(*epoch), *epoch)
+                .write_batch(gen_dummy_batch(*epoch), *epoch, GLOBAL_STORAGE_TABLE_ID)
                 .unwrap();
             local_version_manager.ref_committed_epoch(*epoch);
         }

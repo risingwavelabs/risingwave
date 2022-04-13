@@ -22,6 +22,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_expr::expr::RowExpression;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
+use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::barrier_align::{AlignedMessage, BarrierAligner};
@@ -332,7 +333,11 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
     async fn flush_data(&mut self) -> Result<()> {
         let epoch = self.executor_state().epoch();
         for side in [&mut self.side_l, &mut self.side_r] {
-            let mut write_batch = side.keyspace.state_store().start_write_batch();
+            // TODO(partial checkpoint): use the table id obtained locally.
+            let mut write_batch = side
+                .keyspace
+                .state_store()
+                .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
             for state in side.ht.values_mut() {
                 state.flush(&mut write_batch)?;
             }

@@ -21,13 +21,15 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use lazy_static::lazy_static;
+use risingwave_hummock_sdk::HummockEpoch;
 use tokio::sync::Mutex;
 
 use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-type KeyWithEpoch = (Bytes, Reverse<u64>);
+type TableInMemStorage = BTreeMap<KeyWithEpoch, Option<Bytes>>;
+type KeyWithEpoch = (Bytes, Reverse<HummockEpoch>);
 
 /// An in-memory state store
 ///
@@ -37,8 +39,8 @@ type KeyWithEpoch = (Bytes, Reverse<u64>);
 /// store should never be used in production.
 #[derive(Clone)]
 pub struct MemoryStateStore {
-    /// Stores (key, epoch) -> user value. We currently don't consider value meta here.
-    inner: Arc<Mutex<BTreeMap<KeyWithEpoch, Option<Bytes>>>>,
+    /// Stores table_id -> (key, epoch) -> user value. We currently don't consider value meta here.
+    inner: Arc<Mutex<BTreeMap<StorageTableId, TableInMemStorage>>>,
 }
 
 impl Default for MemoryStateStore {
@@ -53,13 +55,19 @@ where
     B: AsRef<[u8]>,
 {
     let start = match range.start_bound() {
-        Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
+        Included(k) => Included((
+            Bytes::copy_from_slice(k.as_ref()),
+            Reverse(HummockEpoch::MAX),
+        )),
         Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
         Unbounded => Unbounded,
     };
     let end = match range.end_bound() {
         Included(k) => Included((Bytes::copy_from_slice(k.as_ref()), Reverse(0))),
-        Excluded(k) => Excluded((Bytes::copy_from_slice(k.as_ref()), Reverse(u64::MAX))),
+        Excluded(k) => Excluded((
+            Bytes::copy_from_slice(k.as_ref()),
+            Reverse(HummockEpoch::MAX),
+        )),
         Unbounded => Unbounded,
     };
     (start, end)
@@ -84,7 +92,7 @@ impl StateStore for MemoryStateStore {
     type Iter<'a> = MemoryStateStoreIter;
     define_state_store_associated_type!();
 
-    fn get<'a>(&'a self, key: &'a [u8], epoch: u64) -> Self::GetFuture<'_> {
+    fn get<'a>(&'a self, key: &'a [u8], epoch: HummockEpoch) -> Self::GetFuture<'_> {
         async move {
             let range_bounds = key.to_vec()..=key.to_vec();
             let res = self.scan(range_bounds, Some(1), epoch).await?;
@@ -101,7 +109,7 @@ impl StateStore for MemoryStateStore {
         &self,
         key_range: R,
         limit: Option<usize>,
-        epoch: u64,
+        epoch: HummockEpoch,
     ) -> Self::ScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -113,22 +121,26 @@ impl StateStore for MemoryStateStore {
                 return Ok(vec![]);
             }
             let inner = self.inner.lock().await;
+            let byte_range = to_bytes_range(key_range);
 
-            let mut last_key = None;
-            for ((key, Reverse(key_epoch)), value) in inner.range(to_bytes_range(key_range)) {
-                if *key_epoch > epoch {
-                    continue;
-                }
-                if Some(key) != last_key.as_ref() {
-                    if let Some(value) = value {
-                        data.push((key.clone(), value.clone()));
+            inner.values().for_each(|tree| {
+                let mut last_key = None;
+                for ((key, Reverse(key_epoch)), value) in tree.range(byte_range.clone()) {
+                    if *key_epoch > epoch {
+                        continue;
                     }
-                    last_key = Some(key.clone());
+                    if Some(key) != last_key.as_ref() {
+                        if let Some(value) = value {
+                            data.push((key.clone(), value.clone()));
+                        }
+                        last_key = Some(key.clone());
+                    }
+                    if let Some(limit) = limit && data.len() >= limit {
+                        break;
+                    }
                 }
-                if let Some(limit) = limit && data.len() >= limit {
-                    break;
-                }
-            }
+            });
+
             Ok(data)
         }
     }
@@ -137,7 +149,7 @@ impl StateStore for MemoryStateStore {
         &self,
         _key_range: R,
         _limit: Option<usize>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
     ) -> Self::ReverseScanFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
@@ -149,12 +161,16 @@ impl StateStore for MemoryStateStore {
     fn ingest_batch(
         &self,
         kv_pairs: Vec<(Bytes, StorageValue)>,
-        epoch: u64,
+        epoch: HummockEpoch,
+        table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
-            let mut inner = self.inner.lock().await;
-            for (key, value) in kv_pairs {
-                inner.insert((key, Reverse(epoch)), value.user_value);
+            if !kv_pairs.is_empty() {
+                let mut inner = self.inner.lock().await;
+                let table_store = inner.entry(table_id).or_insert_with(BTreeMap::new);
+                for (key, value) in kv_pairs {
+                    table_store.insert((key, Reverse(epoch)), value.user_value);
+                }
             }
             Ok(())
         }
@@ -163,12 +179,12 @@ impl StateStore for MemoryStateStore {
     fn replicate_batch(
         &self,
         _kv_pairs: Vec<(Bytes, StorageValue)>,
-        _epoch: u64,
+        _epoch: HummockEpoch,
     ) -> Self::ReplicateBatchFuture<'_> {
         async move { unimplemented!() }
     }
 
-    fn iter<R, B>(&self, key_range: R, epoch: u64) -> Self::IterFuture<'_, R, B>
+    fn iter<R, B>(&self, key_range: R, epoch: HummockEpoch) -> Self::IterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -180,7 +196,11 @@ impl StateStore for MemoryStateStore {
         }
     }
 
-    fn reverse_iter<R, B>(&self, _key_range: R, _epoch: u64) -> Self::ReverseIterFuture<'_, R, B>
+    fn reverse_iter<R, B>(
+        &self,
+        _key_range: R,
+        _epoch: HummockEpoch,
+    ) -> Self::ReverseIterFuture<'_, R, B>
     where
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
@@ -188,14 +208,21 @@ impl StateStore for MemoryStateStore {
         async move { unimplemented!() }
     }
 
-    fn wait_epoch(&self, _epoch: u64) -> Self::WaitEpochFuture<'_> {
+    fn wait_epoch(
+        &self,
+        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+    ) -> Self::WaitEpochFuture<'_> {
         async move {
             // memory backend doesn't support wait for epoch, so this is a no-op.
             Ok(())
         }
     }
 
-    fn sync(&self, _epoch: Option<u64>) -> Self::SyncFuture<'_> {
+    fn sync(
+        &self,
+        _epoch: Option<HummockEpoch>,
+        _table_id: Option<Vec<StorageTableId>>,
+    ) -> Self::SyncFuture<'_> {
         async move {
             // memory backend doesn't support push to S3, so this is a no-op
             Ok(())
@@ -241,6 +268,7 @@ mod tests {
                     ),
                 ],
                 0,
+                GLOBAL_STORAGE_TABLE_ID,
             )
             .await
             .unwrap();
@@ -254,6 +282,7 @@ mod tests {
                     (b"b".to_vec().into(), StorageValue::new_default_delete()),
                 ],
                 1,
+                GLOBAL_STORAGE_TABLE_ID,
             )
             .await
             .unwrap();

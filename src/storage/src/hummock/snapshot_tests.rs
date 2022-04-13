@@ -92,10 +92,14 @@ async fn test_snapshot() {
                 (Bytes::from("2"), StorageValue::new_default_put("test")),
             ],
             epoch1,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch1)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch1), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client.commit_epoch(epoch1).await.unwrap();
     vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
@@ -109,10 +113,14 @@ async fn test_snapshot() {
                 (Bytes::from("4"), StorageValue::new_default_put("test")),
             ],
             epoch2,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch2)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch2), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client.commit_epoch(epoch2).await.unwrap();
     vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
@@ -127,10 +135,14 @@ async fn test_snapshot() {
                 (Bytes::from("4"), StorageValue::new_default_delete()),
             ],
             epoch3,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch3)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch3), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client.commit_epoch(epoch3).await.unwrap();
     vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     assert_count_range_scan!(hummock_storage, .., 0, epoch3);
@@ -178,10 +190,14 @@ async fn test_snapshot_range_scan() {
                 (Bytes::from("4"), StorageValue::new_default_put("test")),
             ],
             epoch,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
     vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     macro_rules! key {
@@ -239,10 +255,14 @@ async fn test_snapshot_reverse_range_scan() {
                 (Bytes::from("6"), StorageValue::new_default_put("test")),
             ],
             epoch,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client.commit_epoch(epoch).await.unwrap();
     vm.refresh_version(mock_hummock_meta_client.as_ref()).await;
     hummock_storage
@@ -254,10 +274,14 @@ async fn test_snapshot_reverse_range_scan() {
                 (Bytes::from("8"), StorageValue::new_default_put("test")),
             ],
             epoch + 1,
+            GLOBAL_STORAGE_TABLE_ID,
         )
         .await
         .unwrap();
-    hummock_storage.sync(Some(epoch + 1)).await.unwrap();
+    hummock_storage
+        .sync(Some(epoch + 1), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+        .await
+        .unwrap();
     mock_hummock_meta_client
         .commit_epoch(epoch + 1)
         .await

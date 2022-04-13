@@ -27,25 +27,28 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
+use crate::store::StorageTableId;
 
 #[derive(Debug)]
 pub struct SyncItem {
-    /// Epoch to sync. None means syncing all epochs.
+    /// Epoch to sync. `None` means syncing all epochs.
     pub(super) epoch: Option<u64>,
     /// Notifier to notify on sync finishes
     pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<()>>>,
+    /// Table ids to sync. `None` means syncing all tables.
+    pub(super) table_ids: Option<Vec<StorageTableId>>,
 }
 
 #[derive(Debug)]
 pub enum SharedBufferUploaderItem {
-    Batch(SharedBufferBatch),
+    Batch(SharedBufferBatch, StorageTableId),
     Sync(SyncItem),
     Reset(u64),
 }
 
 pub struct SharedBufferUploader {
-    /// Batches to upload grouped by epoch
-    batches_to_upload: BTreeMap<u64, Vec<SharedBufferBatch>>,
+    /// Batches to upload grouped by epoch and table_id
+    batches_to_upload: BTreeMap<u64, BTreeMap<StorageTableId, Vec<SharedBufferBatch>>>,
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<StorageConfig>,
 
@@ -89,13 +92,40 @@ impl SharedBufferUploader {
     }
 
     /// Uploads buffer batches to S3.
-    async fn sync(&mut self, epoch: u64) -> HummockResult<()> {
+    async fn sync(
+        &mut self,
+        epoch: u64,
+        table_ids: Option<Vec<StorageTableId>>,
+    ) -> HummockResult<()> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
 
-        let buffers = match self.batches_to_upload.remove(&epoch) {
-            Some(m) => m,
+        // TODO: may want to recover the removed batches in case of compaction failure
+        let buffers = match self.batches_to_upload.get_mut(&epoch) {
+            Some(table_batches) => {
+                if let Some(table_ids) = table_ids {
+                    let mut ret = vec![];
+                    for table_id in table_ids {
+                        if let Some(batches) = table_batches.remove(&table_id) {
+                            ret.extend(batches);
+                        } else {
+                            tracing::warn!("no table for table_id `{}` exists to sync", table_id)
+                        }
+                    }
+                    if table_batches.is_empty() {
+                        self.batches_to_upload.remove(&epoch);
+                    }
+                    ret
+                } else {
+                    self.batches_to_upload
+                        .remove(&epoch)
+                        .unwrap()
+                        .into_values()
+                        .flat_map(Vec::into_iter)
+                        .collect_vec()
+                }
+            }
             None => return Ok(()),
         };
 
@@ -144,13 +174,15 @@ impl SharedBufferUploader {
 
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
         match item {
-            SharedBufferUploaderItem::Batch(m) => {
+            SharedBufferUploaderItem::Batch(m, table_id) => {
                 if let Some(detector) = &self.write_conflict_detector {
                     detector.check_conflict_and_track_write_batch(&m.inner, m.epoch);
                 }
 
                 self.batches_to_upload
                     .entry(m.epoch())
+                    .or_insert(BTreeMap::new())
+                    .entry(table_id)
                     .or_insert(Vec::new())
                     .push(m);
                 Ok(())
@@ -159,14 +191,14 @@ impl SharedBufferUploader {
                 let res = match sync_item.epoch {
                     Some(e) => {
                         // Sync a specific epoch
-                        self.sync(e).await
+                        self.sync(e, sync_item.table_ids).await
                     }
                     None => {
                         // Sync all epochs
                         let epochs = self.batches_to_upload.keys().copied().collect_vec();
                         let mut res = Ok(());
                         for e in epochs {
-                            res = self.sync(e).await;
+                            res = self.sync(e, sync_item.table_ids.clone()).await;
                             if res.is_err() {
                                 break;
                             }

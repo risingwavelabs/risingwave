@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -24,6 +25,7 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
 use risingwave_storage::storage_value::StorageValue;
+use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::StateStore;
 
 use super::{Batch, Operations, PerfMetrics};
@@ -188,14 +190,23 @@ impl Operations {
                         .map(|(k, v)| (k, StorageValue::new(Default::default(), v)))
                         .collect_vec();
                     let epoch = ctx.epoch.load(Ordering::Acquire);
-                    store.ingest_batch(batch, epoch).await.unwrap();
+                    store
+                        .ingest_batch(batch, epoch, GLOBAL_STORAGE_TABLE_ID)
+                        .await
+                        .unwrap();
                     let last_batch = i + 1 == l;
                     if ctx.epoch_barrier_finish(last_batch) {
-                        store.sync(Some(epoch)).await.unwrap();
+                        store
+                            .sync(Some(epoch), Some(vec![GLOBAL_STORAGE_TABLE_ID]))
+                            .await
+                            .unwrap();
                         ctx.meta_client.commit_epoch(epoch).await.unwrap();
                         ctx.epoch.fetch_add(1, Ordering::SeqCst);
                     }
-                    store.wait_epoch(epoch).await.unwrap();
+                    store
+                        .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch)]))
+                        .await
+                        .unwrap();
                     let time_nano = start.elapsed().as_nanos();
                     latencies.push(time_nano);
                 }

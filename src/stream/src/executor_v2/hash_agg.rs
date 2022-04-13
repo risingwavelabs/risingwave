@@ -25,6 +25,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::HashKey;
+use risingwave_storage::store::GLOBAL_STORAGE_TABLE_ID;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
@@ -310,7 +311,11 @@ impl<K: HashKey, S: StateStore> AggExecutor for AggHashAggExecutor<K, S> {
         // Some state will have the correct output only after their internal states have been fully
         // flushed.
         let (write_batch, dirty_cnt) = {
-            let mut write_batch = self.keyspace.state_store().start_write_batch();
+            // TODO(partial checkpoint): use the table id obtained locally.
+            let mut write_batch = self
+                .keyspace
+                .state_store()
+                .start_write_batch(GLOBAL_STORAGE_TABLE_ID);
             let mut dirty_cnt = 0;
 
             for states in self.state_map.values_mut() {

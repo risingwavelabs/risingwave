@@ -19,6 +19,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use parking_lot::RwLock as PLRwLock;
 use risingwave_common::config::StorageConfig;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_rpc_client::HummockMetaClient;
 use tokio::task::JoinHandle;
 
@@ -35,12 +36,13 @@ use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
+use crate::store::StorageTableId;
 
 /// A manager to manage reads and writes on shared buffer.
 /// Shared buffer is a node level abstraction to buffer write batches across executors.
 pub struct SharedBufferManager {
     /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
-    shared_buffer: PLRwLock<BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
+    shared_buffer: PLRwLock<BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
     uploader_handle: JoinHandle<StorageResult<()>>,
 }
@@ -72,7 +74,12 @@ impl SharedBufferManager {
     }
 
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
-    pub fn write_batch(&self, batch: Vec<SharedBufferItem>, epoch: u64) -> HummockResult<()> {
+    pub fn write_batch(
+        &self,
+        batch: Vec<SharedBufferItem>,
+        epoch: HummockEpoch,
+        table_id: StorageTableId,
+    ) -> HummockResult<()> {
         let batch = SharedBufferBatch::new(batch, epoch);
         self.shared_buffer
             .write()
@@ -80,7 +87,7 @@ impl SharedBufferManager {
             .or_insert(BTreeMap::new())
             .insert(batch.end_user_key().to_vec(), batch.clone());
         self.uploader_tx
-            .send(SharedBufferUploaderItem::Batch(batch))
+            .send(SharedBufferUploaderItem::Batch(batch, table_id))
             .map_err(HummockError::shared_buffer_error)
     }
 
@@ -88,7 +95,7 @@ impl SharedBufferManager {
     pub fn replicate_remote_batch(
         &self,
         batch: Vec<SharedBufferItem>,
-        epoch: u64,
+        epoch: HummockEpoch,
     ) -> HummockResult<()> {
         let batch = SharedBufferBatch::new(batch, epoch);
         self.shared_buffer
@@ -100,12 +107,17 @@ impl SharedBufferManager {
     }
 
     // TODO: support time-based syncing
-    pub async fn sync(&self, epoch: Option<u64>) -> HummockResult<()> {
+    pub async fn sync(
+        &self,
+        epoch: Option<HummockEpoch>,
+        table_ids: Option<Vec<StorageTableId>>,
+    ) -> HummockResult<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.uploader_tx
             .send(SharedBufferUploaderItem::Sync(SyncItem {
                 epoch,
                 notifier: Some(tx),
+                table_ids,
             }))
             .unwrap();
         rx.await.unwrap()
@@ -118,7 +130,7 @@ impl SharedBufferManager {
     pub fn get(
         &self,
         user_key: &[u8],
-        epoch_range: impl RangeBounds<u64>,
+        epoch_range: impl RangeBounds<HummockEpoch>,
     ) -> Option<HummockValue<Vec<u8>>> {
         let guard = self.shared_buffer.read();
         for (_epoch, buffers) in guard.range(epoch_range).rev() {
@@ -140,7 +152,7 @@ impl SharedBufferManager {
     pub fn iters<R, B>(
         &self,
         key_range: &R,
-        epoch_range: impl RangeBounds<u64>,
+        epoch_range: impl RangeBounds<HummockEpoch>,
     ) -> Vec<SharedBufferBatchIterator<FORWARD>>
     where
         R: RangeBounds<B>,
@@ -169,7 +181,7 @@ impl SharedBufferManager {
     pub fn reverse_iters<R, B>(
         &self,
         key_range: &R,
-        epoch_range: impl RangeBounds<u64>,
+        epoch_range: impl RangeBounds<HummockEpoch>,
     ) -> Vec<SharedBufferBatchIterator<BACKWARD>>
     where
         R: RangeBounds<B>,
@@ -194,7 +206,7 @@ impl SharedBufferManager {
     }
 
     /// Deletes shared buffers before a given `epoch` exclusively.
-    pub fn delete_before(&self, epoch: u64) {
+    pub fn delete_before(&self, epoch: HummockEpoch) {
         let mut guard = self.shared_buffer.write();
         let new = guard.split_off(&epoch);
         *guard = new;
@@ -205,7 +217,7 @@ impl SharedBufferManager {
         self.uploader_handle.await.unwrap()
     }
 
-    pub fn reset(&mut self, epoch: u64) {
+    pub fn reset(&mut self, epoch: HummockEpoch) {
         // Reset uploader item.
         self.uploader_tx
             .send(SharedBufferUploaderItem::Reset(epoch))
@@ -215,7 +227,9 @@ impl SharedBufferManager {
     }
 
     #[cfg(test)]
-    pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
+    pub fn get_shared_buffer(
+        &self,
+    ) -> BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>> {
         self.shared_buffer.read().clone()
     }
 }
@@ -236,6 +250,7 @@ mod tests {
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
     use crate::object::{InMemObjectStore, ObjectStoreImpl};
+    use crate::store::GLOBAL_STORAGE_TABLE_ID;
 
     async fn new_shared_buffer_manager() -> SharedBufferManager {
         let obj_client = Arc::new(ObjectStoreImpl::Mem(InMemObjectStore::new()));
@@ -266,8 +281,9 @@ mod tests {
     fn generate_and_write_batch(
         put_keys: &[Vec<u8>],
         delete_keys: &[Vec<u8>],
-        epoch: u64,
+        epoch: HummockEpoch,
         idx: &mut usize,
+        table_id: StorageTableId,
         shared_buffer_manager: &SharedBufferManager,
     ) -> Vec<(Vec<u8>, HummockValue<Vec<u8>>)> {
         let mut shared_buffer_items = Vec::new();
@@ -286,7 +302,7 @@ mod tests {
         }
         shared_buffer_items.sort_by(|l, r| user_key(&l.0).cmp(&r.0));
         shared_buffer_manager
-            .write_batch(shared_buffer_items.clone(), epoch)
+            .write_batch(shared_buffer_items.clone(), epoch, table_id)
             .unwrap();
         shared_buffer_items
             .iter()
@@ -312,6 +328,7 @@ mod tests {
             &[],
             epoch1,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -323,6 +340,7 @@ mod tests {
             &keys[2..3],
             epoch2,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -399,6 +417,7 @@ mod tests {
             &[],
             epoch1,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -410,6 +429,7 @@ mod tests {
             &keys[2..3],
             epoch2,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -534,6 +554,7 @@ mod tests {
             &[],
             epoch1,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -545,6 +566,7 @@ mod tests {
             &keys[2..3],
             epoch2,
             &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
             &shared_buffer_manager,
         );
 
@@ -665,8 +687,14 @@ mod tests {
 
         // Write a batch
         let epoch = 1;
-        let shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+        let shared_buffer_items = generate_and_write_batch(
+            &keys,
+            &[],
+            epoch,
+            &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
+            &shared_buffer_manager,
+        );
 
         // Get and check value with epoch 0..=epoch1
         for (idx, key) in keys.iter().enumerate() {
@@ -685,8 +713,14 @@ mod tests {
         // Generate new items overlapping with old items and check
         keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
         let epoch = 1;
-        let new_shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager);
+        let new_shared_buffer_items = generate_and_write_batch(
+            &keys,
+            &[],
+            epoch,
+            &mut idx,
+            GLOBAL_STORAGE_TABLE_ID,
+            &shared_buffer_manager,
+        );
         for (idx, key) in keys.iter().enumerate() {
             assert_eq!(
                 shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
