@@ -556,6 +556,8 @@ impl LocalStreamManagerCore {
         if env_var_is_true(CACHE_CLEAR_ENABLED_ENV_VAR_KEY) {
             executor = Box::new(CacheClearExecutor::new(executor));
         }
+        // Update check
+        executor = Box::new(UpdateCheckExecutor::new(executor));
 
         Ok(executor)
     }
