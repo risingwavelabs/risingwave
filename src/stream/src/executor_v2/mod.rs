@@ -18,7 +18,6 @@ use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
@@ -147,10 +146,5 @@ pub trait Executor: Send + 'static {
         Self: Sized + Send + 'static,
     {
         Box::new(self)
-    }
-
-    /// Clears the in-memory cache of the executor. It's no-op by default.
-    fn clear_cache(&mut self) -> Result<()> {
-        Ok(())
     }
 }

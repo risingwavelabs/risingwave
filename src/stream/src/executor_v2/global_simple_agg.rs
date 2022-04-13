@@ -121,10 +121,6 @@ impl<S: StateStore> AggSimpleAggExecutor<S> {
             key_indices,
         })
     }
-
-    fn is_dirty(&self) -> bool {
-        self.states.as_ref().map(|s| s.is_dirty()).unwrap_or(false)
-    }
 }
 
 #[async_trait]
@@ -240,15 +236,6 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
 
     fn identity(&self) -> &str {
         self.info.identity.as_str()
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while states of simple agg are dirty"
-        );
-        self.states.take();
-        Ok(())
     }
 }
 
