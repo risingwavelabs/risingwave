@@ -38,6 +38,7 @@
 #![feature(generators)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
+#![feature(unzip_option)]
 
 #[macro_use]
 extern crate log;
