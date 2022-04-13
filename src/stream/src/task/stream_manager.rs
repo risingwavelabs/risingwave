@@ -441,7 +441,7 @@ impl LocalStreamManagerCore {
                 actor_id,
                 self.context.clone(),
             )),
-            Simple => {
+            Simple | NoShuffle => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(

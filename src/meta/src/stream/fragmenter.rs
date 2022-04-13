@@ -21,7 +21,9 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_node::Node;
-use risingwave_pb::stream_plan::{Dispatcher, DispatcherType, StreamNode};
+use risingwave_pb::stream_plan::{
+    DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
+};
 
 use super::graph::StreamFragmentEdge;
 use super::{CreateMaterializedViewContext, FragmentManagerRef};
@@ -89,8 +91,12 @@ where
         stream_node: &StreamNode,
         ctx: &mut CreateMaterializedViewContext,
     ) -> Result<BTreeMap<FragmentId, Fragment>> {
+        let stream_node = stream_node.clone();
+
         // Generate fragment graph and seal
         self.generate_fragment_graph(stream_node)?;
+        // The stream node might be rewritten after this point. Don't use `stream_node` anymore.
+
         let fragment_len = self.fragment_graph.fragment_len() as u32;
         assert_eq!(fragment_len, self.next_local_fragment_id);
         let offset = self
@@ -141,9 +147,64 @@ where
             .collect::<Result<BTreeMap<_, _>>>()
     }
 
+    /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
+    /// fragments.
+    fn rewrite_stream_node(&self, stream_node: StreamNode) -> Result<StreamNode> {
+        self.rewrite_stream_node_inner(stream_node, false)
+    }
+
+    fn rewrite_stream_node_inner(
+        &self,
+        stream_node: StreamNode,
+        insert_exchange_flag: bool,
+    ) -> Result<StreamNode> {
+        let mut inputs = vec![];
+
+        for child_node in stream_node.input {
+            let input = match child_node.get_node()? {
+                // For stateful operators, set `exchange_flag = true`. If it's already true, force
+                // add an exchange.
+                Node::HashAggNode(_) | Node::HashJoinNode(_) => {
+                    // We didn't make `fields` available on Java frontend yet, so we check if schema
+                    // is available (by `child_node.fields.is_empty()`) before deciding to do the
+                    // rewrite.
+                    if insert_exchange_flag && !child_node.fields.is_empty() {
+                        let child_node = self.rewrite_stream_node_inner(child_node, false)?;
+
+                        let strategy = DispatchStrategy {
+                            r#type: DispatcherType::NoShuffle.into(),
+                            column_indices: vec![],
+                        };
+
+                        StreamNode {
+                            pk_indices: child_node.pk_indices.clone(),
+                            fields: child_node.fields.clone(),
+                            node: Some(Node::ExchangeNode(ExchangeNode {
+                                strategy: Some(strategy.clone()),
+                            })),
+                            operator_id: 10000000 + child_node.operator_id,
+                            input: vec![child_node],
+                            identity: "Exchange (NoShuffle)".to_string(),
+                        }
+                    } else {
+                        self.rewrite_stream_node_inner(child_node, true)?
+                    }
+                }
+                _ => child_node,
+            };
+            inputs.push(input);
+        }
+
+        Ok(StreamNode {
+            input: inputs,
+            ..stream_node
+        })
+    }
+
     /// Generate fragment DAG from input streaming plan by their dependency.
-    fn generate_fragment_graph(&mut self, stream_node: &StreamNode) -> Result<()> {
-        self.build_and_add_fragment(stream_node)?;
+    fn generate_fragment_graph(&mut self, stream_node: StreamNode) -> Result<()> {
+        let stream_node = self.rewrite_stream_node(stream_node)?;
+        self.build_and_add_fragment(&stream_node)?;
         Ok(())
     }
 
