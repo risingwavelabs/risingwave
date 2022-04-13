@@ -107,7 +107,9 @@ impl ColumnDesc {
     pub fn get_column_descs(&self) -> Vec<ColumnDesc> {
         let mut descs = vec![self.clone()];
         for desc in &self.field_descs {
-            descs.append(&mut desc.get_column_descs());
+            let mut field_desc = desc.clone();
+            field_desc.name = self.name.clone() + "." + &field_desc.name;
+            descs.append(&mut field_desc.get_column_descs());
         }
         descs
     }

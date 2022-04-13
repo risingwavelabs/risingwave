@@ -235,8 +235,9 @@ impl Binder {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
                         .map(|s| {
-                            let source = s.clone().flatten();
-                            (Relation::Source(Box::new((&source).into())), source.columns)
+                            //let source = s.clone().flatten();
+                            //(Relation::Source(Box::new((&source).into())), source.columns)
+                            (Relation::Source(Box::new(s.into())), s.columns.clone())
                         })
                 })
                 .map_err(|_| {
