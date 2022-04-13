@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
-    fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    extract_common_factor, fold_boolean_constant, merge_expr_by, push_down_not, to_conjunctions,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -74,49 +74,29 @@ impl Condition {
     }
 
     pub fn to_expr(self) -> ExprImpl {
-        let mut iter = self.conjunctions.into_iter();
-        if let Some(mut ret) = iter.next() {
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
+        merge_expr_by(
+            self.conjunctions.into_iter().map(Cow::Owned),
+            ExprType::And,
+            true,
+        )
     }
 
     // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
     // rather than using `AND` to combine them.
     pub fn as_expr(&self) -> ExprImpl {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
+        merge_expr_by(
+            self.conjunctions.iter().map(Cow::Borrowed),
+            ExprType::And,
+            true,
+        )
     }
 
     /// Convert condition to an expression. If always true, return `None`.
     pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            Some(ret)
-        } else {
+        if self.always_true() {
             None
+        } else {
+            Some(self.as_expr())
         }
     }
 
@@ -288,9 +268,10 @@ impl Condition {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
+    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::InputRef;
+    use crate::expr::{FunctionCall, InputRef};
 
     #[test]
     fn test_split() {

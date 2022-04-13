@@ -12,32 +12,52 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+use std::collections::HashSet;
+
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
+use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal};
 use crate::expr::ExprType;
 
-fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
+fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
-        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
+        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == op => {
             let (_, exprs, _) = func_call.decompose();
             for expr in exprs {
-                to_conjunctions_inner(expr, rets);
+                split_expr_by(expr, op, rets);
             }
         }
         _ => rets.push(expr),
     }
 }
 
-/// give a bool expression, and transform it to Conjunctive form. e.g. given expression is
+pub fn merge_expr_by<'a, I>(mut exprs: I, op: ExprType, identity_elem: bool) -> ExprImpl
+where
+    I: Iterator<Item = Cow<'a, ExprImpl>>,
+{
+    if let Some(e) = exprs.next() {
+        let mut ret = e.into_owned();
+        for expr in exprs {
+            ret = FunctionCall::new(op, vec![ret, expr.into_owned()])
+                .unwrap()
+                .into();
+        }
+        ret
+    } else {
+        Literal::new(Some(ScalarImpl::Bool(identity_elem)), DataType::Boolean).into()
+    }
+}
+
+/// Transform a bool expression to Conjunctive form. e.g. given expression is
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
-    to_conjunctions_inner(expr, &mut rets);
-    // TODO: extract common factors fromm the conjunctions with OR expression.
-    // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
+    split_expr_by(expr, ExprType::And, &mut rets);
+    rets
+}
     rets
 }
 
