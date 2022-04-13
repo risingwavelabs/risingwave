@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::iter::once;
 
 use async_trait::async_trait;
 use itertools::Itertools;
@@ -40,14 +41,14 @@ impl super::DebugExecutor for UpdateCheckExecutor {
         let message = self.input.next().await?;
 
         if let Message::Chunk(chunk) = &message {
-            for (row1, row2) in chunk.rows().map(Some).chain(None).tuple_windows() {
+            for (row1, row2) in chunk.rows().map(Some).chain(once(None)).tuple_windows() {
                 match (row1, row2) {
                     (Some(row1), row2) => {
                         if row1.op() == Op::UpdateDelete {
                             assert_eq!(
                                 row2.as_ref().map(|r| r.op()),
                                 Some(Op::UpdateInsert),
-                                "update check failed on `{}`: expect an `UpdateInsert` after the `UpdateDelete`:\n first: {:?}\nsecond: {:?}",
+                                "update check failed on `{}`: expect an `UpdateInsert` after the `UpdateDelete`:\n first row: {:?}\nsecond row: {:?}",
                                 self.input.logical_operator_info(),
                                 row1,
                                 row2
