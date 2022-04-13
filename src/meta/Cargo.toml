@@ -32,6 +32,7 @@ prometheus = "0.13"
 prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }

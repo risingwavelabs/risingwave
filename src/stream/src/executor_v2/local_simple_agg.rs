@@ -25,7 +25,7 @@ use super::{Executor, ExecutorInfo, StreamExecutorResult};
 use crate::executor::{create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl};
 use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, PkIndices};
+use crate::executor_v2::PkIndices;
 
 pub type LocalSimpleAggExecutor = AggExecutorWrapper<AggLocalSimpleAggExecutor>;
 
@@ -106,24 +106,6 @@ impl AggLocalSimpleAggExecutor {
     }
 }
 
-impl Executor for AggLocalSimpleAggExecutor {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper")
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        self.info.identity.as_str()
-    }
-}
-
 #[async_trait]
 impl AggExecutor for AggLocalSimpleAggExecutor {
     async fn apply_chunk(&mut self, chunk: StreamChunk, _epoch: u64) -> StreamExecutorResult<()> {
@@ -172,6 +154,18 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
         let ops = vec![Op::Insert; 1];
         self.is_dirty = false;
         Ok(Some(StreamChunk::new(ops, columns, None)))
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        self.info.identity.as_str()
     }
 }
 

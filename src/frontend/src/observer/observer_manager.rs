@@ -27,7 +27,7 @@ use tokio::sync::watch::Sender;
 use tokio::task::JoinHandle;
 
 use crate::catalog::root_catalog::Catalog;
-use crate::scheduler::schedule::WorkerNodeManagerRef;
+use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 /// `ObserverManager` is used to update data based on notification from meta.
 /// Call `start` to spawn a new asynchronous task

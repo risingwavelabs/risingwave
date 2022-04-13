@@ -5,8 +5,9 @@ on:
     types: [opened, edited]
 
 jobs:
-  build:
+  pr-labeler:
     runs-on: ubuntu-latest
+    name: pr-labeler
     steps:
     - uses: srvaroa/labeler@master
       env:

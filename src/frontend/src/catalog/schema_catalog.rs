@@ -14,10 +14,10 @@
 
 use std::collections::HashMap;
 
-use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
+use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
@@ -64,22 +64,37 @@ impl SchemaCatalog {
         self.source_by_name.remove(&name).unwrap();
     }
 
-    // Use associated source to filter table.
-    pub fn get_all_table_names(&self) -> Vec<String> {
+    pub fn iter_table(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
             .filter(|(_, v)| v.associated_source_id.is_some())
-            .map(|(k, _)| k.clone())
-            .collect_vec()
+            .map(|(_, v)| v)
     }
 
-    // Use associated source to filter mv.
-    pub fn get_all_mv_names(&self) -> Vec<String> {
+    pub fn iter_mv(&self) -> impl Iterator<Item = &TableCatalog> {
         self.table_by_name
             .iter()
             .filter(|(_, v)| v.associated_source_id.is_none())
-            .map(|(k, _)| k.clone())
-            .collect_vec()
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate all sources, including the materialized sources.
+    pub fn iter_source(&self) -> impl Iterator<Item = &SourceCatalog> {
+        self.source_by_name
+            .iter()
+            .filter(|(_, v)| matches!(v.source_type, SourceType::Source))
+            .map(|(_, v)| v)
+    }
+
+    /// Iterate the materialized sources.
+    pub fn iter_materialized_source(&self) -> impl Iterator<Item = &SourceCatalog> {
+        self.source_by_name
+            .iter()
+            .filter(|(name, v)| {
+                matches!(v.source_type, SourceType::Source)
+                    && self.table_by_name.get(*name).is_some()
+            })
+            .map(|(_, v)| v)
     }
 
     pub fn get_table_by_name(&self, table_name: &str) -> Option<&TableCatalog> {
