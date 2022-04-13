@@ -64,7 +64,6 @@ impl_plan_tree_node_for_unary! {StreamExchange}
 impl ToStreamProst for StreamExchange {
     fn to_stream_prost_body(&self) -> Node {
         Node::ExchangeNode(ExchangeNode {
-            fields: self.schema().to_prost(),
             strategy: Some(DispatchStrategy {
                 r#type: match &self.base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
