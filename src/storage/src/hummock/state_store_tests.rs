@@ -27,7 +27,7 @@ use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::monitor::StateStoreMetrics;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
-use crate::storage_value::StorageValue;
+use crate::storage_value::{StorageValue, VALUE_META_SIZE};
 use crate::StateStoreIter;
 
 #[tokio::test]
@@ -213,10 +213,9 @@ async fn test_state_store_sync() {
     hummock_storage.ingest_batch(batch1, epoch).await.unwrap();
 
     // check sync state store metrics
-    // Note: epoch(8B) will be appended to keys, thus the ingested batch
-    // cost additional 16B in the shared buffer that is 32B in total.
+    // Note: epoch(8B) and ValueMeta(2B) will be appended to each kv pair
     assert_eq!(
-        32,
+        (16 + (8 + VALUE_META_SIZE) * 2) as u64,
         hummock_storage
             .shared_buffer_manager()
             .stats()
@@ -224,17 +223,19 @@ async fn test_state_store_sync() {
             .load(Ordering::SeqCst)
     );
 
-    // ingest 16B batch
+    // ingest 24B batch
     let mut batch2 = vec![
         (Bytes::from("cccc"), StorageValue::new_default_put("3333")),
         (Bytes::from("dddd"), StorageValue::new_default_put("4444")),
+        (Bytes::from("eeee"), StorageValue::new_default_put("5555")),
     ];
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
     hummock_storage.ingest_batch(batch2, epoch).await.unwrap();
 
-    // shared buffer threshold size should have been reached
+    // shared buffer threshold size should have been reached and will trigger a flush
+    // then ingest the batch
     assert_eq!(
-        64,
+        (24 + (8 + VALUE_META_SIZE) * 3) as u64,
         hummock_storage
             .shared_buffer_manager()
             .stats()
@@ -251,7 +252,7 @@ async fn test_state_store_sync() {
 
     // 16B in total with 8B epoch appended to the key
     assert_eq!(
-        16,
+        (16 + VALUE_META_SIZE) as u64,
         hummock_storage
             .shared_buffer_manager()
             .stats()

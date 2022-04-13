@@ -21,6 +21,7 @@ use crate::hummock::iterator::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
+use crate::storage_value::VALUE_META_SIZE;
 
 pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -40,8 +41,8 @@ impl SharedBufferBatch {
             .map(|(k, v)| {
                 let vsize = {
                     match v {
-                        HummockValue::Put(_, val) => val.len(),
-                        HummockValue::Delete(_) => 0,
+                        HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
+                        HummockValue::Delete(_) => VALUE_META_SIZE,
                     }
                 };
                 (k.len() + vsize) as u64
