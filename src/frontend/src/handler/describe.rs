@@ -97,12 +97,11 @@ mod tests {
     use std::collections::HashMap;
     use std::ops::Index;
 
-    use crate::handler::create_source::tests::create_proto_file;
-    use crate::test_utils::LocalFrontend;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
 
     #[tokio::test]
     async fn test_describe_handler() {
-        let proto_file = create_proto_file();
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')

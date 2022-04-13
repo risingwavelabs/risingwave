@@ -76,3 +76,77 @@ pub async fn handle_create_mv(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
 }
+
+#[cfg(test)]
+pub mod tests {
+    use std::collections::HashMap;
+
+    use itertools::Itertools;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+
+    use crate::catalog::gen_row_id_column_name;
+    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+
+    #[tokio::test]
+    async fn test_create_mv_handler() {
+        let proto_file = create_proto_file(PROTO_FILE_DATA);
+        let sql = format!(
+            r#"CREATE SOURCE t1
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
+            proto_file.path().to_str().unwrap()
+        );
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend.run_sql(sql).await.unwrap();
+
+        let sql = "create materialized view mv1 as select t1.country from t1";
+        frontend.run_sql(sql).await.unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader();
+
+        // Check source exists.
+        let source = catalog_reader
+            .read_guard()
+            .get_source_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "t1")
+            .unwrap()
+            .clone();
+        assert_eq!(source.name, "t1");
+
+        // Check table exists.
+        let table = catalog_reader
+            .read_guard()
+            .get_table_by_name(DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, "mv1")
+            .unwrap()
+            .clone();
+        assert_eq!(table.name(), "mv1");
+
+        // Get all column descs
+        let columns = table
+            .columns
+            .iter()
+            .flat_map(|c| c.column_desc.get_column_descs())
+            .collect_vec();
+
+        let columns = columns
+            .iter()
+            .map(|col| (col.name.as_str(), col.data_type.clone()))
+            .collect::<HashMap<&str, DataType>>();
+
+        let city_type = DataType::Struct {
+            fields: vec![DataType::Varchar, DataType::Varchar].into(),
+        };
+        let row_id_col_name = gen_row_id_column_name(0);
+        let expected_columns = maplit::hashmap! {
+            row_id_col_name.as_str() => DataType::Int64,
+            "country.zipcode" => DataType::Varchar,
+            "country.city.address" => DataType::Varchar,
+            "country.address" => DataType::Varchar,
+            "country.city" => city_type.clone(),
+            "country.city.zipcode" => DataType::Varchar,
+            "country" => DataType::Struct {fields:vec![DataType::Varchar,city_type,DataType::Varchar].into()},
+        };
+        assert_eq!(columns, expected_columns);
+    }
+}
