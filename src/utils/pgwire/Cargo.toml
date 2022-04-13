@@ -8,7 +8,6 @@ edition = "2021"
 async-trait = "0.1"
 byteorder = "1.4"
 bytes = "1"
-risingwave_common = { path = "../../common" }
 thiserror = "1"
 tokio = { version = "1", features = ["rt", "macros"] }
 tracing = { version = "0.1" }

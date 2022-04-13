@@ -24,6 +24,8 @@ pub enum PulsarOffset {
     None,
 }
 
+pub const PULSAR_SPLIT_TYPE: &str = "pulsar";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PulsarSplit {
     pub(crate) sub_topic: String,
@@ -48,5 +50,13 @@ impl SourceSplit for PulsarSplit {
 
     fn to_string(&self) -> anyhow::Result<String> {
         serde_json::to_string(self).map_err(|e| anyhow!(e))
+    }
+
+    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
+        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    }
+
+    fn get_type(&self) -> String {
+        PULSAR_SPLIT_TYPE.to_string()
     }
 }
