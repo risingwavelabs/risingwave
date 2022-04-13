@@ -79,3 +79,7 @@ name = "bench_block_iter"
 harness = false
 # Enable debug if you want to generate flamegraph.
 # debug = true
+
+[[bench]]
+name = "bench_lru_cache"
+harness = false
