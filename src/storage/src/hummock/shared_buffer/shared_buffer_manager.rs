@@ -140,7 +140,7 @@ impl SharedBufferManager {
         'retry_allocate: loop {
             // flush shared buffer if there is no enough space
             while threshold < current_size + batch_size {
-                log::info!(
+                log::debug!(
                     "trigge flush: threshold {}, new_size {}",
                     threshold,
                     current_size + batch_size
@@ -158,11 +158,6 @@ impl SharedBufferManager {
             match res {
                 Ok(_) => {
                     assert!(current_size + batch_size <= threshold);
-                    log::info!(
-                        "allocate success batch_size {} curr_size {}",
-                        batch_size,
-                        current_size + batch_size
-                    );
                     break; // success
                 }
                 Err(old_val) => {
@@ -217,7 +212,7 @@ impl SharedBufferManager {
 
         let notifier = self.ongoing_flush.subscribe();
         if let Some(mut rx) = notifier {
-            log::info!("flush: wait for notification");
+            log::debug!("flush: wait for notification");
             // Wait for notification
             rx.changed().await.unwrap();
             if !(*rx.borrow()) {
@@ -231,7 +226,7 @@ impl SharedBufferManager {
             res = self.sync(None).await;
             // Notify other waiters if any
             self.ongoing_flush.notify(res.is_ok());
-            log::info!("flush: notify subscribers, result {}", res.is_ok());
+            log::debug!("flush: notify subscribers, result {}", res.is_ok());
         }
         res
     }
@@ -259,11 +254,7 @@ impl SharedBufferManager {
                     .stats
                     .shared_buffer_cur_size
                     .fetch_sub(sync_size, Ordering::SeqCst);
-                log::info!(
-                    "sync success shared_buffer_old_size {}, sync_size {}",
-                    shared_buff_prev_size,
-                    sync_size
-                );
+                assert!(shared_buff_prev_size >= sync_size);
             }
             Err(e) => {
                 res = Err(e);
