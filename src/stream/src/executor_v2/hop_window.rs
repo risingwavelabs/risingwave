@@ -284,7 +284,7 @@ mod tests {
             unreachable!();
         };
         let rows = chunk
-            .rows_v2()
+            .rows()
             .map(|r| {
                 (
                     r.op(),
@@ -327,7 +327,7 @@ mod tests {
             unreachable!();
         };
         let rows = chunk
-            .rows_v2()
+            .rows()
             .map(|r| {
                 (
                     r.op(),

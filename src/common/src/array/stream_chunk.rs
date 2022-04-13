@@ -20,8 +20,8 @@ use itertools::Itertools;
 use prost::DecodeError;
 use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
 
+use super::stream_chunk_iter::RowRef;
 use crate::array::column::Column;
-use crate::array::stream_chunk_iter::{RowRef, StreamChunkRefIter};
 use crate::array::{DataChunk, Row};
 use crate::buffer::Bitmap;
 use crate::error::{ErrorCode, Result, RwError};
@@ -263,17 +263,12 @@ impl StreamChunk {
     /// Note that this function do not return whether the row is visible.
     /// # Arguments
     /// * `pos` - Index of look up tuple
-    pub fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
-        let mut row = Vec::with_capacity(self.columns.len());
-        for column in &self.columns {
-            row.push(column.array_ref().value_at(pos));
+    fn row_at_unchecked_vis(&self, pos: usize) -> RowRef<'_> {
+        assert!(pos < self.capacity());
+        RowRef {
+            chunk: self,
+            idx: pos,
         }
-        RowRef::new(self.ops[pos], row)
-    }
-
-    /// Get an iterator for visible rows.
-    pub fn rows(&self) -> StreamChunkRefIter<'_> {
-        StreamChunkRefIter::new(self)
     }
 
     /// `to_pretty_string` returns a table-like text representation of the `StreamChunk`.
@@ -282,7 +277,7 @@ impl StreamChunk {
 
         let mut table = Table::new();
         table.load_preset("||--+-++|    ++++++");
-        for row in self.rows_v2() {
+        for row in self.rows() {
             let mut cells = Vec::with_capacity(row.size() + 1);
             cells.push(
                 Cell::new(match row.op() {
