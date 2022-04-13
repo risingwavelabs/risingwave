@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
@@ -20,7 +19,7 @@ use itertools::Itertools;
 
 use crate::expr::{
     fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
-    ExprRewriter, ExprType, ExprVisitor, InputRef,
+    ExprRewriter, ExprType, ExprVisitor, InputRef, extract_common_factor,
 };
 
 #[derive(Debug, Clone)]
@@ -240,7 +239,7 @@ impl Condition {
                     break;
                 }
             } else {
-                res.push(i);
+                res.extend(extract_common_factor(i));
             }
         }
         Self { conjunctions: res }

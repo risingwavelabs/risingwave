@@ -12,14 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Cow;
 use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal};
+use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
@@ -53,9 +52,15 @@ where
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
-    // TODO: extract common factors from the conjunctions with OR expression.
-    // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
     split_expr_by(expr, ExprType::And, &mut rets);
+    rets
+}
+
+/// Transform a bool expression to Disjunctive form. e.g. given expression is
+/// (expr1 OR expr2 OR expr3) the function will return Vec[expr1, expr2, expr3].
+pub fn to_disjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
+    let mut rets = vec![];
+    split_expr_by(expr, ExprType::Or, &mut rets);
     rets
 }
 
@@ -230,6 +235,47 @@ impl ExprRewriter for NotPushDown {
             }
         }
     }
+}
+
+pub fn extract_common_factor(expr: ExprImpl) -> Vec<ExprImpl> {
+    // For example, we assume that expr is (A & B & C & D) | (B & C & D) | (C & D & E)
+    let disjunctions: Vec<ExprImpl> = to_disjunctions(expr);
+
+    // `expr` can not be divided into several disjunctions
+    if disjunctions.len() == 1 {
+        return disjunctions;
+    }
+
+    // extract (A & B & C & D) | (B & C & D) | (C & D & E)
+    // into [{A, B, C, D}, {B, C, D}, {C, D, E}]
+    let mut disjunctions: Vec<HashSet<_>> = disjunctions
+        .into_iter()
+        .map(|x| to_conjunctions(x).into_iter().collect())
+        .collect();
+    let last = disjunctions.pop().unwrap();
+    let (greatest_common_divider, others): (HashSet<_>, _) = last
+        .into_iter()
+        .partition(|x| disjunctions.iter().all(|y| y.contains(x)));
+    // now greatest_common_factor == {C, D}
+    disjunctions.push(others);
+    for i in &mut disjunctions {
+        // remove common factors
+        i.retain(|x| !greatest_common_divider.contains(x));
+    }
+    // now disjunctions == [{A, B}, {B}, {E}]
+    let remaining = merge_expr_by_binary(
+        disjunctions.into_iter().map(|x| {
+            merge_expr_by_binary(x.into_iter(), ExprType::And, ExprImpl::literal_bool(true))
+        }),
+        ExprType::Or,
+        ExprImpl::literal_bool(false),
+    );
+    // now remaining is (A & B) | (B) | (E)
+    // the result is C & D & ((A & B) | (B) | (E))
+    greatest_common_divider
+        .into_iter()
+        .chain(std::iter::once(remaining))
+        .collect()
 }
 
 /// give a expression, and check all columns in its `input_ref` expressions less than the input
