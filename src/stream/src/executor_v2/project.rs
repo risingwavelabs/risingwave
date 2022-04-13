@@ -37,6 +37,9 @@ impl ProjectExecutor {
     }
 }
 
+/// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
+/// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
+/// or update element into next operator according to the result of the expression.
 pub struct SimpleProjectExecutor {
     info: ExecutorInfo,
 
@@ -117,6 +120,7 @@ impl SimpleExecutor for SimpleProjectExecutor {
 
 #[cfg(test)]
 mod tests {
+    use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{I64Array, *};
     use risingwave_common::catalog::{Field, Schema};
@@ -165,7 +169,7 @@ mod tests {
             Box::new(right_expr),
         );
 
-        let mut project = Box::new(ProjectExecutor::new(Box::new(source), vec![test_expr], 1));
+        let project = Box::new(ProjectExecutor::new(Box::new(source), vec![test_expr], 1));
         let mut project = project.execute();
 
         if let Message::Chunk(chunk) = project.next().await.unwrap().unwrap() {
