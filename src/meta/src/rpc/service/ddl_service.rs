@@ -171,12 +171,14 @@ where
             .generate::<{ IdCategory::Table }>()
             .await
             .map_err(tonic_err)? as u32;
+        source.id = id;
 
         self.catalog_manager
             .start_create_source_procedure(&source)
             .await
             .map_err(tonic_err)?;
 
+        // QUESTION(patrick): why do we need to contact compute node on create source
         if let Err(e) = self.source_manager.create_source(&source).await {
             self.catalog_manager
                 .cancel_create_source_procedure(&source)
@@ -185,7 +187,6 @@ where
             return Err(e.to_grpc_status());
         }
 
-        source.id = id;
         let version = self
             .catalog_manager
             .finish_create_source_procedure(&source)
