@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::collections::hash_map::{Entry, HashMap};
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::Result;
@@ -26,97 +27,172 @@ use risingwave_pb::stream_plan::{
 };
 
 use crate::cluster::WorkerId;
-use crate::model::{ActorId, FragmentId};
+use crate::model::{ActorId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
-/// [`StreamActorBuilder`] build a stream actor in a stream DAG.
+#[derive(Debug, Clone)]
+pub struct ActorLink(pub Vec<LocalActorId>);
+
+impl ActorLink {
+    pub fn to_global_ids(&self, actor_id_offset: u32, actor_id_len: u32) -> Self {
+        Self(
+            self.0
+                .iter()
+                .map(|x| x.to_global_id(actor_id_offset, actor_id_len))
+                .collect(),
+        )
+    }
+
+    pub fn as_global_ids(&self) -> Vec<u32> {
+        Self::slice_as_global_ids(self.0.as_slice())
+    }
+
+    pub fn slice_as_global_ids(data: &[LocalActorId]) -> Vec<u32> {
+        data.iter().map(|x| x.as_global_id()).collect()
+    }
+}
+
+/// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
-    /// actor id field.
-    actor_id: ActorId,
-    /// associated fragment id.
-    fragment_id: FragmentId,
-    /// associated stream node.
+    /// actor id field
+    actor_id: LocalActorId,
+
+    /// associated fragment id
+    fragment_id: LocalFragmentId,
+
+    /// associated stream node
     nodes: Arc<StreamNode>,
-    /// dispatcher category.
-    dispatcher: Option<Dispatcher>,
-    /// downstream actor set.
-    downstream_actors: BTreeSet<ActorId>,
-    /// upstream actor array, here we build and set upstream actors in exactly the same order.
-    upstream_actors: Vec<Vec<ActorId>>,
+
+    /// downstream dispatchers (dispatcher, downstream actor, hash mapping)
+    downstreams: Vec<(Dispatcher, ActorLink, Option<Vec<LocalActorId>>)>,
+
+    /// upstreams, exchange node operator_id -> upstream actor ids
+    upstreams: HashMap<u64, ActorLink>,
+
+    sealed: bool,
 }
 
 impl StreamActorBuilder {
-    pub fn new(actor_id: ActorId, fragment_id: FragmentId, node: Arc<StreamNode>) -> Self {
+    pub fn new(
+        actor_id: LocalActorId,
+        fragment_id: LocalFragmentId,
+        node: Arc<StreamNode>,
+    ) -> Self {
         Self {
             actor_id,
             fragment_id,
             nodes: node,
-            dispatcher: None,
-            downstream_actors: BTreeSet::new(),
-            upstream_actors: vec![],
+            downstreams: vec![],
+            upstreams: HashMap::new(),
+            sealed: false,
         }
     }
 
-    pub fn get_id(&self) -> ActorId {
+    pub fn get_id(&self) -> LocalActorId {
         self.actor_id
     }
 
-    pub fn get_fragment_id(&self) -> FragmentId {
+    pub fn get_fragment_id(&self) -> LocalFragmentId {
         self.fragment_id
     }
 
-    #[allow(dead_code)]
-    pub fn set_simple_dispatcher(&mut self) {
-        self.dispatcher = Some(Dispatcher {
-            r#type: DispatcherType::Simple as i32,
-            ..Default::default()
-        })
-    }
-
-    pub fn set_hash_dispatcher(&mut self, column_indices: Vec<u32>, hash_mapping: ActorMapping) {
-        self.dispatcher = Some(Dispatcher {
-            r#type: DispatcherType::Hash as i32,
-            column_indices: column_indices.into_iter().map(|i| i as u32).collect(),
-            hash_mapping: Some(hash_mapping),
-            ..Default::default()
-        })
-    }
-
-    #[allow(dead_code)]
-    pub fn set_broadcast_dispatcher(&mut self) {
-        self.dispatcher = Some(Dispatcher {
-            r#type: DispatcherType::Broadcast as i32,
-            ..Default::default()
-        })
-    }
-
-    pub fn set_dispatcher(&mut self, dispatcher: Dispatcher) {
-        self.dispatcher = Some(dispatcher);
-    }
-
-    /// Used by stream graph to inject upstream fields.
-    pub fn get_upstream_actors(&self) -> Vec<Vec<ActorId>> {
-        self.upstream_actors.clone()
-    }
-
-    pub fn build(&self) -> StreamActor {
-        let mut upstream_actor_id = vec![];
-        self.upstream_actors.iter().for_each(|v| {
-            upstream_actor_id.append(&mut v.clone());
-        });
-        StreamActor {
-            actor_id: self.actor_id,
-            fragment_id: self.fragment_id,
-            nodes: Some(self.nodes.deref().clone()),
-            dispatcher: match self.dispatcher.clone() {
-                Some(d) => vec![Dispatcher {
-                    downstream_actor_id: self.downstream_actors.iter().copied().collect(),
-                    ..d
-                }],
-                None => vec![],
+    /// Add a dispatcher to this actor. Note that the `downstream_actor_id` field must be left
+    /// empty, as we will fill this out when building actors.
+    pub fn add_dispatcher(
+        &mut self,
+        dispatcher: Dispatcher,
+        downstream_actors: ActorLink,
+        mapping: Option<Vec<LocalActorId>>,
+    ) {
+        assert!(!self.sealed);
+        // TODO: we should have a non-proto Dispatcher type here
+        assert!(
+            dispatcher.downstream_actor_id.is_empty(),
+            "should leave downstream_actor_id empty, will be filled later"
+        );
+        assert!(
+            dispatcher.hash_mapping.is_none(),
+            "should leave hash_mapping empty, will be filled later"
+        );
+        self.downstreams.push((
+            Dispatcher {
+                r#type: DispatcherType::Simple as i32,
+                ..Default::default()
             },
-            upstream_actor_id,
+            downstream_actors,
+            mapping,
+        ));
+    }
+
+    /// Build an actor from given information. At the same time, convert local actor id to global
+    /// actor id.
+    pub fn seal(&mut self, actor_id_offset: u32, actor_id_len: u32) {
+        assert!(!self.sealed);
+
+        self.actor_id = self.actor_id.to_global_id(actor_id_offset, actor_id_len);
+        self.downstreams = std::mem::take(&mut self.downstreams)
+            .into_iter()
+            .map(|(dispatcher, downstreams, mapping)| {
+                let global_mapping =
+                    mapping.map(|x| ActorLink(x).to_global_ids(actor_id_offset, actor_id_len));
+
+                (
+                    Dispatcher {
+                        hash_mapping: global_mapping.as_ref().map(|x| ActorMapping {
+                            hash_mapping: x.as_global_ids(),
+                        }),
+                        ..dispatcher
+                    },
+                    downstreams.to_global_ids(actor_id_offset, actor_id_len),
+                    global_mapping.map(|ActorLink(x)| x),
+                )
+            })
+            .collect();
+        self.upstreams = std::mem::take(&mut self.upstreams)
+            .into_iter()
+            .map(|(exchange_id, actor_link)| {
+                (
+                    exchange_id,
+                    actor_link.to_global_ids(actor_id_offset, actor_id_len),
+                )
+            })
+            .collect();
+        self.sealed = true;
+    }
+
+    /// Build an actor after seal.
+    pub fn build(&self) -> StreamActor {
+        assert!(self.sealed);
+
+        let mut dispatcher = self
+            .downstreams
+            .iter()
+            .map(|(dispatcher, downstreams, _)| Dispatcher {
+                downstream_actor_id: downstreams.as_global_ids(),
+                ..dispatcher.clone()
+            })
+            .collect_vec();
+
+        // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
+        if dispatcher.is_empty() {
+            dispatcher = vec![Dispatcher {
+                r#type: DispatcherType::Broadcast.into(),
+                ..Default::default()
+            }]
+        }
+
+        StreamActor {
+            actor_id: self.actor_id.as_global_id(),
+            fragment_id: self.fragment_id.as_global_id(),
+            nodes: Some(self.nodes.deref().clone()),
+            dispatcher,
+            upstream_actor_id: self
+                .upstreams
+                .iter()
+                .flat_map(|(_, upstreams)| upstreams.0.iter().copied())
+                .map(|x| x.as_global_id())
+                .collect(), // TODO: store each upstream separately
         }
     }
 }
@@ -124,7 +200,7 @@ impl StreamActorBuilder {
 /// [`StreamGraphBuilder`] build a stream graph. It injects some information to achieve
 /// dependencies. See `build_inner` for more details.
 pub struct StreamGraphBuilder<S> {
-    actor_builders: BTreeMap<ActorId, StreamActorBuilder>,
+    actor_builders: BTreeMap<LocalActorId, StreamActorBuilder>,
     /// (ctx) fragment manager.
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -145,42 +221,70 @@ where
         self.actor_builders.insert(actor.get_id(), actor);
     }
 
-    /// Add dependency between two connected node in the graph.
-    pub fn add_dependency(&mut self, upstreams: &[ActorId], downstreams: &[ActorId]) {
-        downstreams.iter().for_each(|&downstream| {
-            upstreams.iter().for_each(|upstream| {
-                self.actor_builders
-                    .get_mut(upstream)
-                    .unwrap()
-                    .downstream_actors
-                    .insert(downstream);
-            });
+    /// Number of actors in the graph builder
+    pub fn actor_len(&self) -> usize {
+        self.actor_builders.len()
+    }
+
+    /// Add dependency between two connected node in the graph. Only provide `mapping` when it's
+    /// hash mapping.
+    pub fn add_link(
+        &mut self,
+        upstream_actor_ids: &[LocalActorId],
+        downstream_actor_ids: &[LocalActorId],
+        exchange_operator_id: u64,
+        dispatcher: Dispatcher,
+        mapping: Option<Vec<LocalActorId>>,
+    ) {
+        upstream_actor_ids.iter().for_each(|upstream_id| {
             self.actor_builders
-                .get_mut(&downstream)
+                .get_mut(upstream_id)
                 .unwrap()
-                .upstream_actors
-                .push(upstreams.to_vec());
+                .add_dispatcher(
+                    dispatcher.clone(),
+                    ActorLink(downstream_actor_ids.to_vec()),
+                    mapping.clone(),
+                );
+        });
+
+        downstream_actor_ids.iter().for_each(|downstream_id| {
+            let ret = self
+                .actor_builders
+                .get_mut(downstream_id)
+                .unwrap()
+                .upstreams
+                .insert(exchange_operator_id, ActorLink(upstream_actor_ids.to_vec()));
+            assert!(
+                ret.is_none(),
+                "duplicated exchange input {} for actors {:?} -> {:?}",
+                exchange_operator_id,
+                upstream_actor_ids,
+                downstream_actor_ids
+            );
         });
     }
 
     /// Build final stream DAG with dependencies with current actor builders.
     pub fn build(
-        &self,
+        &mut self,
         ctx: &mut CreateMaterializedViewContext,
-    ) -> Result<HashMap<FragmentId, Vec<StreamActor>>> {
+        actor_id_offset: u32,
+        actor_id_len: u32,
+    ) -> Result<HashMap<LocalFragmentId, Vec<StreamActor>>> {
         let mut graph = HashMap::new();
         let mut table_sink_map = HashMap::new();
         let mut dispatches: HashMap<ActorId, Vec<ActorId>> = HashMap::new();
         let mut upstream_node_actors = HashMap::new();
 
-        for builder in self.actor_builders.values() {
-            let mut actor = builder.build();
-            let actor_id = actor.actor_id;
+        for builder in self.actor_builders.values_mut() {
+            builder.seal(actor_id_offset, actor_id_len);
+        }
 
+        for builder in self.actor_builders.values() {
+            let actor_id = builder.actor_id;
+            let mut actor = builder.build();
             let mut dispatch_upstreams = vec![];
-            let mut upstream_actors = builder.get_upstream_actors();
-            // reverse the vector so we can pop from the back.
-            upstream_actors.reverse();
+            let mut upstream_actors = builder.upstreams.clone();
 
             actor.nodes = Some(self.build_inner(
                 &mut table_sink_map,
@@ -198,10 +302,10 @@ where
             for up_id in dispatch_upstreams {
                 match dispatches.entry(up_id) {
                     Entry::Occupied(mut o) => {
-                        o.get_mut().push(actor_id);
+                        o.get_mut().push(actor_id.as_global_id());
                     }
                     Entry::Vacant(v) => {
-                        v.insert(vec![actor_id]);
+                        v.insert(vec![actor_id.as_global_id()]);
                     }
                 }
             }
@@ -210,6 +314,7 @@ where
             actor_ids.sort_unstable();
             actor_ids.dedup();
         }
+
         ctx.dispatches = dispatches;
         ctx.upstream_node_actors = upstream_node_actors;
         ctx.table_sink_map = table_sink_map;
@@ -228,7 +333,7 @@ where
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
-        upstream_actor_id: &mut Vec<Vec<ActorId>>,
+        upstream_actor_id: &mut HashMap<u64, ActorLink>,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => self.build_inner(
@@ -254,8 +359,8 @@ where
                                 pk_indices: input.pk_indices.clone(),
                                 node: Some(Node::MergeNode(MergeNode {
                                     upstream_actor_id: upstream_actor_id
-                                        .pop()
-                                        .expect("failed to pop upstream actor id"),
+                                        .remove(&input.get_operator_id())
+                                        .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
                                     fields: exchange_node.get_fields().clone(),
                                 })),
                                 operator_id: input.operator_id,
@@ -332,6 +437,12 @@ where
                 }
             }
 
+            let merge_node = &input[0];
+            let batch_plan_node = &input[1];
+
+            assert_matches!(merge_node.node, Some(Node::MergeNode(_)));
+            assert_matches!(batch_plan_node.node, Some(Node::BatchPlanNode(_)));
+
             let chain_input = vec![
                 StreamNode {
                     input: vec![],
@@ -340,10 +451,10 @@ where
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
                         fields: chain_node.upstream_fields.clone(),
                     })),
-                    operator_id: input.get(0).as_ref().unwrap().operator_id,
+                    operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
                 },
-                input.get(1).unwrap().clone(),
+                batch_plan_node.clone(),
             ];
 
             Ok(StreamNode {
