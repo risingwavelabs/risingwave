@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    fold_boolean_constant, merge_expr_by, push_down_not, to_conjunctions, try_get_bool_constant,
-    ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    fold_boolean_constant, merge_expr_by_binary, push_down_not, to_conjunctions,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -74,20 +74,20 @@ impl Condition {
     }
 
     pub fn to_expr(self) -> ExprImpl {
-        merge_expr_by(
+        merge_expr_by_binary(
             self.conjunctions.into_iter().map(Cow::Owned),
             ExprType::And,
-            true,
+            ExprImpl::literal_bool(true),
         )
     }
 
     // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
     // rather than using `AND` to combine them.
     pub fn as_expr(&self) -> ExprImpl {
-        merge_expr_by(
+        merge_expr_by_binary(
             self.conjunctions.iter().map(Cow::Borrowed),
             ExprType::And,
-            true,
+            ExprImpl::literal_bool(true),
         )
     }
 

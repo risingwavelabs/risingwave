@@ -15,10 +15,10 @@
 use std::borrow::Cow;
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
 
-use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef, Literal};
+use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
 fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
@@ -33,7 +33,7 @@ fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     }
 }
 
-pub fn merge_expr_by<'a, I>(mut exprs: I, op: ExprType, identity_elem: bool) -> ExprImpl
+pub fn merge_expr_by_binary<'a, I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
 where
     I: Iterator<Item = Cow<'a, ExprImpl>>,
 {
@@ -46,7 +46,7 @@ where
         }
         ret
     } else {
-        Literal::new(Some(ScalarImpl::Bool(identity_elem)), DataType::Boolean).into()
+        identity_elem
     }
 }
 
