@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_pb::data::Column as ProstColumn;
 
+use super::Array;
 use crate::array::{ArrayImpl, ArrayRef};
 use crate::error::Result;
 
@@ -52,6 +53,12 @@ impl Column {
 
     pub fn into_inner(self) -> ArrayRef {
         self.array
+    }
+}
+
+impl<A: Array> From<A> for Column {
+    fn from(a: A) -> Self {
+        Self::new(Arc::new(a.into()))
     }
 }
 

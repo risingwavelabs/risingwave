@@ -284,16 +284,11 @@ mod tests {
             unreachable!();
         };
         let rows = chunk
-            .rows()
+            .rows_v2()
             .map(|r| {
                 (
-                    r.op,
-                    Row::new(
-                        r.values
-                            .into_iter()
-                            .map(ToOwnedDatum::to_owned_datum)
-                            .collect_vec(),
-                    ),
+                    r.op(),
+                    Row::new(r.values().map(ToOwnedDatum::to_owned_datum).collect_vec()),
                 )
             })
             .collect_vec();
@@ -332,16 +327,11 @@ mod tests {
             unreachable!();
         };
         let rows = chunk
-            .rows()
+            .rows_v2()
             .map(|r| {
                 (
-                    r.op,
-                    Row::new(
-                        r.values
-                            .into_iter()
-                            .map(ToOwnedDatum::to_owned_datum)
-                            .collect_vec(),
-                    ),
+                    r.op(),
+                    Row::new(r.values().map(ToOwnedDatum::to_owned_datum).collect_vec()),
                 )
             })
             .collect_vec();
