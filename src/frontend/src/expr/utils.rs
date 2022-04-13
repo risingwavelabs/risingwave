@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::borrow::Cow;
-use std::collections::HashSet;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::{DataType, ScalarImpl};
@@ -56,8 +55,6 @@ where
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
     split_expr_by(expr, ExprType::And, &mut rets);
-    rets
-}
     rets
 }
 

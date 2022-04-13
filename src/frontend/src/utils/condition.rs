@@ -19,8 +19,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    extract_common_factor, fold_boolean_constant, merge_expr_by, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    fold_boolean_constant, merge_expr_by, push_down_not, to_conjunctions, try_get_bool_constant,
+    ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
