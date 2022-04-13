@@ -35,7 +35,7 @@ use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::session::{OptimizerContext, SessionImpl};
 
-/// The created object under a schema.
+/// The created object under a schema. This is a helper for creating tables and sources.
 pub struct CreateObject {
     pub database_id: u32,
     pub schema_id: u32,

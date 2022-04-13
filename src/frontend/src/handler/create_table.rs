@@ -20,7 +20,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::error::Result;
 use risingwave_pb::catalog::source::Info;
-use risingwave_pb::catalog::{Table as ProstTable, TableSourceInfo};
+use risingwave_pb::catalog::{Source as ProstSource, Table as ProstTable, TableSourceInfo};
 use risingwave_sqlparser::ast::{ColumnDef, ObjectName};
 
 use crate::binder::expr::bind_data_type;
@@ -32,7 +32,7 @@ use crate::handler::create_source::CreateObject;
 use crate::optimizer::plan_node::{LogicalSource, StreamSource};
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::{PlanRef, PlanRoot};
-use crate::session::{OptimizerContext, OptimizerContextRef};
+use crate::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
 // FIXME: store PK columns in ProstTableSourceInfo as Catalog information, and then remove this
 
 /// Binds the column schemas declared in CREATE statement into `ColumnCatalog`.
@@ -68,15 +68,21 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
 
 /// This function is both used by explaining and creating table.
 pub(crate) fn gen_create_table_plan(
+    session: &SessionImpl,
     context: OptimizerContextRef,
-    object: CreateObject,
-    columns: Vec<ColumnCatalog>,
-) -> Result<(PlanRef, ProstTable)> {
+    table_name: ObjectName,
+    columns: Vec<ColumnDef>,
+) -> Result<(PlanRef, ProstSource, ProstTable)> {
+    let object = CreateObject::new(session, table_name)?;
+    let columns = bind_sql_columns(columns)?;
+    let source = object.to_prost_source(Info::TableSource(TableSourceInfo {
+        columns: columns.iter().map(|c| c.to_protobuf()).collect(),
+    }));
     let source_catalog = object.to_table_source_catalog(columns.clone());
     let table_catalog = object.to_table_catalog(columns);
     let table = object.to_prost_table(&table_catalog);
     let plan = gen_materialized_source_plan(context, source_catalog, table_catalog)?;
-    Ok((plan, table))
+    Ok((plan, source, table))
 }
 
 /// Generate a stream plan with `StreamSource` + `StreamMaterialize`, it ressembles a
@@ -110,14 +116,10 @@ pub async fn handle_create_table(
 ) -> Result<PgResponse> {
     let session = context.session_ctx.clone();
 
-    let object = CreateObject::new(&session, table_name)?;
-    let columns = bind_sql_columns(columns)?;
-    let source = object.to_prost_source(Info::TableSource(TableSourceInfo {
-        columns: columns.iter().map(|c| c.to_protobuf()).collect(),
-    }));
-    let (plan, table) = {
-        let (plan, table) = gen_create_table_plan(context.into(), object, columns)?;
-        (plan.to_stream_prost(), table)
+    let (plan, source, table) = {
+        let (plan, source, table) =
+            gen_create_table_plan(&*session, context.into(), table_name, columns)?;
+        (plan.to_stream_prost(), source, table)
     };
 
     log::trace!(
