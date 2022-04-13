@@ -153,10 +153,11 @@ impl Binder {
         Ok((select_list, aliases))
     }
 
+    /// Bind columns exclude field `column_binding` which have `.` in name.
     pub fn bind_columns(columns: &[ColumnBinding]) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
-            .filter(|c|!c.column_name.contains('.'))
+            .filter(|c| !c.column_name.contains('.'))
             .map(|column| {
                 (
                     InputRef::new(column.index, column.data_type.clone()).into(),
@@ -167,12 +168,13 @@ impl Binder {
         Ok(bound_columns)
     }
 
+    /// Bind columns which is not hidden and exclude field `column_binding` which have `.` in name.
     pub fn bind_visible_columns(
         columns: &[ColumnBinding],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
-            .filter(|c|!c.column_name.contains('.'))
+            .filter(|c| !c.column_name.contains('.'))
             .filter_map(|column| {
                 if !column.is_hidden {
                     Some((
