@@ -34,8 +34,8 @@ mod kafka;
 pub mod kinesis;
 mod pulsar;
 mod utils;
-
 pub use base::*;
+pub use utils::{AnyhowProperties, Properties};
 pub mod state;
 
 use crate::kinesis::config::AwsConfigInfo;

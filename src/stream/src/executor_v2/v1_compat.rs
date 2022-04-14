@@ -212,7 +212,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         _op_info: String,
-        key_indices: Vec<usize>,
     ) -> Self {
         Self::new(
             Box::new(ExecutorV1AsV2(input)),
@@ -220,7 +219,6 @@ impl<S: StateStore> MaterializeExecutor<S> {
             keys,
             column_ids,
             executor_id,
-            key_indices,
         )
     }
 }

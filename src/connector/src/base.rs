@@ -32,6 +32,7 @@ pub enum SourceOffset {
 use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
+use crate::utils::AnyhowProperties;
 use crate::{kafka, kinesis, pulsar};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
@@ -149,21 +150,17 @@ impl SplitEnumeratorImpl {
                 .map(|ss| ss.into_iter().map(SplitImpl::Kinesis).collect_vec()),
         }
     }
-}
 
-pub fn extract_split_enumerator(
-    properties: &HashMap<String, String>,
-) -> Result<SplitEnumeratorImpl> {
-    let source_type = match properties.get(UPSTREAM_SOURCE_KEY) {
-        None => return Err(anyhow!("{} not found", UPSTREAM_SOURCE_KEY)),
-        Some(value) => value,
-    };
-
-    match source_type.as_str() {
-        KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
-        PULSAR_SOURCE => PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar),
-        KINESIS_SOURCE => todo!(),
-        _ => Err(anyhow!("unsupported source type: {}", source_type)),
+    pub fn create(properties: &AnyhowProperties) -> Result<SplitEnumeratorImpl> {
+        let source_type = properties.get(UPSTREAM_SOURCE_KEY)?;
+        match source_type.as_str() {
+            KAFKA_SOURCE => KafkaSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Kafka),
+            PULSAR_SOURCE => {
+                PulsarSplitEnumerator::new(properties).map(SplitEnumeratorImpl::Pulsar)
+            }
+            KINESIS_SOURCE => todo!(),
+            _ => Err(anyhow!("unsupported source type: {}", source_type)),
+        }
     }
 }
 
