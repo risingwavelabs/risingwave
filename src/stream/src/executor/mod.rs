@@ -57,6 +57,7 @@ pub use top_n::*;
 pub use top_n_appendonly::*;
 use tracing::trace_span;
 
+use crate::executor_v2::LookupExecutorBuilder;
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
@@ -492,7 +493,11 @@ pub fn create_executor(
     node: &stream_plan::StreamNode,
     store: impl StateStore,
 ) -> Result<Box<dyn Executor>> {
-    let real_executor = build_executor! { executor_params,node,store,stream,
+    let real_executor = build_executor! {
+        executor_params,
+        node,
+        store,
+        stream,
         Node::SourceNode => SourceExecutorBuilder,
         Node::ProjectNode => ProjectExecutorBuilder,
         Node::TopNNode => TopNExecutorBuilder,
@@ -505,7 +510,9 @@ pub fn create_executor(
         Node::BatchPlanNode => BatchQueryExecutorBuilder,
         Node::MergeNode => MergeExecutorBuilder,
         Node::MaterializeNode => MaterializeExecutorBuilder,
-        Node::FilterNode => FilterExecutorBuilder
+        Node::FilterNode => FilterExecutorBuilder,
+        Node::ArrangeNode => ArrangeExecutorBuilder,
+        Node::LookupNode => LookupExecutorBuilder
     }?;
     Ok(real_executor)
 }

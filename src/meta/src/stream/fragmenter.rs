@@ -55,6 +55,9 @@ pub struct StreamFragmenter<S> {
     /// local actor id
     next_local_actor_id: u32,
 
+    /// rewrite will produce new operators, and we need to track next operator id
+    next_operator_id: u32,
+
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
@@ -76,6 +79,7 @@ where
             hash_mapping,
             next_local_fragment_id: 0,
             next_local_actor_id: 0,
+            next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
         }
     }
@@ -149,12 +153,12 @@ where
 
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
     /// fragments.
-    fn rewrite_stream_node(&self, stream_node: StreamNode) -> Result<StreamNode> {
+    fn rewrite_stream_node(&mut self, stream_node: StreamNode) -> Result<StreamNode> {
         self.rewrite_stream_node_inner(stream_node, false)
     }
 
     fn rewrite_stream_node_inner(
-        &self,
+        &mut self,
         stream_node: StreamNode,
         insert_exchange_flag: bool,
     ) -> Result<StreamNode> {
@@ -182,7 +186,7 @@ where
                             node: Some(Node::ExchangeNode(ExchangeNode {
                                 strategy: Some(strategy.clone()),
                             })),
-                            operator_id: 10000000 + child_node.operator_id,
+                            operator_id: self.gen_operator_id() as u64,
                             input: vec![child_node],
                             identity: "Exchange (NoShuffle)".to_string(),
                         }
@@ -290,6 +294,12 @@ where
         self.next_local_actor_id += parallel_degree;
 
         start_actor_id..start_actor_id + parallel_degree
+    }
+
+    /// Generate an operator id
+    fn gen_operator_id(&mut self) -> u32 {
+        self.next_operator_id -= 1;
+        self.next_operator_id
     }
 
     fn build_actor_graph_fragment(&mut self, fragment_id: LocalFragmentId) -> Result<()> {
