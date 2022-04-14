@@ -101,8 +101,8 @@ impl AwsConfigInfo {
     }
 
     pub fn build(properties: &Properties) -> risingwave_common::error::Result<Self> {
-        let stream_name = properties.get(KINESIS_STREAM_NAME)?;
-        let region = properties.get(KINESIS_STREAM_REGION)?;
+        let stream_name = properties.get_kinesis(KINESIS_STREAM_NAME)?;
+        let region = properties.get_kinesis(KINESIS_STREAM_REGION)?;
 
         let mut credentials: Option<AwsCredentials> = None;
         let mut assume_role: Option<AwsAssumeRole> = None;
