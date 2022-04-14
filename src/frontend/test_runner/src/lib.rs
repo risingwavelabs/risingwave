@@ -17,14 +17,16 @@
 
 mod resolve_id;
 
+use std::sync::Arc;
+
 use anyhow::{anyhow, Result};
 pub use resolve_id::*;
 use risingwave_frontend::binder::Binder;
-use risingwave_frontend::handler::{create_mv, create_table, drop_table};
+use risingwave_frontend::handler::{create_mv, create_source, create_table, drop_table};
 use risingwave_frontend::optimizer::PlanRef;
 use risingwave_frontend::planner::Planner;
-use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef};
-use risingwave_frontend::test_utils::LocalFrontend;
+use risingwave_frontend::session::{OptimizerContext, OptimizerContextRef, SessionImpl};
+use risingwave_frontend::test_utils::{create_proto_file, LocalFrontend};
 use risingwave_frontend::FrontendOpts;
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -73,6 +75,18 @@ pub struct TestCase {
 
     /// Error of optimizer
     pub optimizer_error: Option<String>,
+
+    /// Support using file content or file location to create source.
+    pub create_source: Option<CreateSource>,
+}
+
+#[serde_with::skip_serializing_none]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct CreateSource {
+    row_format: String,
+    name: String,
+    file: Option<String>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -134,6 +148,7 @@ impl TestCaseResult {
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
             binder_error: self.binder_error,
+            create_source: original_test_case.create_source.clone(),
         };
         Ok(case)
     }
@@ -145,10 +160,12 @@ impl TestCase {
         let frontend = LocalFrontend::new(FrontendOpts::default()).await;
         let session = frontend.session_ref();
 
-        let mut result = None;
-
         let placeholder_empty_vec = vec![];
 
+        // Since temp file will be deleted when it goes out of scope, so create source in advance.
+        self.create_source(session.clone()).await?;
+
+        let mut result: Option<TestCaseResult> = None;
         for sql in self
             .before_statements
             .as_ref()
@@ -156,44 +173,92 @@ impl TestCase {
             .iter()
             .chain(std::iter::once(&self.sql))
         {
-            let statements = Parser::parse_sql(sql)?;
-
-            for stmt in statements {
-                let context = OptimizerContext::new(session.clone());
-                match stmt.clone() {
-                    Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
-                        if result.is_some() {
-                            panic!("two queries in one test case");
-                        }
-                        let ret = self.apply_query(&stmt, context.into())?;
-                        if do_check_result {
-                            check_result(self, &ret)?;
-                        }
-                        result = Some(ret);
-                    }
-                    Statement::CreateTable { name, columns, .. } => {
-                        create_table::handle_create_table(context, name, columns).await?;
-                    }
-                    Statement::CreateView {
-                        materialized: true,
-                        or_replace: false,
-                        name,
-                        query,
-                        ..
-                    } => {
-                        create_mv::handle_create_mv(context, name, query).await?;
-                    }
-
-                    Statement::Drop(drop_statement) => {
-                        let table_object_name = ObjectName(vec![drop_statement.name]);
-                        drop_table::handle_drop_table(context, table_object_name).await?;
-                    }
-                    _ => return Err(anyhow!("Unsupported statement type")),
-                }
-            }
+            result = self
+                .run_sql(sql, session.clone(), do_check_result, result)
+                .await?;
         }
 
         Ok(result.unwrap_or_default())
+    }
+
+    // If testcase have create source info, run sql to create source.
+    // Support create source by file content or file location.
+    async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
+        match self.create_source.clone() {
+            Some(source) => {
+                if let Some(content) = source.file {
+                    let sql = format!(
+                        r#"CREATE SOURCE {}
+    WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
+    ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
+                        source.name, source.row_format
+                    );
+                    let temp_file = create_proto_file(content.as_str());
+                    self.run_sql(
+                        &(sql + temp_file.path().to_str().unwrap() + "'"),
+                        session.clone(),
+                        false,
+                        None,
+                    )
+                    .await
+                } else {
+                    panic!(
+                        "{:?} create source must include `file` for the file content",
+                        self.id
+                    );
+                }
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn run_sql(
+        &self,
+        sql: &str,
+        session: Arc<SessionImpl>,
+        do_check_result: bool,
+        mut result: Option<TestCaseResult>,
+    ) -> Result<Option<TestCaseResult>> {
+        let statements = Parser::parse_sql(sql).unwrap();
+        for stmt in statements {
+            let context = OptimizerContext::new(session.clone());
+            match stmt.clone() {
+                Statement::Query(_) | Statement::Insert { .. } | Statement::Delete { .. } => {
+                    if result.is_some() {
+                        panic!("two queries in one test case");
+                    }
+                    let ret = self.apply_query(&stmt, context.into())?;
+                    if do_check_result {
+                        check_result(self, &ret)?;
+                    }
+                    result = Some(ret);
+                }
+                Statement::CreateTable { name, columns, .. } => {
+                    create_table::handle_create_table(context, name, columns).await?;
+                }
+                Statement::CreateSource {
+                    is_materialized,
+                    stmt,
+                } => {
+                    create_source::handle_create_source(context, is_materialized, stmt).await?;
+                }
+                Statement::CreateView {
+                    materialized: true,
+                    or_replace: false,
+                    name,
+                    query,
+                    ..
+                } => {
+                    create_mv::handle_create_mv(context, name, query).await?;
+                }
+                Statement::Drop(drop_statement) => {
+                    let table_object_name = ObjectName(vec![drop_statement.name]);
+                    drop_table::handle_drop_table(context, table_object_name).await?;
+                }
+                _ => return Err(anyhow!("Unsupported statement type")),
+            }
+        }
+        Ok(result)
     }
 
     fn apply_query(

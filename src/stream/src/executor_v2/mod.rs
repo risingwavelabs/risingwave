@@ -24,7 +24,6 @@ pub use super::executor::{
 };
 
 mod agg;
-mod barrier_align;
 mod batch_query;
 mod chain;
 mod filter;
@@ -61,10 +60,12 @@ pub use project::ProjectExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use v1_compat::StreamExecutorV1;
+pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
+pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
 #[derive(Debug)]
