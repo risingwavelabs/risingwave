@@ -18,6 +18,8 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
+use super::Barrier;
+
 #[derive(Error, Debug)]
 pub enum StreamExecutorError {
     #[error("Storage error: {0}")]
@@ -47,6 +49,9 @@ pub enum StreamExecutorError {
 
     #[error("Channel `{0}` closed")]
     ChannelClosed(String),
+
+    #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
+    AlignBarrier(Box<Barrier>, Box<Barrier>),
 }
 
 impl StreamExecutorError {
@@ -76,6 +81,10 @@ impl StreamExecutorError {
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
         Self::ChannelClosed(name.into()).into()
+    }
+
+    pub fn align_barrier(expected: Barrier, received: Barrier) -> TracedStreamExecutorError {
+        Self::AlignBarrier(expected.into(), received.into()).into()
     }
 }
 
