@@ -24,7 +24,7 @@ use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_connector::base::SourceReader;
-use risingwave_connector::new_connector;
+use risingwave_connector::{new_connector, Properties};
 use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
@@ -104,18 +104,6 @@ pub struct MemSourceManager {
     sources: Mutex<HashMap<TableId, SourceDesc>>,
 }
 
-fn get_properties<'a>(properties: &'a HashMap<String, String>, key: &'a str) -> Result<&'a str> {
-    Ok(properties
-        .get(key)
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "property {} not found",
-                UPSTREAM_SOURCE_KEY
-            )))
-        })?
-        .as_str())
-}
-
 #[async_trait]
 impl SourceManager for MemSourceManager {
     async fn create_source(
@@ -179,8 +167,8 @@ impl SourceManager for MemSourceManager {
             )));
         }
 
-        let parser =
-            build_source_parser(&format, &info.properties, info.row_schema_location.as_str())?;
+        let properties = Properties::new(info.properties.clone());
+        let parser = build_source_parser(&format, &properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -204,7 +192,7 @@ impl SourceManager for MemSourceManager {
         );
         let row_id_index = Some(info.row_id_index as usize);
 
-        let config = match get_properties(&info.properties, UPSTREAM_SOURCE_KEY)? {
+        let config = match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
             // TODO support more connector here
             KINESIS_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
             KAFKA_SOURCE => Ok(SourceConfig::Connector(info.properties.clone())),
@@ -321,7 +309,7 @@ impl Default for MemSourceManager {
 
 fn build_source_parser(
     format: &SourceFormat,
-    properties: &HashMap<String, String>,
+    properties: &Properties,
     schema_location: &str,
 ) -> Result<Arc<dyn SourceParser + Send + Sync>> {
     let parser: Arc<dyn SourceParser + Send + Sync> = match format {
@@ -330,15 +318,9 @@ fn build_source_parser(
             Ok(parser)
         }
         SourceFormat::Protobuf => {
-            let message_name = properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
-                RwError::from(ProtocolError(format!(
-                    "{} not found in properties",
-                    PROTOBUF_MESSAGE_KEY
-                )))
-            })?;
-
+            let message_name = properties.get(PROTOBUF_MESSAGE_KEY)?;
             let parser: Arc<dyn SourceParser + Send + Sync> =
-                Arc::new(ProtobufParser::new(schema_location, message_name)?);
+                Arc::new(ProtobufParser::new(schema_location, &message_name)?);
 
             Ok(parser)
         }

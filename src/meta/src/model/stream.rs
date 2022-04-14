@@ -40,8 +40,10 @@ const TABLE_FRAGMENTS_CF_NAME: &str = "cf/table_fragments";
 pub struct TableFragments {
     /// The table id.
     table_id: TableId,
+
     /// The table fragments.
     pub(crate) fragments: BTreeMap<FragmentId, Fragment>,
+
     /// The status of actors
     actor_status: BTreeMap<ActorId, ActorStatus>,
 }
