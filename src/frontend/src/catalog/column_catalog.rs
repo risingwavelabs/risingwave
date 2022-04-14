@@ -14,6 +14,7 @@
 
 use std::borrow::Cow;
 
+use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::ColumnCatalog as ProstColumnCatalog;
@@ -69,6 +70,22 @@ impl ColumnCatalog {
         for catalog in catalogs {
             catalog.column_desc.generate_increment_id(&mut index);
         }
+    }
+
+    pub fn flatten(catalogs: Vec<ColumnCatalog>) -> Vec<ColumnCatalog> {
+        catalogs
+            .iter()
+            .flat_map(|c| {
+                c.column_desc
+                    .get_column_descs()
+                    .into_iter()
+                    .map(|d| ColumnCatalog {
+                        column_desc: d,
+                        is_hidden: c.is_hidden,
+                    })
+                    .collect_vec()
+            })
+            .collect_vec()
     }
 }
 

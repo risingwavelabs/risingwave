@@ -128,30 +128,36 @@ impl ProtobufParser {
         let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, &mut index))
+            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 
-    // Use pb field to create column_desc, use index to create incremental column_id
+    // Use pb field to create column_desc, use index to create increment column_id
     pub fn pb_field_to_col_desc(
         field_descriptor: &FieldDescriptor,
         descriptors: &Descriptors,
+        lastname: String,
         index: &mut i32,
     ) -> Result<ColumnDesc> {
         let field_type = field_descriptor.field_type(descriptors);
         let data_type = protobuf_type_mapping(field_descriptor, descriptors)?;
         if let FieldType::Message(m) = field_type {
-            *index += 1;
-            let column_id = *index;
             let column_vec = m
                 .fields()
                 .iter()
-                .map(|f| Self::pb_field_to_col_desc(f, descriptors, index))
+                .map(|f| {
+                    Self::pb_field_to_col_desc(
+                        f,
+                        descriptors,
+                        lastname.clone() + field_descriptor.name() + ".",
+                        index,
+                    )
+                })
                 .collect::<Result<Vec<_>>>()?;
-
+            *index += 1;
             Ok(ColumnDesc {
-                column_id, // need increment
-                name: field_descriptor.name().to_string(),
+                column_id: *index, // need increment
+                name: lastname + field_descriptor.name(),
                 column_type: Some(data_type.to_protobuf()),
                 field_descs: column_vec,
                 type_name: m.name().to_string(),
@@ -160,7 +166,7 @@ impl ProtobufParser {
             *index += 1;
             Ok(ColumnDesc {
                 column_id: *index, // need increment
-                name: field_descriptor.name().to_string(),
+                name: lastname + field_descriptor.name(),
                 column_type: Some(data_type.to_protobuf()),
                 ..Default::default()
             })
@@ -477,19 +483,19 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 5),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 3),
-            ColumnDesc::new_struct("city", 4, ".test.City", city),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 7),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
+            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
         ];
         assert_eq!(
             columns,
             vec![
                 ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
-                ColumnDesc::new_struct("country", 2, ".test.Country", country),
+                ColumnDesc::new_struct("country", 7, ".test.Country", country),
                 ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
                 ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]

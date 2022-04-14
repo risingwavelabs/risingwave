@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, TableId};
@@ -230,12 +231,20 @@ impl Binder {
 
             catalog
                 .get_table_by_name(&self.db_name, schema_name, table_name)
-                .map(|t| (Relation::BaseTable(Box::new(t.into())), t.columns.clone()))
+                .map(|t| {
+                    let mut table = t.clone();
+                    table.columns = ColumnCatalog::flatten(table.columns);
+                    (
+                        Relation::BaseTable(Box::new((&table).into())),
+                        table.columns,
+                    )
+                })
                 .or_else(|_| {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
                         .map(|s| {
-                            let source = s.clone().flatten();
+                            let mut source = s.clone();
+                            source.columns = ColumnCatalog::flatten(source.columns);
                             (Relation::Source(Box::new((&source).into())), source.columns)
                         })
                 })

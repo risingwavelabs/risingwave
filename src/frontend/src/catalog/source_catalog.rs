@@ -30,24 +30,26 @@ pub struct SourceCatalog {
 }
 
 impl SourceCatalog {
-    /// Extract `field_descs` from `column_desc` and add in source catalog.
+    /// Flatten a nested column to a list of columns (including itself).
+    /// If the type is atomic, it returns simply itself.
+    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
+    /// and returns every children node.
     pub fn flatten(mut self) -> Self {
-        let mut catalogs = vec![];
-        for col in &self.columns {
-            // Extract `field_descs` and return `column_catalogs`.
-            catalogs.append(
-                &mut col
-                    .column_desc
+        let catalogs: Vec<ColumnCatalog> = self
+            .columns
+            .iter()
+            .flat_map(|c| {
+                c.column_desc
                     .get_column_descs()
                     .into_iter()
-                    .map(|c| ColumnCatalog {
-                        column_desc: c,
-                        is_hidden: col.is_hidden,
+                    .map(|d| ColumnCatalog {
+                        column_desc: d,
+                        is_hidden: c.is_hidden,
                     })
-                    .collect_vec(),
-            )
-        }
-        self.columns = catalogs.clone();
+                    .collect_vec()
+            })
+            .collect();
+        self.columns = catalogs;
         self
     }
 }

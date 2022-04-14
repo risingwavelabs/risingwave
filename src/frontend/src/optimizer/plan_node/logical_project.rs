@@ -139,14 +139,17 @@ impl LogicalProject {
             .enumerate()
             .map(|(id, (expr, alias))| {
                 // Get field info from o2i.
-                let (default_name, sub_fields, type_name) = match o2i.try_map(id) {
+                let (default_name, mut sub_fields, type_name) = match o2i.try_map(id) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
                     None => (format!("expr#{}", id), vec![], String::new()),
                 };
-                let name = alias.clone().unwrap_or(default_name);
+                let name = alias.clone().unwrap_or_else(|| default_name.clone());
+                sub_fields
+                    .iter_mut()
+                    .for_each(|f| f.change_prefix_name(default_name.as_str(), name.as_str()));
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
             .collect();
