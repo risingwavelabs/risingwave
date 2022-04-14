@@ -198,6 +198,10 @@ impl LogicalProject {
                     matches!(expr, ExprImpl::InputRef(input_ref) if **input_ref == InputRef::new(i, field.data_type()))
                 })
     }
+
+    pub fn decompose(self) -> (Vec<ExprImpl>, Vec<Option<String>>) {
+        (self.exprs, self.expr_alias)
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalProject {

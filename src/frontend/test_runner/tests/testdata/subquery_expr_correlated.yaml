@@ -53,3 +53,21 @@
                               LogicalScan { table: t3, columns: [_row_id#0, x, y] }
                               LogicalProject { exprs: [1:Int32], expr_alias: [ ] }
                                 LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+- sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1 where exists(select * from t2 where y = 100 and t1.x = t2.x and x = 1000 and t1.y = t2.y);
+  logical_plan: |
+    LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
+      LogicalApply { type: LeftSemi }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
+          LogicalFilter { predicate: ($2 = 100:Int32) AND (CorrelatedInputRef { index: 1, depth: 1 } = $1) AND ($1 = 1000:Int32) AND (CorrelatedInputRef { index: 2, depth: 1 } = $2) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }
+  optimized_logical_plan: |
+    LogicalProject { exprs: [$1, $2], expr_alias: [x, y] }
+      LogicalJoin { type: LeftSemi, on: ($1 = $5) AND ($2 = $6) }
+        LogicalScan { table: t1, columns: [_row_id#0, x, y] }
+        LogicalProject { exprs: [$1, $2, $1, $2], expr_alias: [x, y,  ,  ] }
+          LogicalFilter { predicate: ($2 = 100:Int32) AND ($1 = 1000:Int32) }
+            LogicalScan { table: t2, columns: [_row_id#0, x, y] }

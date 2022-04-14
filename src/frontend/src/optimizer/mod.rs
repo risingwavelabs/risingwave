@@ -115,6 +115,13 @@ impl PlanRoot {
     pub fn gen_optimized_logical_plan(&self) -> PlanRef {
         let mut plan = self.plan.clone();
 
+        // Subquery Unnesting.
+        plan = {
+            let rules = vec![ApplyProjFilterRule::create()];
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
+            heuristic_optimizer.optimize(plan)
+        };
+
         // Predicate Push-down
         plan = {
             let rules = vec![
@@ -126,8 +133,8 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        // Prune Columns
-        plan = plan.prune_col(&self.out_fields);
+        // // Prune Columns
+        // plan = plan.prune_col(&self.out_fields);
 
         plan = {
             let rules = vec![
