@@ -33,6 +33,7 @@ risedev:
     # - use: frontend-legacy
 
     # If you want to create source from Kafka, uncomment the following lines
+    # Note that kafka depends on zookeeper, so zookeeper must be started beforehand.
     # - use: zookeeper
     #   persist-data: true
     # - use: kafka
