@@ -11,7 +11,6 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use itertools::Itertools;
 use risingwave_pb::catalog::source::Info;
 use risingwave_pb::catalog::Source as ProstSource;
 use risingwave_pb::stream_plan::source_node::SourceType;
@@ -27,31 +26,6 @@ pub struct SourceCatalog {
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub source_type: SourceType,
-}
-
-impl SourceCatalog {
-    /// Flatten a nested column to a list of columns (including itself).
-    /// If the type is atomic, it returns simply itself.
-    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
-    /// and returns every children node.
-    pub fn flatten(mut self) -> Self {
-        let catalogs: Vec<ColumnCatalog> = self
-            .columns
-            .iter()
-            .flat_map(|c| {
-                c.column_desc
-                    .get_column_descs()
-                    .into_iter()
-                    .map(|d| ColumnCatalog {
-                        column_desc: d,
-                        is_hidden: c.is_hidden,
-                    })
-                    .collect_vec()
-            })
-            .collect();
-        self.columns = catalogs;
-        self
-    }
 }
 
 impl From<&ProstSource> for SourceCatalog {

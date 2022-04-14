@@ -72,18 +72,17 @@ impl ColumnCatalog {
         }
     }
 
-    pub fn flatten(catalogs: Vec<ColumnCatalog>) -> Vec<ColumnCatalog> {
-        catalogs
-            .iter()
-            .flat_map(|c| {
-                c.column_desc
-                    .get_column_descs()
-                    .into_iter()
-                    .map(|d| ColumnCatalog {
-                        column_desc: d,
-                        is_hidden: c.is_hidden,
-                    })
-                    .collect_vec()
+    /// Flatten a nested column to a list of columns (including itself).
+    /// If the type is atomic, it returns simply itself.
+    /// If the type has multiple nesting levels, it traverses for the tree-like schema,
+    /// and returns every children node.
+    pub fn flatten(&self) -> Vec<ColumnCatalog> {
+        self.column_desc
+            .get_column_descs()
+            .into_iter()
+            .map(|d| ColumnCatalog {
+                column_desc: d,
+                is_hidden: self.is_hidden,
             })
             .collect_vec()
     }
