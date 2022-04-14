@@ -18,32 +18,40 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 
+use super::Barrier;
+
 #[derive(Error, Debug)]
 pub enum StreamExecutorError {
-    #[error("storage error {0}")]
+    #[error("Storage error: {0}")]
     Storage(
         #[backtrace]
         #[source]
         StorageError,
     ),
 
-    #[error("executor v1 error {0}")]
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+
+    #[error("Executor v1 error: {0}")]
     ExecutorV1(RwError),
 
-    #[error("chunk operation error {0}")]
+    #[error("Chunk operation error: {0}")]
     EvalError(RwError),
 
-    #[error("aggregate state error {0}")]
+    #[error("Aggregate state error: {0}")]
     AggStateError(RwError),
 
-    #[error("input error")]
+    #[error("Input error: {0}")]
     InputError(RwError),
 
-    #[error("top n state error {0}")]
+    #[error("TopN state error: {0}")]
     TopNStateError(RwError),
 
-    #[error("channel `{0}` closed")]
+    #[error("Channel `{0}` closed")]
     ChannelClosed(String),
+
+    #[error("Failed to align barrier: expected {0:?} but got {1:?}")]
+    AlignBarrier(Box<Barrier>, Box<Barrier>),
 }
 
 impl StreamExecutorError {
@@ -73,6 +81,10 @@ impl StreamExecutorError {
 
     pub fn channel_closed(name: impl Into<String>) -> TracedStreamExecutorError {
         Self::ChannelClosed(name.into()).into()
+    }
+
+    pub fn align_barrier(expected: Barrier, received: Barrier) -> TracedStreamExecutorError {
+        Self::AlignBarrier(expected.into(), received.into()).into()
     }
 }
 
@@ -109,10 +121,10 @@ impl From<StorageError> for TracedStreamExecutorError {
     }
 }
 
-/// Always convert [`TracedStreamExecutorError`] to internal error of `RwResult`.
+/// Always convert [`TracedStreamExecutorError`] to stream error of `RwResult`.
 impl From<TracedStreamExecutorError> for RwError {
     fn from(h: TracedStreamExecutorError) -> Self {
-        ErrorCode::InternalError(h.to_string()).into()
+        ErrorCode::StreamError(h.into()).into()
     }
 }
 

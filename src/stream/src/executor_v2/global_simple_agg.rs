@@ -28,7 +28,7 @@ use crate::executor_v2::agg::{
     generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
 };
 use crate::executor_v2::error::StreamExecutorError;
-use crate::executor_v2::{BoxedMessageStream, PkIndices};
+use crate::executor_v2::PkIndices;
 
 /// `SimpleAggExecutor` is the aggregation operator for streaming system.
 /// To create an aggregation operator, states and expressions should be passed along the
@@ -120,37 +120,6 @@ impl<S: StateStore> AggSimpleAggExecutor<S> {
             agg_calls,
             key_indices,
         })
-    }
-
-    fn is_dirty(&self) -> bool {
-        self.states.as_ref().map(|s| s.is_dirty()).unwrap_or(false)
-    }
-}
-
-impl<S: StateStore> Executor for AggSimpleAggExecutor<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper")
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        self.info.identity.as_str()
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        assert!(
-            !self.is_dirty(),
-            "cannot clear cache while states of simple agg are dirty"
-        );
-        self.states.take();
-        Ok(())
     }
 }
 
@@ -255,6 +224,18 @@ impl<S: StateStore> AggExecutor for AggSimpleAggExecutor<S> {
         let chunk = StreamChunk::new(new_ops, columns, None);
 
         Ok(Some(chunk))
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        self.info.identity.as_str()
     }
 }
 

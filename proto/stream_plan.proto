@@ -14,6 +14,7 @@ message ActorMapping {
   repeated uint32 hash_mapping = 1;
 }
 
+// todo: StreamSourceNode or TableSourceNode
 message SourceNode {
   enum SourceType {
     TABLE = 0;
@@ -22,6 +23,15 @@ message SourceNode {
   plan.TableRefId table_ref_id = 1;
   repeated int32 column_ids = 2;
   SourceType source_type = 3;
+  // split allocation information,
+  // and in the future will distinguish between `StreamSource` and `TableSource`
+  // so that there is no need to put many fields that are not common into the same SourceNode structure
+  StreamSourceState stream_source_state = 4;
+}
+
+message StreamSourceState {
+  string split_type = 1;
+  repeated bytes stream_source_splits = 2;
 }
 
 message ProjectNode {
@@ -42,6 +52,7 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
+  // TODO: remove this field, not used anywhere
   repeated int32 distribution_keys = 5;
 }
 
@@ -75,15 +86,13 @@ message HashJoinNode {
 
 message MergeNode {
   repeated uint32 upstream_actor_id = 1;
-  // The schema of input columns.
+  // The schema of input columns. TODO: remove this field.
   repeated plan.Field fields = 2;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
 // and maybe `DispatcherNode` later.
 message ExchangeNode {
-  // The schema of input columns.
-  repeated plan.Field fields = 1;
   DispatchStrategy strategy = 2;
 }
 
@@ -107,6 +116,27 @@ message BatchPlanNode {
   repeated int32 distribution_keys = 3;
 }
 
+// Special node for shared state. ArrangeNode will produce a special Materialize executor,
+// which materializes data for downstream to query.
+message ArrangeNode {
+  // The keys used to group the rows, aka. arrange key.
+  repeated int32 arrange_key_indexes = 1;
+}
+
+// Special node for shared state. LookupNode will join an arrangement with a stream.
+message LookupNode {
+  // Join keys of the arrangement side
+  repeated int32 arrange_key = 1;
+  // Join keys of the stream side
+  repeated int32 stream_key = 2;
+  // Whether to join the current epoch of arrangement
+  bool use_current_epoch = 3;
+  // Sometimes we need to re-order the output data to meet the requirement of schema.
+  // By default, lookup executor will produce `<arrangement side, stream side>`. We
+  // will then apply the column mapping to the combined result.
+  repeated int32 column_mapping = 4;
+}
+
 message StreamNode {
   oneof node {
     SourceNode source_node = 4;
@@ -123,6 +153,8 @@ message StreamNode {
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
     BatchPlanNode batch_plan_node = 17;
+    LookupNode lookup_node = 20;
+    ArrangeNode arrange_node = 21;
   }
   // The id for the operator.
   uint64 operator_id = 1;
@@ -130,13 +162,24 @@ message StreamNode {
   repeated StreamNode input = 3;
   repeated uint32 pk_indices = 2;
   string identity = 18;
+  // The schema of the plan node
+  repeated plan.Field fields = 19;
 }
 
 enum DispatcherType {
   INVALID = 0;
+  // Dispatch by hash key, hashed by consistent hash.
   HASH = 1;
+  // Broadcast to all downstreams.
+  // TODO: we don't need this as we now support multi-dispatcher per actor.
   BROADCAST = 2;
+  // Only one downstream.
+  // TODO: seems that same as broadcast dispatch (with only one downstream actor).
   SIMPLE = 3;
+  // A special kind of exchange that doesn't involve shuffle. The upstream actor will be directly
+  // piped into the downstream actor, if there are the same number of actors. If number of actors
+  // are not the same, should use hash instead. Should be only used when distribution is the same.
+  NO_SHUFFLE = 4;
 }
 
 message DispatchStrategy {

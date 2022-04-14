@@ -123,6 +123,7 @@ fn make_stream_node() -> StreamNode {
             table_ref_id: Some(table_ref_id),
             column_ids: vec![1, 2, 0],
             source_type: SourceType::Table as i32,
+            stream_source_state: None,
         })),
         pk_indices: vec![2],
         ..Default::default()
@@ -135,12 +136,12 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Hash as i32,
                 column_indices: vec![0],
             }),
-            fields: vec![
-                make_field(TypeName::Int32),
-                make_field(TypeName::Int32),
-                make_field(TypeName::Int64),
-            ],
         })),
+        fields: vec![
+            make_field(TypeName::Int32),
+            make_field(TypeName::Int32),
+            make_field(TypeName::Int64),
+        ],
         input: vec![source_node],
         pk_indices: vec![2],
         operator_id: 1,
@@ -162,6 +163,7 @@ fn make_stream_node() -> StreamNode {
                 rex_node: Some(RexNode::FuncCall(function_call)),
             }),
         })),
+        fields: vec![], // TODO: fill this later
         input: vec![exchange_node],
         pk_indices: vec![0, 1],
         operator_id: 2,
@@ -175,6 +177,7 @@ fn make_stream_node() -> StreamNode {
             distribution_keys: Default::default(),
         })),
         input: vec![filter_node],
+        fields: vec![], // TODO: fill this later
         pk_indices: vec![0, 1],
         operator_id: 3,
         identity: "GlobalSimpleAggExecutor".to_string(),
@@ -187,8 +190,8 @@ fn make_stream_node() -> StreamNode {
                 r#type: DispatcherType::Simple as i32,
                 ..Default::default()
             }),
-            fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         })),
+        fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         input: vec![simple_agg_node],
         pk_indices: vec![0, 1],
         operator_id: 4,
@@ -201,6 +204,7 @@ fn make_stream_node() -> StreamNode {
             agg_calls: vec![make_sum_aggcall(0), make_sum_aggcall(1)],
             distribution_keys: Default::default(),
         })),
+        fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
         pk_indices: vec![0, 1],
         operator_id: 5,
@@ -226,6 +230,7 @@ fn make_stream_node() -> StreamNode {
                 make_inputref(1),
             ],
         })),
+        fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
         pk_indices: vec![1, 2],
         operator_id: 6,
@@ -243,6 +248,7 @@ fn make_stream_node() -> StreamNode {
             column_orders: vec![make_column_order(1), make_column_order(2)],
             distribution_keys: Default::default(),
         })),
+        fields: vec![], // TODO: fill this later
         operator_id: 7,
         identity: "MaterializeExecutor".to_string(),
     }
@@ -254,7 +260,7 @@ async fn test_fragmenter() -> Result<()> {
     let stream_node = make_stream_node();
     let fragment_manager = Arc::new(FragmentManager::new(env.meta_store_ref()).await?);
     let hash_mapping = (1..5).flat_map(|id| vec![id; 512]).collect_vec();
-    let mut fragmenter =
+    let fragmenter =
         StreamFragmenter::new(env.id_gen_manager_ref(), fragment_manager, hash_mapping);
 
     let mut ctx = CreateMaterializedViewContext::default();

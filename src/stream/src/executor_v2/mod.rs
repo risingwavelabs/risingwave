@@ -18,23 +18,23 @@ use error::StreamExecutorResult;
 use futures::stream::BoxStream;
 pub use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 
 pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
 mod agg;
-mod barrier_align;
 mod batch_query;
 mod chain;
 mod filter;
 mod global_simple_agg;
 mod hash_agg;
+mod hop_window;
 mod local_simple_agg;
 mod lookup;
 pub mod merge;
 pub(crate) mod mview;
+mod project;
 #[allow(dead_code)]
 mod rearranged_chain;
 pub mod receiver;
@@ -51,17 +51,21 @@ pub use chain::ChainExecutor;
 pub use filter::FilterExecutor;
 pub use global_simple_agg::SimpleAggExecutor;
 pub use hash_agg::HashAggExecutor;
+pub use hop_window::HopWindowExecutor;
 pub use local_simple_agg::LocalSimpleAggExecutor;
 pub use lookup::*;
 pub use merge::MergeExecutor;
 pub use mview::*;
+pub use project::ProjectExecutor;
 pub(crate) use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use top_n::TopNExecutor;
 pub use top_n_appendonly::AppendOnlyTopNExecutor;
-pub use v1_compat::StreamExecutorV1;
+pub use v1_compat::{ExecutorV1AsV2, StreamExecutorV1};
 
 pub type BoxedExecutor = Box<dyn Executor>;
 pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
+pub type MessageStreamItem = StreamExecutorResult<Message>;
+pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
 /// Static information of an executor.
 #[derive(Debug)]
@@ -138,8 +142,10 @@ pub trait Executor: Send + 'static {
         }
     }
 
-    /// Clears the in-memory cache of the executor. It's no-op by default.
-    fn clear_cache(&mut self) -> Result<()> {
-        Ok(())
+    fn boxed(self) -> BoxedExecutor
+    where
+        Self: Sized + Send + 'static,
+    {
+        Box::new(self)
     }
 }

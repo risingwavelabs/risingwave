@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -14,7 +28,7 @@ use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor_v2::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -167,33 +181,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for InnerAppendOnlyTopNExecutor<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper");
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache();
-        self.managed_higher_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn apply_chunk(
         &mut self,
@@ -317,6 +304,18 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 

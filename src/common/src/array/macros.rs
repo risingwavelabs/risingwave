@@ -15,7 +15,7 @@
 /// `array` builds an `Array` with `Option`.
 #[macro_export]
 macro_rules! array {
-    ($array:ty, [$( $value:expr ),*]) => {
+    ($array:ty, [$( $value:expr ),*] $(,)?) => {
         {
             use $crate::array::Array;
             use $crate::array::ArrayBuilder;

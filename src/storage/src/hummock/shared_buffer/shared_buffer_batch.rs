@@ -20,7 +20,8 @@ use bytes::Bytes;
 use crate::hummock::iterator::variants::*;
 use crate::hummock::iterator::HummockIterator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{key, HummockResult};
+use crate::hummock::{key, HummockEpoch, HummockResult};
+use crate::storage_value::VALUE_META_SIZE;
 
 pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 
@@ -28,14 +29,30 @@ pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 #[derive(Clone, Debug)]
 pub struct SharedBufferBatch {
     pub(super) inner: Arc<[SharedBufferItem]>,
-    pub(super) epoch: u64,
+    pub(super) epoch: HummockEpoch,
+    pub(super) size: u64,
 }
 
 impl SharedBufferBatch {
-    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: u64) -> Self {
+    pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: HummockEpoch) -> Self {
+        // size = Sum(length of full key + length of user value)
+        let size: u64 = sorted_items
+            .iter()
+            .map(|(k, v)| {
+                let vsize = {
+                    match v {
+                        HummockValue::Put(_, val) => VALUE_META_SIZE + val.len(),
+                        HummockValue::Delete(_) => VALUE_META_SIZE,
+                    }
+                };
+                (k.len() + vsize) as u64
+            })
+            .sum();
+
         Self {
             inner: sorted_items.into(),
             epoch,
+            size,
         }
     }
 

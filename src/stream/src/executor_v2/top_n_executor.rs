@@ -1,3 +1,17 @@
+// Copyright 2022 Singularity Data
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -25,6 +39,15 @@ pub trait TopNExecutorBase: Send + 'static {
 
     /// Flush the buffered chunk to the storage backend.
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()>;
+
+    /// See [`Executor::schema`].
+    fn schema(&self) -> &Schema;
+
+    /// See [`Executor::pk_indices`].
+    fn pk_indices(&self) -> PkIndicesRef;
+
+    /// See [`Executor::identity`].
+    fn identity(&self) -> &str;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -35,7 +58,7 @@ pub struct TopNExecutorWrapper<E> {
 
 impl<E> Executor for TopNExecutorWrapper<E>
 where
-    E: TopNExecutorBase + Executor,
+    E: TopNExecutorBase,
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.top_n_executor_execute().boxed()
@@ -51,24 +74,6 @@ where
 
     fn identity(&self) -> &str {
         self.inner.identity()
-    }
-}
-
-#[async_trait]
-impl<E> TopNExecutorBase for TopNExecutorWrapper<E>
-where
-    E: TopNExecutorBase,
-{
-    async fn apply_chunk(
-        &mut self,
-        chunk: StreamChunk,
-        epoch: u64,
-    ) -> StreamExecutorResult<StreamChunk> {
-        self.inner.apply_chunk(chunk, epoch).await
-    }
-
-    async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
-        self.inner.flush_data(epoch).await
     }
 }
 

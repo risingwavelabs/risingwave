@@ -18,6 +18,7 @@ use risingwave_pb::plan::{
     OrderedColumnDesc as ProstOrderedColumnDesc,
 };
 
+use crate::catalog::Field;
 use crate::types::DataType;
 use crate::util::sort_util::OrderType;
 
@@ -142,6 +143,27 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
+        }
+    }
+
+    /// Generate incremental `column_id` for `column_desc` and `field_descs`
+    pub fn generate_increment_id(&mut self, index: &mut i32) {
+        self.column_id = ColumnId::new(*index);
+        *index += 1;
+        for field in &mut self.field_descs {
+            field.generate_increment_id(index);
+        }
+    }
+}
+
+impl From<&Field> for ColumnDesc {
+    fn from(field: &Field) -> Self {
+        Self {
+            data_type: field.data_type.clone(),
+            column_id: ColumnId::new(0),
+            name: field.name.clone(),
+            field_descs: field.sub_fields.iter().map(|d| d.into()).collect_vec(),
+            type_name: field.type_name.clone(),
         }
     }
 }

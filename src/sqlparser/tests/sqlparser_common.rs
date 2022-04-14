@@ -2667,10 +2667,10 @@ fn parse_scalar_subqueries() {
     assert_matches!(
         verified_expr(sql),
         Expr::BinaryOp {
-        op: BinaryOperator::Plus, ..
-        //left: box Subquery { .. },
-        //right: box Subquery { .. },
-    }
+            op: BinaryOperator::Plus,
+            .. /* left: box Subquery { .. },
+                * right: box Subquery { .. }, */
+        }
     );
 }
 

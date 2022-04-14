@@ -21,6 +21,7 @@ crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 either = "1"
 enum-as-inner = "0.4"
+fail = "0.5"
 farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
@@ -75,9 +76,11 @@ procfs = { version = "0.12", default-features = false }
 criterion = "0.3"
 risingwave_meta = { path = "../meta", features = ["test"] }
 uuid = { version = "0.8", features = ["v4"] }
-# [features]
+
+[features]
 # rocksdb-local = ["rocksdb"]
 # tikv = ["tikv-client"]
+failpoints = ["fail/failpoints"]
 
 [[bench]]
 name = "bench_block_iter"

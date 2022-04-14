@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+assert_matches = "1"
 async-recursion = "1"
 async-stream = "0.3"
 async-trait = "0.1"
@@ -32,6 +33,7 @@ prometheus = "0.13"
 prost = "0.10"
 rand = "0.8"
 risingwave_common = { path = "../common" }
+risingwave_connector = { path = "../connector" }
 risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
