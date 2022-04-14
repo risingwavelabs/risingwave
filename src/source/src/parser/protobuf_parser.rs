@@ -477,19 +477,19 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 5),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 6),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
-            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 3),
+            ColumnDesc::new_struct("city", 4, ".test.City", city),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 7),
         ];
         assert_eq!(
             columns,
             vec![
                 ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
-                ColumnDesc::new_struct("country", 7, ".test.Country", country),
+                ColumnDesc::new_struct("country", 2, ".test.Country", country),
                 ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
                 ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
             ]
