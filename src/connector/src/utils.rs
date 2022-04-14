@@ -30,7 +30,7 @@ impl Properties {
             .get(key)
             .ok_or_else(|| {
                 RwError::from(ProtocolError(format!(
-                    "Must specify property \"{}\" in WITH CLAUSE{}",
+                    "Must specify property \"{}\" in WITH clause{}",
                     key, context
                 )))
             })
@@ -48,6 +48,7 @@ impl Properties {
     }
 }
 
+/// [`AnyhowProperties`] returns [`anyhow::Result`] if key is not found.
 #[derive(Clone)]
 pub struct AnyhowProperties(pub HashMap<String, String>);
 
@@ -61,7 +62,7 @@ impl AnyhowProperties {
             .get(key)
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Must specify property \"{}\" in WITH CLAUSE{}",
+                    "Must specify property \"{}\" in WITH clause{}",
                     key,
                     context
                 )
@@ -76,11 +77,42 @@ impl AnyhowProperties {
 
     /// It's an alternative of `get` but returns pulsar-specifc error hints.
     pub fn get_pulsar(&self, key: &str) -> anyhow::Result<String> {
-        self.get_inner(key, " when using Pulsar Source")
+        self.get_inner(key, " when using Pulsar source")
     }
 
     /// It's an alternative of `get` but returns kafka-specifc error hints.
     pub fn get_kafka(&self, key: &str) -> anyhow::Result<String> {
-        self.get_inner(key, " when using Kafka Source")
+        self.get_inner(key, " when using Kafka source")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use maplit::hashmap;
+
+    use crate::{AnyhowProperties, Properties};
+
+    #[test]
+    fn test_properties() {
+        let props = Properties::new(hashmap! {
+            "a".to_string() => "b".to_string(),
+        });
+        assert_eq!(props.get_kafka("a").unwrap(), "b".to_string());
+        assert_eq!(
+            props.get_kafka("1").unwrap_err().to_string(),
+            "protocol error: Must specify property \"1\" in WITH clause when using Kafka source"
+        );
+    }
+
+    #[test]
+    fn test_anyhow_properties() {
+        let props = AnyhowProperties::new(hashmap! {
+            "a".to_string() => "b".to_string(),
+        });
+        assert_eq!(props.get_kafka("a").unwrap(), "b".to_string());
+        assert_eq!(
+            props.get_kafka("1").unwrap_err().to_string(),
+            "Must specify property \"1\" in WITH clause when using Kafka source"
+        );
     }
 }
