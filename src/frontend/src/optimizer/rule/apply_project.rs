@@ -56,6 +56,7 @@ impl Rule for ApplyProjectRule {
                 let new_apply = apply.clone_with_left_right(apply.left(), new_right);
                 let lifted_project: PlanRef =
                     LogicalProject::new(new_apply.into(), exprs, expr_alias).into();
+                println!("Apply LogicalProject for LeftOuter finished.");
                 Some(lifted_project)
             }
             JoinType::LeftSemi => {

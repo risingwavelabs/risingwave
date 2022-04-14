@@ -194,7 +194,7 @@ public class SubQueryDecorrelator extends RelShuttleImpl {
   /**
    * Adds Projection to adjust the field index for join condition.
    *
-   * <p>e.g. SQL: SELECT * FROM l WHERE b IN (SELECT COUNT(*) FROM r WHERE l.c = r.f the rel in
+   * <p>e.g. SQL: SELECT * FROM l WHERE b IN (SELECT COUNT(*) FROM r WHERE l.c = r.f) the rel in
    * SubQuery is `LogicalAggregate(group=[{}], EXPR$1=[COUNT()])`. After decorrelated, it was
    * changed to `LogicalAggregate(group=[{0}], EXPR$0=[COUNT()])`, and the output index of `COUNT()`
    * was changed from 0 to 1. So, add a project (`LogicalProject(EXPR$0=[$1], f=[$0])`) to adjust

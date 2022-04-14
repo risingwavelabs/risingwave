@@ -237,6 +237,7 @@ impl PlanTreeNodeBinary for LogicalJoin {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
+        println!("LogicalJoin clone with input");
         Self::new(left, right, self.join_type, self.on.clone())
     }
 

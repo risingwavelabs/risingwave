@@ -43,7 +43,9 @@ impl LogicalProject {
         let ctx = input.ctx();
         let schema = Self::derive_schema(&exprs, &expr_alias, input.schema());
         let pk_indices = Self::derive_pk(input.schema(), input.pk_indices(), &exprs);
+        println!("Derive pk finished.");
         for expr in &exprs {
+            // Panic.
             assert_input_ref!(expr, input.schema().fields().len());
             assert!(!expr.has_subquery());
             assert!(!expr.has_agg_call());
@@ -203,6 +205,7 @@ impl PlanTreeNodeUnary for LogicalProject {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        println!("LogicalProject clone with input");
         Self::new(input, self.exprs.clone(), self.expr_alias().to_vec())
     }
 

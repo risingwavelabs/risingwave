@@ -385,6 +385,7 @@ impl PlanTreeNodeUnary for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        println!("LogicalAgg clone with input");
         Self::new(
             self.agg_calls().to_vec(),
             self.agg_call_alias().to_vec(),

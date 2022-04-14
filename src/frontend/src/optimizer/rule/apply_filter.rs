@@ -40,8 +40,10 @@ impl Rule for ApplyFilterRule {
             .rewrite_expr(&mut shift_input_ref)
             .rewrite_expr(&mut lift_correlated_input_ref);
 
-        let join = LogicalJoin::new(apply.left(), new_right, apply.join_type(), predicate);
-        Some(join.into())
+        let new_apply = apply.clone_with_left_right(apply.left(), new_right);
+        let lifted_filter: PlanRef = LogicalFilter::new(new_apply.into(), predicate).into();
+        println!("Apply LogicalFilter finished.");
+        Some(lifted_filter)
     }
 }
 

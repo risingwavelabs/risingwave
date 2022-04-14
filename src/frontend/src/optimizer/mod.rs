@@ -119,13 +119,15 @@ impl PlanRoot {
         plan = {
             let rules = vec![
                 ApplyProjectRule::create(),
-                ApplyFilterRule::create(),
                 ApplyAggRule::create(),
+                ApplyFilterRule::create(),
+                ApplyScanRule::create(),
             ];
-            let heuristic_optimizer =
-                HeuristicOptimizer::new(ApplyOrder::BottomUpAndThenTopDown, rules);
+            let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        println!("Subquery Unnesting finished.");
 
         // Predicate Push-down
         plan = {
@@ -138,6 +140,8 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
+        println!("Predicate Push-down finished.");
+
         // Prune Columns
         plan = plan.prune_col(&self.out_fields);
 
@@ -149,6 +153,8 @@ impl PlanRoot {
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::BottomUp, rules);
             heuristic_optimizer.optimize(plan)
         };
+
+        println!("Prune Columns finished.");
 
         plan
     }

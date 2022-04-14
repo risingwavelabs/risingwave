@@ -23,9 +23,8 @@ impl Rule for ApplyAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply = plan.as_logical_apply()?;
         let right = apply.right();
-        let logical_agg = right.as_logical_agg()?;
         let (agg_calls, agg_call_alias, mut group_keys, new_right) =
-            logical_agg.clone().decompose();
+            right.as_logical_agg()?.clone().decompose();
 
         match apply.join_type() {
             JoinType::LeftOuter if group_keys.is_empty() => {
@@ -37,11 +36,13 @@ impl Rule for ApplyAggRule {
                 // }
 
                 // Use apply.left's primary key as group_keys.
-                group_keys.extend(logical_agg.base.pk_indices.iter());
+                // Wrong here.
+                // group_keys.extend(apply.left().pk_indices().iter());
 
                 let new_apply = apply.clone_with_left_right(apply.left(), new_right);
                 let new_agg =
                     LogicalAgg::new(agg_calls, agg_call_alias, group_keys, new_apply.into());
+                println!("Apply LogicalAgg for LeftOuter finished.");
                 Some(new_agg.into())
             }
             _ => Some(plan),

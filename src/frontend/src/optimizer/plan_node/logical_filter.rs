@@ -78,6 +78,7 @@ impl PlanTreeNodeUnary for LogicalFilter {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
+        println!("LogicalFilter clone with input");
         Self::new(input, self.predicate.clone())
     }
 
