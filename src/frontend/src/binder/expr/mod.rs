@@ -317,6 +317,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Array(datatype) => DataType::List {
             datatype: Box::new(bind_data_type(datatype)?),
         },
+        AstDataType::Char(..) => {
+            return Err(ErrorCode::NotImplemented(
+                format!("CHAR is not supported, please use VARCHAR instead\n"),
+                None.into(),
+            )
+            .into())
+        },
         _ => {
             return Err(ErrorCode::NotImplemented(
                 format!("unsupported data type: {:?}", data_type),
