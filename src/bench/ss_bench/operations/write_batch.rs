@@ -102,7 +102,8 @@ impl Operations {
                     // FIXME: A workaround to ensure the version after compaction is available
                     // locally. Notice now multiple tasks are trying to pin_version, which breaks
                     // the assumption required by LocalVersionManager. It may result in some pinned
-                    // versions never get unpinned.
+                    // versions never get unpinned. This can be fixed after
+                    // LocalVersionManager::start_workers is modified into push-based.
                     let last_pinned = local_version_manager.get_version().unwrap();
                     let version = self
                         .meta_client
