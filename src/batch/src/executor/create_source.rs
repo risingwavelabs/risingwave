@@ -19,7 +19,7 @@ use risingwave_common::error::Result;
 use super::{BoxedExecutor, BoxedExecutorBuilder, ExecutorBuilder};
 use crate::executor::Executor;
 
-// TODO: All DDLs should be RPC requests from the meta service. Remove this.
+// TODO: Remove this when Java frontend is completely removed.
 pub(super) struct CreateSourceExecutor {}
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {
