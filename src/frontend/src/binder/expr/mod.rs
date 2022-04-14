@@ -319,7 +319,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         },
         AstDataType::Char(..) => {
             return Err(ErrorCode::NotImplemented(
-                format!("CHAR is not supported, please use VARCHAR instead\n"),
+                "CHAR is not supported, please use VARCHAR instead\n".to_string(),
                 None.into(),
             )
             .into())
