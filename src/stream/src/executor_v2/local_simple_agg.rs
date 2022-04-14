@@ -55,7 +55,7 @@ impl Executor for LocalSimpleAggExecutor {
 impl LocalSimpleAggExecutor {
     fn apply_chunk(
         agg_calls: &[AggCall],
-        states: &mut Vec<Box<dyn StreamingAggStateImpl>>,
+        states: &mut [Box<dyn StreamingAggStateImpl>],
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
