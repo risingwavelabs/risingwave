@@ -72,30 +72,12 @@ impl Condition {
         self.conjunctions.is_empty()
     }
 
-    pub fn into_expr(self) -> ExprImpl {
-        merge_expr_by_binary(
-            self.conjunctions.into_iter(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
-    }
-
-    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
-    // rather than using `AND` to combine them.
-    pub fn to_expr(&self) -> ExprImpl {
-        merge_expr_by_binary(
-            self.conjunctions.iter().cloned(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
-    }
-
     /// Convert condition to an expression. If always true, return `None`.
     pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
         if self.always_true() {
             None
         } else {
-            Some(self.to_expr())
+            Some(self.into())
         }
     }
 
@@ -261,6 +243,28 @@ impl Condition {
             }
         }
         Self { conjunctions: res }
+    }
+}
+
+impl From<Condition> for ExprImpl {
+    fn from(c: Condition) -> Self {
+        merge_expr_by_binary(
+            c.conjunctions.into_iter(),
+            ExprType::And,
+            ExprImpl::literal_bool(true),
+        )
+    }
+}
+
+impl<'a> From<&'a Condition> for ExprImpl {
+    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
+    // rather than using `AND` to combine them.
+    fn from(c: &'a Condition) -> Self {
+        merge_expr_by_binary(
+            c.conjunctions.iter().cloned(),
+            ExprType::And,
+            ExprImpl::literal_bool(true),
+        )
     }
 }
 
