@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -179,7 +178,7 @@ async fn test_state_store_sync() {
     let sstable_store = mock_sstable_store_with_object_store(object_client.clone());
 
     let mut config = default_config_for_test();
-    config.shared_buffer_threshold_size = 64;
+    config.shared_buffer_flush_threshold = 64;
     config.write_conflict_detection_enabled = false;
 
     let hummock_options = Arc::new(config);
@@ -215,12 +214,8 @@ async fn test_state_store_sync() {
     // check sync state store metrics
     // Note: epoch(8B) and ValueMeta(2B) will be appended to each kv pair
     assert_eq!(
-        (16 + (8 + VALUE_META_SIZE) * 2) as u64,
-        hummock_storage
-            .shared_buffer_manager()
-            .stats()
-            .shared_buffer_cur_size
-            .load(Ordering::SeqCst)
+        16 + (8 + VALUE_META_SIZE) * 2,
+        hummock_storage.shared_buffer_manager().len()
     );
 
     // ingest 24B batch
@@ -235,12 +230,8 @@ async fn test_state_store_sync() {
     // shared buffer threshold size should have been reached and will trigger a flush
     // then ingest the batch
     assert_eq!(
-        (24 + (8 + VALUE_META_SIZE) * 3) as u64,
-        hummock_storage
-            .shared_buffer_manager()
-            .stats()
-            .shared_buffer_cur_size
-            .load(Ordering::SeqCst)
+        24 + (8 + VALUE_META_SIZE) * 3,
+        hummock_storage.shared_buffer_manager().len()
     );
 
     epoch += 1;
@@ -252,25 +243,14 @@ async fn test_state_store_sync() {
 
     // 16B in total with 8B epoch appended to the key
     assert_eq!(
-        (16 + VALUE_META_SIZE) as u64,
-        hummock_storage
-            .shared_buffer_manager()
-            .stats()
-            .shared_buffer_cur_size
-            .load(Ordering::SeqCst)
+        16 + VALUE_META_SIZE,
+        hummock_storage.shared_buffer_manager().len()
     );
 
     // triger a sync
     hummock_storage.sync(Some(epoch)).await.unwrap();
 
-    assert_eq!(
-        0,
-        hummock_storage
-            .shared_buffer_manager()
-            .stats()
-            .shared_buffer_cur_size
-            .load(Ordering::SeqCst)
-    );
+    assert_eq!(0, hummock_storage.shared_buffer_manager().len());
 }
 
 #[tokio::test]

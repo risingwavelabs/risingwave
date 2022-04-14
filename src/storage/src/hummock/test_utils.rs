@@ -36,11 +36,13 @@ use crate::store::StateStoreIter;
 
 pub fn default_config_for_test() -> StorageConfig {
     StorageConfig {
-        shared_buffer_threshold_size: 67108864, // 64MB
         sstable_size: 256 * (1 << 20),
         block_size: 64 * (1 << 10),
         bloom_false_positive: 0.1,
         share_buffers_sync_parallelism: 2,
+        shared_buffer_upload_timeout: 10000,     // 10s
+        shared_buffer_flush_threshold: 48 << 20, // 0.75 * 64MB
+        shared_buffer_capacity: 64 << 20,        // 64 MB
         data_directory: "hummock_001".to_string(),
         async_checkpoint_enabled: true,
         write_conflict_detection_enabled: true,

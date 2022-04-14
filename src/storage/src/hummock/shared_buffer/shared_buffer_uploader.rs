@@ -13,12 +13,15 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use itertools::Itertools;
 use risingwave_common::config::StorageConfig;
 use risingwave_pb::hummock::SstableInfo;
 use risingwave_rpc_client::HummockMetaClient;
+use tokio::sync::Notify;
 
 use crate::error::StorageResult;
 use crate::hummock::compactor::{Compactor, CompactorContext};
@@ -31,9 +34,9 @@ use crate::monitor::StateStoreMetrics;
 #[derive(Debug)]
 pub struct SyncItem {
     /// Epoch to sync. None means syncing all epochs.
-    pub(super) epoch: Option<u64>,
+    pub epoch: Option<u64>,
     /// Notifier to notify on sync finishes
-    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<u64>>>,
+    pub notifier: Option<tokio::sync::oneshot::Sender<HummockResult<usize>>>,
 }
 
 #[derive(Debug)]
@@ -49,17 +52,20 @@ pub struct SharedBufferUploader {
     local_version_manager: Arc<LocalVersionManager>,
     options: Arc<StorageConfig>,
 
-    /// Statistics.
-    // TODO: separate `HummockStats` from `StateStoreMetrics`.
-    stats: Arc<StateStoreMetrics>,
+    scheduled_size: Arc<AtomicUsize>,
+    notify: Arc<Notify>,
+    uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+
     hummock_meta_client: Arc<dyn HummockMetaClient>,
     sstable_store: SstableStoreRef,
 
     /// For conflict key detection. Enabled by setting `write_conflict_detection_enabled` to true
-    /// in `StorageConfig`
+    /// in `StorageConfig`.ƒ
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
-    uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+    /// Statistics.
+    // TODO: separate `HummockStats` from `StateStoreMetrics`.
+    stats: Arc<StateStoreMetrics>,
 }
 
 impl SharedBufferUploader {
@@ -69,6 +75,8 @@ impl SharedBufferUploader {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
+        scheduled_size: Arc<AtomicUsize>,
+        notify: Arc<Notify>,
         uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
         Self {
@@ -84,12 +92,30 @@ impl SharedBufferUploader {
             } else {
                 None
             },
+            scheduled_size,
+            notify,
             uploader_rx,
         }
     }
 
     /// Uploads buffer batches to S3.
-    async fn sync(&mut self, epoch: u64) -> HummockResult<u64> {
+    async fn flush(&mut self, epoch: Option<u64>) -> HummockResult<usize> {
+        match epoch {
+            // Sync a specific epoch
+            Some(e) => self.flush_epoch(e).await,
+            // Sync all epochs
+            None => {
+                let epochs = self.batches_to_upload.keys().copied().collect_vec();
+                let mut total_size = 0;
+                for epoch in epochs {
+                    total_size += self.flush_epoch(epoch).await?;
+                }
+                Ok(total_size)
+            }
+        }
+    }
+
+    async fn flush_epoch(&mut self, epoch: u64) -> HummockResult<usize> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
@@ -99,7 +125,9 @@ impl SharedBufferUploader {
             None => return Ok(0),
         };
 
-        let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
+        let flush_size = buffers.iter().map(|batch| batch.len()).sum();
+
+        self.scheduled_size.fetch_add(flush_size, Ordering::Release);
 
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
@@ -139,48 +167,28 @@ impl SharedBufferUploader {
             .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
+        // RIVIEW ME: need assert?
         self.local_version_manager.try_set_version(version);
 
-        Ok(sync_size)
+        Ok(flush_size)
     }
 
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
         match item {
-            SharedBufferUploaderItem::Batch(m) => {
+            SharedBufferUploaderItem::Batch(batch) => {
                 if let Some(detector) = &self.write_conflict_detector {
-                    detector.check_conflict_and_track_write_batch(&m.inner, m.epoch);
+                    detector.check_conflict_and_track_write_batch(&batch.inner, batch.epoch);
                 }
 
                 self.batches_to_upload
-                    .entry(m.epoch())
+                    .entry(batch.epoch())
                     .or_insert(Vec::new())
-                    .push(m);
-                Ok(())
+                    .push(batch);
             }
             SharedBufferUploaderItem::Sync(sync_item) => {
-                let res = match sync_item.epoch {
-                    Some(e) => {
-                        // Sync a specific epoch
-                        self.sync(e).await
-                    }
-                    None => {
-                        // Sync all epochs
-                        let epochs = self.batches_to_upload.keys().copied().collect_vec();
-                        let mut res = Ok(0);
-                        let mut size_total: u64 = 0;
-
-                        for e in epochs {
-                            res = self.sync(e).await;
-                            if res.is_err() {
-                                break;
-                            }
-                            size_total += res.unwrap();
-                            res = Ok(size_total);
-                        }
-                        res
-                    }
-                };
-
+                // Flush buffer to S3.
+                let res = self.flush(sync_item.epoch).await;
+                // Notify sync notifier.
                 if let Some(tx) = sync_item.notifier {
                     tx.send(res).map_err(|_| {
                         HummockError::shared_buffer_error(
@@ -188,19 +196,24 @@ impl SharedBufferUploader {
                         )
                     })?;
                 }
-                Ok(())
             }
             SharedBufferUploaderItem::Reset(epoch) => {
                 self.batches_to_upload.remove(&epoch);
-                Ok(())
             }
         }
+        Ok(())
     }
 
     pub async fn run(mut self) -> StorageResult<()> {
-        while let Some(m) = self.uploader_rx.recv().await {
-            if let Err(e) = self.handle(m).await {
-                return Err(e);
+        let mut ticker = tokio::time::interval(Duration::from_millis(
+            self.options.shared_buffer_upload_timeout as u64,
+        ));
+        loop {
+            tokio::select! {
+                Some(item) = self.uploader_rx.recv() => self.handle(item).await?,
+                _ = ticker.tick() => {self.flush(None).await?;}
+                _ = self.notify.notified() => {self.flush(None).await?;}
+                else => break,
             }
         }
         Ok(())

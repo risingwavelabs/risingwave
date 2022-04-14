@@ -14,14 +14,14 @@
 
 use std::collections::BTreeMap;
 use std::ops::RangeBounds;
-use std::sync::atomic::Ordering;
-use std::sync::{atomic, Arc};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock as PLRwLock};
+use parking_lot::RwLock;
 use risingwave_common::config::StorageConfig;
 use risingwave_rpc_client::HummockMetaClient;
-use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
+use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
 use crate::error::StorageResult;
@@ -38,63 +38,75 @@ use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
-#[derive(Debug)]
-pub struct SharedBufferMetrics {
-    pub shared_buffer_cur_size: atomic::AtomicU64,
-    pub shared_buffer_threshold_size: u64,
-}
-
-impl SharedBufferMetrics {
-    pub fn new(options: &StorageConfig) -> Self {
-        Self {
-            shared_buffer_cur_size: atomic::AtomicU64::new(0),
-            shared_buffer_threshold_size: options.shared_buffer_threshold_size as u64,
-        }
-    }
+pub struct SharedBufferManagerInner {
+    /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
+    shared_buffer: BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>,
+    /// Total used buffer size.
+    buffered_size: usize,
 }
 
 /// A manager to manage reads and writes on shared buffer.
 /// Shared buffer is a node level abstraction to buffer write batches across executors.
+///
+/// # Resource Governance
+///
+/// There are 2 waterlines in shared buffer: `threshold` and `capacity`.
+///
+/// `threshold` : When buffer usage reaches `threshold`, `flush` will be triggered to spill data to
+/// S3 and make room for shared buffer.
+///
+/// `capacity` : When buffer usage reaches `capacity`, writes will stall until there is enough room.
+///
+/// # When will the functions be called?
+///
+/// ## `write_batch`
+///
+/// `write_batch` insert data batch into shared buffer and register it in uploader.
+///
+/// When `Hummock::ingest_batch` is called, `write_batch` will be called.
+///
+/// There are 2 cases that `ingest_batch` will be called:
+///
+/// 1. Executor receives a barrier.
+/// 2. Anytime even between two barriers (in future, AKA write anytime).
+///
+/// ## `flush`
+///
+/// `flush` is used to notify uploader that data batches in shared buffer that haven't been uploaded
+/// to S3 can be uploaded now. `flush` returns immediately and will NOT wait for uploading. After
+/// data batches are successfully uploaded, flushed data batches will be deleted asynchronously.
+///
+/// There are 2 cases that `flush` will be called:
+///
+/// 1. Size of shared buffer reaches `threshold`.
+/// 2. When `sycn` is called.
+///
+/// Additionally, uploader will also be notified to upload batches by timeout. See the loop in
+/// `SharedBufferUploader::run`.
+///
+/// ## `sync`
+///
+/// `sync` is also used to notify uploader that data batches in shared buffer that haven't been
+/// uploaded to S3 can ne uploaded. Unlike `flush`, `sync` will wait until data batches are
+/// successfully uploaded.
+///
+/// `sync` is called when `LocalBarrierManager` collected all barriers of the node and waits all
+/// data beloned to the epoch for uploading to S3.
 pub struct SharedBufferManager {
-    /// `shared_buffer` is a collection of immutable batches grouped by (epoch, end_key)
-    shared_buffer: PLRwLock<BTreeMap<HummockEpoch, BTreeMap<Vec<u8>, SharedBufferBatch>>>,
+    inner: RwLock<SharedBufferManagerInner>,
+    /// Threshold to trigger flushing.
+    threshold: usize,
+    /// Maximum memory capacity of shared buffer, any writes that will exceed capacity will stall
+    /// until there is space.
+    capacity: usize,
+
+    /// Shared buffer that has been scheduled to upload (uploading & uploaded).
+    scheduled_size: Arc<AtomicUsize>,
+
+    release_notifier: Notify,
+    uploader_notifier: Arc<Notify>,
     uploader_tx: tokio::sync::mpsc::UnboundedSender<SharedBufferUploaderItem>,
     uploader_handle: JoinHandle<StorageResult<()>>,
-    stats: SharedBufferMetrics,
-    ongoing_flush: OnGoingFlush,
-}
-
-#[derive(Debug)]
-struct OnGoingFlush {
-    data: Mutex<Option<WatchSender<bool>>>,
-}
-
-impl OnGoingFlush {
-    pub fn new() -> Self {
-        Self {
-            data: Mutex::new(Option::None),
-        }
-    }
-
-    pub fn subscribe(&self) -> Option<WatchReceiver<bool>> {
-        let guard = self.data.lock();
-        guard.as_ref().map(|tx| tx.subscribe())
-    }
-
-    pub fn init(&self) {
-        let mut guard = self.data.lock();
-        assert!(guard.is_none());
-        let (watch_tx, _) = tokio::sync::watch::channel(false);
-        guard.replace(watch_tx);
-    }
-
-    pub fn notify(&self, success: bool) {
-        let mut guard = self.data.lock();
-        assert!(guard.is_some());
-        if let Some(watch_tx) = guard.take() {
-            watch_tx.send(success).ok(); // ignore send error
-        }
-    }
 }
 
 impl SharedBufferManager {
@@ -107,66 +119,44 @@ impl SharedBufferManager {
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> Self {
         let (uploader_tx, uploader_rx) = tokio::sync::mpsc::unbounded_channel();
-        let stats = SharedBufferMetrics::new(options.as_ref());
+        let uploader_notifier = Arc::new(Notify::new());
+        let scheduled_size = Arc::new(AtomicUsize::new(0));
+
         let uploader = SharedBufferUploader::new(
-            options,
+            options.clone(),
             local_version_manager,
             sstable_store,
             state_store_stats,
             hummock_meta_client,
+            scheduled_size.clone(),
+            uploader_notifier.clone(),
             uploader_rx,
         );
         let uploader_handle = tokio::spawn(uploader.run());
+
         Self {
-            shared_buffer: PLRwLock::new(BTreeMap::new()),
+            inner: RwLock::new(SharedBufferManagerInner {
+                shared_buffer: BTreeMap::default(),
+                buffered_size: 0,
+            }),
+            threshold: options.shared_buffer_flush_threshold as usize,
+            capacity: options.shared_buffer_capacity as usize,
+
+            scheduled_size,
+
+            release_notifier: Notify::new(),
+            uploader_notifier,
             uploader_tx,
             uploader_handle,
-            stats,
-            ongoing_flush: OnGoingFlush::new(),
         }
     }
 
-    fn empty(&self) -> bool {
-        self.stats.shared_buffer_cur_size.load(Ordering::SeqCst) == 0
+    pub fn len(&self) -> usize {
+        self.inner.read().buffered_size
     }
 
-    /// Allocates a shared buffer budget.
-    async fn allocate_space(&self, batch_size: u64) -> HummockResult<()> {
-        let mut current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-        let threshold = self.stats.shared_buffer_threshold_size;
-
-        // Atomically allocates space,
-        // since there could be concurrent Actors write to the shared buffer.
-        'retry_allocate: loop {
-            // flush shared buffer if there is no enough space
-            while threshold < current_size + batch_size {
-                log::debug!(
-                    "trigge flush: threshold {}, new_size {}",
-                    threshold,
-                    current_size + batch_size
-                );
-                self.flush().await?;
-                current_size = self.stats.shared_buffer_cur_size.load(Ordering::SeqCst);
-            }
-
-            let res = self.stats.shared_buffer_cur_size.compare_exchange(
-                current_size,
-                current_size + batch_size,
-                Ordering::SeqCst,
-                Ordering::Acquire,
-            );
-            match res {
-                Ok(_) => {
-                    assert!(current_size + batch_size <= threshold);
-                    break; // success
-                }
-                Err(old_val) => {
-                    current_size = old_val;
-                    continue 'retry_allocate;
-                }
-            }
-        }
-        Ok(())
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
@@ -174,21 +164,57 @@ impl SharedBufferManager {
         &self,
         batch: Vec<SharedBufferItem>,
         epoch: HummockEpoch,
-    ) -> HummockResult<u64> {
+    ) -> HummockResult<usize> {
         let batch = SharedBufferBatch::new(batch, epoch);
-        let size = batch.size;
+        let batch_size = batch.len();
 
-        self.allocate_space(size).await?;
+        // Stall writes if there is no quota.
+        loop {
+            let buffer_size = self.len();
+            if buffer_size == 0 || buffer_size + batch_size < self.capacity {
+                break;
+            }
+            self.uploader_notifier.notify_one();
+            self.release_notifier.notified().await;
+        }
 
-        self.shared_buffer
-            .write()
+        let mut inner = self.inner.write();
+        inner
+            .shared_buffer
             .entry(epoch)
             .or_insert(BTreeMap::new())
             .insert(batch.end_user_key().to_vec(), batch.clone());
+        inner.buffered_size += batch_size;
+        let size = inner.buffered_size - self.scheduled_size.load(Ordering::Acquire);
+        drop(inner);
+
+        // Queue batch in uploader.
         self.uploader_tx
             .send(SharedBufferUploaderItem::Batch(batch))
             .map_err(HummockError::shared_buffer_error)?;
-        Ok(size)
+
+        // Notify uploader to flush if not-uploading buffer size exceeds threshold.
+        if size > self.threshold {
+            self.flush();
+        }
+
+        Ok(batch_size)
+    }
+
+    pub async fn sync(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.uploader_tx
+            .send(SharedBufferUploaderItem::Sync(SyncItem {
+                epoch,
+                notifier: Some(tx),
+            }))
+            .unwrap();
+        rx.await.unwrap()?;
+        Ok(())
+    }
+
+    fn flush(&self) {
+        self.uploader_notifier.notify_one();
     }
 
     /// Puts a write batch into shared buffer. The batch will won't be synced to S3 asynchronously.
@@ -198,69 +224,16 @@ impl SharedBufferManager {
         epoch: u64,
     ) -> HummockResult<()> {
         let batch = SharedBufferBatch::new(batch, epoch);
-        self.shared_buffer
-            .write()
+        let batch_size = batch.len();
+        let mut inner = self.inner.write();
+        inner
+            .shared_buffer
             .entry(epoch)
             .or_insert(BTreeMap::new())
             .insert(batch.end_user_key().to_vec(), batch.clone());
+        // REVIEW ME: Update buffered size?
+        inner.buffered_size += batch_size;
         Ok(())
-    }
-
-    async fn flush(&self) -> HummockResult<()> {
-        assert!(!self.empty());
-        let mut res = Ok(());
-
-        let notifier = self.ongoing_flush.subscribe();
-        if let Some(mut rx) = notifier {
-            log::debug!("flush: wait for notification");
-            // Wait for notification
-            rx.changed().await.unwrap();
-            if !(*rx.borrow()) {
-                res = Err(HummockError::shared_buffer_error(
-                    "Fail to flush shared buffer",
-                ));
-            }
-        } else {
-            self.ongoing_flush.init();
-            // Flush all batches in the shared buffer
-            res = self.sync(None).await;
-            // Notify other waiters if any
-            self.ongoing_flush.notify(res.is_ok());
-            log::debug!("flush: notify subscribers, result {}", res.is_ok());
-        }
-        res
-    }
-
-    // TODO: support time-based syncing
-    pub async fn sync(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
-        if self.empty() {
-            return Ok(());
-        }
-
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        self.uploader_tx
-            .send(SharedBufferUploaderItem::Sync(SyncItem {
-                epoch,
-                notifier: Some(tx),
-            }))
-            .unwrap();
-
-        let mut res = Ok(());
-        let sync_res = rx.await.unwrap();
-        match sync_res {
-            Ok(sync_size) => {
-                // Update the shared buffer size
-                let shared_buff_prev_size = self
-                    .stats
-                    .shared_buffer_cur_size
-                    .fetch_sub(sync_size, Ordering::SeqCst);
-                assert!(shared_buff_prev_size >= sync_size);
-            }
-            Err(e) => {
-                res = Err(e);
-            }
-        }
-        res
     }
 
     /// Searches shared buffers within the `epoch_range` for the given key.
@@ -272,8 +245,8 @@ impl SharedBufferManager {
         user_key: &[u8],
         epoch_range: impl RangeBounds<u64>,
     ) -> Option<HummockValue<Vec<u8>>> {
-        let guard = self.shared_buffer.read();
-        for (_epoch, buffers) in guard.range(epoch_range).rev() {
+        let inner = self.inner.read();
+        for (_epoch, buffers) in inner.shared_buffer.range(epoch_range).rev() {
             for (_, m) in buffers.range(user_key.to_vec()..) {
                 if m.start_user_key() > user_key {
                     continue;
@@ -298,8 +271,9 @@ impl SharedBufferManager {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.shared_buffer
+        self.inner
             .read()
+            .shared_buffer
             .range(epoch_range)
             .flat_map(|entry| {
                 entry
@@ -327,8 +301,9 @@ impl SharedBufferManager {
         R: RangeBounds<B>,
         B: AsRef<[u8]>,
     {
-        self.shared_buffer
+        self.inner
             .read()
+            .shared_buffer
             .range(epoch_range)
             .flat_map(|entry| {
                 entry
@@ -347,9 +322,21 @@ impl SharedBufferManager {
 
     /// Deletes shared buffers before a given `epoch` exclusively.
     pub fn delete_before(&self, epoch: u64) {
-        let mut guard = self.shared_buffer.write();
-        let new = guard.split_off(&epoch);
-        *guard = new;
+        let mut inner = self.inner.write();
+        // `buffer` = newer part
+        let mut buffer = inner.shared_buffer.split_off(&epoch);
+        // `buffer` = older part
+        std::mem::swap(&mut inner.shared_buffer, &mut buffer);
+        // Update buffer size and scheduled size.
+        let deleted_size: usize = buffer
+            .into_iter()
+            .flat_map(|(_epoch, buffer)| buffer.into_iter().map(|(_end_key, batch)| batch.len()))
+            .sum();
+        inner.buffered_size -= deleted_size;
+        self.scheduled_size
+            .fetch_sub(deleted_size, Ordering::Release);
+        drop(inner);
+        self.release_notifier.notify_one();
     }
 
     /// This function was called while [`SharedBufferManager`] exited.
@@ -363,16 +350,26 @@ impl SharedBufferManager {
             .send(SharedBufferUploaderItem::Reset(epoch))
             .unwrap();
         // Remove items of the given epoch from shared buffer
-        self.shared_buffer.write().remove(&epoch);
-    }
-
-    pub fn stats(&self) -> &SharedBufferMetrics {
-        &self.stats
+        let mut inner = self.inner.write();
+        let buffer = match inner.shared_buffer.remove(&epoch) {
+            None => return,
+            Some(buffer) => buffer,
+        };
+        // Update buffer size and scheduled size.
+        let deleted_size = buffer
+            .into_iter()
+            .map(|(_end_key, batch)| batch.len())
+            .sum();
+        inner.buffered_size -= deleted_size;
+        self.scheduled_size
+            .fetch_sub(deleted_size, Ordering::Release);
+        drop(inner);
+        self.release_notifier.notify_one();
     }
 
     #[cfg(test)]
     pub fn get_shared_buffer(&self) -> BTreeMap<u64, BTreeMap<Vec<u8>, SharedBufferBatch>> {
-        self.shared_buffer.read().clone()
+        self.inner.read().shared_buffer.clone()
     }
 }
 

@@ -30,13 +30,13 @@ pub(super) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub struct SharedBufferBatch {
     pub(super) inner: Arc<[SharedBufferItem]>,
     pub(super) epoch: HummockEpoch,
-    pub(super) size: u64,
+    size: usize,
 }
 
 impl SharedBufferBatch {
     pub fn new(sorted_items: Vec<SharedBufferItem>, epoch: HummockEpoch) -> Self {
         // size = Sum(length of full key + length of user value)
-        let size: u64 = sorted_items
+        let size = sorted_items
             .iter()
             .map(|(k, v)| {
                 let vsize = {
@@ -45,7 +45,7 @@ impl SharedBufferBatch {
                         HummockValue::Delete(_) => VALUE_META_SIZE,
                     }
                 };
-                (k.len() + vsize) as u64
+                k.len() + vsize
             })
             .sum();
 
@@ -96,6 +96,10 @@ impl SharedBufferBatch {
 
     pub fn epoch(&self) -> u64 {
         self.epoch
+    }
+
+    pub fn len(&self) -> usize {
+        self.size
     }
 }
 
