@@ -98,13 +98,6 @@ impl Operations {
             if let Some(context) = context {
                 if let Some(task) = self.meta_client.get_compact_task().await {
                     Compactor::compact(context.clone(), task).await;
-                    let last_pinned = context.local_version_manager.get_version().unwrap();
-                    let version = self
-                        .meta_client
-                        .pin_version(last_pinned.id())
-                        .await
-                        .unwrap();
-                    context.local_version_manager.try_set_version(version);
                 }
             }
         }

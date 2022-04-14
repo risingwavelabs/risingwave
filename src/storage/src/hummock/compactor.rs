@@ -36,8 +36,7 @@ use super::multi_builder::CapacitySplitTableBuilder;
 use super::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use super::sstable_store::SstableStoreRef;
 use super::{
-    HummockError, HummockResult, HummockStorage, LocalVersionManager, SSTableBuilder,
-    SSTableIterator, Sstable,
+    HummockError, HummockResult, HummockStorage, SSTableBuilder, SSTableIterator, Sstable,
 };
 use crate::hummock::vacuum::Vacuum;
 use crate::monitor::StateStoreMetrics;
@@ -47,9 +46,6 @@ use crate::monitor::StateStoreMetrics;
 pub struct CompactorContext {
     /// Storage configurations.
     pub options: Arc<StorageConfig>,
-
-    /// Local view on the levels of lsm tree.
-    pub local_version_manager: Arc<LocalVersionManager>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -356,11 +352,7 @@ impl Compactor {
             let level = opt_level.as_ref().unwrap();
             // Do not need to filter the table because manager has done it.
             let table_idxs = level.table_infos.iter().map(|sst| sst.id).collect_vec();
-            let tables = self
-                .context
-                .local_version_manager
-                .pick_few_tables(&table_idxs)
-                .await?;
+            let tables = self.context.sstable_store.sstables(&table_idxs).await?;
 
             // let read_statistics: &mut TableSetStatistics = if *level_idx ==
             // compact_task.target_level {
@@ -422,14 +414,12 @@ impl Compactor {
     /// manager and runs compaction tasks.
     pub fn start_compactor(
         options: Arc<StorageConfig>,
-        local_version_manager: Arc<LocalVersionManager>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
     ) -> (JoinHandle<()>, UnboundedSender<()>) {
         let compactor_context = Arc::new(CompactorContext {
             options,
-            local_version_manager,
             hummock_meta_client: hummock_meta_client.clone(),
             sstable_store: sstable_store.clone(),
             stats,

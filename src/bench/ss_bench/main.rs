@@ -155,7 +155,6 @@ async fn main() {
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
         context = Some(Arc::new(CompactorContext {
             options: config.clone(),
-            local_version_manager: hummock.inner().local_version_manager().clone(),
             hummock_meta_client: mock_hummock_meta_client.clone(),
             sstable_store: hummock.inner().sstable_store(),
             stats: state_store_stats.clone(),

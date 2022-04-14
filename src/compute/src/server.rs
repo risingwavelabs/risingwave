@@ -118,7 +118,6 @@ pub async fn compute_node_serve(
     if let Some(hummock) = state_store.as_hummock_state_store() {
         sub_tasks.push(Compactor::start_compactor(
             hummock.inner().options().clone(),
-            hummock.inner().local_version_manager().clone(),
             hummock.inner().hummock_meta_client().clone(),
             hummock.inner().sstable_store(),
             state_store_metrics,
