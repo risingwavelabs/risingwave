@@ -22,12 +22,13 @@ use futures::StreamExt;
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::consumer::{DefaultConsumerContext, StreamConsumer};
 use rdkafka::ClientConfig;
-use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
+use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::RwError;
 
 use crate::base::{InnerMessage, SourceReader};
 use crate::kafka::split::KafkaSplit;
 use crate::kafka::KAFKA_CONFIG_BROKER_KEY;
+use crate::Properties;
 
 const KAFKA_MAX_FETCH_MESSAGES: usize = 1024;
 
@@ -56,19 +57,11 @@ impl SourceReader for KafkaSplitReader {
             .map(Some)
     }
 
-    async fn new(
-        properties: HashMap<String, String>,
-        _state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(properties: Properties, _state: Option<crate::ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {
-        let bootstrap_servers = properties.get(KAFKA_CONFIG_BROKER_KEY).ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "could not found config {}",
-                KAFKA_CONFIG_BROKER_KEY
-            )))
-        })?;
+        let bootstrap_servers = properties.get_kafka(KAFKA_CONFIG_BROKER_KEY)?;
 
         let mut config = ClientConfig::new();
 
