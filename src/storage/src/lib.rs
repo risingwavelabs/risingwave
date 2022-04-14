@@ -33,8 +33,6 @@
 #![feature(type_alias_impl_trait)]
 #![feature(let_chains)]
 
-extern crate core;
-
 pub mod cell_based_row_deserializer;
 pub mod cell_based_row_serializer;
 pub mod hummock;
