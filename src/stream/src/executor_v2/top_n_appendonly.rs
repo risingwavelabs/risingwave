@@ -28,7 +28,7 @@ use crate::executor::managed_state::top_n::variants::TOP_N_MAX;
 use crate::executor::managed_state::top_n::ManagedTopNState;
 use crate::executor_v2::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor_v2::top_n_executor::{generate_output, TopNExecutorBase, TopNExecutorWrapper};
-use crate::executor_v2::{BoxedMessageStream, Executor, ExecutorInfo, PkIndices, PkIndicesRef};
+use crate::executor_v2::{Executor, ExecutorInfo, PkIndices, PkIndicesRef};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -181,33 +181,6 @@ impl<S: StateStore> InnerAppendOnlyTopNExecutor<S> {
 }
 
 #[async_trait]
-impl<S: StateStore> Executor for InnerAppendOnlyTopNExecutor<S> {
-    fn execute(self: Box<Self>) -> BoxedMessageStream {
-        panic!("Should execute by wrapper");
-    }
-
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
-    }
-
-    fn clear_cache(&mut self) -> Result<()> {
-        self.managed_lower_state.clear_cache();
-        self.managed_higher_state.clear_cache();
-        self.first_execution = true;
-
-        Ok(())
-    }
-}
-
-#[async_trait]
 impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
     async fn apply_chunk(
         &mut self,
@@ -331,6 +304,18 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
 
     async fn flush_data(&mut self, epoch: u64) -> StreamExecutorResult<()> {
         self.flush_inner(epoch).await
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
     }
 }
 

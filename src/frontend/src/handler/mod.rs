@@ -21,7 +21,7 @@ use risingwave_sqlparser::ast::{DropStatement, ObjectName, ObjectType, Statement
 use crate::session::{OptimizerContext, SessionImpl};
 
 pub mod create_mv;
-mod create_source;
+pub mod create_source;
 pub mod create_table;
 mod describe;
 pub mod drop_mv;

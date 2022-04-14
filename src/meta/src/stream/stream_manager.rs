@@ -21,6 +21,7 @@ use log::{debug, info};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, ToRwResult};
+use risingwave_pb::catalog::Source;
 use risingwave_pb::common::{ActorInfo, WorkerType};
 use risingwave_pb::meta::table_fragments::{ActorState, ActorStatus};
 use risingwave_pb::stream_plan::stream_node::Node;
@@ -49,6 +50,8 @@ pub struct CreateMaterializedViewContext {
     pub upstream_node_actors: HashMap<WorkerId, Vec<ActorId>>,
     /// Upstream mview actor ids grouped by table id.
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
+    /// Temporary source info used during `create_materialized_source`
+    pub affiliated_source: Option<Source>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
@@ -165,7 +168,7 @@ where
 
         let split_assignment = self
             .source_manager
-            .schedule_split_for_actors(source_actors_group_by_fragment)
+            .schedule_split_for_actors(source_actors_group_by_fragment, ctx.affiliated_source)
             .await?;
 
         // patch source actors with splits

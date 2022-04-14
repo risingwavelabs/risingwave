@@ -31,10 +31,11 @@ use crate::model::{ActorId, LocalActorId, LocalFragmentId};
 use crate::storage::MetaStore;
 use crate::stream::{CreateMaterializedViewContext, FragmentManagerRef};
 
+/// A list of actors with order.
 #[derive(Debug, Clone)]
-pub struct ActorLink(pub Vec<LocalActorId>);
+pub struct OrderedActorLink(pub Vec<LocalActorId>);
 
-impl ActorLink {
+impl OrderedActorLink {
     pub fn to_global_ids(&self, actor_id_offset: u32, actor_id_len: u32) -> Self {
         Self(
             self.0
@@ -53,6 +54,18 @@ impl ActorLink {
     }
 }
 
+pub struct StreamActorDownstream {
+    /// Dispatcher
+    /// TODO: refactor to `DispatcherStrategy`.
+    dispatcher: Dispatcher,
+
+    /// Downstream actors.
+    actors: OrderedActorLink,
+
+    /// Consistent hash mapping (only needed when dispatcher is hash).
+    hash_mapping: Option<Vec<LocalActorId>>,
+}
+
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
 pub struct StreamActorBuilder {
     /// actor id field
@@ -65,11 +78,12 @@ pub struct StreamActorBuilder {
     nodes: Arc<StreamNode>,
 
     /// downstream dispatchers (dispatcher, downstream actor, hash mapping)
-    downstreams: Vec<(Dispatcher, ActorLink, Option<Vec<LocalActorId>>)>,
+    downstreams: Vec<StreamActorDownstream>,
 
     /// upstreams, exchange node operator_id -> upstream actor ids
-    upstreams: HashMap<u64, ActorLink>,
+    upstreams: HashMap<u64, OrderedActorLink>,
 
+    /// whether this actor builder has been sealed
     sealed: bool,
 }
 
@@ -102,8 +116,8 @@ impl StreamActorBuilder {
     pub fn add_dispatcher(
         &mut self,
         dispatcher: Dispatcher,
-        downstream_actors: ActorLink,
-        mapping: Option<Vec<LocalActorId>>,
+        downstream_actors: OrderedActorLink,
+        hash_mapping: Option<Vec<LocalActorId>>,
     ) {
         assert!(!self.sealed);
         // TODO: we should have a non-proto Dispatcher type here
@@ -115,8 +129,11 @@ impl StreamActorBuilder {
             dispatcher.hash_mapping.is_none(),
             "should leave hash_mapping empty, will be filled later"
         );
-        self.downstreams
-            .push((dispatcher, downstream_actors, mapping));
+        self.downstreams.push(StreamActorDownstream {
+            dispatcher,
+            actors: downstream_actors,
+            hash_mapping,
+        });
     }
 
     /// Build an actor from given information. At the same time, convert local actor id to global
@@ -127,22 +144,44 @@ impl StreamActorBuilder {
         self.actor_id = self.actor_id.to_global_id(actor_id_offset, actor_id_len);
         self.downstreams = std::mem::take(&mut self.downstreams)
             .into_iter()
-            .map(|(dispatcher, downstreams, mapping)| {
-                let global_mapping =
-                    mapping.map(|x| ActorLink(x).to_global_ids(actor_id_offset, actor_id_len));
+            .map(
+                |StreamActorDownstream {
+                     dispatcher,
+                     actors: downstreams,
+                     hash_mapping,
+                 }| {
+                    let global_mapping = hash_mapping
+                        .map(|x| OrderedActorLink(x).to_global_ids(actor_id_offset, actor_id_len));
 
-                (
-                    Dispatcher {
-                        hash_mapping: global_mapping.as_ref().map(|x| ActorMapping {
-                            hash_mapping: x.as_global_ids(),
-                        }),
-                        ..dispatcher
-                    },
-                    downstreams.to_global_ids(actor_id_offset, actor_id_len),
-                    global_mapping.map(|ActorLink(x)| x),
-                )
-            })
+                    // `global_mapping` should only be available on hash dispatch.
+                    assert_eq!(
+                        dispatcher.r#type == DispatcherType::Hash as i32,
+                        global_mapping.is_some()
+                    );
+                    let downstreams = downstreams.to_global_ids(actor_id_offset, actor_id_len);
+
+                    if dispatcher.r#type == DispatcherType::NoShuffle as i32 {
+                        assert_eq!(
+                            downstreams.0.len(),
+                            1,
+                            "no shuffle should only have one actor downstream"
+                        );
+                    }
+
+                    StreamActorDownstream {
+                        dispatcher: Dispatcher {
+                            hash_mapping: global_mapping.as_ref().map(|x| ActorMapping {
+                                hash_mapping: x.as_global_ids(),
+                            }),
+                            ..dispatcher
+                        },
+                        actors: downstreams,
+                        hash_mapping: global_mapping.map(|OrderedActorLink(x)| x),
+                    }
+                },
+            )
             .collect();
+
         self.upstreams = std::mem::take(&mut self.upstreams)
             .into_iter()
             .map(|(exchange_id, actor_link)| {
@@ -162,10 +201,14 @@ impl StreamActorBuilder {
         let mut dispatcher = self
             .downstreams
             .iter()
-            .map(|(dispatcher, downstreams, _)| Dispatcher {
-                downstream_actor_id: downstreams.as_global_ids(),
-                ..dispatcher.clone()
-            })
+            .map(
+                |StreamActorDownstream {
+                     dispatcher, actors, ..
+                 }| Dispatcher {
+                    downstream_actor_id: actors.as_global_ids(),
+                    ..dispatcher.clone()
+                },
+            )
             .collect_vec();
 
         // If there's no dispatcher, add an empty broadcast. TODO: Can be removed later.
@@ -230,24 +273,65 @@ where
         dispatcher: Dispatcher,
         mapping: Option<Vec<LocalActorId>>,
     ) {
+        if dispatcher.get_type().unwrap() == DispatcherType::NoShuffle {
+            assert_eq!(upstream_actor_ids.len(), downstream_actor_ids.len());
+
+            // update 1v1 relationship
+            upstream_actor_ids
+                .iter()
+                .zip_eq(downstream_actor_ids.iter())
+                .for_each(|(upstream_id, downstream_id)| {
+                    self.actor_builders
+                        .get_mut(upstream_id)
+                        .unwrap()
+                        .add_dispatcher(
+                            dispatcher.clone(),
+                            OrderedActorLink(vec![*downstream_id]),
+                            mapping.clone(),
+                        );
+
+                    let ret = self
+                        .actor_builders
+                        .get_mut(downstream_id)
+                        .unwrap()
+                        .upstreams
+                        .insert(exchange_operator_id, OrderedActorLink(vec![*upstream_id]));
+
+                    assert!(
+                        ret.is_none(),
+                        "duplicated exchange input {} for no-shuffle actors {:?} -> {:?}",
+                        exchange_operator_id,
+                        upstream_id,
+                        downstream_id
+                    );
+                });
+
+            return;
+        }
+
+        // update actors to have dispatchers, link upstream -> downstream.
         upstream_actor_ids.iter().for_each(|upstream_id| {
             self.actor_builders
                 .get_mut(upstream_id)
                 .unwrap()
                 .add_dispatcher(
                     dispatcher.clone(),
-                    ActorLink(downstream_actor_ids.to_vec()),
+                    OrderedActorLink(downstream_actor_ids.to_vec()),
                     mapping.clone(),
                 );
         });
 
+        // update actors to have upstreams, link downstream <- upstream.
         downstream_actor_ids.iter().for_each(|downstream_id| {
             let ret = self
                 .actor_builders
                 .get_mut(downstream_id)
                 .unwrap()
                 .upstreams
-                .insert(exchange_operator_id, ActorLink(upstream_actor_ids.to_vec()));
+                .insert(
+                    exchange_operator_id,
+                    OrderedActorLink(upstream_actor_ids.to_vec()),
+                );
             assert!(
                 ret.is_none(),
                 "duplicated exchange input {} for actors {:?} -> {:?}",
@@ -327,7 +411,7 @@ where
         dispatch_upstreams: &mut Vec<ActorId>,
         upstream_node_actors: &mut HashMap<WorkerId, Vec<ActorId>>,
         stream_node: &StreamNode,
-        upstream_actor_id: &mut HashMap<u64, ActorLink>,
+        upstream_actor_id: &mut HashMap<u64, OrderedActorLink>,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
             Node::ExchangeNode(_) => self.build_inner(
@@ -347,7 +431,8 @@ where
                 let mut new_stream_node = stream_node.clone();
                 for (idx, input) in stream_node.input.iter().enumerate() {
                     match input.get_node()? {
-                        Node::ExchangeNode(exchange_node) => {
+                        Node::ExchangeNode(_) => {
+                            assert!(!input.get_fields().is_empty());
                             new_stream_node.input[idx] = StreamNode {
                                 input: vec![],
                                 pk_indices: input.pk_indices.clone(),
@@ -355,8 +440,9 @@ where
                                     upstream_actor_id: upstream_actor_id
                                         .remove(&input.get_operator_id())
                                         .expect("failed to find upstream actor id for given exchange node").as_global_ids(),
-                                    fields: exchange_node.get_fields().clone(),
+                                    fields: input.get_fields().clone(),
                                 })),
+                                fields: input.get_fields().clone(),
                                 operator_id: input.operator_id,
                                 identity: "MergeExecutor".to_string(),
                             };
@@ -445,6 +531,7 @@ where
                         upstream_actor_id: Vec::from_iter(upstream_actor_ids.into_iter()),
                         fields: chain_node.upstream_fields.clone(),
                     })),
+                    fields: chain_node.upstream_fields.clone(),
                     operator_id: merge_node.operator_id,
                     identity: "MergeExecutor".to_string(),
                 },
@@ -457,6 +544,7 @@ where
                 node: Some(Node::ChainNode(chain_node.clone())),
                 operator_id: stream_node.operator_id,
                 identity: "ChainExecutor".to_string(),
+                fields: chain_node.upstream_fields.clone(),
             })
         } else {
             unreachable!()

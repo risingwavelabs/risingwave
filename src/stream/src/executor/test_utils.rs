@@ -70,15 +70,6 @@ impl MockSource {
         }
     }
 
-    pub fn with_chunks(schema: Schema, pk_indices: PkIndices, chunks: Vec<StreamChunk>) -> Self {
-        Self {
-            schema,
-            pk_indices,
-            epoch: 0,
-            msgs: chunks.into_iter().map(Message::Chunk).collect(),
-        }
-    }
-
     pub fn push_chunks(&mut self, chunks: impl Iterator<Item = StreamChunk>) {
         self.msgs.extend(chunks.map(Message::Chunk));
     }

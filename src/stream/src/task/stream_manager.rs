@@ -26,12 +26,11 @@ use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::{is_local_address, HostAddr};
 use risingwave_common::util::env_var::env_var_is_true;
-use risingwave_expr::expr::{build_from_prost, AggKind, RowExpression};
+use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::ActorInfo;
-use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::{expr, stream_plan, stream_service};
-use risingwave_storage::{dispatch_state_store, Keyspace, StateStore, StateStoreImpl};
+use risingwave_storage::{dispatch_state_store, StateStore, StateStoreImpl};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
@@ -441,7 +440,7 @@ impl LocalStreamManagerCore {
                 actor_id,
                 self.context.clone(),
             )),
-            Simple => {
+            Simple | NoShuffle => {
                 assert_eq!(outputs.len(), 1);
                 let output = outputs.into_iter().next().unwrap();
                 Box::new(DispatchExecutor::new(
@@ -493,6 +492,8 @@ impl LocalStreamManagerCore {
 
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
+
+        assert!(node.get_operator_id() <= u32::MAX as u64);
         let executor_id = ((actor_id as u64) << 32) + node.get_operator_id();
         let operator_id = ((fragment_id as u64) << 32) + node.get_operator_id();
 
@@ -559,75 +560,6 @@ impl LocalStreamManagerCore {
         // Update check
         executor = Box::new(UpdateCheckExecutor::new(executor));
 
-        Ok(executor)
-    }
-
-    pub(crate) fn create_hash_join_node(
-        &mut self,
-        mut params: ExecutorParams,
-        node: &stream_plan::HashJoinNode,
-        store: impl StateStore,
-    ) -> Result<Box<dyn Executor>> {
-        let source_r = params.input.remove(1);
-        let source_l = params.input.remove(0);
-        let params_l = JoinParams::new(
-            node.get_left_key()
-                .iter()
-                .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
-        );
-        let params_r = JoinParams::new(
-            node.get_right_key()
-                .iter()
-                .map(|key| *key as usize)
-                .collect::<Vec<_>>(),
-        );
-
-        let condition = match node.get_condition() {
-            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
-            Err(_) => None,
-        };
-        trace!("Join non-equi condition: {:?}", condition);
-
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
-        macro_rules! impl_create_hash_join_executor {
-            ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
-                |typ| match typ {
-                    $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
-                        source_l,
-                        source_r,
-                        params_l,
-                        params_r,
-                        params.pk_indices,
-                        Keyspace::shared_executor_root(store.clone(), params.operator_id),
-                        params.executor_id,
-                        condition,
-                        params.op_info,
-                        key_indices,
-                    )) as Box<dyn Executor>, )*
-                    _ => todo!("Join type {:?} not implemented", typ),
-                }
-            }
-        }
-
-        macro_rules! for_all_join_types {
-            ($macro:ident) => {
-                $macro! {
-                    { Inner, Inner },
-                    { LeftOuter, LeftOuter },
-                    { RightOuter, RightOuter },
-                    { FullOuter, FullOuter }
-                }
-            };
-        }
-        let create_hash_join_executor = for_all_join_types! { impl_create_hash_join_executor };
-        let join_type_proto = node.get_join_type()?;
-        let executor = create_hash_join_executor(join_type_proto);
         Ok(executor)
     }
 
