@@ -60,8 +60,8 @@ impl ConflictDetector {
         *table_watermark = epoch;
     }
 
-    pub fn set_watermark(&self, epoch: HummockEpoch, table_ids: &Option<Vec<StorageTableId>>) {
-        let table_ids = table_ids.clone().unwrap_or_else(|| {
+    pub fn set_watermark(&self, epoch: HummockEpoch, table_ids: Option<&Vec<StorageTableId>>) {
+        let table_ids = table_ids.cloned().unwrap_or_else(|| {
             self.table_epoch_watermark
                 .iter()
                 .map(|entry| *entry.key())
@@ -121,9 +121,9 @@ impl ConflictDetector {
     ///
     /// `table_ids` is an optional parameter that specifies which storage tables to archive. If
     /// `None`, all tables are archived.
-    pub fn archive_epoch(&self, epoch: HummockEpoch, table_ids: &Option<Vec<StorageTableId>>) {
+    pub fn archive_epoch(&self, epoch: HummockEpoch, table_ids: Option<&Vec<StorageTableId>>) {
         if let Some(mut epoch_history) = self.epoch_history.get_mut(&epoch) {
-            if let Some(table_ids) = &table_ids {
+            if let Some(table_ids) = table_ids {
                 for table_id in table_ids {
                     epoch_history.remove(table_id);
                 }
@@ -217,7 +217,7 @@ mod test {
             233,
             GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
+        detector.archive_epoch(233, Some(&vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -244,7 +244,7 @@ mod test {
             233,
             GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
+        detector.archive_epoch(233, Some(&vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),
@@ -271,7 +271,7 @@ mod test {
             GLOBAL_STORAGE_TABLE_ID,
         );
         assert!(!detector.epoch_history.get(&233).unwrap().is_empty());
-        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
+        detector.archive_epoch(233, Some(&vec![GLOBAL_STORAGE_TABLE_ID]));
         assert!(detector.epoch_history.get(&233).is_none());
     }
 
@@ -289,7 +289,7 @@ mod test {
             233,
             GLOBAL_STORAGE_TABLE_ID,
         );
-        detector.archive_epoch(233, &Some(vec![GLOBAL_STORAGE_TABLE_ID]));
+        detector.archive_epoch(233, Some(&vec![GLOBAL_STORAGE_TABLE_ID]));
         detector.check_conflict_and_track_write_batch(
             once((
                 Bytes::from("key1"),

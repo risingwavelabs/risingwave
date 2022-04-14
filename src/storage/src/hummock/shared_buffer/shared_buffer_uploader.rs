@@ -98,7 +98,7 @@ impl SharedBufferUploader {
         table_ids: Option<Vec<StorageTableId>>,
     ) -> HummockResult<()> {
         if let Some(detector) = &self.write_conflict_detector {
-            detector.archive_epoch(epoch, &table_ids);
+            detector.archive_epoch(epoch, table_ids.as_ref());
         }
 
         // TODO: may want to recover the removed batches in case of compaction failure
