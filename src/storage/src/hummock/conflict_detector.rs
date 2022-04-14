@@ -77,14 +77,14 @@ impl ConflictDetector {
 
         let mut written_key = self.epoch_history.entry(epoch).or_insert(HashSet::new());
 
-        // for (key, value) in kv_pairs.iter() {
-        //     assert!(
-        //         written_key.insert(key.clone()),
-        //         "key {:?} is written again after previously written, value is {:?}",
-        //         key,
-        //         value,
-        //     );
-        // }
+        for (key, value) in kv_pairs.iter() {
+            assert!(
+                written_key.insert(key.clone()),
+                "key {:?} is written again after previously written, value is {:?}",
+                key,
+                value,
+            );
+        }
     }
 
     /// Archives an epoch. An archived epoch cannot be written anymore.
