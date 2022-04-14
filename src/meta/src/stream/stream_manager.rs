@@ -52,6 +52,8 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Temporary source info used during `create_materialized_source`
     pub affiliated_source: Option<Source>,
+    /// Memo for assigning upstream actors to parallelized chain node.
+    pub chain_upstream_assignment: HashMap<FragmentId, Vec<ActorId>>,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.

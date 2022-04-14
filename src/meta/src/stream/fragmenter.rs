@@ -144,8 +144,7 @@ where
                     },
                 ))
             })
-            .collect::<Result<BTreeMap<_, _>>>();
-        result
+            .collect::<Result<BTreeMap<_, _>>>()
     }
 
     /// Do some dirty rewrites on meta. Currently, it will split stateful operators into two
@@ -233,10 +232,6 @@ where
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
-
-            // TODO: Force Chain to be singleton as a workaround. Remove this if parallel Chain is
-            // supported
-            Node::ChainNode(_) => current_fragment.is_singleton = true,
 
             _ => {}
         };
@@ -359,7 +354,8 @@ where
         };
 
         for id in &actor_ids {
-            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
+            let actor_builder =
+                StreamActorBuilder::new(*id, fragment_id, node.clone(), parallel_degree);
             self.stream_graph.add_actor(actor_builder);
         }
 

@@ -23,6 +23,8 @@
                         typeName: INT64
                         isNullable: true
                       name: "_row_id#0"
+                  distributionKeys:
+                    - 1
             pkIndices:
               - 1
             chainNode:
@@ -92,6 +94,8 @@
       columnIds:
         - 0
         - 1
+      distributionKeys:
+        - 1
     ---
     id: 4294967294
     name: test
@@ -136,6 +140,8 @@
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
+              distributionKeys:
+                - 1
         pkIndices:
           - 1
         chainNode:
@@ -174,6 +180,8 @@
             isNullable: true
       columnIds:
         - 0
+        - 1
+      distributionKeys:
         - 1
     ---
     id: 4294967294
@@ -219,6 +227,8 @@
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
+              distributionKeys:
+                - 1
         pkIndices:
           - 1
         chainNode:
@@ -262,6 +272,8 @@
       columnIds:
         - 0
         - 1
+      distributionKeys:
+        - 1
     ---
     id: 4294967294
     name: test
@@ -291,39 +303,56 @@
     input:
       - input:
           - input:
-              - mergeNode: {}
-              - pkIndices:
+              - input:
+                  - mergeNode: {}
+                  - pkIndices:
+                      - 1
+                    batchPlanNode:
+                      tableRefId:
+                        tableId: 1
+                      columnDescs:
+                        - columnType:
+                            typeName: INT32
+                            isNullable: true
+                          columnId: 1
+                          name: v1
+                        - columnType:
+                            typeName: INT64
+                            isNullable: true
+                          name: "_row_id#0"
+                      distributionKeys:
+                        - 1
+                pkIndices:
                   - 1
-                batchPlanNode:
+                chainNode:
                   tableRefId:
                     tableId: 1
-                  columnDescs:
-                    - columnType:
-                        typeName: INT32
-                        isNullable: true
-                      columnId: 1
-                      name: v1
-                    - columnType:
+                  upstreamFields:
+                    - dataType:
                         typeName: INT64
                         isNullable: true
                       name: "_row_id#0"
+                    - dataType:
+                        typeName: INT32
+                        isNullable: true
+                      name: v1
+                  columnIds:
+                    - 1
+                    - 0
             pkIndices:
               - 1
-            chainNode:
-              tableRefId:
-                tableId: 1
-              upstreamFields:
-                - dataType:
-                    typeName: INT64
-                    isNullable: true
-                  name: "_row_id#0"
-                - dataType:
-                    typeName: INT32
-                    isNullable: true
-                  name: v1
-              columnIds:
-                - 1
-                - 0
+            fields:
+              - dataType:
+                  typeName: INT32
+                  isNullable: true
+                name: v1
+              - dataType:
+                  typeName: INT64
+                  isNullable: true
+                name: "_row_id#0"
+            exchangeNode:
+              strategy:
+                type: SIMPLE
         pkIndices:
           - 0
           - 1
@@ -434,6 +463,8 @@
                                     typeName: INT64
                                     isNullable: true
                                   name: "_row_id#0"
+                              distributionKeys:
+                                - 2
                         pkIndices:
                           - 2
                         chainNode:

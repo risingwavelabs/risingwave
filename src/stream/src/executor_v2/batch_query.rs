@@ -88,6 +88,7 @@ where
         }
     }
 
+    /// Now we use hash as a workaround for supporting parallelized chain.
     fn filter_chunk(&self, data_chunk: DataChunk) -> Option<DataChunk> {
         let hash_values = data_chunk
             .get_hash_values(self.info.pk_indices.as_ref(), CRC32FastBuilder)
