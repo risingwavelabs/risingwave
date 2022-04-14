@@ -279,13 +279,6 @@ jobs:
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node w/o cache
-        timeout-minutes: 4
-        run: |
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
       - name: e2e test batch 3-node
         timeout-minutes: 2
         run: |
@@ -389,13 +382,6 @@ jobs:
         timeout-minutes: 4
         run: |
           ~/cargo-make/makers ci-start ci-3node
-          sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
-      - name: Kill cluster
-        run: ~/cargo-make/makers ci-kill
-      - name: e2e test streaming 3-node w/o cache
-        timeout-minutes: 4
-        run: |
-          RW_NO_CACHE=1 ~/cargo-make/makers ci-start ci-3node
           sqllogictest -p 4567 -d dev './e2e_test/streaming/**/*.slt'
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
