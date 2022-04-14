@@ -280,7 +280,10 @@ where
             .map_err(tonic_err)?;
 
         // 3. Create mview in stream manager. The id in stream node will be filled.
-        if let Err(e) = self.create_mview_on_compute_node(stream_node, id).await {
+        if let Err(e) = self
+            .create_mview_on_compute_node(stream_node, id, None)
+            .await
+        {
             self.catalog_manager
                 .cancel_create_table_procedure(&mview)
                 .await
@@ -378,6 +381,7 @@ where
         &self,
         mut stream_node: StreamNode,
         id: TableId,
+        affiliated_source: Option<Source>,
     ) -> RwResult<()> {
         use risingwave_common::catalog::TableId;
 
@@ -405,7 +409,10 @@ where
 
         // Resolve fragments.
         let hash_mapping = self.cluster_manager.get_hash_mapping().await;
-        let mut ctx = CreateMaterializedViewContext::default();
+        let mut ctx = CreateMaterializedViewContext {
+            affiliated_source,
+            ..Default::default()
+        };
         let fragmenter = StreamFragmenter::new(
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
@@ -482,8 +489,9 @@ where
         mview.id = mview_id;
 
         // Create mview on compute node.
+        // Noted that this progress relies on the source just created, so we pass it here.
         if let Err(e) = self
-            .create_mview_on_compute_node(stream_node, mview_id)
+            .create_mview_on_compute_node(stream_node, mview_id, Some(source.clone()))
             .await
         {
             self.catalog_manager

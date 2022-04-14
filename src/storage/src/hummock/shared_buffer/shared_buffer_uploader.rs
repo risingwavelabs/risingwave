@@ -104,7 +104,6 @@ impl SharedBufferUploader {
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
             options: self.options.clone(),
-            local_version_manager: self.local_version_manager.clone(),
             hummock_meta_client: self.hummock_meta_client.clone(),
             sstable_store: self.sstable_store.clone(),
             stats: self.stats.clone(),

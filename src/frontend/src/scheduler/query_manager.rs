@@ -74,7 +74,7 @@ impl QueryManager {
         plan: BatchPlanProst,
     ) -> Result<impl Stream<Item = Result<DataChunk>>> {
         let session = context.session();
-        let worker_node_addr = self.worker_node_manager.next_random().host.unwrap();
+        let worker_node_addr = self.worker_node_manager.next_random()?.host.unwrap();
         let compute_client: ComputeClient = ComputeClient::new((&worker_node_addr).into()).await?;
 
         // Build task id and task sink id

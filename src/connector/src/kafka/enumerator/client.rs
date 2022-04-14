@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
 use async_trait::async_trait;
 use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
 use rdkafka::error::KafkaResult;
@@ -26,6 +26,7 @@ use crate::kafka::{
     KAFKA_CONFIG_BROKER_KEY, KAFKA_CONFIG_SCAN_STARTUP_MODE, KAFKA_CONFIG_TIME_OFFSET,
     KAFKA_CONFIG_TOPIC_KEY, KAFKA_SYNC_CALL_TIMEOUT,
 };
+use crate::utils::AnyhowProperties;
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -46,20 +47,13 @@ pub struct KafkaSplitEnumerator {
     stop_offset: KafkaEnumeratorOffset,
 }
 
-macro_rules! extract_properties {
-    ($node_type:expr, $source:expr) => {
-        $node_type
-            .get($source)
-            .ok_or_else(|| anyhow::anyhow!("property {} not found", $source))?
-    };
-}
-
 impl KafkaSplitEnumerator {
-    pub fn new(properties: &HashMap<String, String>) -> Result<KafkaSplitEnumerator> {
-        let broker_address = extract_properties!(properties, KAFKA_CONFIG_BROKER_KEY);
-        let topic = extract_properties!(properties, KAFKA_CONFIG_TOPIC_KEY);
+    pub fn new(properties: &AnyhowProperties) -> anyhow::Result<KafkaSplitEnumerator> {
+        let broker_address = properties.get_kafka(KAFKA_CONFIG_BROKER_KEY)?;
+        let topic = properties.get_kafka(KAFKA_CONFIG_TOPIC_KEY)?;
 
         let mut scan_start_offset = match properties
+            .0
             .get(KAFKA_CONFIG_SCAN_STARTUP_MODE)
             .map(String::as_str)
         {
@@ -74,19 +68,19 @@ impl KafkaSplitEnumerator {
             }
         };
 
-        if let Some(s) = properties.get(KAFKA_CONFIG_TIME_OFFSET) {
+        if let Some(s) = properties.0.get(KAFKA_CONFIG_TIME_OFFSET) {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
         let client: BaseConsumer = rdkafka::ClientConfig::new()
-            .set("bootstrap.servers", broker_address)
+            .set("bootstrap.servers", &broker_address)
             .create_with_context(DefaultConsumerContext)
             .map_err(|e| anyhow!(e))?;
 
         Ok(Self {
-            broker_address: broker_address.clone(),
-            topic: topic.clone(),
+            broker_address,
+            topic,
             admin_client: client,
             start_offset: scan_start_offset,
             stop_offset: KafkaEnumeratorOffset::None,

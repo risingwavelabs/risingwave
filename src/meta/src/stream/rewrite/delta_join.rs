@@ -12,19 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod fragmenter;
-mod graph;
-mod meta;
-mod rewrite;
-mod scheduler;
-mod source_manager;
-mod stream_manager;
+use risingwave_common::error::Result;
+use risingwave_pb::stream_plan::StreamNode;
 
-#[cfg(test)]
-mod test_fragmenter;
+use crate::storage::MetaStore;
+use crate::stream::graph::StreamFragment;
+use crate::stream::StreamFragmenter;
 
-pub use fragmenter::*;
-pub use meta::*;
-pub use scheduler::*;
-pub use source_manager::*;
-pub use stream_manager::*;
+impl<S> StreamFragmenter<S>
+where
+    S: MetaStore,
+{
+    pub fn rewrite_delta_join(&mut self, _node: &StreamNode) -> Result<StreamFragment> {
+        todo!()
+    }
+}
