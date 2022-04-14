@@ -86,7 +86,6 @@ pub struct TestCase {
 pub struct CreateSource {
     row_format: String,
     name: String,
-    file_location: Option<String>,
     file: Option<String>,
 }
 
@@ -163,8 +162,8 @@ impl TestCase {
 
         let placeholder_empty_vec = vec![];
 
-        // Since temp file will be deleted when it goes out of scope, so create source advance.
-        self.create_source_advance(session.clone()).await?;
+        // Since temp file will be deleted when it goes out of scope, so create source in advance.
+        self.create_source(session.clone()).await?;
 
         let mut result: Option<TestCaseResult> = None;
         for sql in self
@@ -184,19 +183,16 @@ impl TestCase {
 
     // If testcase have create source info, run sql to create source.
     // Support create source by file content or file location.
-    async fn create_source_advance(
-        &self,
-        session: Arc<SessionImpl>,
-    ) -> Result<Option<TestCaseResult>> {
+    async fn create_source(&self, session: Arc<SessionImpl>) -> Result<Option<TestCaseResult>> {
         match self.create_source.clone() {
             Some(source) => {
-                let sql = format!(
-                    r#"CREATE SOURCE {}
+                if let Some(content) = source.file {
+                    let sql = format!(
+                        r#"CREATE SOURCE {}
     WITH ('kafka.topic' = 'abc', 'kafka.servers' = 'localhost:1001')
     ROW FORMAT {} MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://"#,
-                    source.name, source.row_format
-                );
-                if let Some(content) = source.file {
+                        source.name, source.row_format
+                    );
                     let temp_file = create_proto_file(content.as_str());
                     self.run_sql(
                         &(sql + temp_file.path().to_str().unwrap() + "'"),
@@ -205,12 +201,9 @@ impl TestCase {
                         None,
                     )
                     .await
-                } else if let Some(file) = source.file_location {
-                    self.run_sql(&(sql + &file + "'"), session.clone(), false, None)
-                        .await
                 } else {
                     panic!(
-                        "{:?} create source need to conclude content or location",
+                        "{:?} create source must include `file` for the file content",
                         self.id
                     );
                 }
