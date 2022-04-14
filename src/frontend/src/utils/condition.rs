@@ -18,7 +18,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    fold_boolean_constant, merge_expr_by_binary, push_down_not, to_conjunctions,
+    fold_boolean_constant, push_down_not, to_conjunctions,
     try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
@@ -243,28 +243,6 @@ impl Condition {
             }
         }
         Self { conjunctions: res }
-    }
-}
-
-impl From<Condition> for ExprImpl {
-    fn from(c: Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.into_iter(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
-    }
-}
-
-impl<'a> From<&'a Condition> for ExprImpl {
-    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
-    // rather than using `AND` to combine them.
-    fn from(c: &'a Condition) -> Self {
-        merge_expr_by_binary(
-            c.conjunctions.iter().cloned(),
-            ExprType::And,
-            ExprImpl::literal_bool(true),
-        )
     }
 }
 
