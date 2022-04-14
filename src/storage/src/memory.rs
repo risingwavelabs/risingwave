@@ -214,7 +214,8 @@ impl StateStore for MemoryStateStore {
 
     fn wait_epoch(
         &self,
-        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        _epoch: HummockEpoch,
+        _table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_> {
         async move {
             // memory backend doesn't support wait for epoch, so this is a no-op.

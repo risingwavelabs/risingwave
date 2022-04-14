@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 use std::sync::Arc;
 
@@ -186,9 +185,10 @@ where
 
     fn wait_epoch(
         &self,
-        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        epoch: HummockEpoch,
+        table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_> {
-        async move { self.inner.wait_epoch(table_epoch).await }
+        async move { self.inner.wait_epoch(epoch, table_id).await }
     }
 
     fn sync(

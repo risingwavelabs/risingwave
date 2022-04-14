@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -172,7 +171,7 @@ async fn test_basic() {
         .unwrap();
     meta_client.commit_epoch(epoch1).await.unwrap();
     hummock_storage
-        .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch1)]))
+        .wait_epoch(epoch1, GLOBAL_STORAGE_TABLE_ID)
         .await
         .unwrap();
     let value = hummock_storage

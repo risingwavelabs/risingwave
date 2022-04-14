@@ -15,7 +15,6 @@
 //! Hummock is the state store of the streaming system.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt;
 use std::future::Future;
 use std::ops::RangeBounds;
@@ -133,10 +132,7 @@ impl HummockStorage {
         // Ensure at least one available version in cache.
         // TODO(partial checkpoint): wait epoch for all tables?
         local_version_manager
-            .wait_epoch(BTreeMap::from([(
-                GLOBAL_STORAGE_TABLE_ID,
-                HummockEpoch::MIN,
-            )]))
+            .wait_epoch(HummockEpoch::MIN, GLOBAL_STORAGE_TABLE_ID)
             .await?;
 
         let instance = Self {
@@ -602,9 +598,15 @@ impl StateStore for HummockStorage {
 
     fn wait_epoch(
         &self,
-        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        epoch: HummockEpoch,
+        table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_> {
-        async move { Ok(self.local_version_manager.wait_epoch(table_epoch).await?) }
+        async move {
+            Ok(self
+                .local_version_manager
+                .wait_epoch(epoch, table_id)
+                .await?)
+        }
     }
 
     fn sync(

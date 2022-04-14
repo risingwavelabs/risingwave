@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::mem::size_of_val;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -204,7 +203,7 @@ impl Operations {
                         ctx.epoch.fetch_add(1, Ordering::SeqCst);
                     }
                     store
-                        .wait_epoch(BTreeMap::from([(GLOBAL_STORAGE_TABLE_ID, epoch)]))
+                        .wait_epoch(epoch, GLOBAL_STORAGE_TABLE_ID)
                         .await
                         .unwrap();
                     let time_nano = start.elapsed().as_nanos();

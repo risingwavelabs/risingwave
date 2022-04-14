@@ -14,7 +14,6 @@
 
 #![allow(dead_code)]
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::RangeBounds;
 
@@ -110,7 +109,8 @@ impl StateStore for RocksDBStateStore {
 
     fn wait_epoch(
         &self,
-        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        _epoch: HummockEpoch,
+        _table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_> {
         async move { unimplemented!() }
     }

@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 // Copyright 2022 Singularity Data
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -179,7 +178,8 @@ pub trait StateStore: Send + Sync + 'static + Clone {
     /// will wait for all tables.
     fn wait_epoch(
         &self,
-        table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        epoch: HummockEpoch,
+        table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_>;
 
     /// Syncs buffered data to S3.

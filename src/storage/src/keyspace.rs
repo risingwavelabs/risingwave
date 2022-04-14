@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-
 use bytes::{BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::next_key;
@@ -209,7 +207,6 @@ impl<S: StateStore> Keyspace<S> {
     }
 
     pub fn wait_epoch(&self, epoch: u64) -> S::WaitEpochFuture<'_> {
-        self.store
-            .wait_epoch(BTreeMap::from([(self.table_id, epoch)]))
+        self.store.wait_epoch(epoch, self.table_id)
     }
 }

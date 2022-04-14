@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
 use std::future::Future;
 use std::ops::RangeBounds;
 
@@ -112,7 +111,8 @@ impl StateStore for PanicStateStore {
 
     fn wait_epoch(
         &self,
-        _table_epoch: BTreeMap<StorageTableId, HummockEpoch>,
+        _epoch: HummockEpoch,
+        _table_id: StorageTableId,
     ) -> Self::WaitEpochFuture<'_> {
         async move {
             panic!("should not wait epoch from the panic state store!");
