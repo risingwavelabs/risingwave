@@ -257,10 +257,7 @@ impl StateStore for HummockStorage {
                             })
                             .map(|info| info.id)
                             .collect_vec();
-                        let tables = self
-                            .local_version_manager
-                            .pick_few_tables(&table_infos)
-                            .await?;
+                        let tables = self.sstable_store.sstables(&table_infos).await?;
                         for table in tables.into_iter().rev() {
                             table_counts += 1;
                             if let Some(v) = self.get_from_table(table, &internal_key, key).await? {
@@ -284,8 +281,8 @@ impl StateStore for HummockStorage {
                         // Because we will keep multiple version of one in the same sst file, we
                         // do not find it in the next adjacent file.
                         let tables = self
-                            .local_version_manager
-                            .pick_few_tables(&[level.table_infos[table_idx].id])
+                            .sstable_store
+                            .sstables(&[level.table_infos[table_idx].id])
                             .await?;
                         if let Some(v) = self
                             .get_from_table(tables.first().unwrap().clone(), &internal_key, key)
@@ -442,10 +439,7 @@ impl StateStore for HummockStorage {
                 if table_ids.is_empty() {
                     continue;
                 }
-                let tables = self
-                    .local_version_manager
-                    .pick_few_tables(&table_ids)
-                    .await?;
+                let tables = self.sstable_store.sstables(&table_ids).await?;
                 match level.level_type() {
                     LevelType::Overlapping => {
                         for table in tables.into_iter().rev() {
@@ -524,10 +518,7 @@ impl StateStore for HummockStorage {
                 if table_ids.is_empty() {
                     continue;
                 }
-                let mut tables = self
-                    .local_version_manager
-                    .pick_few_tables(&table_ids)
-                    .await?;
+                let mut tables = self.sstable_store.sstables(&table_ids).await?;
                 match level.level_type() {
                     LevelType::Overlapping => {
                         for table in tables.into_iter().rev() {

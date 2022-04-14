@@ -19,25 +19,40 @@ use risingwave_pb::expr::expr_node::Type;
 use super::{ExprImpl, ExprRewriter, ExprVisitor, FunctionCall, InputRef};
 use crate::expr::ExprType;
 
-fn to_conjunctions_inner(expr: ExprImpl, rets: &mut Vec<ExprImpl>) {
+fn split_expr_by(expr: ExprImpl, op: ExprType, rets: &mut Vec<ExprImpl>) {
     match expr {
-        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == ExprType::And => {
+        ExprImpl::FunctionCall(func_call) if func_call.get_expr_type() == op => {
             let (_, exprs, _) = func_call.decompose();
             for expr in exprs {
-                to_conjunctions_inner(expr, rets);
+                split_expr_by(expr, op, rets);
             }
         }
         _ => rets.push(expr),
     }
 }
 
-/// give a bool expression, and transform it to Conjunctive form. e.g. given expression is
+pub fn merge_expr_by_binary<I>(mut exprs: I, op: ExprType, identity_elem: ExprImpl) -> ExprImpl
+where
+    I: Iterator<Item = ExprImpl>,
+{
+    if let Some(e) = exprs.next() {
+        let mut ret = e;
+        for expr in exprs {
+            ret = FunctionCall::new(op, vec![ret, expr]).unwrap().into();
+        }
+        ret
+    } else {
+        identity_elem
+    }
+}
+
+/// Transform a bool expression to Conjunctive form. e.g. given expression is
 /// (expr1 AND expr2 AND expr3) the function will return Vec[expr1, expr2, expr3].
 pub fn to_conjunctions(expr: ExprImpl) -> Vec<ExprImpl> {
     let mut rets = vec![];
-    to_conjunctions_inner(expr, &mut rets);
     // TODO: extract common factors fromm the conjunctions with OR expression.
     // e.g: transform (a AND ((b AND c) OR (b AND d))) to (a AND b AND (c OR d))
+    split_expr_by(expr, ExprType::And, &mut rets);
     rets
 }
 

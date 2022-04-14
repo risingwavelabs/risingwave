@@ -40,7 +40,7 @@ async fn test_failpoint_state_store_read_upload() {
         worker_node.id,
     ));
 
-    let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+    let local_version_manager = Arc::new(LocalVersionManager::new());
 
     let hummock_storage = HummockStorage::with_default_stats(
         hummock_options,

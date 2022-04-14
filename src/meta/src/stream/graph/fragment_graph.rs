@@ -28,6 +28,11 @@ pub struct StreamFragmentEdge {
 
     /// Whether the two linked nodes should be placed on the same worker node
     pub same_worker_node: bool,
+
+    /// A unique identifer of this edge. Generally it should be exchange node's operator id. When
+    /// rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
+    /// virtual links generated.
+    pub link_id: u64,
 }
 
 /// [`StreamFragment`] represent a fragment node in fragment DAG.
