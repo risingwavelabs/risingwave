@@ -31,6 +31,7 @@ mod block_cache;
 pub use block_cache::*;
 mod sstable;
 pub use sstable::*;
+mod cache;
 pub mod compactor;
 #[cfg(test)]
 mod compactor_tests;
@@ -50,7 +51,7 @@ mod test_utils;
 mod utils;
 mod vacuum;
 pub mod value;
-
+pub use cache::{CachableEntry, LRUCache};
 pub use error::*;
 use value::*;
 
