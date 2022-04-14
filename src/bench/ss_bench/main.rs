@@ -153,13 +153,16 @@ async fn main() {
     .expect("Failed to get state_store");
     let mut context = None;
     if let StateStoreImpl::HummockStateStore(hummock) = state_store.clone() {
-        context = Some(Arc::new(CompactorContext {
-            options: config.clone(),
-            hummock_meta_client: mock_hummock_meta_client.clone(),
-            sstable_store: hummock.inner().sstable_store(),
-            stats: state_store_stats.clone(),
-            is_share_buffer_compact: false,
-        }));
+        context = Some((
+            Arc::new(CompactorContext {
+                options: config.clone(),
+                hummock_meta_client: mock_hummock_meta_client.clone(),
+                sstable_store: hummock.inner().sstable_store(),
+                stats: state_store_stats.clone(),
+                is_share_buffer_compact: false,
+            }),
+            hummock.inner().local_version_manager().clone(),
+        ));
     }
 
     dispatch_state_store!(state_store, store, {

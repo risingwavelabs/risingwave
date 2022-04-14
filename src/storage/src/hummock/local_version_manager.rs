@@ -129,7 +129,9 @@ impl LocalVersionManager {
         }
     }
 
-    /// Updates cached version if the new version is of greater id
+    /// Updates cached version if the new version is of greater id.
+    /// You shouldn't unpin even the method returns false, as it is possible `hummock_version` is
+    /// being referenced by some readers.
     pub fn try_set_version(&self, hummock_version: HummockVersion) -> bool {
         let new_version_id = hummock_version.id;
         if validate_table_key_range(&hummock_version.levels).is_err() {
