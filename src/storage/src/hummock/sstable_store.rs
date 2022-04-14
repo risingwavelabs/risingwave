@@ -184,6 +184,14 @@ impl SstableStore {
     pub fn store(&self) -> ObjectStoreRef {
         self.store.clone()
     }
+
+    pub async fn sstables(&self, sst_ids: &[u64]) -> HummockResult<Vec<Arc<Sstable>>> {
+        let mut ssts = Vec::with_capacity(sst_ids.len());
+        for sst_id in sst_ids {
+            ssts.push(self.sstable(*sst_id).await?);
+        }
+        Ok(ssts)
+    }
 }
 
 pub type SstableStoreRef = Arc<SstableStore>;

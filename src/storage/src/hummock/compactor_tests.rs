@@ -53,7 +53,7 @@ mod tests {
             block_cache_capacity,
             meta_cache_capacity,
         ));
-        let local_version_manager = Arc::new(LocalVersionManager::new(sstable_store.clone()));
+        let local_version_manager = Arc::new(LocalVersionManager::new());
         let storage = HummockStorage::with_default_stats(
             options.clone(),
             sstable_store,
@@ -84,7 +84,6 @@ mod tests {
         let storage = get_hummock_storage(hummock_meta_client.clone()).await;
         let compact_ctx = CompactorContext {
             options: storage.options().clone(),
-            local_version_manager: storage.local_version_manager().clone(),
             sstable_store: storage.sstable_store(),
             hummock_meta_client: hummock_meta_client.clone(),
             stats: Arc::new(StateStoreMetrics::unused()),
@@ -144,8 +143,8 @@ mod tests {
             .unwrap()
             .id;
         let table = storage
-            .local_version_manager()
-            .pick_few_tables(&[output_table_id])
+            .sstable_store()
+            .sstables(&[output_table_id])
             .await
             .unwrap()
             .first()
