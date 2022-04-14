@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::array::DataChunk;
@@ -20,6 +19,7 @@ use risingwave_common::catalog::{ColumnId, Schema, TableId};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_connector::Properties;
 use risingwave_pb::plan::plan_node::NodeBody;
 use risingwave_pb::plan::RowFormatType;
 use risingwave_source::parser::JSONParser;
@@ -50,32 +50,23 @@ pub(super) struct CreateSourceExecutor {
     parser: Option<Arc<dyn SourceParser + Send + Sync>>,
     columns: Vec<SourceColumnDesc>,
     source_manager: SourceManagerRef,
-    properties: HashMap<String, String>,
+    properties: Properties,
     schema_location: String,
     schema: Schema,
     row_id_index: Option<usize>,
     identity: String,
 }
 
-macro_rules! get_from_properties {
-    ($node_type:expr, $source:expr) => {
-        $node_type.get($source).ok_or_else(|| {
-            RwError::from(ProtocolError(format!("property {} not found", $source)))
-        })?
-    };
-}
-
-impl CreateSourceExecutor {
-    fn extract_kafka_config(properties: &HashMap<String, String>) -> Result<SourceConfig> {
-        Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: get_from_properties!(properties, KAFKA_BOOTSTRAP_SERVERS_KEY)
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            topic: get_from_properties!(properties, KAFKA_TOPIC_KEY).clone(),
-            properties: Default::default(),
-        }))
-    }
+pub fn extract_kafka_config(properties: &Properties) -> Result<SourceConfig> {
+    Ok(SourceConfig::Kafka(HighLevelKafkaSourceConfig {
+        bootstrap_servers: properties
+            .get_kafka(KAFKA_BOOTSTRAP_SERVERS_KEY)?
+            .split(',')
+            .map(|s| s.to_string())
+            .collect::<Vec<String>>(),
+        topic: properties.get_kafka(KAFKA_TOPIC_KEY)?,
+        properties: Default::default(),
+    }))
 }
 
 impl BoxedExecutorBuilder for CreateSourceExecutor {
@@ -111,7 +102,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             RowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
         };
 
-        let properties: &HashMap<String, String> = info.get_properties();
+        let properties = Properties(info.properties.clone());
 
         let schema_location = info.get_row_schema_location();
 
@@ -121,9 +112,9 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
             )));
         }
 
-        let config = match get_from_properties!(properties, UPSTREAM_SOURCE_KEY).as_str() {
-            KAFKA_SOURCE => CreateSourceExecutor::extract_kafka_config(properties),
-            KINESIS_SOURCE => Ok(SourceConfig::Connector(properties.clone())),
+        let config = match properties.get(UPSTREAM_SOURCE_KEY)?.as_str() {
+            KAFKA_SOURCE => extract_kafka_config(&properties),
+            KINESIS_SOURCE => Ok(SourceConfig::Connector(properties.0.clone())),
             other => Err(RwError::from(ProtocolError(format!(
                 "source type {} not supported",
                 other
@@ -144,7 +135,7 @@ impl BoxedExecutorBuilder for CreateSourceExecutor {
                 source_manager: source.global_batch_env().source_manager_ref(),
                 columns,
                 schema: Schema { fields: vec![] },
-                properties: properties.clone(),
+                properties,
                 schema_location: schema_location.clone(),
                 parser: None,
                 row_id_index,
@@ -164,16 +155,10 @@ impl Executor for CreateSourceExecutor {
                 Ok(parser)
             }
             SourceFormat::Protobuf => {
-                let message_name = self.properties.get(PROTOBUF_MESSAGE_KEY).ok_or_else(|| {
-                    RwError::from(ProtocolError(format!(
-                        "{} not found in properties",
-                        PROTOBUF_MESSAGE_KEY
-                    )))
-                })?;
-
+                let message_name = self.properties.get(PROTOBUF_MESSAGE_KEY)?;
                 let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(ProtobufParser::new(
                     self.schema_location.as_str(),
-                    message_name,
+                    &message_name,
                 )?);
 
                 Ok(parser)
