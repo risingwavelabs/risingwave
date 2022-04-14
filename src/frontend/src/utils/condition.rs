@@ -18,8 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    fold_boolean_constant, push_down_not, to_conjunctions,
-    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
+    fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
+    ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
