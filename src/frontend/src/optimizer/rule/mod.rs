@@ -37,3 +37,7 @@ mod project_elim;
 pub use project_elim::*;
 mod project_merge;
 pub use project_merge::*;
+mod apply_proj_agg;
+pub use apply_proj_agg::*;
+mod apply_proj_filter;
+pub use apply_proj_filter::*;
