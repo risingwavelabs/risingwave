@@ -313,7 +313,7 @@ mod tests {
             assert_eq!(val, iterator_test_value_of(i).as_slice());
             i += 1;
             ui.next().await.unwrap();
-            if i == 0 {
+            if i == TEST_KEYS_COUNT * 3 {
                 assert!(!ui.is_valid());
                 break;
             }

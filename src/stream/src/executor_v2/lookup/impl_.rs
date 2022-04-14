@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::{Row, RowRef, StreamChunk};
@@ -170,17 +171,8 @@ impl<S: StateStore> LookupExecutor<S> {
             schema,
             pk_indices,
             last_barrier: None,
-            input: if use_current_epoch {
-                Some(Box::pin(stream_lookup_arrange_this_epoch(
-                    stream,
-                    arrangement,
-                )))
-            } else {
-                Some(Box::pin(stream_lookup_arrange_prev_epoch(
-                    stream,
-                    arrangement,
-                )))
-            },
+            stream_executor: Some(stream),
+            arrangement_executor: Some(arrangement),
             stream: StreamJoinSide {
                 key_indices: stream_join_key_indices,
                 pk_indices: stream_pk_indices,
@@ -207,9 +199,22 @@ impl<S: StateStore> LookupExecutor<S> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = TracedStreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
-        let input = std::mem::take(&mut self.input);
+        let input = if self.arrangement.use_current_epoch {
+            stream_lookup_arrange_this_epoch(
+                self.stream_executor.take().unwrap(),
+                self.arrangement_executor.take().unwrap(),
+            )
+            .boxed()
+        } else {
+            stream_lookup_arrange_prev_epoch(
+                self.stream_executor.take().unwrap(),
+                self.arrangement_executor.take().unwrap(),
+            )
+            .boxed()
+        };
+
         #[for_await]
-        for msg in input.unwrap() {
+        for msg in input {
             let msg = msg.map_err(StreamExecutorError::input_error)?;
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
@@ -218,13 +223,9 @@ impl<S: StateStore> LookupExecutor<S> {
                         .map_err(StreamExecutorError::eval_error)?;
                     yield Message::Barrier(barrier)
                 }
-                ArrangeMessage::Arrange(_) => {
-                    // TODO: replicate batch
-                    //
-                    // As we assume currently all lookups are on the same worker node of
-                    // arrangements, the data would always be available in the
-                    // local shared buffer. Therefore, there's no need to
-                    // replicate batch.
+                ArrangeMessage::ArrangeReady => {
+                    // The arrangement is ready, and we will receive a bunch of stream messages for
+                    // the next poll.
                 }
                 ArrangeMessage::Stream(chunk) => {
                     yield Message::Chunk(

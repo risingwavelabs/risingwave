@@ -423,6 +423,7 @@ mod tests {
                 epochs[0],
                 GLOBAL_STORAGE_TABLE_ID,
             )
+            .await
             .unwrap();
         assert!(!shared_buffer_manager.get_shared_buffer().is_empty());
 
@@ -442,6 +443,7 @@ mod tests {
         for epoch in epochs.iter().skip(1) {
             shared_buffer_manager
                 .write_batch(gen_dummy_batch(*epoch), *epoch, GLOBAL_STORAGE_TABLE_ID)
+                .await
                 .unwrap();
             local_version_manager.ref_committed_epoch(*epoch);
         }

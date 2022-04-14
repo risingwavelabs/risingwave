@@ -26,6 +26,7 @@ use crate::write_batch::WriteBatch;
 pub trait GetFutureTrait<'a> = Future<Output = StorageResult<Option<Bytes>>> + Send;
 pub trait ScanFutureTrait<'a, R, B> = Future<Output = StorageResult<Vec<(Bytes, Bytes)>>> + Send;
 pub trait EmptyFutureTrait<'a> = Future<Output = StorageResult<()>> + Send;
+pub trait IngestBatchFutureTrait<'a> = Future<Output = StorageResult<u64>> + Send;
 
 /// Table id of storage table, which is a logical concept representing the kvs written by a specific
 /// relational table. A storage table usually stores the kvs written from a specific
@@ -46,7 +47,7 @@ macro_rules! define_state_store_associated_type {
         type GetFuture<'a> = impl GetFutureTrait<'a>;
         type ScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
         type ReverseScanFuture<'a, R, B> = impl ScanFutureTrait<'a, R, B> where R: 'static + Send, B: 'static + Send;
-        type IngestBatchFuture<'a> = impl EmptyFutureTrait<'a>;
+        type IngestBatchFuture<'a> = impl IngestBatchFutureTrait<'a>;
         type ReplicateBatchFuture<'a> = impl EmptyFutureTrait<'a>;
         type WaitEpochFuture<'a> = impl EmptyFutureTrait<'a>;
         type SyncFuture<'a> = impl EmptyFutureTrait<'a>;
@@ -72,7 +73,7 @@ pub trait StateStore: Send + Sync + 'static + Clone {
         R: 'static + Send,
         B: 'static + Send;
 
-    type IngestBatchFuture<'a>: EmptyFutureTrait<'a>;
+    type IngestBatchFuture<'a>: IngestBatchFutureTrait<'a>;
 
     type ReplicateBatchFuture<'a>: EmptyFutureTrait<'a>;
 

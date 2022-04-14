@@ -166,6 +166,7 @@ impl StateStore for MemoryStateStore {
         table_id: StorageTableId,
     ) -> Self::IngestBatchFuture<'_> {
         async move {
+            let mut size: u64 = 0;
             if !kv_pairs.is_empty() {
                 let mut inner = self.inner.lock().await;
                 #[allow(clippy::mutable_key_type)]
@@ -173,10 +174,11 @@ impl StateStore for MemoryStateStore {
                 // `mutable_key_type`.
                 let table_store = inner.entry(table_id).or_insert_with(BTreeMap::new);
                 for (key, value) in kv_pairs {
+                    size += (key.len() + value.size()) as u64;
                     table_store.insert((key, Reverse(epoch)), value.user_value);
                 }
             }
-            Ok(())
+            Ok(size)
         }
     }
 

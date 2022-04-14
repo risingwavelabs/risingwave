@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, Field, OrderedColumnDesc, Schema, TableId};
+use risingwave_common::catalog::{Field, OrderedColumnDesc, Schema, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::OrderType;
@@ -77,10 +77,12 @@ impl StreamMaterialize {
             .iter()
             .map(|field| match is_row_id_column_name(&field.name) {
                 true => {
-                    let field = Field {
-                        data_type: field.data_type.clone(),
-                        name: gen_row_id_column_name(row_id_count),
-                    };
+                    let field = Field::with_struct(
+                        field.data_type.clone(),
+                        gen_row_id_column_name(row_id_count),
+                        field.sub_fields.clone(),
+                        field.type_name.clone(),
+                    );
                     row_id_count += 1;
                     field
                 }
@@ -108,21 +110,19 @@ impl StreamMaterialize {
         let pk_indices = &base.pk_indices;
         // Materialize executor won't change the append-only behavior of the stream, so it depends
         // on input's `append_only`.
-        let columns = schema
+        let mut columns = schema
             .fields()
             .iter()
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
-                column_desc: ColumnDesc {
-                    data_type: field.data_type.clone(),
-                    column_id: (i as i32).into(),
-                    name: field.name.clone(),
-                    field_descs: vec![],
-                    type_name: "".to_string(),
-                },
+                column_desc: field.into(),
                 is_hidden: !user_cols.contains(i),
             })
             .collect_vec();
+
+        // Since the `field.into()` only generate same ColumnId,
+        // so rewrite ColumnId for each `column_desc` and `column_desc.field_desc`.
+        ColumnCatalog::generate_increment_id(&mut columns);
 
         let mut in_pk = FixedBitSet::with_capacity(schema.len());
         let mut pk_desc = vec![];

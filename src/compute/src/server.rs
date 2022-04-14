@@ -99,8 +99,9 @@ pub async fn compute_node_serve(
     let batch_metrics = Arc::new(BatchMetrics::new(registry.clone()));
 
     // Initialize state store.
-    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
     let storage_config = Arc::new(config.storage.clone());
+    let state_store_metrics = Arc::new(StateStoreMetrics::new(registry.clone()));
+
     let state_store = StateStoreImpl::new(
         &opts.state_store,
         storage_config,

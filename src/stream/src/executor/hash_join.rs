@@ -19,7 +19,8 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::{DataType, ToOwnedDatum};
-use risingwave_expr::expr::RowExpression;
+use risingwave_expr::expr::{build_from_prost, RowExpression};
+use risingwave_pb::plan::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -124,13 +125,73 @@ pub struct HashJoinExecutorBuilder {}
 
 impl ExecutorBuilder for HashJoinExecutorBuilder {
     fn new_boxed_executor(
-        params: ExecutorParams,
+        mut params: ExecutorParams,
         node: &stream_plan::StreamNode,
         store: impl StateStore,
-        stream: &mut LocalStreamManagerCore,
+        _stream: &mut LocalStreamManagerCore,
     ) -> Result<Box<dyn Executor>> {
         let node = try_match_expand!(node.get_node().unwrap(), Node::HashJoinNode)?;
-        stream.create_hash_join_node(params, node, store)
+        let source_r = params.input.remove(1);
+        let source_l = params.input.remove(0);
+        let params_l = JoinParams::new(
+            node.get_left_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+        let params_r = JoinParams::new(
+            node.get_right_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect::<Vec<_>>(),
+        );
+
+        let condition = match node.get_condition() {
+            Ok(cond_prost) => Some(RowExpression::new(build_from_prost(cond_prost)?)),
+            Err(_) => None,
+        };
+        trace!("Join non-equi condition: {:?}", condition);
+
+        let key_indices = node
+            .get_distribution_keys()
+            .iter()
+            .map(|key| *key as usize)
+            .collect::<Vec<_>>();
+
+        macro_rules! impl_create_hash_join_executor {
+            ($( { $join_type_proto:ident, $join_type:ident } ),*) => {
+                |typ| match typ {
+                    $( JoinTypeProto::$join_type_proto => Box::new(HashJoinExecutor::<_, { JoinType::$join_type }>::new(
+                        source_l,
+                        source_r,
+                        params_l,
+                        params_r,
+                        params.pk_indices,
+                        Keyspace::shared_executor_root(store.clone(), params.operator_id),
+                        params.executor_id,
+                        condition,
+                        params.op_info,
+                        key_indices,
+                    )) as Box<dyn Executor>, )*
+                    _ => todo!("Join type {:?} not implemented", typ),
+                }
+            }
+        }
+
+        macro_rules! for_all_join_types {
+            ($macro:ident) => {
+                $macro! {
+                    { Inner, Inner },
+                    { LeftOuter, LeftOuter },
+                    { RightOuter, RightOuter },
+                    { FullOuter, FullOuter }
+                }
+            };
+        }
+        let create_hash_join_executor = for_all_join_types! { impl_create_hash_join_executor };
+        let join_type_proto = node.get_join_type()?;
+        let executor = create_hash_join_executor(join_type_proto);
+        Ok(executor)
     }
 }
 
@@ -485,7 +546,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                     )?;
                                 } else {
                                     // concat with the matched_row and append the new row
-                                    stream_chunk_builder.append_row(*op, &row, &matched_row.row)?;
+                                    // FIXME: we always use `Op::Delete` here to avoid violating
+                                    // the assumption for U+ after U-.
+                                    stream_chunk_builder.append_row(
+                                        Op::Insert,
+                                        &row,
+                                        &matched_row.row,
+                                    )?;
                                 }
                                 matched_row.inc_degree();
                             } else {
@@ -531,8 +598,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
                                         )?;
                                     } else {
                                         // concat with the matched_row and append the new row
+                                        // FIXME: we always use `Op::Delete` here to avoid violating
+                                        // the assumption for U+ after U-.
                                         stream_chunk_builder.append_row(
-                                            *op,
+                                            Op::Delete,
                                             &row,
                                             &matched_row.row,
                                         )?;

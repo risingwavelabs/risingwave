@@ -34,7 +34,7 @@ pub struct SyncItem {
     /// Epoch to sync. `None` means syncing all epochs.
     pub(super) epoch: Option<u64>,
     /// Notifier to notify on sync finishes
-    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<()>>>,
+    pub(super) notifier: Option<tokio::sync::oneshot::Sender<HummockResult<u64>>>,
     /// Table ids to sync. `None` means syncing all tables.
     pub(super) table_ids: Option<Vec<StorageTableId>>,
 }
@@ -62,7 +62,7 @@ pub struct SharedBufferUploader {
     /// in `StorageConfig`
     write_conflict_detector: Option<Arc<ConflictDetector>>,
 
-    rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+    uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
 }
 
 impl SharedBufferUploader {
@@ -72,7 +72,7 @@ impl SharedBufferUploader {
         sstable_store: SstableStoreRef,
         stats: Arc<StateStoreMetrics>,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
-        rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
+        uploader_rx: tokio::sync::mpsc::UnboundedReceiver<SharedBufferUploaderItem>,
     ) -> Self {
         Self {
             batches_to_upload: BTreeMap::new(),
@@ -87,7 +87,7 @@ impl SharedBufferUploader {
             } else {
                 None
             },
-            rx,
+            uploader_rx,
         }
     }
 
@@ -96,7 +96,7 @@ impl SharedBufferUploader {
         &mut self,
         epoch: u64,
         table_ids: Option<Vec<StorageTableId>>,
-    ) -> HummockResult<()> {
+    ) -> HummockResult<u64> {
         if let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch, table_ids.as_ref());
         }
@@ -128,8 +128,10 @@ impl SharedBufferUploader {
                         .collect_vec()
                 }
             }
-            None => return Ok(()),
+            None => return Ok(0),
         };
+
+        let sync_size: u64 = buffers.iter().map(|batch| batch.size).sum();
 
         // Compact buffers into SSTs
         let mem_compactor_ctx = CompactorContext {
@@ -171,7 +173,7 @@ impl SharedBufferUploader {
         // Ensure the added data is available locally
         self.local_version_manager.try_set_version(version);
 
-        Ok(())
+        Ok(sync_size)
     }
 
     async fn handle(&mut self, item: SharedBufferUploaderItem) -> StorageResult<()> {
@@ -198,12 +200,16 @@ impl SharedBufferUploader {
                     None => {
                         // Sync all epochs
                         let epochs = self.batches_to_upload.keys().copied().collect_vec();
-                        let mut res = Ok(());
+                        let mut res = Ok(0);
+                        let mut size_total: u64 = 0;
+
                         for e in epochs {
                             res = self.sync(e, sync_item.table_ids.clone()).await;
                             if res.is_err() {
                                 break;
                             }
+                            size_total += res.unwrap();
+                            res = Ok(size_total);
                         }
                         res
                     }
@@ -226,7 +232,7 @@ impl SharedBufferUploader {
     }
 
     pub async fn run(mut self) -> StorageResult<()> {
-        while let Some(m) = self.rx.recv().await {
+        while let Some(m) = self.uploader_rx.recv().await {
             if let Err(e) = self.handle(m).await {
                 return Err(e);
             }

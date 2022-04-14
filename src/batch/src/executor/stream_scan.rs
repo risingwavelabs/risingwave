@@ -62,10 +62,7 @@ impl BoxedExecutorBuilder for StreamScanExecutor {
                     .columns
                     .iter()
                     .find(|c| c.column_id == *id)
-                    .map(|col| Field {
-                        data_type: col.data_type.clone(),
-                        name: col.name.clone(),
-                    })
+                    .map(|col| Field::with_name(col.data_type.clone(), col.name.clone()))
                     .ok_or_else(|| {
                         RwError::from(InternalError(format!(
                             "Failed to find column id: {} in source: {:?}",

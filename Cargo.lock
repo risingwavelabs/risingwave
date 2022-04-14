@@ -1245,6 +1245,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77f3309417938f28bf8228fcff79a4a37103981e3e186d2ccd19c74b38f4eb71"
 
 [[package]]
+name = "fail"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec3245a0ca564e7f3c797d20d833a6870f57a728ac967d5225b3ffdef4465011"
+dependencies = [
+ "lazy_static",
+ "log",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "farmhash"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3599,6 +3610,7 @@ dependencies = [
  "dashmap",
  "either",
  "enum-as-inner",
+ "fail",
  "farmhash",
  "futures",
  "hyper",
@@ -4921,6 +4933,7 @@ dependencies = [
  "bstr",
  "bytes",
  "either",
+ "fail",
  "fixedbitset",
  "futures",
  "futures-channel",

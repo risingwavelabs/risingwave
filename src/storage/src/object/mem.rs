@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use bytes::Bytes;
+use fail::fail_point;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use tokio::sync::Mutex;
@@ -31,6 +32,9 @@ pub struct InMemObjectStore {
 #[async_trait::async_trait]
 impl ObjectStore for InMemObjectStore {
     async fn upload(&self, path: &str, obj: Bytes) -> ObjectResult<()> {
+        fail_point!("mem_upload_err", |_| Err(ObjectError::internal(
+            "mem upload error"
+        )));
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
         } else {
@@ -40,6 +44,9 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn read(&self, path: &str, block: Option<BlockLocation>) -> ObjectResult<Bytes> {
+        fail_point!("mem_read_err", |_| Err(ObjectError::internal(
+            "mem read error"
+        )));
         if let Some(loc) = block {
             self.get_object(path, |obj| find_block(obj, loc)).await?
         } else {
@@ -61,6 +68,9 @@ impl ObjectStore for InMemObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
+        fail_point!("mem_delete_err", |_| Err(ObjectError::internal(
+            "mem delete error"
+        )));
         self.objects.lock().await.remove(path);
         Ok(())
     }
