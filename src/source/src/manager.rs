@@ -14,9 +14,11 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::Future;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::ensure;
@@ -35,6 +37,8 @@ use crate::{
 };
 
 pub type SourceRef = Arc<SourceImpl>;
+pub type SourceDescAsyncClosure =
+    Box<dyn Fn() -> Pin<Box<dyn Future<Output = Result<SourceDesc>>>> + Send + Sync>;
 
 // the same key is defined in `src/batch/src/executor/create_source.rs`, remove in batch if
 // necessary
@@ -60,7 +64,7 @@ pub trait SourceManager: Debug + Sync + Send {
     async fn create_source_v2(&self, table_id: &TableId, info: StreamSourceInfo) -> Result<()>;
     fn create_table_source_v2(&self, table_id: &TableId, columns: Vec<ColumnDesc>) -> Result<()>;
 
-    fn get_source(&self, source_id: &TableId) -> Result<SourceDesc>;
+    fn get_source<'a>(&'a self, source_id: &TableId) -> Result<&'a SourceDescAsyncClosure>;
     fn drop_source(&self, source_id: &TableId) -> Result<()>;
 
     /// Clear sources, this is used when failover happens.
@@ -99,9 +103,14 @@ pub struct SourceDesc {
 
 pub type SourceManagerRef = Arc<dyn SourceManager>;
 
-#[derive(Debug)]
 pub struct MemSourceManager {
-    sources: Mutex<HashMap<TableId, SourceDesc>>,
+    sources: Mutex<HashMap<TableId, SourceDescAsyncClosure>>,
+}
+
+impl Debug for MemSourceManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!()
+    }
 }
 
 #[async_trait]
@@ -115,40 +124,48 @@ impl SourceManager for MemSourceManager {
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()> {
-        let source = match config {
-            SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
-                config.clone(),
-                Arc::new(columns.clone()),
-                parser.clone(),
-            )),
-            SourceConfig::Connector(config) => {
-                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                    Arc::new(tokio::sync::Mutex::new(
-                        new_connector(config.clone(), None)
-                            .await
-                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                    ));
-                SourceImpl::Connector(ConnectorSource {
-                    parser: parser.clone(),
-                    reader: split_reader,
-                    column_descs: columns.clone(),
-                })
-            }
-        };
+        let gen_source_desc: SourceDescAsyncClosure = Box::new(|| {
+            Box::pin(async {
+                let source = match config.clone() {
+                    SourceConfig::Kafka(config) => {
+                        SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
+                            config.clone(),
+                            Arc::new(columns.clone()),
+                            parser.clone(),
+                        ))
+                    }
+                    SourceConfig::Connector(config) => {
+                        let split_reader: Arc<
+                            tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>,
+                        > = Arc::new(tokio::sync::Mutex::new(
+                            new_connector(config.clone(), None)
+                                .await
+                                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                        ));
+                        SourceImpl::Connector(ConnectorSource {
+                            parser: parser.clone(),
+                            reader: split_reader,
+                            column_descs: columns.clone(),
+                        })
+                    }
+                };
 
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-        };
+                Ok(SourceDesc {
+                    source: Arc::new(source),
+                    format,
+                    columns,
+                    row_id_index,
+                })
+            })
+        });
+
         let mut tables = self.get_sources()?;
         ensure!(
             !tables.contains_key(source_id),
             "Source id already exists: {:?}",
             source_id
         );
-        tables.insert(*source_id, desc);
+        tables.insert(*source_id, gen_source_desc);
 
         Ok(())
     }
@@ -202,32 +219,40 @@ impl SourceManager for MemSourceManager {
             )))),
         }?;
 
-        let source =
-            match config {
-                SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(
-                    HighLevelKafkaSource::new(config, Arc::new(columns.clone()), parser.clone()),
-                ),
-                SourceConfig::Connector(config) => {
-                    let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                        Arc::new(tokio::sync::Mutex::new(
+        let gen_source_desc: SourceDescAsyncClosure = Box::new(|| {
+            Box::pin(async {
+                let source = match config.clone() {
+                    SourceConfig::Kafka(config) => {
+                        SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
+                            config,
+                            Arc::new(columns.clone()),
+                            parser.clone(),
+                        ))
+                    }
+                    SourceConfig::Connector(config) => {
+                        let split_reader: Arc<
+                            tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>,
+                        > = Arc::new(tokio::sync::Mutex::new(
                             new_connector(config.clone(), None)
                                 .await
                                 .map_err(|e| RwError::from(InternalError(e.to_string())))?,
                         ));
-                    SourceImpl::Connector(ConnectorSource {
-                        parser: parser.clone(),
-                        reader: split_reader,
-                        column_descs: columns.clone(),
-                    })
-                }
-            };
+                        SourceImpl::Connector(ConnectorSource {
+                            parser: parser.clone(),
+                            reader: split_reader,
+                            column_descs: columns.clone(),
+                        })
+                    }
+                };
 
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            format,
-            columns,
-            row_id_index,
-        };
+                Ok(SourceDesc {
+                    source: Arc::new(source),
+                    format: format.clone(),
+                    columns: columns.clone(),
+                    row_id_index: row_id_index.clone(),
+                })
+            })
+        });
 
         let mut tables = self.get_sources()?;
         ensure!(
@@ -235,7 +260,7 @@ impl SourceManager for MemSourceManager {
             "Source id already exists: {:?}",
             source_id
         );
-        tables.insert(*source_id, desc);
+        tables.insert(*source_id, gen_source_desc);
 
         Ok(())
     }
@@ -252,23 +277,25 @@ impl SourceManager for MemSourceManager {
         let source_columns = columns.iter().map(SourceColumnDesc::from).collect();
         let source = SourceImpl::TableV2(TableSourceV2::new(columns));
 
-        // Table sources do not need columns and format
-        let desc = SourceDesc {
-            source: Arc::new(source),
-            columns: source_columns,
-            format: SourceFormat::Invalid,
-            row_id_index: Some(0), // always use the first column as row_id
-        };
+        let gen_source_desc: SourceDescAsyncClosure = Box::new(move || Box::pin(async {
+            // Table sources do not need columns and format
+            Ok(SourceDesc {
+                source: Arc::new(source),
+                columns: source_columns,
+                format: SourceFormat::Invalid,
+                row_id_index: Some(0), // always use the first column as row_id
+            })
+        }));
 
-        sources.insert(*table_id, desc);
+        sources.insert(*table_id, gen_source_desc);
         Ok(())
     }
 
-    fn get_source(&self, table_id: &TableId) -> Result<SourceDesc> {
+    fn get_source(&self, table_id: &TableId) -> Result<&SourceDescAsyncClosure> {
         let sources = self.get_sources()?;
-        sources.get(table_id).cloned().ok_or_else(|| {
-            InternalError(format!("Get source table id not exists: {:?}", table_id)).into()
-        })
+        Ok(sources.get(table_id).ok_or_else(|| {
+            RwError::from(InternalError(format!("Get source table id not exists: {:?}", table_id)))
+        })?)
     }
 
     fn drop_source(&self, table_id: &TableId) -> Result<()> {
@@ -296,7 +323,7 @@ impl MemSourceManager {
         }
     }
 
-    fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDesc>>> {
+    fn get_sources(&self) -> Result<MutexGuard<HashMap<TableId, SourceDescAsyncClosure>>> {
         Ok(self.sources.lock())
     }
 }
@@ -476,5 +503,27 @@ mod tests {
         assert!(get_source_res.is_err());
 
         Ok(())
+    }
+
+    use std::pin::Pin;
+
+    use futures::Future;
+    #[tokio::test]
+    async fn test() {
+        let mut c: HashMap<String, Box<dyn Fn() -> Pin<Box<dyn Future<Output = i32>>>>> =
+            HashMap::new();
+        c.insert(
+            "1".to_string(),
+            Box::new(|| {
+                Box::pin(async {
+                    println!("async func");
+                    1
+                })
+            }),
+        );
+
+        let y = c.get("1").unwrap();
+        let z = y().await;
+        println!("{:?}", z);
     }
 }
