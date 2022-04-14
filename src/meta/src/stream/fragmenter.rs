@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::meta::table_fragments::fragment::{FragmentDistributionType, FragmentType};
 use risingwave_pb::meta::table_fragments::Fragment;
+use risingwave_pb::plan::JoinType;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, Dispatcher, DispatcherType, ExchangeNode, StreamNode,
@@ -249,13 +250,15 @@ where
             match child_node.get_node()? {
                 // Exchange node indicates a new child fragment.
                 Node::ExchangeNode(exchange_node) => {
-                    let child_fragment = self.build_and_add_fragment(child_node)?;
+                    assert_eq!(child_node.input.len(), 1);
+                    let child_fragment = self.build_and_add_fragment(&child_node.input[0])?;
                     self.fragment_graph.add_edge(
                         child_fragment.fragment_id,
                         current_fragment.fragment_id,
                         StreamFragmentEdge {
                             dispatch_strategy: exchange_node.get_strategy()?.clone(),
                             same_worker_node: false,
+                            link_id: child_node.operator_id,
                         },
                     );
 
@@ -263,6 +266,34 @@ where
                         exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                     if is_simple_dispatcher {
                         current_fragment.is_singleton = true;
+                    }
+                }
+
+                // For HashJoin nodes, attempting to rewrite to delta joins only on inner join with
+                // only equal conditions
+                Node::HashJoinNode(hash_join_node)
+                    if hash_join_node.get_join_type()? == JoinType::Inner
+                        && hash_join_node.condition.is_none() =>
+                {
+                    const ENABLE_DELTA_JOIN: bool = false;
+                    if ENABLE_DELTA_JOIN {
+                        // TODO, will implement rewrite later
+                        let child_fragment = self.rewrite_delta_join(child_node)?;
+                        let link_id = self.gen_operator_id() as u64;
+                        self.fragment_graph.add_edge(
+                            child_fragment.fragment_id,
+                            current_fragment.fragment_id,
+                            StreamFragmentEdge {
+                                dispatch_strategy: DispatchStrategy {
+                                    r#type: DispatcherType::NoShuffle.into(),
+                                    column_indices: vec![],
+                                },
+                                same_worker_node: true,
+                                link_id,
+                            },
+                        );
+                    } else {
+                        self.build_fragment(current_fragment, child_node)?;
                     }
                 }
 
@@ -322,105 +353,85 @@ where
             .map(LocalActorId::Local)
             .collect_vec();
 
-        // TODO: in the future, there might be multiple dispatchers and multiple set of downstream
-        // actors.
-        let downstream_fragments = self
-            .fragment_graph
-            .get_downstreams(fragment_id)
-            .iter()
-            .map(|(id, _)| *id)
-            .collect_vec();
-
-        let downstream_actors;
-        let exchange_node_id;
-        let dispatcher;
-
-        match downstream_fragments.as_slice() {
-            [] => {
-                downstream_actors = vec![];
-                exchange_node_id = None;
-                dispatcher = Dispatcher {
-                    r#type: DispatcherType::Broadcast as i32,
-                    ..Default::default()
-                };
-            }
-            [fragment] => {
-                downstream_actors = self
-                    .fragment_actors
-                    .get(fragment)
-                    .expect("downstream fragment not processed yet")
-                    .clone();
-
-                dispatcher = match node.get_node()? {
-                    Node::ExchangeNode(exchange_node) => {
-                        exchange_node_id = Some(node.operator_id);
-                        let strategy = exchange_node.get_strategy()?;
-                        Dispatcher {
-                            r#type: strategy.r#type,
-                            column_indices: strategy.column_indices.clone(),
-                            ..Default::default()
-                        }
-                    }
-                    _ => panic!("expect exchange node or sink node at the top of the plan"),
-                };
-            }
-            _ => todo!("there should not be multiple downstreams in plan"),
-        };
-
         for id in &actor_ids {
             let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
             self.stream_graph.add_actor(actor_builder);
         }
 
-        let streaming_hash_mapping;
+        for (downstream_fragment_id, dispatch_edge) in
+            self.fragment_graph.get_downstreams(fragment_id).iter()
+        {
+            let downstream_actors = self
+                .fragment_actors
+                .get(downstream_fragment_id)
+                .expect("downstream fragment not processed yet")
+                .clone();
 
-        // Construct a consistent hash mapping of actors based on that of parallel units. Set
-        // the new mapping into hash dispatchers.
-        let dispatcher = if dispatcher.r#type == DispatcherType::Hash as i32 {
-            // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as the
-            // number of its downstream actors. However, since the frontend optimizer is still
-            // WIP, there exists some unoptimized situation where a hash dispatcher has ONLY
-            // ONE downstream actor, which makes it behave like a simple dispatcher. As an
-            // expedient, we specially compute the consistent hash mapping here. The `if`
-            // branch could be removed after the optimizer has been fully implemented.
+            match dispatch_edge.dispatch_strategy.get_type()? {
+                // Construct a consistent hash mapping of actors based on that of parallel units.
+                // Set the new mapping into hash dispatchers.
+                DispatcherType::Hash => {
+                    // Theoretically, a hash dispatcher should have `self.hash_parallel_count` as
+                    // the number of its downstream actors. However, since the
+                    // frontend optimizer is still WIP, there exists some
+                    // unoptimized situation where a hash dispatcher has ONLY
+                    // ONE downstream actor, which makes it behave like a simple dispatcher. As an
+                    // expedient, we specially compute the consistent hash mapping here. The `if`
+                    // branch could be removed after the optimizer has been fully implemented.
 
-            streaming_hash_mapping = if downstream_actors.len() == 1 {
-                Some(vec![downstream_actors[0]; self.hash_mapping.len()])
-            } else {
-                let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
-                assert_eq!(downstream_actors.len(), hash_parallel_units.len());
-                let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
-                    .into_iter()
-                    .zip_eq(downstream_actors.iter().copied())
-                    .collect();
-                Some(
-                    self.hash_mapping
-                        .iter()
-                        .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
-                        .collect_vec(),
-                )
-            };
+                    let streaming_hash_mapping = if downstream_actors.len() == 1 {
+                        Some(vec![downstream_actors[0]; self.hash_mapping.len()])
+                    } else {
+                        let hash_parallel_units = self.hash_mapping.iter().unique().collect_vec();
+                        assert_eq!(downstream_actors.len(), hash_parallel_units.len());
+                        let parallel_unit_actor_map: HashMap<_, _> = hash_parallel_units
+                            .into_iter()
+                            .zip_eq(downstream_actors.iter().copied())
+                            .collect();
+                        Some(
+                            self.hash_mapping
+                                .iter()
+                                .map(|parallel_unit_id| parallel_unit_actor_map[parallel_unit_id])
+                                .collect_vec(),
+                        )
+                    };
 
-            Dispatcher {
-                r#type: DispatcherType::Hash.into(),
-                column_indices: dispatcher.column_indices,
-                hash_mapping: None,
-                downstream_actor_id: vec![],
+                    let dispatcher = Dispatcher {
+                        r#type: DispatcherType::Hash.into(),
+                        column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
+                        hash_mapping: None,
+                        downstream_actor_id: vec![],
+                    };
+
+                    self.stream_graph.add_link(
+                        &actor_ids,
+                        &downstream_actors,
+                        dispatch_edge.link_id,
+                        dispatcher,
+                        dispatch_edge.same_worker_node,
+                        streaming_hash_mapping,
+                    );
+                }
+
+                ty @ (DispatcherType::Simple
+                | DispatcherType::Broadcast
+                | DispatcherType::NoShuffle) => {
+                    self.stream_graph.add_link(
+                        &actor_ids,
+                        &downstream_actors,
+                        dispatch_edge.link_id,
+                        Dispatcher {
+                            r#type: ty.into(),
+                            column_indices: dispatch_edge.dispatch_strategy.column_indices.clone(),
+                            hash_mapping: None,
+                            downstream_actor_id: vec![],
+                        },
+                        dispatch_edge.same_worker_node,
+                        None,
+                    );
+                }
+                DispatcherType::Invalid => unreachable!(),
             }
-        } else {
-            streaming_hash_mapping = None;
-
-            dispatcher
-        };
-
-        if !downstream_actors.is_empty() {
-            self.stream_graph.add_link(
-                &actor_ids,
-                &downstream_actors,
-                exchange_node_id.unwrap(),
-                dispatcher,
-                streaming_hash_mapping,
-            );
         }
 
         let ret = self.fragment_actors.insert(fragment_id, actor_ids);
