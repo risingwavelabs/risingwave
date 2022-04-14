@@ -80,3 +80,6 @@ sqllogictest:
 
 docker:
 	docker build -f docker/Dockerfile -t risingwave:latest .
+
+docker-compose:
+	docker-compose -f docker/docker-compose.yml --project-directory . up

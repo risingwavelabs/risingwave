@@ -102,8 +102,12 @@ where
     /// 1. schedule the actors to nodes in the cluster.
     /// 2. broadcast the actor info table.
     /// (optional) get the split information of the `StreamSource` via source manager and patch
-    /// actors 3. notify related nodes to update and build the actors.
+    /// actors .
+    /// 3. notify related nodes to update and build the actors.
     /// 4. store related meta data.
+    ///
+    /// Note the `table_fragments` is required to be sorted in topology order. (Downstream first,
+    /// then upstream.)
     pub async fn create_materialized_view(
         &self,
         mut table_fragments: TableFragments,

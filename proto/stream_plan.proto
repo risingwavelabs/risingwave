@@ -52,6 +52,7 @@ message MaterializeNode {
   repeated plan.ColumnOrder column_orders = 3;
   // Column IDs of input schema
   repeated int32 column_ids = 4;
+  // TODO: remove this field, not used anywhere
   repeated int32 distribution_keys = 5;
 }
 
@@ -122,6 +123,27 @@ message BatchPlanNode {
   BatchParallelInfo parallel_info = 4;
 }
 
+// Special node for shared state. ArrangeNode will produce a special Materialize executor,
+// which materializes data for downstream to query.
+message ArrangeNode {
+  // The keys used to group the rows, aka. arrange key.
+  repeated int32 arrange_key_indexes = 1;
+}
+
+// Special node for shared state. LookupNode will join an arrangement with a stream.
+message LookupNode {
+  // Join keys of the arrangement side
+  repeated int32 arrange_key = 1;
+  // Join keys of the stream side
+  repeated int32 stream_key = 2;
+  // Whether to join the current epoch of arrangement
+  bool use_current_epoch = 3;
+  // Sometimes we need to re-order the output data to meet the requirement of schema.
+  // By default, lookup executor will produce `<arrangement side, stream side>`. We
+  // will then apply the column mapping to the combined result.
+  repeated int32 column_mapping = 4;
+}
+
 message StreamNode {
   oneof node {
     SourceNode source_node = 4;
@@ -138,6 +160,8 @@ message StreamNode {
     ExchangeNode exchange_node = 14;
     ChainNode chain_node = 15;
     BatchPlanNode batch_plan_node = 17;
+    LookupNode lookup_node = 20;
+    ArrangeNode arrange_node = 21;
   }
   // The id for the operator.
   uint64 operator_id = 1;
@@ -192,4 +216,6 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
+  // Placement rule for actor, need to stay on the same node as upstream.
+  bool same_worker_node_as_upstream = 7;
 }

@@ -55,7 +55,7 @@ impl OrderedActorLink {
 
 pub struct StreamActorDownstream {
     /// Dispatcher
-    /// TODO: refactor to `DispatcherStrategy`.
+    /// TODO: refactor to `DispatchStrategy`.
     dispatcher: Dispatcher,
 
     /// Downstream actors.
@@ -63,6 +63,17 @@ pub struct StreamActorDownstream {
 
     /// Consistent hash mapping (only needed when dispatcher is hash).
     hash_mapping: Option<Vec<LocalActorId>>,
+
+    /// Whether to place the downstream actors on the same node
+    same_worker_node: bool,
+}
+
+pub struct StreamActorUpstream {
+    /// Upstream actors
+    actors: OrderedActorLink,
+
+    /// Whether to place the upstream actors on the same node
+    same_worker_node: bool,
 }
 
 /// [`StreamActorBuilder`] builds a stream actor in a stream DAG.
@@ -80,7 +91,7 @@ pub struct StreamActorBuilder {
     downstreams: Vec<StreamActorDownstream>,
 
     /// upstreams, exchange node operator_id -> upstream actor ids
-    upstreams: HashMap<u64, OrderedActorLink>,
+    upstreams: HashMap<u64, StreamActorUpstream>,
 
     /// whether this actor builder has been sealed
     sealed: bool,
@@ -126,6 +137,7 @@ impl StreamActorBuilder {
         dispatcher: Dispatcher,
         downstream_actors: OrderedActorLink,
         hash_mapping: Option<Vec<LocalActorId>>,
+        same_worker_node: bool,
     ) {
         assert!(!self.sealed);
         // TODO: we should have a non-proto Dispatcher type here
@@ -141,6 +153,7 @@ impl StreamActorBuilder {
             dispatcher,
             actors: downstream_actors,
             hash_mapping,
+            same_worker_node,
         });
     }
 
@@ -157,6 +170,7 @@ impl StreamActorBuilder {
                      dispatcher,
                      actors: downstreams,
                      hash_mapping,
+                     same_worker_node,
                  }| {
                     let global_mapping = hash_mapping
                         .map(|x| OrderedActorLink(x).to_global_ids(actor_id_offset, actor_id_len));
@@ -174,6 +188,10 @@ impl StreamActorBuilder {
                             1,
                             "no shuffle should only have one actor downstream"
                         );
+                        assert!(
+                            dispatcher.column_indices.is_empty(),
+                            "should leave `column_indices` empty"
+                        );
                     }
 
                     StreamActorDownstream {
@@ -185,6 +203,7 @@ impl StreamActorBuilder {
                         },
                         actors: downstreams,
                         hash_mapping: global_mapping.map(|OrderedActorLink(x)| x),
+                        same_worker_node,
                     }
                 },
             )
@@ -192,12 +211,23 @@ impl StreamActorBuilder {
 
         self.upstreams = std::mem::take(&mut self.upstreams)
             .into_iter()
-            .map(|(exchange_id, actor_link)| {
-                (
+            .map(
+                |(
                     exchange_id,
-                    actor_link.to_global_ids(actor_id_offset, actor_id_len),
-                )
-            })
+                    StreamActorUpstream {
+                        actors,
+                        same_worker_node,
+                    },
+                )| {
+                    (
+                        exchange_id,
+                        StreamActorUpstream {
+                            actors: actors.to_global_ids(actor_id_offset, actor_id_len),
+                            same_worker_node,
+                        },
+                    )
+                },
+            )
             .collect();
         self.sealed = true;
     }
@@ -235,9 +265,17 @@ impl StreamActorBuilder {
             upstream_actor_id: self
                 .upstreams
                 .iter()
-                .flat_map(|(_, upstreams)| upstreams.0.iter().copied())
+                .flat_map(|(_, StreamActorUpstream { actors, .. })| actors.0.iter().copied())
                 .map(|x| x.as_global_id())
                 .collect(), // TODO: store each upstream separately
+            same_worker_node_as_upstream: self.upstreams.iter().any(
+                |(
+                    _,
+                    StreamActorUpstream {
+                        same_worker_node, ..
+                    },
+                )| *same_worker_node,
+            ),
         }
     }
 }
@@ -279,6 +317,7 @@ where
         downstream_actor_ids: &[LocalActorId],
         exchange_operator_id: u64,
         dispatcher: Dispatcher,
+        same_worker_node: bool,
         mapping: Option<Vec<LocalActorId>>,
     ) {
         if dispatcher.get_type().unwrap() == DispatcherType::NoShuffle {
@@ -296,6 +335,7 @@ where
                             dispatcher.clone(),
                             OrderedActorLink(vec![*downstream_id]),
                             mapping.clone(),
+                            same_worker_node,
                         );
 
                     let ret = self
@@ -303,7 +343,13 @@ where
                         .get_mut(downstream_id)
                         .unwrap()
                         .upstreams
-                        .insert(exchange_operator_id, OrderedActorLink(vec![*upstream_id]));
+                        .insert(
+                            exchange_operator_id,
+                            StreamActorUpstream {
+                                actors: OrderedActorLink(vec![*upstream_id]),
+                                same_worker_node,
+                            },
+                        );
 
                     assert!(
                         ret.is_none(),
@@ -317,6 +363,13 @@ where
             return;
         }
 
+        // otherwise, make m * n links between actors.
+
+        assert!(
+            !same_worker_node,
+            "same_worker_node only applies to 1v1 dispatchers."
+        );
+
         // update actors to have dispatchers, link upstream -> downstream.
         upstream_actor_ids.iter().for_each(|upstream_id| {
             self.actor_builders
@@ -326,6 +379,7 @@ where
                     dispatcher.clone(),
                     OrderedActorLink(downstream_actor_ids.to_vec()),
                     mapping.clone(),
+                    same_worker_node,
                 );
         });
 
@@ -338,7 +392,10 @@ where
                 .upstreams
                 .insert(
                     exchange_operator_id,
-                    OrderedActorLink(upstream_actor_ids.to_vec()),
+                    StreamActorUpstream {
+                        actors: OrderedActorLink(upstream_actor_ids.to_vec()),
+                        same_worker_node,
+                    },
                 );
             assert!(
                 ret.is_none(),
@@ -367,7 +424,11 @@ where
             let actor_id = builder.actor_id;
             let mut actor = builder.build();
             let mut dispatch_upstreams = vec![];
-            let mut upstream_actors = builder.upstreams.clone();
+            let mut upstream_actors = builder
+                .upstreams
+                .iter()
+                .map(|(id, StreamActorUpstream { actors, .. })| (*id, actors.clone()))
+                .collect();
 
             actor.nodes = Some(self.build_inner(
                 ctx,
@@ -418,14 +479,9 @@ where
         parallel_degree: u32,
     ) -> Result<StreamNode> {
         match stream_node.get_node()? {
-            Node::ExchangeNode(_) => self.build_inner(
-                ctx,
-                dispatch_upstreams,
-                stream_node.input.get(0).unwrap(),
-                upstream_actor_id,
-                fragment_id,
-                parallel_degree,
-            ),
+            Node::ExchangeNode(_) => {
+                panic!("ExchangeNode should be eliminated from the top of the plan node when converting fragments to actors")
+            }
             Node::ChainNode(_) => self.resolve_chain_node(
                 ctx,
                 dispatch_upstreams,
