@@ -285,8 +285,6 @@ async fn test_lookup_this_epoch() {
 
 #[tokio::test]
 async fn test_lookup_last_epoch() {
-    // TODO: memory state store doesn't support read epoch yet, so this test won't pass for now.
-    // Will fix later.
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;

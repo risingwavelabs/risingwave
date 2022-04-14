@@ -12,12 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::Pin;
-
 use async_trait::async_trait;
-use futures::{Stream, StreamExt};
+use futures::StreamExt;
 use risingwave_common::catalog::Schema;
-use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
@@ -29,8 +26,6 @@ mod impl_;
 
 #[cfg(test)]
 mod tests;
-
-type BoxedArrangeStream = Pin<Box<dyn Stream<Item = Result<ArrangeMessage>> + Send>>;
 
 /// `LookupExecutor` takes one input stream and one arrangement. It joins the input stream with the
 /// arrangement. Currently, it only supports inner join. See `LookupExecutorParams` for more
@@ -53,8 +48,11 @@ pub struct LookupExecutor<S: StateStore> {
     /// The join side of the stream
     stream: StreamJoinSide,
 
-    /// The combined input from arrangement and stream
-    input: Option<BoxedArrangeStream>,
+    /// The executor for arrangement.
+    arrangement_executor: Option<Box<dyn Executor>>,
+
+    /// The executor for stream.
+    stream_executor: Option<Box<dyn Executor>>,
 
     /// The last received barrier.
     last_barrier: Option<Barrier>,
