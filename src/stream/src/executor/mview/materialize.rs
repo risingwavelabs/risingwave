@@ -48,12 +48,6 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let keyspace = Keyspace::table_root(store, &table_id);
 
-        let key_indices = node
-            .get_distribution_keys()
-            .iter()
-            .map(|key| *key as usize)
-            .collect::<Vec<_>>();
-
         let v2 = Box::new(MaterializeExecutorV2::new_from_v1(
             params.input.remove(0),
             keyspace,
@@ -61,9 +55,23 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
             column_ids,
             params.executor_id,
             params.op_info,
-            key_indices,
         ));
 
         Ok(Box::new(v2.v1()))
+    }
+}
+
+pub struct ArrangeExecutorBuilder;
+
+impl ExecutorBuilder for ArrangeExecutorBuilder {
+    fn new_boxed_executor(
+        _params: ExecutorParams,
+        node: &stream_plan::StreamNode,
+        _store: impl StateStore,
+        _stream: &mut LocalStreamManagerCore,
+    ) -> Result<Box<dyn Executor>> {
+        let _node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
+
+        todo!()
     }
 }

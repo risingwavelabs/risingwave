@@ -60,7 +60,7 @@ pub async fn mock_hummock_storage() -> HummockStorage {
     HummockStorage::with_default_stats(
         Arc::new(StorageConfig::default()),
         sstable_store.clone(),
-        Arc::new(LocalVersionManager::new(sstable_store.clone())),
+        Arc::new(LocalVersionManager::new()),
         mock_hummock_meta_client,
         Arc::new(StateStoreMetrics::unused()),
     )

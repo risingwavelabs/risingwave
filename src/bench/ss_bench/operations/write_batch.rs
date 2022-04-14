@@ -22,6 +22,7 @@ use rand::prelude::Distribution;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
+use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::StateStore;
 
@@ -81,7 +82,7 @@ impl Operations {
         &mut self,
         store: &impl StateStore,
         opts: &Opts,
-        context: Option<Arc<CompactorContext>>,
+        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
     ) {
         let (prefixes, keys) = Workload::new_random_keys(opts, opts.writes as u64, &mut self.rng);
         let values = Workload::new_values(opts, opts.writes as u64, &mut self.rng);
@@ -95,16 +96,21 @@ impl Operations {
 
         let perf = self.run_batches(store, opts, batches).await;
         if opts.compact_level_after_write > 0 {
-            if let Some(context) = context {
+            if let Some((compact_context, local_version_manager)) = context {
                 if let Some(task) = self.meta_client.get_compact_task().await {
-                    Compactor::compact(context.clone(), task).await;
-                    let last_pinned = context.local_version_manager.get_version().unwrap();
+                    Compactor::compact(compact_context.clone(), task).await;
+                    // FIXME: A workaround to ensure the version after compaction is available
+                    // locally. Notice now multiple tasks are trying to pin_version, which breaks
+                    // the assumption required by LocalVersionManager. It may result in some pinned
+                    // versions never get unpinned. This can be fixed after
+                    // LocalVersionManager::start_workers is modified into push-based.
+                    let last_pinned = local_version_manager.get_version().unwrap();
                     let version = self
                         .meta_client
                         .pin_version(last_pinned.id())
                         .await
                         .unwrap();
-                    context.local_version_manager.try_set_version(version);
+                    local_version_manager.try_set_version(version);
                 }
             }
         }

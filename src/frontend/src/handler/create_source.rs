@@ -79,7 +79,7 @@ fn handle_source_with_properties(options: Vec<SqlOption>) -> Result<HashMap<Stri
         .collect()
 }
 
-pub(super) async fn handle_create_source(
+pub async fn handle_create_source(
     context: OptimizerContext,
     is_materialized: bool,
     stmt: CreateSourceStatement,
