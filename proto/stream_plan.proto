@@ -113,6 +113,7 @@ message BatchParallelInfo {
   uint32 degree = 1;
   uint32 index = 2;
 }
+
 // BatchPlanNode is used for mv on mv snapshot read.
 // BatchPlanNode is supposed to carry a batch plan that can be optimized with the streaming plan.
 // Currently, streaming to batch push down is not yet supported, BatchPlanNode is simply a table scan.
