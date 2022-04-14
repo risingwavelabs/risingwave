@@ -20,6 +20,7 @@ use rand::prelude::StdRng;
 use rand::SeedableRng;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::local_version_manager::LocalVersionManager;
 use risingwave_storage::StateStore;
 
 use crate::utils::display_stats::*;
@@ -51,7 +52,7 @@ impl Operations {
     pub(crate) async fn run(
         store: impl StateStore,
         meta_service: Arc<MockHummockMetaClient>,
-        context: Option<Arc<CompactorContext>>,
+        context: Option<(Arc<CompactorContext>, Arc<LocalVersionManager>)>,
         opts: &Opts,
     ) {
         let mut stat_display = DisplayStats::default();
