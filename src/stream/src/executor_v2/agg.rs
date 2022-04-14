@@ -142,6 +142,7 @@ pub async fn generate_agg_state<S: StateStore>(
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,
     epoch: u64,
+    key_hash_code: Option<u64>,
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -166,6 +167,7 @@ pub async fn generate_agg_state<S: StateStore>(
             row_count,
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
+            key_hash_code,
         )
         .await
         .map_err(StreamExecutorError::agg_state_error)?;

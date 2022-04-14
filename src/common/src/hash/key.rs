@@ -77,6 +77,14 @@ pub trait HashKey: Clone + Debug + Hash + Eq + Sized + Send + Sync + 'static {
 
     fn build(column_idxes: &[usize], data_chunk: &DataChunk) -> Result<Vec<Self>> {
         let hash_codes = data_chunk.get_hash_values(column_idxes, CRC32FastBuilder)?;
+        Self::build_from_hash_code(column_idxes, data_chunk, hash_codes)
+    }
+
+    fn build_from_hash_code(
+        column_idxes: &[usize],
+        data_chunk: &DataChunk,
+        hash_codes: Vec<u64>,
+    ) -> Result<Vec<Self>> {
         let mut serializers: Vec<Self::S> = hash_codes
             .into_iter()
             .map(Self::S::from_hash_code)

@@ -39,6 +39,12 @@ impl From<ValueMeta> for Bytes {
 }
 
 impl ValueMeta {
+    pub fn new_with_consistent_hash_value(consistent_hash_value: u16) -> Self {
+        Self {
+            consistent_hash_value,
+        }
+    }
+
     pub fn encode(&self, buf: &mut impl BufMut) {
         buf.put_u16_le(self.consistent_hash_value);
     }

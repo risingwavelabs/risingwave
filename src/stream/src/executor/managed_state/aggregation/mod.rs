@@ -103,6 +103,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
         row_count: Option<usize>,
         pk_data_types: PkDataTypes,
         is_row_count: bool,
+        key_hash_code: Option<u64>,
     ) -> Result<Self> {
         match agg_call.kind {
             AggKind::Max | AggKind::Min => {
@@ -118,6 +119,7 @@ impl<S: StateStore> ManagedStateImpl<S> {
                         // TODO: estimate a good cache size instead of hard-coding
                         Some(1024),
                         pk_data_types,
+                        key_hash_code.unwrap(),
                     )
                     .await?,
                 ))
