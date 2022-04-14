@@ -12,7 +12,7 @@ This directory contains RisingWave design documents that are intended to be used
 * [Checkpoint](./checkpoint.md)
 * [Design of Data Source](./data-source.md)
 * [Data Model and Encoding](./data-model-and-encoding.md)
-* Docs: Local state and cache of stateful operator
+* Local state and cache of stateful operator
 
 ## Contribution Guide
 
