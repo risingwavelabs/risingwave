@@ -9,13 +9,10 @@ This directory contains RisingWave design documents that are intended to be used
 * [An Overview of RisingWave State Store](./state-store-overview.md)
 * [Meta Service](./meta-service.md)
 * [Create MView on Top of MView](./mv-on-mv.md)
-*  Checkpoint and Barrier Manager
-* Primary Key of Materialized Data
+* [Checkpoint](./checkpoint.md)
 * [Design of Data Source](./data-source.md)
 * [Data Model and Encoding](./data-model-and-encoding.md)
 * Docs: Local state and cache of stateful operator
-* Consistent Hash & Locality-aware Compaction
-* Clarifications of consistency & Proposal: Epoch-based Concurrency Control
 
 ## Contribution Guide
 
