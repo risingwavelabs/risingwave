@@ -126,7 +126,7 @@ pub mod tests {
         let columns = table
             .columns
             .iter()
-            .flat_map(|c| c.column_desc.get_column_descs())
+            .flat_map(|c| c.column_desc.flatten())
             .collect_vec();
 
         let columns = columns

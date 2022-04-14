@@ -151,6 +151,8 @@ impl Field {
         self.data_type.clone()
     }
 
+    /// Change field and `sub_fields` prefix name to alias,
+    /// e.g. from `v1.field1` change to `c.field1`
     pub fn change_prefix_name(&mut self, prefix: &str, alias: &str) {
         let regex = regex::Regex::new(("^".to_string() + prefix).as_str()).unwrap();
         self.name = regex.replace(&self.name, alias).to_string();

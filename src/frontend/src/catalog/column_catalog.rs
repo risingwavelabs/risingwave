@@ -78,7 +78,7 @@ impl ColumnCatalog {
     /// and returns every children node.
     pub fn flatten(&self) -> Vec<ColumnCatalog> {
         self.column_desc
-            .get_column_descs()
+            .flatten()
             .into_iter()
             .map(|d| ColumnCatalog {
                 column_desc: d,

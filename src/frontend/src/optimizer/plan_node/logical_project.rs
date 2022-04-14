@@ -147,6 +147,7 @@ impl LogicalProject {
                     None => (format!("expr#{}", id), vec![], String::new()),
                 };
                 let name = alias.clone().unwrap_or_else(|| default_name.clone());
+                // Change `sub_fields` name prefix to alias.
                 sub_fields
                     .iter_mut()
                     .for_each(|f| f.change_prefix_name(default_name.as_str(), name.as_str()));

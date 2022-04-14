@@ -164,7 +164,7 @@ pub mod tests {
 
         // Get all column descs
         for catalog in catalogs {
-            columns.append(&mut catalog.column_desc.get_column_descs());
+            columns.append(&mut catalog.column_desc.flatten());
         }
         let columns = columns
             .iter()
