@@ -436,9 +436,10 @@
     StreamMaterialize { columns: [revenue, agg#0(hidden)], pk_columns: [agg#0, revenue] }
       StreamProject { exprs: [$1, $0], expr_alias: [revenue,  ] }
         StreamSimpleAgg { aggs: [count, sum($0)] }
-          StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
-            StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
-              StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
+          StreamExchange { dist: Single }
+            StreamProject { exprs: [($1 * $2), $4], expr_alias: [ ,  ] }
+              StreamFilter { predicate: ($3 >= '1994-01-01':Varchar::Date) AND ($3 < ('1994-01-01':Varchar::Date + '1 year 00:00:00':Interval)) AND ($2 >= (0.08:Decimal - 0.01:Decimal)) AND ($2 <= (0.08:Decimal + 0.01:Decimal)) AND ($0 < 24:Int32) }
+                StreamTableScan { table: lineitem, columns: [l_quantity, l_extendedprice, l_discount, l_shipdate, _row_id#0], pk_indices: [4] }
 - id: tpch_q7
   before:
     - create_tables
