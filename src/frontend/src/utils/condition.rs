@@ -77,7 +77,7 @@ impl Condition {
         if self.always_true() {
             None
         } else {
-            Some(self.into())
+            Some(self.clone().into())
         }
     }
 
