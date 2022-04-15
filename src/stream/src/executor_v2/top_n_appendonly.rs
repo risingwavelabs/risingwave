@@ -199,37 +199,21 @@ impl<S: StateStore> TopNExecutorBase for InnerAppendOnlyTopNExecutor<S> {
             self.first_execution = false;
         }
 
-        // Ops is useless as we have assumed the input is append-only.
-        let (_ops, columns, visibility) = chunk.into_inner();
-
-        let mut data_chunk: DataChunk = DataChunk::builder().columns(columns.to_vec()).build();
-        if let Some(vis_map) = &visibility {
-            data_chunk = data_chunk
-                .with_visibility(vis_map.clone())
-                .compact()
-                .map_err(StreamExecutorError::eval_error)?;
-        }
-        let data_chunk = Arc::new(data_chunk);
-        // As we have already compacted the data chunk with visibility map,
-        // we don't check visibility anymore.
-        // We also don't compact ops as they are always "Insert"s.
-
         let num_need_to_keep = self.limit.unwrap_or(usize::MAX);
         let mut new_ops = vec![];
         let mut new_rows = vec![];
 
-        for row_idx in 0..data_chunk.capacity() {
-            let row_ref = data_chunk
-                .row_at(row_idx)
-                .map_err(StreamExecutorError::eval_error)?
-                .0;
+        for row_ref in chunk.rows() {
+            assert_eq!(row_ref.op(), Op::Insert);
+
             let pk_row = Row(self
                 .pk_indices
                 .iter()
-                .map(|idx| row_ref.0[*idx].to_owned_datum())
-                .collect::<Vec<_>>());
+                .map(|&idx| row_ref.value_at(idx).to_owned_datum())
+                .collect());
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
-            let row = row_ref.into();
+            let row = row_ref.to_owned_row();
+
             if self.managed_lower_state.total_count() < self.offset {
                 // `elem` is in the range of `[0, offset)`,
                 // we ignored it for now as it is not in the result set.
