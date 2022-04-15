@@ -647,11 +647,14 @@ where
         assert!(!remaining.is_empty());
 
         // TODO: remove this when we deprecate Java frontend.
-        let (assigned_upstreams, parallel_index)= if ctx.is_legacy_frontend {
+        let (assigned_upstreams, parallel_index) = if ctx.is_legacy_frontend {
             (HashSet::<ActorId>::from_iter(remaining.iter().cloned()), 0)
         } else {
             let upstream_id = remaining.pop().unwrap();
-            (HashSet::<ActorId>::from([upstream_id]), remaining.len() as u32)
+            (
+                HashSet::<ActorId>::from([upstream_id]),
+                remaining.len() as u32,
+            )
         };
 
         Ok((assigned_upstreams, parallel_index))
