@@ -8,7 +8,6 @@ chunk_size = 1024
 chunk_size = 1024
 
 [storage]
-shared_buffer_threshold_size = 268435456
 sstable_size = 268435456
 block_size = 4096
 bloom_false_positive = 0.1
@@ -16,3 +15,6 @@ data_directory = "hummock_001"
 async_checkpoint_enabled = true
 block_cache_capacity = 268435456
 meta_cache_capacity = 67108864
+shared_buffer_flush_threshold = 201326592
+shared_buffer_capacity = 268435456
+shared_buffer_upload_timeout = 10000

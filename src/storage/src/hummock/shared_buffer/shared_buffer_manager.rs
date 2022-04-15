@@ -92,6 +92,11 @@ pub struct SharedBufferManagerInner {
 ///
 /// `sync` is called when `LocalBarrierManager` collected all barriers of the node and waits all
 /// data beloned to the epoch for uploading to S3.
+///
+/// ## `delete_before`
+///
+/// `delete_before` is used to clean buffered batches in shared buffer. Make sure `sync` has been
+/// called on to delete epoches.
 pub struct SharedBufferManager {
     inner: RwLock<SharedBufferManagerInner>,
     /// Threshold to trigger flushing.
