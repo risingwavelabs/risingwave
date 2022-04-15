@@ -17,6 +17,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Row, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::hash::HashCode;
 use risingwave_storage::{Keyspace, StateStore};
 use static_assertions::const_assert_eq;
 
@@ -142,7 +143,7 @@ pub async fn generate_agg_state<S: StateStore>(
     keyspace: &Keyspace<S>,
     pk_data_types: PkDataTypes,
     epoch: u64,
-    key_hash_code: Option<u64>,
+    key_hash_code: Option<HashCode>,
 ) -> StreamExecutorResult<AggState<S>> {
     let mut managed_states = vec![];
 
@@ -167,7 +168,7 @@ pub async fn generate_agg_state<S: StateStore>(
             row_count,
             pk_data_types.clone(),
             idx == ROW_COUNT_COLUMN,
-            key_hash_code,
+            key_hash_code.clone(),
         )
         .await
         .map_err(StreamExecutorError::agg_state_error)?;

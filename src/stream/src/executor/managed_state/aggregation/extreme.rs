@@ -20,7 +20,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::VIRTUAL_KEY_COUNT;
+use risingwave_common::hash::{HashCode, VIRTUAL_KEY_COUNT};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -422,7 +422,7 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
     row_count: usize,
     top_n_count: Option<usize>,
     pk_data_types: PkDataTypes,
-    key_hash_code: u64,
+    key_hash_code: Option<HashCode>,
 ) -> Result<Box<dyn ManagedTableState<S>>> {
     match &agg_call.args {
         AggArgs::Unary(x, _) => {
@@ -444,10 +444,24 @@ pub async fn create_streaming_extreme_state<S: StateStore>(
             match (agg_call.kind, agg_call.return_type.clone()) {
                 $(
                     (AggKind::Max, $( $kind )|+) => Ok(Box::new(
-                        ManagedMaxState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types, key_hash_code).await?,
+                        ManagedMaxState::<_, $array>::new(
+                            keyspace,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            key_hash_code.unwrap_or_default().hash_code()
+                        ).await?,
                     )),
                     (AggKind::Min, $( $kind )|+) => Ok(Box::new(
-                        ManagedMinState::<_, $array>::new(keyspace, agg_call.return_type.clone(), top_n_count, row_count, pk_data_types, key_hash_code).await?,
+                        ManagedMinState::<_, $array>::new(
+                            keyspace,
+                            agg_call.return_type.clone(),
+                            top_n_count,
+                            row_count,
+                            pk_data_types,
+                            key_hash_code.unwrap_or_default().hash_code()
+                        ).await?,
                     )),
                 )*
                 (kind, return_type) => unimplemented!("unsupported extreme agg, kind: {:?}, return type: {:?}", kind, return_type),
@@ -491,6 +505,7 @@ mod tests {
             Some(5),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -633,6 +648,7 @@ mod tests {
             Some(5),
             row_count,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -674,6 +690,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
+            567,
         )
         .await
         .unwrap();
@@ -759,6 +776,7 @@ mod tests {
             Some(3),
             0,
             smallvec![DataType::Int64],
+            567,
         )
         .await
         .unwrap();
@@ -860,6 +878,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -939,6 +958,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();
@@ -1036,6 +1056,7 @@ mod tests {
             Some(3),
             0,
             PkDataTypes::new(),
+            567,
         )
         .await
         .unwrap();

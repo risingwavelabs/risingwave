@@ -13,8 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Reverse;
-use std::hash::{BuildHasher, Hash, Hasher};
-use std::mem;
 
 use itertools::Itertools;
 use memcomparable::from_slice;

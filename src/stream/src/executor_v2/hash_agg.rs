@@ -24,7 +24,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::collection::evictable::EvictableHashMap;
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::hash::HashKey;
+use risingwave_common::hash::{HashCode, HashKey};
 use risingwave_common::util::hash_util::CRC32FastBuilder;
 use risingwave_storage::{Keyspace, StateStore};
 
@@ -135,9 +135,9 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
     fn get_unique_keys(
         &self,
         keys: Vec<K>,
-        key_hash_codes: Vec<u64>,
+        key_hash_codes: Vec<HashCode>,
         visibility: &Option<Bitmap>,
-    ) -> Result<Vec<(K, u64, Bitmap)>> {
+    ) -> Result<Vec<(K, HashCode, Bitmap)>> {
         let total_num_rows = keys.len();
         assert_eq!(key_hash_codes.len(), total_num_rows);
         // Each hash key, e.g. `key1` corresponds to a visibility map that not only shadows
@@ -168,7 +168,7 @@ impl<K: HashKey, S: StateStore> AggHashAggExecutor<K, S> {
             .map(|(key, hash_code)| {
                 (
                     key.clone(),
-                    *hash_code,
+                    hash_code.clone(),
                     key_to_vis_maps.remove(key).unwrap().try_into().unwrap(),
                 )
             })
