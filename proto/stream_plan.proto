@@ -209,4 +209,6 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
+  // Placement rule for actor, need to stay on the same node as upstream.
+  bool same_worker_node_as_upstream = 7;
 }
