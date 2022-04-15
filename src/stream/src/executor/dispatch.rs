@@ -814,7 +814,7 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 4);
+                    assert_eq!(chunk1.cardinality(), 5);
                     assert!(chunk1.visibility().as_ref().unwrap().is_set(4).unwrap());
                     assert_eq!(
                         chunk1.ops()[6],
@@ -830,12 +830,12 @@ mod tests {
             match guard[0] {
                 Message::Chunk(ref chunk1) => {
                     assert_eq!(chunk1.capacity(), 8, "Should keep capacity");
-                    assert_eq!(chunk1.cardinality(), 3);
+                    assert_eq!(chunk1.cardinality(), 2);
                     assert!(
                         !chunk1.visibility().as_ref().unwrap().is_set(3).unwrap(),
                         "Should keep original invisible mark"
                     );
-                    assert!(chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
+                    assert!(!chunk1.visibility().as_ref().unwrap().is_set(6).unwrap());
 
                     assert_eq!(
                         chunk1.ops()[4],
