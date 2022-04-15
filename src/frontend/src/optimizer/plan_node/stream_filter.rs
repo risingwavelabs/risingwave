@@ -72,7 +72,7 @@ impl_plan_tree_node_for_unary! { StreamFilter }
 impl ToStreamProst for StreamFilter {
     fn to_stream_prost_body(&self) -> ProstStreamNode {
         ProstStreamNode::FilterNode(FilterNode {
-            search_condition: Some(ExprImpl::from(self.predicate()).to_protobuf()),
+            search_condition: Some(ExprImpl::from(self.predicate().clone()).to_protobuf()),
         })
     }
 }

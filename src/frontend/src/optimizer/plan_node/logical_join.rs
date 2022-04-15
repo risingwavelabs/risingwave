@@ -646,7 +646,10 @@ mod tests {
 
         // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
         let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(ExprImpl::from(batch_filter.predicate()), non_eq_cond);
+        assert_eq!(
+            ExprImpl::from(batch_filter.predicate().clone()),
+            non_eq_cond
+        );
 
         let input = batch_filter.input();
         let hash_join = input.as_batch_hash_join().unwrap();

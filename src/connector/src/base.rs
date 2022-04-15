@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -33,7 +31,7 @@ use crate::kafka::KafkaSplit;
 use crate::kinesis::split::KinesisSplit;
 use crate::pulsar::{PulsarSplit, PulsarSplitEnumerator};
 use crate::utils::AnyhowProperties;
-use crate::{kafka, kinesis, pulsar};
+use crate::{kafka, kinesis, pulsar, Properties};
 
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KAFKA_SOURCE: &str = "kafka";
@@ -70,7 +68,7 @@ pub struct ConnectorState {
 #[async_trait]
 pub trait SourceReader {
     async fn next(&mut self) -> Result<Option<Vec<InnerMessage>>>;
-    async fn new(config: HashMap<String, String>, state: Option<ConnectorState>) -> Result<Self>
+    async fn new(properties: Properties, state: Option<ConnectorState>) -> Result<Self>
     where
         Self: Sized;
 }
@@ -165,10 +163,10 @@ impl SplitEnumeratorImpl {
 }
 
 pub async fn new_connector(
-    config: HashMap<String, String>,
+    config: Properties,
     state: Option<ConnectorState>,
 ) -> Result<Box<dyn SourceReader + Send + Sync>> {
-    let upstream_type = config.get(UPSTREAM_SOURCE_KEY).unwrap();
+    let upstream_type = config.get(UPSTREAM_SOURCE_KEY)?;
     let connector: Box<dyn SourceReader + Send + Sync> = match upstream_type.as_str() {
         KAFKA_SOURCE => Box::new(KafkaSplitReader::new(config, state).await?),
         KINESIS_SOURCE => Box::new(KinesisSplitReader::new(config, state).await?),

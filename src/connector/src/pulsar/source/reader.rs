@@ -21,6 +21,7 @@ use pulsar::{Consumer, Pulsar, TokioExecutor};
 
 use crate::base::{InnerMessage, SourceReader};
 use crate::pulsar::split::{PulsarOffset, PulsarSplit};
+use crate::Properties;
 
 pub struct PulsarSplitReader {
     pulsar: Pulsar<TokioExecutor>,
@@ -73,36 +74,7 @@ impl SourceReader for PulsarSplitReader {
         Ok(Some(ret))
     }
 
-    // async fn assign_split<'a>(&'a mut self, split: &'a [u8]) -> anyhow::Result<()> {
-    //     let split: PulsarSplit = serde_json::from_str(from_utf8(split)?)?;
-    //     let consumer: Consumer<Vec<u8>, TokioExecutor> = self
-    //         .pulsar
-    //         .consumer()
-    //         .with_topic(split.sub_topic.as_str())
-    //         .with_batch_size(PULSAR_MAX_FETCH_MESSAGES)
-    //         //.with_consumer_name("test_consumer")
-    //         .with_subscription_type(SubType::Exclusive)
-    //         .with_subscription(format!(
-    //             "consumer-{}",
-    //             SystemTime::now()
-    //                 .duration_since(SystemTime::UNIX_EPOCH)
-    //                 .unwrap()
-    //                 .as_millis()
-    //         ))
-    //         .build()
-    //         .await
-    //         .map_err(|e| anyhow!(e))?;
-
-    //     self.consumer = consumer;
-    //     self.split = split;
-
-    //     todo!("seek offset here")
-    // }
-
-    async fn new(
-        _config: std::collections::HashMap<String, String>,
-        _state: Option<crate::ConnectorState>,
-    ) -> Result<Self>
+    async fn new(_props: Properties, _state: Option<crate::ConnectorState>) -> Result<Self>
     where
         Self: Sized,
     {
