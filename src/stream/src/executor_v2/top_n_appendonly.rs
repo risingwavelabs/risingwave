@@ -12,10 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use async_trait::async_trait;
-use risingwave_common::array::{DataChunk, Op, Row, StreamChunk};
+use risingwave_common::array::{Op, Row, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::ToOwnedDatum;
