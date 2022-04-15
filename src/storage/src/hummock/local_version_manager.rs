@@ -327,18 +327,11 @@ impl LocalVersionManager {
             None => return,
         };
         match epoch_ref_guard.entry(committed_epoch) {
-            std::collections::btree_map::Entry::Vacant(_) => {
-                println!("===> vacant");
-            }
+            std::collections::btree_map::Entry::Vacant(_) => (),
             std::collections::btree_map::Entry::Occupied(mut e) => {
                 let refcnt = e.get_mut();
-                println!("new refcnt: {}", *refcnt - 1);
                 if *refcnt == 1 {
                     e.remove();
-                    println!(
-                        "===> epoch_low_watermark: {}, committed_epoch: {}",
-                        epoch_low_watermark, committed_epoch
-                    );
                     if epoch_low_watermark == committed_epoch {
                         // Delete data before ref epoch low watermark in shared buffer if the epoch
                         // low watermark changes after ref epoch removal.

@@ -99,24 +99,24 @@ impl SharedBufferUploader {
     }
 
     /// Uploads buffer batches to S3.
-    async fn flush(&mut self, epoch: Option<u64>) -> HummockResult<usize> {
+    async fn flush(&mut self, epoch: Option<u64>, achieve: bool) -> HummockResult<usize> {
         match epoch {
             // Sync a specific epoch
-            Some(e) => self.flush_epoch(e).await,
+            Some(e) => self.flush_epoch(e, achieve).await,
             // Sync all epochs
             None => {
                 let epochs = self.batches_to_upload.keys().copied().collect_vec();
                 let mut total_size = 0;
                 for epoch in epochs {
-                    total_size += self.flush_epoch(epoch).await?;
+                    total_size += self.flush_epoch(epoch, achieve).await?;
                 }
                 Ok(total_size)
             }
         }
     }
 
-    async fn flush_epoch(&mut self, epoch: u64) -> HummockResult<usize> {
-        if let Some(detector) = &self.write_conflict_detector {
+    async fn flush_epoch(&mut self, epoch: u64, achieve: bool) -> HummockResult<usize> {
+        if achieve && let Some(detector) = &self.write_conflict_detector {
             detector.archive_epoch(epoch);
         }
 
@@ -185,7 +185,7 @@ impl SharedBufferUploader {
             }
             SharedBufferUploaderItem::Sync(epoch_notifier) => {
                 // Flush buffer to S3.
-                let res = self.flush(epoch_notifier.epoch).await;
+                let res = self.flush(epoch_notifier.epoch, true).await;
                 // Notify sync notifier.
                 if let Some(tx) = epoch_notifier.notifier {
                     tx.send(res).map_err(|_| {
@@ -206,8 +206,12 @@ impl SharedBufferUploader {
         loop {
             tokio::select! {
                 Some(item) = self.uploader_rx.recv() => self.handle(item).await?,
-                _ = ticker.tick() => {self.flush(None).await?;}
-                _ = self.notify.notified() => {self.flush(None).await?;}
+                _ = ticker.tick() => {
+                    self.flush(None, false).await?;
+                }
+                _ = self.notify.notified() => {
+                    self.flush(None, false).await?;
+                }
                 else => break,
             }
         }
