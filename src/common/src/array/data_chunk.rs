@@ -25,6 +25,7 @@ use crate::array::data_chunk_iter::{DataChunkRefIter, Row, RowRef};
 use crate::array::{ArrayBuilderImpl, ArrayImpl};
 use crate::buffer::Bitmap;
 use crate::error::{Result, RwError};
+use crate::hash::HashCode;
 use crate::types::DataType;
 use crate::util::hash_util::finalize_hashers;
 
@@ -350,14 +351,17 @@ impl DataChunk {
         &self,
         column_idxes: &[usize],
         hasher_builder: H,
-    ) -> Result<Vec<u64>> {
+    ) -> Result<Vec<HashCode>> {
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
             let array = self.column_at(*column_idx).array();
             array.hash_vec(&mut states[..]);
         }
-        Ok(finalize_hashers(&mut states[..]))
+        Ok(finalize_hashers(&mut states[..])
+            .into_iter()
+            .map(|hash_code| hash_code.into())
+            .collect_vec())
     }
 
     /// Get an iterator for visible rows.
