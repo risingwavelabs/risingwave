@@ -19,22 +19,6 @@ use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{define_state_store_associated_type, StateStore, StateStoreIter};
 
-async fn collect_from_iter(
-    mut iter: HummockStateStoreIter<'_>,
-    limit: Option<usize>,
-) -> StorageResult<Vec<(Bytes, Bytes)>> {
-    let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
-
-    for _ in 0..limit.unwrap_or(usize::MAX) {
-        match iter.next().await? {
-            Some(kv) => kvs.push(kv),
-            None => break,
-        }
-    }
-
-    Ok(kvs)
-}
-
 impl HummockStorage {
     async fn iter_inner<R, B>(
         &self,
@@ -262,7 +246,7 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { collect_from_iter(self.iter(key_range, epoch).await?, limit).await }
+        async move { self.iter(key_range, epoch).await?.collect(limit).await }
     }
 
     fn reverse_scan<R, B>(
@@ -275,7 +259,12 @@ impl StateStore for HummockStorage {
         R: RangeBounds<B> + Send,
         B: AsRef<[u8]> + Send,
     {
-        async move { collect_from_iter(self.reverse_iter(key_range, epoch).await?, limit).await }
+        async move {
+            self.reverse_iter(key_range, epoch)
+                .await?
+                .collect(limit)
+                .await
+        }
     }
 
     /// Writes a batch to storage. The batch should be:
@@ -374,6 +363,19 @@ pub struct HummockStateStoreIter<'a> {
 impl<'a> HummockStateStoreIter<'a> {
     fn new(inner: DirectedUserIterator<'a>) -> Self {
         Self { inner }
+    }
+
+    async fn collect(mut self, limit: Option<usize>) -> StorageResult<Vec<(Bytes, Bytes)>> {
+        let mut kvs = Vec::with_capacity(limit.unwrap_or_default());
+
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            match self.next().await? {
+                Some(kv) => kvs.push(kv),
+                None => break,
+            }
+        }
+
+        Ok(kvs)
     }
 }
 
