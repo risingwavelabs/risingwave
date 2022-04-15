@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::BatchParallelInfo;
 use risingwave_storage::table::cell_based_table::CellBasedTable;
 use risingwave_storage::StateStore;
 
-use super::error::TracedStreamExecutorError;
+use super::error::{TracedStreamExecutorError, StreamExecutorError};
 use super::{Executor, ExecutorInfo, Message};
 use crate::executor_v2::BoxedMessageStream;
 
@@ -74,7 +74,6 @@ where
             .collect_data_chunk(&self.table, Some(self.batch_size))
             .await?
         {
-            let ops = vec![Op::Insert; data_chunk.cardinality()];
             // Filter out rows
             let filtered_data_chunk = match self.filter_chunk(data_chunk) {
                 Some(chunk) => chunk,
@@ -82,8 +81,9 @@ where
                     continue;
                 }
             };
-
-            let stream_chunk = StreamChunk::from_parts(ops, filtered_data_chunk);
+            let compacted_chunk = filtered_data_chunk.compact().map_err(StreamExecutorError::eval_error)?;
+            let ops = vec![Op::Insert; compacted_chunk.cardinality()];
+            let stream_chunk = StreamChunk::from_parts(ops, compacted_chunk);
             yield Message::Chunk(stream_chunk);
         }
     }

@@ -23,8 +23,6 @@
                         typeName: INT64
                         isNullable: true
                       name: "_row_id#0"
-                  distributionKeys:
-                    - 1
             pkIndices:
               - 1
             chainNode:
@@ -94,8 +92,6 @@
       columnIds:
         - 0
         - 1
-      distributionKeys:
-        - 1
     ---
     id: 4294967294
     name: test
@@ -140,8 +136,6 @@
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         chainNode:
@@ -180,8 +174,6 @@
             isNullable: true
       columnIds:
         - 0
-        - 1
-      distributionKeys:
         - 1
     ---
     id: 4294967294
@@ -227,8 +219,6 @@
                     typeName: INT64
                     isNullable: true
                   name: "_row_id#0"
-              distributionKeys:
-                - 1
         pkIndices:
           - 1
         chainNode:
@@ -271,8 +261,6 @@
             isNullable: true
       columnIds:
         - 0
-        - 1
-      distributionKeys:
         - 1
     ---
     id: 4294967294
@@ -320,8 +308,6 @@
                             typeName: INT64
                             isNullable: true
                           name: "_row_id#0"
-                      distributionKeys:
-                        - 1
                 pkIndices:
                   - 1
                 chainNode:
@@ -463,8 +449,6 @@
                                     typeName: INT64
                                     isNullable: true
                                   name: "_row_id#0"
-                              distributionKeys:
-                                - 2
                         pkIndices:
                           - 2
                         chainNode:
