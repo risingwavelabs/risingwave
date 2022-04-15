@@ -42,7 +42,7 @@ use crate::util::hash_util::CRC32FastBuilder;
 
 /// A wrapper for u64 hash result.
 #[derive(Default, Clone)]
-pub struct HashCode(u64);
+pub struct HashCode(pub u64);
 
 impl From<u64> for HashCode {
     fn from(hash_code: u64) -> Self {

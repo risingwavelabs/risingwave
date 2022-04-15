@@ -182,7 +182,7 @@ mod tests {
     fn test_vec_decode_encode() {
         let mut result = vec![];
         let value_meta = ValueMeta {
-            consistent_hash_value: 63492,
+            vnode: 63492,
         };
         HummockValue::Put(value_meta, b"233333".to_vec()).encode(&mut result);
         assert_eq!(
@@ -195,7 +195,7 @@ mod tests {
     fn test_slice_decode_encode() {
         let mut result = vec![];
         let value_meta = ValueMeta {
-            consistent_hash_value: 63492,
+            vnode: 63492,
         };
         HummockValue::Put(value_meta, b"233333".to_vec()).encode(&mut result);
         assert_eq!(

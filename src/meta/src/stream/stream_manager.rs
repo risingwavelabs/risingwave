@@ -35,7 +35,7 @@ use super::ScheduledLocations;
 use crate::barrier::{BarrierManagerRef, Command};
 use crate::cluster::{ClusterManagerRef, WorkerId};
 use crate::manager::{MetaSrvEnv, StreamClientsRef};
-use crate::model::{ActorId, TableFragments};
+use crate::model::{ActorId, FragmentId, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{FragmentManagerRef, Scheduler, SourceManagerRef};
 
@@ -52,6 +52,11 @@ pub struct CreateMaterializedViewContext {
     pub table_sink_map: HashMap<TableId, Vec<ActorId>>,
     /// Temporary source info used during `create_materialized_source`
     pub affiliated_source: Option<Source>,
+    /// Memo for assigning upstream actors to parallelized chain node.
+    pub chain_upstream_assignment: HashMap<FragmentId, Vec<ActorId>>,
+
+    /// TODO: remove this when we deprecate Java frontend.
+    pub is_legacy_frontend: bool,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use bytes::{Buf, BufMut, Bytes};
+use risingwave_common::hash::VirtualNode;
 
 /// Size of value meta in bytes. Since there might exist paddings between fields in `ValueMeta`, we
 /// can't simply use `size_of` to retrieve its size.
@@ -23,37 +24,33 @@ pub const VALUE_META_SIZE: usize = 2;
 /// value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ValueMeta {
-    pub consistent_hash_value: u16,
+    pub vnode: VirtualNode,
 }
 
 impl From<ValueMeta> for Vec<u8> {
     fn from(value_meta: ValueMeta) -> Self {
-        value_meta.consistent_hash_value.to_le_bytes().to_vec()
+        value_meta.vnode.to_le_bytes().to_vec()
     }
 }
 
 impl From<ValueMeta> for Bytes {
     fn from(value_meta: ValueMeta) -> Self {
-        Bytes::from_iter(value_meta.consistent_hash_value.to_le_bytes().into_iter())
+        Bytes::from_iter(value_meta.vnode.to_le_bytes().into_iter())
     }
 }
 
 impl ValueMeta {
-    pub fn new_with_consistent_hash_value(consistent_hash_value: u16) -> Self {
-        Self {
-            consistent_hash_value,
-        }
+    pub fn new_with_vnode(vnode: VirtualNode) -> Self {
+        Self { vnode }
     }
 
     pub fn encode(&self, buf: &mut impl BufMut) {
-        buf.put_u16_le(self.consistent_hash_value);
+        buf.put_u16_le(self.vnode);
     }
 
     pub fn decode(mut buf: impl Buf) -> Self {
-        let consistent_hash_value = buf.get_u16_le();
-        Self {
-            consistent_hash_value,
-        }
+        let vnode = buf.get_u16_le();
+        Self { vnode }
     }
 }
 
@@ -125,9 +122,7 @@ mod tests {
     #[test]
     fn test_value_meta_decode_encode() {
         let mut result = vec![];
-        let value_meta = ValueMeta {
-            consistent_hash_value: 5678,
-        };
+        let value_meta = ValueMeta { vnode: 5678 };
         value_meta.encode(&mut result);
         assert_eq!(ValueMeta::decode(&mut &result[..]), value_meta);
     }

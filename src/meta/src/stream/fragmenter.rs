@@ -14,7 +14,6 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::ops::Range;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
@@ -39,7 +38,7 @@ use crate::stream::graph::{
 /// [`StreamFragmenter`] generates the proto for interconnected actors for a streaming pipeline.
 pub struct StreamFragmenter<S> {
     /// fragment graph field, transformed from input streaming plan.
-    fragment_graph: StreamFragmentGraph,
+    pub(super) fragment_graph: StreamFragmentGraph,
 
     /// stream graph builder, to build streaming DAG.
     stream_graph: StreamGraphBuilder<S>,
@@ -62,6 +61,9 @@ pub struct StreamFragmenter<S> {
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
+
+    // TODO: remove this when we deprecate Java frontend.
+    is_legacy_frontend: bool,
 }
 
 impl<S> StreamFragmenter<S>
@@ -72,6 +74,7 @@ where
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hash_mapping: Vec<ParallelUnitId>,
+        is_legacy_frontend: bool,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
@@ -82,6 +85,7 @@ where
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
+            is_legacy_frontend,
         }
     }
 
@@ -209,14 +213,18 @@ where
     /// Generate fragment DAG from input streaming plan by their dependency.
     fn generate_fragment_graph(&mut self, stream_node: StreamNode) -> Result<()> {
         let stream_node = self.rewrite_stream_node(stream_node)?;
-        self.build_and_add_fragment(&stream_node)?;
+        self.build_and_add_fragment(stream_node)?;
         Ok(())
     }
 
     /// Use the given `stream_node` to create a fragment and add it to graph.
-    fn build_and_add_fragment(&mut self, stream_node: &StreamNode) -> Result<StreamFragment> {
-        let mut fragment = self.new_stream_fragment(stream_node.clone());
-        self.build_fragment(&mut fragment, stream_node)?;
+    pub(super) fn build_and_add_fragment(
+        &mut self,
+        stream_node: StreamNode,
+    ) -> Result<StreamFragment> {
+        let mut fragment = self.new_stream_fragment();
+        let node = self.build_fragment(&mut fragment, stream_node)?;
+        fragment.seal_node(node);
         self.fragment_graph.add_fragment(fragment.clone());
         Ok(fragment)
     }
@@ -227,8 +235,8 @@ where
     fn build_fragment(
         &mut self,
         current_fragment: &mut StreamFragment,
-        stream_node: &StreamNode,
-    ) -> Result<()> {
+        mut stream_node: StreamNode,
+    ) -> Result<StreamNode> {
         // Update current fragment based on the node we're visiting.
         match stream_node.get_node()? {
             Node::SourceNode(_) => current_fragment.fragment_type = FragmentType::Source,
@@ -238,81 +246,79 @@ where
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
 
-            // TODO: Force Chain to be singleton as a workaround. Remove this if parallel Chain is
-            // supported
-            Node::ChainNode(_) => current_fragment.is_singleton = true,
+            // TODO: Remove this when we deprecate Java frontend.
+            Node::ChainNode(_) => current_fragment.is_singleton = self.is_legacy_frontend,
 
             _ => {}
         };
 
+        let inputs = std::mem::take(&mut stream_node.input);
+
         // Visit plan children.
-        for child_node in stream_node.get_input() {
-            match child_node.get_node()? {
-                // Exchange node indicates a new child fragment.
-                Node::ExchangeNode(exchange_node) => {
-                    assert_eq!(child_node.input.len(), 1);
-                    let child_fragment = self.build_and_add_fragment(&child_node.input[0])?;
-                    self.fragment_graph.add_edge(
-                        child_fragment.fragment_id,
-                        current_fragment.fragment_id,
-                        StreamFragmentEdge {
-                            dispatch_strategy: exchange_node.get_strategy()?.clone(),
-                            same_worker_node: false,
-                            link_id: child_node.operator_id,
-                        },
-                    );
-
-                    let is_simple_dispatcher =
-                        exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
-                    if is_simple_dispatcher {
-                        current_fragment.is_singleton = true;
+        let inputs = inputs
+            .into_iter()
+            .map(|mut child_node| -> Result<StreamNode> {
+                match child_node.get_node()? {
+                    Node::ExchangeNode(_) if child_node.input.is_empty() => {
+                        // When exchange node is generated when doing rewrites, it could be having
+                        // zero input. In this case, we won't recursively
+                        // visit its children.
+                        Ok(child_node)
                     }
-                }
+                    // Exchange node indicates a new child fragment.
+                    Node::ExchangeNode(exchange_node) => {
+                        let exchange_node = exchange_node.clone();
 
-                // For HashJoin nodes, attempting to rewrite to delta joins only on inner join with
-                // only equal conditions
-                Node::HashJoinNode(hash_join_node)
-                    if hash_join_node.get_join_type()? == JoinType::Inner
-                        && hash_join_node.condition.is_none() =>
-                {
-                    const ENABLE_DELTA_JOIN: bool = false;
-                    if ENABLE_DELTA_JOIN {
-                        // TODO, will implement rewrite later
-                        let child_fragment = self.rewrite_delta_join(child_node)?;
-                        let link_id = self.gen_operator_id() as u64;
+                        assert_eq!(child_node.input.len(), 1);
+                        let child_fragment =
+                            self.build_and_add_fragment(child_node.input.remove(0))?;
                         self.fragment_graph.add_edge(
                             child_fragment.fragment_id,
                             current_fragment.fragment_id,
                             StreamFragmentEdge {
-                                dispatch_strategy: DispatchStrategy {
-                                    r#type: DispatcherType::NoShuffle.into(),
-                                    column_indices: vec![],
-                                },
-                                same_worker_node: true,
-                                link_id,
+                                dispatch_strategy: exchange_node.get_strategy()?.clone(),
+                                same_worker_node: false,
+                                link_id: child_node.operator_id,
                             },
                         );
-                    } else {
-                        self.build_fragment(current_fragment, child_node)?;
+
+                        let is_simple_dispatcher =
+                            exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
+                        if is_simple_dispatcher {
+                            current_fragment.is_singleton = true;
+                        }
+
+                        Ok(child_node)
                     }
-                }
 
-                // For other children, visit recursively.
-                _ => {
-                    self.build_fragment(current_fragment, child_node)?;
-                }
-            };
-        }
+                    // For HashJoin nodes, attempting to rewrite to delta joins only on inner join
+                    // with only equal conditions
+                    Node::HashJoinNode(hash_join_node)
+                        if hash_join_node.get_join_type()? == JoinType::Inner
+                            && hash_join_node.condition.is_none() =>
+                    {
+                        const ENABLE_DELTA_JOIN: bool = false;
+                        if ENABLE_DELTA_JOIN {
+                            self.build_delta_join(current_fragment, child_node)
+                        } else {
+                            self.build_fragment(current_fragment, child_node)
+                        }
+                    }
 
-        Ok(())
+                    // For other children, visit recursively.
+                    _ => self.build_fragment(current_fragment, child_node),
+                }
+            })
+            .try_collect()?;
+
+        stream_node.input = inputs;
+
+        Ok(stream_node)
     }
 
     /// Create a new stream fragment with given node with generating a fragment id.
-    fn new_stream_fragment(&mut self, node: StreamNode) -> StreamFragment {
-        let fragment = StreamFragment::new(
-            LocalFragmentId::Local(self.next_local_fragment_id),
-            Arc::new(node),
-        );
+    fn new_stream_fragment(&mut self) -> StreamFragment {
+        let fragment = StreamFragment::new(LocalFragmentId::Local(self.next_local_fragment_id));
 
         self.next_local_fragment_id += 1;
 
@@ -328,7 +334,7 @@ where
     }
 
     /// Generate an operator id
-    fn gen_operator_id(&mut self) -> u32 {
+    pub(super) fn gen_operator_id(&mut self) -> u32 {
         self.next_operator_id -= 1;
         self.next_operator_id
     }
@@ -346,7 +352,7 @@ where
             self.hash_mapping.iter().unique().count() as u32
         };
 
-        let node = &current_fragment.node;
+        let node = current_fragment.get_node();
         let actor_ids = self
             .gen_actor_ids(parallel_degree)
             .into_iter()
@@ -354,7 +360,8 @@ where
             .collect_vec();
 
         for id in &actor_ids {
-            let actor_builder = StreamActorBuilder::new(*id, fragment_id, node.clone());
+            let actor_builder =
+                StreamActorBuilder::new(*id, fragment_id, node.clone(), parallel_degree);
             self.stream_graph.add_actor(actor_builder);
         }
 

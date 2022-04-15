@@ -15,15 +15,11 @@
 #![allow(dead_code)]
 
 use risingwave_common::error::Result;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::meta::ParallelUnitMapping;
 
 use super::MetadataModel;
 use crate::cluster::ParallelUnitId;
-
-/// `VirtualKey` is the logical key for consistent hash. One `VirtualKey` corresponds to exactly
-/// one `ParallelUnit` or `Actor`, while a `ParallelUnit` or `Actor` can correspond to a number
-/// of `VirtualKey`s.
-pub type VirtualKey = usize;
 
 /// Column family name for hash mapping.
 const HASH_MAPPING_CF_NAME: &str = "cf/hash_mapping";
@@ -67,17 +63,18 @@ impl ConsistentHashMapping {
 
     pub fn update_mapping(
         &mut self,
-        virtual_key: VirtualKey,
+        vnode: VirtualNode,
         parallel_unit_id: ParallelUnitId,
     ) -> Result<ParallelUnitId> {
+        let vnode = vnode as usize;
         assert!(
-            virtual_key < self.0.get_hash_mapping().len(),
-            "Cannot update virtual key {} because there are only {} slots.",
-            virtual_key,
+            vnode < self.0.get_hash_mapping().len(),
+            "Cannot update virtual node {} because there are only {} slots.",
+            vnode,
             self.0.get_hash_mapping().len()
         );
-        let old_id = self.0.hash_mapping[virtual_key];
-        self.0.hash_mapping[virtual_key] = parallel_unit_id;
+        let old_id = self.0.hash_mapping[vnode];
+        self.0.hash_mapping[vnode] = parallel_unit_id;
         Ok(old_id)
     }
 
