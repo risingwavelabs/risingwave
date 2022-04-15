@@ -281,7 +281,7 @@ where
                         let is_simple_dispatcher =
                             exchange_node.get_strategy()?.get_type()? == DispatcherType::Simple;
                         if is_simple_dispatcher {
-                            panic!("simple dispatcher is not supported any more");
+                            current_fragment.is_singleton = true;
                         }
 
                         Ok(child_node)
