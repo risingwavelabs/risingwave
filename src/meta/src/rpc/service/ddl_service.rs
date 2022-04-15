@@ -417,6 +417,7 @@ where
             self.env.id_gen_manager_ref(),
             self.fragment_manager.clone(),
             hash_mapping,
+            false,
         );
         let graph = fragmenter.generate_graph(&stream_node, &mut ctx).await?;
         let table_fragments = TableFragments::new(mview_id, graph);
