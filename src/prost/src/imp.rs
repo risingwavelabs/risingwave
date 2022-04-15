@@ -84,11 +84,12 @@ impl crate::catalog::Source {
 
 impl crate::plan::ColumnDesc {
     // Used for test
-    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
+    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32, is_nested: bool) -> Self {
         Self {
             column_type: Some(data_type),
             column_id,
             name: name.to_string(),
+            is_nested,
             ..Default::default()
         }
     }
@@ -99,6 +100,7 @@ impl crate::plan::ColumnDesc {
         column_id: i32,
         type_name: &str,
         fields: Vec<ColumnDesc>,
+        is_nested: bool,
     ) -> Self {
         Self {
             column_type: Some(DataType {
@@ -110,6 +112,7 @@ impl crate::plan::ColumnDesc {
             name: name.to_string(),
             type_name: type_name.to_string(),
             field_descs: fields,
+            is_nested,
         }
     }
 }

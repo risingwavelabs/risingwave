@@ -41,6 +41,8 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
+  // If the column is in the field_descs, is_nested will be true.
+  bool is_nested = 6;
 }
 
 message OrderedColumnDesc {

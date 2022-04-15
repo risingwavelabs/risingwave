@@ -32,20 +32,8 @@ use crate::executor_v2::{
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc {
-            data_type: DataType::Int32,
-            column_id: ColumnId::new(1),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int32,
-            column_id: ColumnId::new(2),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::with_name(DataType::Int32, "rowid_column", ColumnId::new(1)),
+        ColumnDesc::with_name(DataType::Int32, "join_column", ColumnId::new(2)),
     ]
 }
 
@@ -144,20 +132,8 @@ async fn create_arrangement(
 /// | b  |       |      | 2 -> 3  |
 async fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
-        ColumnDesc {
-            data_type: DataType::Int32,
-            column_id: ColumnId::new(1),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int32,
-            column_id: ColumnId::new(2),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::with_name(DataType::Int32, "join_column", ColumnId::new(1)),
+        ColumnDesc::with_name(DataType::Int32, "rowid_column", ColumnId::new(2)),
     ];
 
     // Prepare source chunks.

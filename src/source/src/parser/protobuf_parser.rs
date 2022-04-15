@@ -128,7 +128,12 @@ impl ProtobufParser {
         let mut index = 0;
         msg.fields()
             .iter()
-            .map(|f| Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index))
+            .map(|f| {
+                let mut col =
+                    Self::pb_field_to_col_desc(f, &self.descriptors, "".to_string(), &mut index)?;
+                col.is_nested = false;
+                Ok(col)
+            })
             .collect::<Result<Vec<ColumnDesc>>>()
     }
 
@@ -161,6 +166,7 @@ impl ProtobufParser {
                 column_type: Some(data_type.to_protobuf()),
                 field_descs: column_vec,
                 type_name: m.name().to_string(),
+                is_nested: true,
             })
         } else {
             *index += 1;
@@ -168,6 +174,7 @@ impl ProtobufParser {
                 column_id: *index, // need increment
                 name: lastname + field_descriptor.name(),
                 column_type: Some(data_type.to_protobuf()),
+                is_nested: true,
                 ..Default::default()
             })
         }
@@ -483,21 +490,31 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 3),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 4),
+            ColumnDesc::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.address",
+                3,
+                true,
+            ),
+            ColumnDesc::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.zipcode",
+                4,
+                true,
+            ),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2),
-            ColumnDesc::new_struct("country.city", 5, ".test.City", city),
-            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 2, true),
+            ColumnDesc::new_struct("country.city", 5, ".test.City", city, true),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.zipcode", 6, true),
         ];
         assert_eq!(
             columns,
             vec![
-                ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1),
-                ColumnDesc::new_struct("country", 7, ".test.Country", country),
-                ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8),
-                ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9),
+                ColumnDesc::new_atomic(DataType::Int32.to_protobuf(), "id", 1, false),
+                ColumnDesc::new_struct("country", 7, ".test.Country", country, false),
+                ColumnDesc::new_atomic(DataType::Int64.to_protobuf(), "zipcode", 8, false),
+                ColumnDesc::new_atomic(DataType::Float32.to_protobuf(), "rate", 9, false),
             ]
         );
     }

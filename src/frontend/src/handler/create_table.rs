@@ -48,6 +48,7 @@ pub fn bind_sql_columns(columns: Vec<ColumnDef>) -> Result<Vec<ColumnCatalog>> {
                 name: column.name.value,
                 field_descs: vec![],
                 type_name: "".to_string(),
+                is_nested: false,
             });
         }
         column_descs

@@ -66,6 +66,7 @@ pub fn row_id_column_desc() -> ColumnDesc {
         name: gen_row_id_column_name(0),
         field_descs: vec![],
         type_name: "".to_string(),
+        is_nested: false,
     }
 }
 

@@ -68,6 +68,7 @@ pub struct ColumnDesc {
     pub name: String, // for debugging
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
+    pub is_nested: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -84,6 +85,18 @@ impl ColumnDesc {
             name: String::new(),
             field_descs: vec![],
             type_name: String::new(),
+            is_nested: false,
+        }
+    }
+
+    pub fn with_name(data_type: DataType, name: impl Into<String>, column_id: ColumnId) -> Self {
+        Self {
+            data_type,
+            column_id,
+            name: name.into(),
+            field_descs: vec![],
+            type_name: "".to_string(),
+            is_nested: false,
         }
     }
 
@@ -100,6 +113,7 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
+            is_nested: self.is_nested,
         }
     }
 
@@ -112,23 +126,23 @@ impl ColumnDesc {
         descs
     }
 
-    #[cfg(test)]
-    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32) -> Self {
+    pub fn new_atomic(data_type: DataType, name: &str, column_id: i32, is_nested: bool) -> Self {
         Self {
             data_type,
             column_id: ColumnId::new(column_id),
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            is_nested,
         }
     }
 
-    #[cfg(test)]
     pub fn new_struct(
         name: &str,
         column_id: i32,
         type_name: &str,
         fields: Vec<ColumnDesc>,
+        is_nested: bool,
     ) -> Self {
         let data_type = DataType::Struct {
             fields: fields
@@ -143,6 +157,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
+            is_nested,
         }
     }
 
@@ -164,6 +179,7 @@ impl From<&Field> for ColumnDesc {
             name: field.name.clone(),
             field_descs: field.sub_fields.iter().map(|d| d.into()).collect_vec(),
             type_name: field.type_name.clone(),
+            is_nested: false,
         }
     }
 }
@@ -192,6 +208,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 name: prost.name,
                 type_name: prost.type_name,
                 field_descs: descs,
+                is_nested: prost.is_nested,
             }
         } else {
             Self {
@@ -200,6 +217,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 name: prost.name,
                 type_name: prost.type_name,
                 field_descs: vec![],
+                is_nested: prost.is_nested,
             }
         }
     }
@@ -219,6 +237,7 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
+            is_nested: c.is_nested,
         }
     }
 }
@@ -241,26 +260,41 @@ pub mod tests {
 
     pub fn build_prost_desc() -> ProstColumnDesc {
         let city = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
+            ProstColumnDesc::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.address",
+                2,
+                false,
+            ),
+            ProstColumnDesc::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.city.zipcode",
+                3,
+                false,
+            ),
         ];
         let country = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            ProstColumnDesc::new_atomic(
+                DataType::Varchar.to_protobuf(),
+                "country.address",
+                1,
+                false,
+            ),
+            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city, false),
         ];
-        ProstColumnDesc::new_struct("country", 5, ".test.Country", country)
+        ProstColumnDesc::new_struct("country", 5, ".test.Country", country, true)
     }
 
     pub fn build_desc() -> ColumnDesc {
         let city = vec![
-            ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2),
-            ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 3),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.address", 2, true),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.city.zipcode", 3, true),
         ];
         let country = vec![
-            ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1),
-            ColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            ColumnDesc::new_atomic(DataType::Varchar, "country.address", 1, true),
+            ColumnDesc::new_struct("country.city", 4, ".test.City", city, true),
         ];
-        ColumnDesc::new_struct("country", 5, ".test.Country", country)
+        ColumnDesc::new_struct("country", 5, ".test.Country", country, false)
     }
 
     #[test]

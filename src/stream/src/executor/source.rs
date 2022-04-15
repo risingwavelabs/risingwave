@@ -396,27 +396,9 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            ColumnDesc {
-                column_id: ColumnId::from(0),
-                data_type: rowid_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(1),
-                data_type: col1_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(2),
-                data_type: col2_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
+            ColumnDesc::unnamed(ColumnId::from(0), rowid_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(1), col1_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(2), col2_type.clone()),
         ];
         let source_manager = MemSourceManager::new();
         source_manager.create_table_source_v2(&table_id, table_columns)?;
@@ -547,27 +529,9 @@ mod tests {
         let col2_type = DataType::Varchar;
 
         let table_columns = vec![
-            ColumnDesc {
-                column_id: ColumnId::from(0),
-                data_type: rowid_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(1),
-                data_type: col1_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
-            ColumnDesc {
-                column_id: ColumnId::from(2),
-                data_type: col2_type.clone(),
-                name: String::new(),
-                field_descs: vec![],
-                type_name: "".to_string(),
-            },
+            ColumnDesc::unnamed(ColumnId::from(0), rowid_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(1), col1_type.clone()),
+            ColumnDesc::unnamed(ColumnId::from(2), col2_type.clone()),
         ];
         let source_manager = MemSourceManager::new();
         source_manager.create_table_source_v2(&table_id, table_columns)?;

@@ -202,13 +202,7 @@ async fn test_table_v2_materialize() -> Result<()> {
     let column_descs = all_column_ids
         .into_iter()
         .zip_eq(all_schema.fields.iter().cloned())
-        .map(|(column_id, field)| ColumnDesc {
-            data_type: field.data_type,
-            column_id,
-            name: field.name,
-            field_descs: vec![],
-            type_name: "".to_string(),
-        })
+        .map(|(column_id, field)| ColumnDesc::with_name(field.data_type, field.name, column_id))
         .collect_vec();
 
     // Since we have not polled `Materialize`, we cannot scan anything from this table

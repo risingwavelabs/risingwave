@@ -427,20 +427,8 @@ mod tests {
                 table_id: 0.into(),
                 pk: vec![],
                 columns: vec![
-                    ColumnDesc {
-                        data_type: DataType::Int32,
-                        column_id: 0.into(),
-                        name: "a".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
-                    ColumnDesc {
-                        data_type: DataType::Float64,
-                        column_id: 1.into(),
-                        name: "b".to_string(),
-                        type_name: String::new(),
-                        field_descs: vec![],
-                    },
+                    ColumnDesc::with_name(DataType::Int32, "a", 0.into()),
+                    ColumnDesc::with_name(DataType::Float64, "b", 1.into()),
                 ],
             }),
             ctx,

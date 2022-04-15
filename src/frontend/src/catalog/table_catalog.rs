@@ -184,13 +184,16 @@ mod tests {
                                 DataType::Varchar.to_protobuf(),
                                 "country.address",
                                 2,
+                                true,
                             ),
                             ProstColumnDesc::new_atomic(
                                 DataType::Varchar.to_protobuf(),
                                 "country.zipcode",
                                 3,
+                                true,
                             ),
                         ],
+                        false,
                     )),
                     is_hidden: false,
                 },
@@ -219,22 +222,21 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "country.address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "country.zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(
+                                    DataType::Varchar,
+                                    "country.address",
+                                    2,
+                                    true
+                                ),
+                                ColumnDesc::new_atomic(
+                                    DataType::Varchar,
+                                    "country.zipcode",
+                                    3,
+                                    true
+                                ),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            is_nested: false
                         },
                         is_hidden: false
                     }
