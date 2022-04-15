@@ -32,7 +32,7 @@ use crate::hummock::{HummockError, HummockResult, SstableStoreRef};
 use crate::monitor::StateStoreMetrics;
 
 #[derive(Debug)]
-pub struct SyncItem {
+pub struct EpochNotifier {
     /// Epoch to sync. None means syncing all epochs.
     pub epoch: Option<u64>,
     /// Notifier to notify on sync finishes
@@ -42,8 +42,7 @@ pub struct SyncItem {
 #[derive(Debug)]
 pub enum SharedBufferUploaderItem {
     Batch(SharedBufferBatch),
-    Sync(SyncItem),
-    Reset(u64),
+    Sync(EpochNotifier),
 }
 
 pub struct SharedBufferUploader {
@@ -69,6 +68,7 @@ pub struct SharedBufferUploader {
 }
 
 impl SharedBufferUploader {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         options: Arc<StorageConfig>,
         local_version_manager: Arc<LocalVersionManager>,
@@ -166,7 +166,6 @@ impl SharedBufferUploader {
             .map_err(HummockError::meta_error)?;
 
         // Ensure the added data is available locally
-        // RIVIEW ME: need assert?
         self.local_version_manager.try_set_version(version);
 
         Ok(flush_size)
@@ -184,20 +183,17 @@ impl SharedBufferUploader {
                     .or_insert(Vec::new())
                     .push(batch);
             }
-            SharedBufferUploaderItem::Sync(sync_item) => {
+            SharedBufferUploaderItem::Sync(epoch_notifier) => {
                 // Flush buffer to S3.
-                let res = self.flush(sync_item.epoch).await;
+                let res = self.flush(epoch_notifier.epoch).await;
                 // Notify sync notifier.
-                if let Some(tx) = sync_item.notifier {
+                if let Some(tx) = epoch_notifier.notifier {
                     tx.send(res).map_err(|_| {
                         HummockError::shared_buffer_error(
                             "Failed to notify shared buffer sync because of send drop",
                         )
                     })?;
                 }
-            }
-            SharedBufferUploaderItem::Reset(epoch) => {
-                self.batches_to_upload.remove(&epoch);
             }
         }
         Ok(())

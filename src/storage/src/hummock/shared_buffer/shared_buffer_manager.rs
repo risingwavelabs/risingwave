@@ -31,7 +31,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferItem,
 };
 use crate::hummock::shared_buffer::shared_buffer_uploader::{
-    SharedBufferUploader, SharedBufferUploaderItem, SyncItem,
+    EpochNotifier, SharedBufferUploader, SharedBufferUploaderItem,
 };
 use crate::hummock::utils::range_overlap;
 use crate::hummock::value::HummockValue;
@@ -159,6 +159,10 @@ impl SharedBufferManager {
         self.len() == 0
     }
 
+    pub fn scheduled_size(&self) -> usize {
+        self.scheduled_size.load(Ordering::Acquire)
+    }
+
     /// Puts a write batch into shared buffer. The batch will be synced to S3 asynchronously.
     pub async fn write_batch(
         &self,
@@ -204,7 +208,7 @@ impl SharedBufferManager {
     pub async fn sync(&self, epoch: Option<HummockEpoch>) -> HummockResult<()> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         self.uploader_tx
-            .send(SharedBufferUploaderItem::Sync(SyncItem {
+            .send(SharedBufferUploaderItem::Sync(EpochNotifier {
                 epoch,
                 notifier: Some(tx),
             }))
@@ -231,8 +235,8 @@ impl SharedBufferManager {
             .entry(epoch)
             .or_insert(BTreeMap::new())
             .insert(batch.end_user_key().to_vec(), batch.clone());
-        // REVIEW ME: Update buffered size?
         inner.buffered_size += batch_size;
+        self.scheduled_size.fetch_add(batch_size, Ordering::Release);
         Ok(())
     }
 
@@ -332,9 +336,9 @@ impl SharedBufferManager {
             .into_iter()
             .flat_map(|(_epoch, buffer)| buffer.into_iter().map(|(_end_key, batch)| batch.len()))
             .sum();
-        inner.buffered_size -= deleted_size;
         self.scheduled_size
             .fetch_sub(deleted_size, Ordering::Release);
+        inner.buffered_size -= deleted_size;
         drop(inner);
         self.release_notifier.notify_one();
     }
@@ -342,29 +346,6 @@ impl SharedBufferManager {
     /// This function was called while [`SharedBufferManager`] exited.
     pub async fn wait(self) -> StorageResult<()> {
         self.uploader_handle.await.unwrap()
-    }
-
-    pub fn reset(&mut self, epoch: u64) {
-        // Reset uploader item.
-        self.uploader_tx
-            .send(SharedBufferUploaderItem::Reset(epoch))
-            .unwrap();
-        // Remove items of the given epoch from shared buffer
-        let mut inner = self.inner.write();
-        let buffer = match inner.shared_buffer.remove(&epoch) {
-            None => return,
-            Some(buffer) => buffer,
-        };
-        // Update buffer size and scheduled size.
-        let deleted_size = buffer
-            .into_iter()
-            .map(|(_end_key, batch)| batch.len())
-            .sum();
-        inner.buffered_size -= deleted_size;
-        self.scheduled_size
-            .fetch_sub(deleted_size, Ordering::Release);
-        drop(inner);
-        self.release_notifier.notify_one();
     }
 
     #[cfg(test)]
@@ -811,47 +792,5 @@ mod tests {
             merge_iterator.next().await.unwrap();
         }
         assert!(!merge_iterator.is_valid());
-    }
-
-    #[tokio::test]
-    async fn test_shared_buffer_manager_reset() {
-        let mut shared_buffer_manager = new_shared_buffer_manager().await;
-
-        let mut keys = Vec::new();
-        for i in 0..4 {
-            keys.push(format!("key_test_{:05}", i).as_bytes().to_vec());
-        }
-        let mut idx = 0;
-
-        // Write a batch
-        let epoch = 1;
-        let shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
-
-        // Get and check value with epoch 0..=epoch1
-        for (idx, key) in keys.iter().enumerate() {
-            assert_eq!(
-                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
-                shared_buffer_items[idx].1
-            );
-        }
-
-        // Reset shared buffer. Expect all keys are gone.
-        shared_buffer_manager.reset(epoch);
-        for item in &shared_buffer_items {
-            assert_eq!(shared_buffer_manager.get(item.0.as_slice(), ..=epoch), None);
-        }
-
-        // Generate new items overlapping with old items and check
-        keys.push(format!("key_test_{:05}", 100).as_bytes().to_vec());
-        let epoch = 1;
-        let new_shared_buffer_items =
-            generate_and_write_batch(&keys, &[], epoch, &mut idx, &shared_buffer_manager).await;
-        for (idx, key) in keys.iter().enumerate() {
-            assert_eq!(
-                shared_buffer_manager.get(key.as_slice(), ..=epoch).unwrap(),
-                new_shared_buffer_items[idx].1
-            );
-        }
     }
 }
