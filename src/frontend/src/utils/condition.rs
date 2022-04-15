@@ -16,11 +16,10 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::types::{DataType, ScalarImpl};
 
 use crate::expr::{
     fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+    ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -73,50 +72,12 @@ impl Condition {
         self.conjunctions.is_empty()
     }
 
-    pub fn to_expr(self) -> ExprImpl {
-        let mut iter = self.conjunctions.into_iter();
-        if let Some(mut ret) = iter.next() {
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
-    }
-
-    // TODO(TaoWu): We might also use `Vec<ExprImpl>` form of predicates in compute node,
-    // rather than using `AND` to combine them.
-    pub fn as_expr(&self) -> ExprImpl {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            ret
-        } else {
-            Literal::new(Some(ScalarImpl::Bool(true)), DataType::Boolean).into()
-        }
-    }
-
     /// Convert condition to an expression. If always true, return `None`.
     pub fn as_expr_unless_true(&self) -> Option<ExprImpl> {
-        let mut iter = self.conjunctions.iter();
-        if let Some(e) = iter.next() {
-            let mut ret = e.clone();
-            for expr in iter {
-                ret = FunctionCall::new(ExprType::And, vec![ret, expr.clone()])
-                    .unwrap()
-                    .into();
-            }
-            Some(ret)
-        } else {
+        if self.always_true() {
             None
+        } else {
+            Some(self.clone().into())
         }
     }
 
@@ -288,9 +249,10 @@ impl Condition {
 #[cfg(test)]
 mod tests {
     use rand::Rng;
+    use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::InputRef;
+    use crate::expr::{FunctionCall, InputRef};
 
     #[test]
     fn test_split() {

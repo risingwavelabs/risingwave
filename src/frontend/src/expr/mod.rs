@@ -243,6 +243,16 @@ impl From<CorrelatedInputRef> for ExprImpl {
     }
 }
 
+impl From<Condition> for ExprImpl {
+    fn from(c: Condition) -> Self {
+        merge_expr_by_binary(
+            c.conjunctions.into_iter(),
+            ExprType::And,
+            ExprImpl::literal_bool(true),
+        )
+    }
+}
+
 /// A custom Debug implementation that is more concise and suitable to use with
 /// [`std::fmt::Formatter::debug_list`] in plan nodes. If the verbose output is preferred, it is
 /// still available via `{:#?}`.
@@ -284,6 +294,8 @@ macro_rules! assert_eq_input_ref {
 
 #[cfg(test)]
 pub(crate) use assert_eq_input_ref;
+
+use crate::utils::Condition;
 
 #[cfg(test)]
 mod tests {

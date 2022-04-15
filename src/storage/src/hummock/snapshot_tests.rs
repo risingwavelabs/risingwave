@@ -22,6 +22,9 @@ use super::*;
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::test_utils::default_config_for_test;
 use crate::object::{InMemObjectStore, ObjectStoreImpl};
+use crate::storage_value::StorageValue;
+use crate::store::StateStoreIter;
+use crate::StateStore;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
