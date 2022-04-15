@@ -42,7 +42,7 @@ impl StreamTableScan {
             ctx,
             logical.schema().clone(),
             logical.base.pk_indices.clone(),
-            Distribution::HashShard(logical.base.pk_indices.clone()),
+            Distribution::AnyShard,
             false, // TODO: determine the `append-only` field of table scan
         );
         Self {
