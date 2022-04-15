@@ -46,6 +46,11 @@ impl Properties {
     pub fn get_kafka(&self, key: &str) -> Result<String> {
         self.get_inner(key, " when using Kafka source")
     }
+
+    /// It's an alternative of `get` but returns kinesis-specifc error hints.
+    pub fn get_kinesis(&self, key: &str) -> Result<String> {
+        self.get_inner(key, " when using Kinesis source")
+    }
 }
 
 /// [`AnyhowProperties`] returns [`anyhow::Result`] if key is not found.
