@@ -100,8 +100,9 @@ where
 
         let mut new_visibility = BitmapBuilder::with_capacity(n);
         for hv in &hash_values {
-            new_visibility
-                .append((hv % self.parallel_info.degree as u64) == self.parallel_info.index as u64);
+            new_visibility.append(
+                (hv.0 % self.parallel_info.degree as u64) == self.parallel_info.index as u64,
+            );
         }
         let new_visibility = new_visibility.finish();
         if new_visibility.num_high_bits() > 0 {
