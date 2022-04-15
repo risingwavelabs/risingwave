@@ -117,7 +117,7 @@ impl PlanRoot {
 
         // Subquery Unnesting.
         plan = {
-            let rules = vec![ApplyProjFilterRule::create()];
+            let rules = vec![ApplyProjAggRule::create(), ApplyProjFilterRule::create()];
             let heuristic_optimizer = HeuristicOptimizer::new(ApplyOrder::TopDown, rules);
             heuristic_optimizer.optimize(plan)
         };
@@ -133,8 +133,8 @@ impl PlanRoot {
             heuristic_optimizer.optimize(plan)
         };
 
-        // // Prune Columns
-        // plan = plan.prune_col(&self.out_fields);
+        // Prune Columns
+        plan = plan.prune_col(&self.out_fields);
 
         plan = {
             let rules = vec![

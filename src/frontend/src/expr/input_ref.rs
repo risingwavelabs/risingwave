@@ -23,7 +23,7 @@ use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
-    index: usize,
+    pub index: usize,
     data_type: DataType,
 }
 
