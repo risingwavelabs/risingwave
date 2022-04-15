@@ -30,15 +30,14 @@ pub struct SourceCatalog {
 }
 
 impl SourceCatalog {
-    /// Extract `field_descs` from `column_desc` and add in source catalog.
+    /// Extract `field_descs` and add in `catalog.columns`.
     pub fn flatten(mut self) -> Self {
         let mut catalogs = vec![];
         for col in &self.columns {
-            // Extract `field_descs` and return `column_catalogs`.
             catalogs.append(
                 &mut col
                     .column_desc
-                    .get_column_descs()
+                    .flatten()
                     .into_iter()
                     .map(|c| ColumnCatalog {
                         column_desc: c,

@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
 use super::bind_context::ColumnBinding;
 use super::{BoundQuery, BoundWindowTableFunction, WindowTableFunctionKind, UNNAMED_SUBQUERY};
 use crate::binder::Binder;
+use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{CatalogError, TableId};
@@ -230,7 +231,13 @@ impl Binder {
 
             catalog
                 .get_table_by_name(&self.db_name, schema_name, table_name)
-                .map(|t| (Relation::BaseTable(Box::new(t.into())), t.columns.clone()))
+                .map(|t| {
+                    let table = t.clone().flatten();
+                    (
+                        Relation::BaseTable(Box::new((&table).into())),
+                        table.columns,
+                    )
+                })
                 .or_else(|_| {
                     catalog
                         .get_source_by_name(&self.db_name, schema_name, table_name)
@@ -247,14 +254,7 @@ impl Binder {
                 })?
         };
 
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
         Ok(ret)
     }
 
@@ -270,14 +270,7 @@ impl Binder {
             .clone();
         let columns = table_catalog.columns.clone();
 
-        self.bind_context(
-            columns
-                .iter()
-                .cloned()
-                .map(|c| (c.name().to_string(), c.data_type().clone(), c.is_hidden)),
-            table_name.to_string(),
-            alias,
-        )?;
+        self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
 
         let table_id = table_catalog.id();
         Ok(BoundBaseTable {
@@ -330,7 +323,7 @@ impl Binder {
     /// Fill the [`BindContext`](super::BindContext) for table.
     pub(super) fn bind_context(
         &mut self,
-        columns: impl IntoIterator<Item = (String, DataType, bool)>,
+        columns: impl IntoIterator<Item = ColumnCatalog>,
         table_name: String,
         alias: Option<TableAlias>,
     ) -> Result<()> {
@@ -346,17 +339,21 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, (name, data_type, is_hidden))| {
-                let name = match is_hidden {
-                    true => name,
-                    false => alias_iter.next().map(|t| t.value).unwrap_or(name),
+            .for_each(|(index, catalog)| {
+                let name = match catalog.is_hidden {
+                    true => catalog.name().to_string(),
+                    false => alias_iter
+                        .next()
+                        .map(|t| t.value)
+                        .unwrap_or_else(|| catalog.name().to_string()),
                 };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     name.clone(),
                     begin + index,
-                    data_type,
-                    is_hidden,
+                    catalog.data_type().clone(),
+                    catalog.is_hidden,
+                    catalog.column_desc,
                 ));
                 self.context
                     .indexs_of
@@ -400,7 +397,11 @@ impl Binder {
                 .names()
                 .into_iter()
                 .zip_eq(query.data_types().into_iter())
-                .map(|(x, y)| (x, y, false)),
+                //.map(|(x, y)| (x, y, false))
+                .map(|(x, y)| ColumnCatalog {
+                    column_desc: ColumnDesc::with_name(y, x, ColumnId::new(0)),
+                    is_hidden: false,
+                }),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;

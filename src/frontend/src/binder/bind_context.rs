@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 
@@ -25,6 +26,7 @@ pub struct ColumnBinding {
     pub index: usize,
     pub data_type: DataType,
     pub is_hidden: bool,
+    pub desc: ColumnDesc,
 }
 
 impl ColumnBinding {
@@ -34,6 +36,7 @@ impl ColumnBinding {
         index: usize,
         data_type: DataType,
         is_hidden: bool,
+        desc: ColumnDesc,
     ) -> Self {
         ColumnBinding {
             table_name,
@@ -41,6 +44,7 @@ impl ColumnBinding {
             index,
             data_type,
             is_hidden,
+            desc,
         }
     }
 }

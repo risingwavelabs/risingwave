@@ -65,6 +65,26 @@ impl TableCatalog {
         }
     }
 
+    /// Extract `field_descs` and add in `catalog.columns`.
+    pub fn flatten(mut self) -> Self {
+        let mut catalogs = vec![];
+        for col in &self.columns {
+            catalogs.append(
+                &mut col
+                    .column_desc
+                    .flatten()
+                    .into_iter()
+                    .map(|c| ColumnCatalog {
+                        column_desc: c,
+                        is_hidden: col.is_hidden,
+                    })
+                    .collect_vec(),
+            )
+        }
+        self.columns = catalogs.clone();
+        self
+    }
+
     /// Get a reference to the table catalog's name.
     pub fn name(&self) -> &str {
         self.name.as_ref()
@@ -109,7 +129,7 @@ impl From<ProstTable> for TableCatalog {
         let mut col_descs: HashMap<i32, ColumnDesc> = HashMap::new();
         let columns: Vec<ColumnCatalog> = tb.columns.into_iter().map(ColumnCatalog::from).collect();
         for catalog in columns.clone() {
-            for col_desc in catalog.column_desc.get_column_descs() {
+            for col_desc in catalog.column_desc.flatten() {
                 let col_name = col_desc.name.clone();
                 if !col_names.insert(col_name.clone()) {
                     panic!("duplicated column name {} in table {} ", col_name, tb.name)
