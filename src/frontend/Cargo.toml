@@ -28,7 +28,6 @@ pgwire = { path = "../utils/pgwire" }
 rand = "0.8"
 risingwave_common = { path = "../common" }
 risingwave_expr = { path = "../expr" }
-risingwave_meta = { path = "../meta" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }

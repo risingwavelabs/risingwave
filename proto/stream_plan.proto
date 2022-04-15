@@ -137,6 +137,9 @@ message LookupNode {
   repeated int32 column_mapping = 4;
 }
 
+// Special node for shared state. Merge and align barrier from upstreams.
+message UnionNode {}
+
 message StreamNode {
   oneof node {
     SourceNode source_node = 4;
@@ -155,6 +158,7 @@ message StreamNode {
     BatchPlanNode batch_plan_node = 17;
     LookupNode lookup_node = 20;
     ArrangeNode arrange_node = 21;
+    UnionNode union_node = 22;
   }
   // The id for the operator.
   uint64 operator_id = 1;
