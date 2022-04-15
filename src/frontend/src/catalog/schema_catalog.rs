@@ -15,13 +15,14 @@
 use std::collections::HashMap;
 
 use risingwave_common::catalog::TableId;
-use risingwave_meta::manager::SourceId;
 use risingwave_pb::catalog::{Schema as ProstSchema, Source as ProstSource, Table as ProstTable};
 use risingwave_pb::stream_plan::source_node::SourceType;
 
 use super::source_catalog::SourceCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::SchemaId;
+
+pub type SourceId = u32;
 
 #[derive(Clone, Debug)]
 pub struct SchemaCatalog {

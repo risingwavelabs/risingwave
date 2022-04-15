@@ -321,7 +321,14 @@ where
         mapping: Option<Vec<LocalActorId>>,
     ) {
         if dispatcher.get_type().unwrap() == DispatcherType::NoShuffle {
-            assert_eq!(upstream_actor_ids.len(), downstream_actor_ids.len());
+            assert_eq!(
+                upstream_actor_ids.len(),
+                downstream_actor_ids.len(),
+                "mismatched length when procssing no-shuffle exchange: {:?} -> {:?} on exchange {}",
+                upstream_actor_ids,
+                downstream_actor_ids,
+                exchange_operator_id
+            );
 
             // update 1v1 relationship
             upstream_actor_ids
