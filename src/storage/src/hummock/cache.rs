@@ -4,7 +4,7 @@ use std::sync::Arc;
 use spin::Mutex;
 
 const IN_CACHE: u8 = 1;
-const REVERSE_IN_CACHE: u8 = IN_CACHE.swap_bytes();
+const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 
 pub struct LRUHandle<K: PartialEq + Default, T> {
     next_hash: *mut LRUHandle<K, T>,
@@ -203,6 +203,10 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         {
             let old_ptr = self.lru.next;
             let tmp = self.table.remove((*old_ptr).hash, &(*old_ptr).key);
+            if tmp.is_null() {
+                println!("remove hash: {}", (*old_ptr).hash);
+            }
+            assert!((*old_ptr).is_in_cache());
             assert!(!tmp.is_null());
             self.lru_remove(old_ptr);
             (*old_ptr).set_in_cache(false);
@@ -240,6 +244,8 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         };
         handle.charge = charge;
         handle.hash = hash;
+        handle.refs = 0;
+        handle.flags = 0;
         handle.set_in_cache(true);
         self.evict_from_lru(charge, last_reference_list);
         if self.usage + charge > self.capacity {
@@ -275,6 +281,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         let last_reference = (*e).unref();
         if last_reference && (*e).is_in_cache() {
             if self.usage > self.capacity {
+                println!("remove {}", (*e).hash);
                 self.table.remove((*e).hash, &(*e).key);
                 (*e).set_in_cache(false);
             } else {
@@ -404,34 +411,54 @@ impl<K: PartialEq + Default, T> Drop for CachableEntry<K, T> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
     use std::sync::Arc;
 
     use rand::rngs::SmallRng;
     use rand::{RngCore, SeedableRng};
 
+    use super::*;
+    use crate::hummock::cache::{LRUHandle, IN_CACHE};
     use crate::hummock::LRUCache;
     pub struct Block {
         pub offset: u64,
+        pub sst: u64,
+    }
+    #[test]
+    fn test_cache_handle_basic() {
+        println!("not in cache: {}, in cache {}", REVERSE_IN_CACHE, IN_CACHE);
+        let mut h = Box::new(LRUHandle::new(1, Some(2)));
+        h.set_in_cache(true);
+        assert!(h.is_in_cache());
+        h.set_in_cache(false);
+        assert!(!h.is_in_cache());
     }
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LRUCache::<u64, Block>::new(2, 256, 16));
+        let cache = Arc::new(LRUCache::<(u64, u64), Block>::new(2, 256, 16));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
-        for _ in 0..10000 {
+        for _ in 0..100000 {
             let block_offset = rng.next_u64() % 1024;
-            if let Some(block) = cache.lookup(block_offset, &block_offset) {
+            let sst = rng.next_u64() % 1024;
+            let mut hasher = DefaultHasher::new();
+            sst.hash(&mut hasher);
+            block_offset.hash(&mut hasher);
+            let h = hasher.finish();
+            if let Some(block) = cache.lookup(h, &(sst, block_offset)) {
                 assert_eq!(block.value().offset, block_offset);
                 drop(block);
                 continue;
             }
             cache.insert(
-                block_offset,
-                block_offset,
+                (sst, block_offset),
+                h,
                 1,
                 Block {
                     offset: block_offset,
+                    sst,
                 },
             );
         }

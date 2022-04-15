@@ -95,31 +95,32 @@ lazy_static::lazy_static! {
 }
 
 async fn get_fake_block(sst: u64, offset: u64) -> HummockResult<Block> {
-    use std::time::Duration;
-    let stream_retry_interval = Duration::from_millis(1);
-    let mut min_interval = tokio::time::interval(stream_retry_interval);
-    IO_COUNT.fetch_add(1, Ordering::Relaxed);
-    min_interval.tick().await;
+    // use std::time::Duration;
+    // let stream_retry_interval = Duration::from_millis(10);
+    // let mut min_interval = tokio::time::interval(stream_retry_interval);
+    // IO_COUNT.fetch_add(1, Ordering::Relaxed);
+    // min_interval.tick().await;
     Ok(Block { sst, offset })
 }
 
 fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
+    IO_COUNT.store(0, Ordering::Relaxed);
     let pool = Builder::new_multi_thread()
         .enable_time()
-        .worker_threads(4)
+        .worker_threads(8)
         .build()
         .unwrap();
     let current = Runtime::new().unwrap();
     let mut handles = vec![];
-    for _ in 0..4 {
+    for i in 0..8 {
         let cache = block_cache.clone();
         let handle = pool.spawn(async move {
-            let seed = 10244021u64;
+            let seed = 10244021u64 + i;
             let mut rng = SmallRng::seed_from_u64(seed);
             let t = Instant::now();
             for _ in 0..10000 {
-                let sst_id = rng.next_u64() % 1024;
-                let block_offset = rng.next_u64() % 1024;
+                let sst_id = rng.next_u64() % 4096;
+                let block_offset = rng.next_u64() % 2048;
                 let block = cache.try_get_with(sst_id, block_offset).await.unwrap();
                 assert_eq!(block.offset, block_offset);
                 assert_eq!(block.sst, sst_id);
@@ -128,13 +129,11 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
         });
         handles.push(handle);
     }
-    println!("===begin wait===");
     current.block_on(async move {
         for h in handles {
             h.await.unwrap();
         }
     });
-    println!("===end===");
     println!("io count: {}", IO_COUNT.load(Ordering::Relaxed));
 
     c.bench_function("block-cache", |bencher| {
@@ -154,13 +153,12 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion) {
             current.block_on(f);
         })
     });
-    println!("========= end iter ==");
 }
 
 fn bench_block_cache(c: &mut Criterion) {
-    let block_cache = Arc::new(MokaCache::new(2048 * 1024));
+    let block_cache = Arc::new(MokaCache::new(2048));
     bench_cache(block_cache, c);
-    let block_cache = Arc::new(LRUCacheImpl::new(2048 * 1024));
+    let block_cache = Arc::new(LRUCacheImpl::new(2048));
     bench_cache(block_cache, c);
 }
 
