@@ -24,13 +24,13 @@ pub mod create_mv;
 pub mod create_source;
 pub mod create_table;
 mod describe;
+pub mod dml;
 pub mod drop_mv;
 pub mod drop_table;
 mod explain;
 mod flush;
 #[allow(dead_code)]
 pub mod query;
-pub mod query_single;
 mod set;
 mod show;
 pub mod util;
@@ -72,16 +72,8 @@ pub(super) async fn handle(session: Arc<SessionImpl>, stmt: Statement) -> Result
                 .into()),
             }
         }
-        Statement::Query(_) => {
-            if context.session_ctx.env().query_manager().dist_query() {
-                query::handle_query(context, stmt).await
-            } else {
-                query_single::handle_query_single(context, stmt).await
-            }
-        }
-        Statement::Insert { .. } | Statement::Delete { .. } => {
-            query_single::handle_query_single(context, stmt).await
-        }
+        Statement::Query(_) => query::handle_query(context, stmt).await,
+        Statement::Insert { .. } | Statement::Delete { .. } => dml::handle_dml(context, stmt).await,
         Statement::CreateView {
             materialized: true,
             or_replace: false,
