@@ -117,7 +117,7 @@ impl Output for RemoteOutput {
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
     input: Box<dyn Executor>,
-    inner: DispatcherImpl,
+    inner: Vec<DispatcherImpl>,
     actor_id: u32,
     context: Arc<SharedContext>,
 }
@@ -150,7 +150,7 @@ impl std::fmt::Debug for DispatchExecutor {
 impl DispatchExecutor {
     pub fn new(
         input: Box<dyn Executor>,
-        inner: DispatcherImpl,
+        inner: Vec<DispatcherImpl>,
         actor_id: u32,
         context: Arc<SharedContext>,
     ) -> Self {
@@ -165,12 +165,21 @@ impl DispatchExecutor {
     async fn dispatch(&mut self, msg: Message) -> Result<()> {
         match msg {
             Message::Chunk(chunk) => {
-                self.inner.dispatch_data(chunk).await?;
+                if self.inner.len() == 1 {
+                    // special clone optimization when there is only one downstream dispatcher
+                    self.inner[0].dispatch_data(chunk).await?;
+                } else {
+                    for dispatcher in &mut self.inner {
+                        dispatcher.dispatch_data(chunk.clone()).await?;
+                    }
+                }
             }
             Message::Barrier(barrier) => {
                 let mutation = barrier.mutation.clone();
                 self.pre_mutate_outputs(&mutation).await?;
-                self.inner.dispatch_barrier(barrier).await?;
+                for dispatcher in &mut self.inner {
+                    dispatcher.dispatch_barrier(barrier.clone()).await?;
+                }
                 self.post_mutate_outputs(&mutation).await?;
             }
         };
@@ -181,6 +190,11 @@ impl DispatchExecutor {
     async fn pre_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
         match mutation.as_deref() {
             Some(Mutation::UpdateOutputs(updates)) => {
+                assert_eq!(
+                    self.inner.len(),
+                    1,
+                    "only support mutation on one-dispatcher actors"
+                );
                 if let Some((_, actor_infos)) = updates.get_key_value(&self.actor_id) {
                     let mut new_outputs = vec![];
 
@@ -200,10 +214,15 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.set_outputs(new_outputs)
+                    self.inner[0].set_outputs(new_outputs)
                 }
             }
             Some(Mutation::AddOutput(adds)) => {
+                assert_eq!(
+                    self.inner.len(),
+                    1,
+                    "only support mutation on one-dispatcher actors"
+                );
                 if let Some(downstream_actor_infos) = adds.get(&self.actor_id) {
                     let mut outputs_to_add = Vec::with_capacity(downstream_actor_infos.len());
                     for downstream_actor_info in downstream_actor_infos {
@@ -216,7 +235,7 @@ impl DispatchExecutor {
                             &down_id,
                         )?);
                     }
-                    self.inner.add_outputs(outputs_to_add);
+                    self.inner[0].add_outputs(outputs_to_add);
                 }
             }
             _ => {}
@@ -227,15 +246,16 @@ impl DispatchExecutor {
 
     /// For `Stop`, update the outputs after we dispatch the barrier.
     async fn post_mutate_outputs(&mut self, mutation: &Option<Arc<Mutation>>) -> Result<()> {
-        #[allow(clippy::single_match)]
-        match mutation.as_deref() {
-            Some(Mutation::Stop(stops)) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !stops.contains(&self.actor_id) {
-                    self.inner.remove_outputs(stops);
-                }
+        if let Some(Mutation::Stop(stops)) = mutation.as_deref() {
+            assert_eq!(
+                self.inner.len(),
+                1,
+                "only support mutation on one-dispatcher actors"
+            );
+            // Remove outputs only if this actor itself is not to be stopped.
+            if !stops.contains(&self.actor_id) {
+                self.inner[0].remove_outputs(stops);
             }
-            _ => {}
         }
 
         Ok(())
@@ -905,7 +925,7 @@ mod tests {
 
         let mut executor = Box::new(DispatchExecutor::new(
             Box::new(input),
-            DispatcherImpl::Simple(SimpleDispatcher::new(output)),
+            vec![DispatcherImpl::Simple(SimpleDispatcher::new(output))],
             actor_id,
             ctx.clone(),
         ));
