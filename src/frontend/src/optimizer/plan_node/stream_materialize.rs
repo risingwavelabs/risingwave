@@ -115,7 +115,7 @@ impl StreamMaterialize {
             .iter()
             .enumerate()
             .map(|(i, field)| ColumnCatalog {
-                column_desc: field.into(),
+                column_desc: field.to_column_desc(false),
                 is_hidden: !user_cols.contains(i),
             })
             .collect_vec();

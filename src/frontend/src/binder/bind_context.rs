@@ -17,32 +17,22 @@ use std::fmt::Display;
 
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::DataType;
 
 #[derive(Debug)]
 pub struct ColumnBinding {
     pub table_name: String,
-    pub column_name: String,
+    // pub column_name: String,
     pub index: usize,
-    pub data_type: DataType,
+    // pub data_type: DataType,
     pub is_hidden: bool,
     pub desc: ColumnDesc,
 }
 
 impl ColumnBinding {
-    pub fn new(
-        table_name: String,
-        column_name: String,
-        index: usize,
-        data_type: DataType,
-        is_hidden: bool,
-        desc: ColumnDesc,
-    ) -> Self {
+    pub fn new(table_name: String, index: usize, is_hidden: bool, desc: ColumnDesc) -> Self {
         ColumnBinding {
             table_name,
-            column_name,
             index,
-            data_type,
             is_hidden,
             desc,
         }

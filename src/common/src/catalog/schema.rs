@@ -150,6 +150,21 @@ impl Field {
     pub fn data_type(&self) -> DataType {
         self.data_type.clone()
     }
+
+    pub fn to_column_desc(&self, is_nested: bool) -> ColumnDesc {
+        let field_descs = self
+            .sub_fields
+            .iter()
+            .map(|f| f.to_column_desc(true))
+            .collect_vec();
+        ColumnDesc::new_struct(
+            self.name.as_str(),
+            0,
+            self.type_name.as_str(),
+            field_descs,
+            is_nested,
+        )
+    }
 }
 
 impl From<&ProstField> for Field {

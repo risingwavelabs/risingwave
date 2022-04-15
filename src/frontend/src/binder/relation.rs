@@ -349,9 +349,7 @@ impl Binder {
                 };
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
-                    name.clone(),
                     begin + index,
-                    catalog.data_type().clone(),
                     catalog.is_hidden,
                     catalog.column_desc,
                 ));

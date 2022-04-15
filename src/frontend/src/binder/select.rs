@@ -156,10 +156,11 @@ impl Binder {
     pub fn bind_columns(columns: &[ColumnBinding]) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
+            .filter(|c| !c.desc.is_nested)
             .map(|column| {
                 (
-                    InputRef::new(column.index, column.data_type.clone()).into(),
-                    Some(column.column_name.clone()),
+                    InputRef::new(column.index, column.desc.data_type.clone()).into(),
+                    Some(column.desc.name.clone()),
                 )
             })
             .unzip();
@@ -171,17 +172,19 @@ impl Binder {
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
         let bound_columns = columns
             .iter()
+            .filter(|c| !c.desc.is_nested)
             .filter_map(|column| {
                 if !column.is_hidden {
                     Some((
-                        InputRef::new(column.index, column.data_type.clone()).into(),
-                        Some(column.column_name.clone()),
+                        InputRef::new(column.index, column.desc.data_type.clone()).into(),
+                        Some(column.desc.name.clone()),
                     ))
                 } else {
                     None
                 }
             })
             .unzip();
+        println!("{:?}", bound_columns);
         Ok(bound_columns)
     }
 }
