@@ -327,8 +327,8 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
             shards.push(Mutex::new(LRUCacheShard::new(per_shard, per_shard_object)));
         }
         Self {
-            shards,
             num_shard_bits,
+            shards,
         }
     }
 
@@ -347,8 +347,8 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
         }
     }
 
-    pub fn release(&self, handle: *mut LRUHandle<K, T>) {
-        let data = unsafe {
+    unsafe fn release(&self, handle: *mut LRUHandle<K, T>) {
+        let data = {
             let mut shard = self.shards[self.shard((*handle).hash)].lock();
             shard.release(handle)
         };
@@ -405,7 +405,9 @@ impl<K: PartialEq + Default, T> CachableEntry<K, T> {
 
 impl<K: PartialEq + Default, T> Drop for CachableEntry<K, T> {
     fn drop(&mut self) {
-        self.cache.release(self.handle);
+        unsafe {
+            self.cache.release(self.handle);
+        }
     }
 }
 
