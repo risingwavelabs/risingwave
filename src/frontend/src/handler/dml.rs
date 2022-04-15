@@ -24,7 +24,7 @@ use crate::planner::Planner;
 use crate::scheduler::{ExecutionContext, ExecutionContextRef};
 use crate::session::{OptimizerContext, SessionImpl};
 
-pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
+pub async fn handle_dml(context: OptimizerContext, stmt: Statement) -> Result<PgResponse> {
     let stmt_type = to_statement_type(&stmt);
     let session = context.session_ctx.clone();
 
@@ -60,8 +60,6 @@ pub async fn handle_query_single(context: OptimizerContext, stmt: Statement) -> 
     }
 
     let rows_count = match stmt_type {
-        StatementType::SELECT => rows.len() as i32,
-
         // TODO(renjie): We need a better solution for this.
         StatementType::INSERT | StatementType::DELETE | StatementType::UPDATE => {
             let first_row = rows[0].values();
@@ -101,7 +99,6 @@ fn to_statement_type(stmt: &Statement) -> StatementType {
         Statement::Insert { .. } => INSERT,
         Statement::Delete { .. } => DELETE,
         Statement::Update { .. } => UPDATE,
-        Statement::Query(_) => SELECT,
         _ => unreachable!(),
     }
 }
