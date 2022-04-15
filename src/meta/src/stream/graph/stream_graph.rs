@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::hash_map::{Entry, HashMap};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -551,7 +551,7 @@ where
             let (assigned_upstream, parallel_index) =
                 self.assign_upstream_for_chain(table_id, ctx, fragment_id)?;
 
-            dispatch_upstreams.push(assigned_upstream);
+            dispatch_upstreams.extend(assigned_upstream.iter());
             let chain_upstream_table_node_actors = self
                 .fragment_manager
                 .blocking_table_node_actors(&table_id)?;
@@ -560,7 +560,7 @@ where
                 .flat_map(|(node_id, actor_ids)| {
                     actor_ids.iter().map(|actor_id| (*node_id, *actor_id))
                 })
-                .filter(|(_, actor_id)| *actor_id == assigned_upstream)
+                .filter(|(_, actor_id)| assigned_upstream.contains(actor_id))
                 .into_group_map();
             for (node_id, actor_ids) in chain_upstream_node_actors {
                 match ctx.upstream_node_actors.entry(node_id) {
@@ -591,7 +591,7 @@ where
                     input: vec![],
                     pk_indices: stream_node.pk_indices.clone(),
                     node: Some(Node::MergeNode(MergeNode {
-                        upstream_actor_id: vec![assigned_upstream],
+                        upstream_actor_id: Vec::from_iter(assigned_upstream.into_iter()),
                         fields: chain_node.upstream_fields.clone(),
                     })),
                     fields: chain_node.upstream_fields.clone(),
@@ -622,7 +622,7 @@ where
         table_id: TableId,
         ctx: &mut CreateMaterializedViewContext,
         fragment_id: LocalFragmentId,
-    ) -> Result<(ActorId, u32)> {
+    ) -> Result<(HashSet<ActorId>, u32)> {
         let remaining = match ctx
             .chain_upstream_assignment
             .entry(fragment_id.as_global_id())
@@ -645,7 +645,15 @@ where
 
         // choose one upstream from remaining.
         assert!(!remaining.is_empty());
-        let upstream_id = remaining.pop().unwrap();
-        Ok((upstream_id, remaining.len() as u32))
+
+        // TODO: remove this when we deprecate Java frontend.
+        let (assigned_upstreams, parallel_index)= if ctx.is_legacy_frontend {
+            (HashSet::<ActorId>::from_iter(remaining.iter().cloned()), 0)
+        } else {
+            let upstream_id = remaining.pop().unwrap();
+            (HashSet::<ActorId>::from([upstream_id]), remaining.len() as u32)
+        };
+
+        Ok((assigned_upstreams, parallel_index))
     }
 }

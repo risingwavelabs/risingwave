@@ -62,6 +62,9 @@ pub struct StreamFragmenter<S> {
     /// when converting fragment graph to actor graph, we need to know which actors belong to a
     /// fragment.
     fragment_actors: HashMap<LocalFragmentId, Vec<LocalActorId>>,
+
+    // TODO: remove this when we deprecate Java frontend.
+    is_legacy_frontend: bool,
 }
 
 impl<S> StreamFragmenter<S>
@@ -72,6 +75,7 @@ where
         id_gen_manager: IdGeneratorManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
         hash_mapping: Vec<ParallelUnitId>,
+        is_legacy_frontend: bool,
     ) -> Self {
         Self {
             fragment_graph: StreamFragmentGraph::new(),
@@ -82,6 +86,7 @@ where
             next_local_actor_id: 0,
             next_operator_id: u32::MAX - 1,
             fragment_actors: HashMap::new(),
+            is_legacy_frontend,
         }
     }
 
@@ -237,6 +242,9 @@ where
 
             // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
             Node::TopNNode(_) => current_fragment.is_singleton = true,
+
+            // TODO: Remove this when we deprecate Java frontend.
+            Node::ChainNode(_) => current_fragment.is_singleton = self.is_legacy_frontend,
 
             _ => {}
         };

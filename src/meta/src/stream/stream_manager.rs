@@ -54,6 +54,9 @@ pub struct CreateMaterializedViewContext {
     pub affiliated_source: Option<Source>,
     /// Memo for assigning upstream actors to parallelized chain node.
     pub chain_upstream_assignment: HashMap<FragmentId, Vec<ActorId>>,
+
+    /// TODO: remove this when we deprecate Java frontend.
+    pub is_legacy_frontend: bool,
 }
 
 /// `GlobalStreamManager` manages all the streams in the system.
