@@ -9,7 +9,7 @@ option optimize_for = SPEED;
 import "expr.proto";
 import "plan.proto";
 
-// Hash mapping for compute node. Stores mapping from virtual key to actor id.
+// Hash mapping for compute node. Stores mapping from virtual node to actor id.
 message ActorMapping {
   repeated uint32 hash_mapping = 1;
 }

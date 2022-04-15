@@ -20,7 +20,7 @@ use risingwave_common::array::stream_chunk::{Op, Ops};
 use risingwave_common::array::{Array, ArrayImpl};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::hash::{HashCode, VIRTUAL_KEY_COUNT};
+use risingwave_common::hash::{HashCode, VirtualNode, VIRTUAL_NODE_COUNT};
 use risingwave_common::types::*;
 use risingwave_common::util::value_encoding::{deserialize_cell, serialize_cell};
 use risingwave_expr::expr::AggKind;
@@ -83,9 +83,9 @@ where
     /// The sort key serializer
     serializer: ExtremeSerializer<A::OwnedItem, EXTREME_TYPE>,
 
-    /// Consistent hash value to be set in value meta. Used for grouping the kv together in
-    /// storage. Each state will have the same consistent hash value.
-    consistent_hash_value: u16,
+    /// Computed via consistent hash. The value is to be set in value meta and used for grouping
+    /// the kv together in storage. Each state will have the same value of virtual node.
+    vnode: VirtualNode,
 }
 
 /// A trait over all table-structured states.
@@ -139,7 +139,7 @@ where
             top_n_count,
             data_type: data_type.clone(),
             serializer: ExtremeSerializer::new(data_type, pk_data_types),
-            consistent_hash_value: (group_key_hash_code % (VIRTUAL_KEY_COUNT as u64)) as u16,
+            vnode: (group_key_hash_code % (VIRTUAL_NODE_COUNT as u64)) as VirtualNode,
         })
     }
 
@@ -337,7 +337,7 @@ where
 
         for ((key, pks), v) in std::mem::take(&mut self.flush_buffer) {
             let key_encoded = self.serializer.serialize(key, &pks)?;
-            let value_meta = ValueMeta::new_with_consistent_hash_value(self.consistent_hash_value);
+            let value_meta = ValueMeta::new_with_vnode(self.vnode);
             match v.into_option() {
                 Some(v) => {
                     local.put(
