@@ -82,7 +82,7 @@ impl LocalSimpleAggExecutor {
             info,
             agg_calls,
         } = self;
-        let mut input = input.execute();
+        let input = input.execute();
         let mut is_dirty = false;
         let mut states: Vec<_> = agg_calls
             .iter()
