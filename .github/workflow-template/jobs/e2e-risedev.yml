@@ -102,6 +102,14 @@ jobs:
           sqllogictest -p 4566 './e2e_test/v2/ddl/**/*.slt'
           sqllogictest -p 4566 './e2e_test/v2/batch/**/*.slt'
 
+      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+        timeout-minutes: 2
+        run: |
+          RW_DIST_QUERY=1 ~/cargo-make/makers ci-start ci-kafka
+          sqllogictest -p 4566 './e2e_test/v2/source/**/*.slt'
+        env:
+          BROKERS: localhost:29092
+
       - name: Kill cluster
         run: ~/cargo-make/makers ci-kill
 
