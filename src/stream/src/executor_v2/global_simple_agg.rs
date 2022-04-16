@@ -51,6 +51,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
     /// Pk indices from input
     input_pk_indices: Vec<usize>,
 
+    /// Schema from input
+    input_schema: Schema,
+
     /// The executor operates on this keyspace.
     keyspace: Keyspace<S>,
 
@@ -105,6 +108,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 identity: format!("SimpleAggExecutor-{:X}", executor_id),
             },
             input_pk_indices: input_info.pk_indices,
+            input_schema: input_info.schema,
             keyspace,
             states: None,
             agg_calls,
@@ -115,7 +119,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
     async fn apply_chunk(
         agg_calls: &[AggCall],
         input_pk_indices: &[usize],
-        schema: &Schema,
+        input_schema: &Schema,
         states: &mut Option<AggState<S>>,
         keyspace: &Keyspace<S>,
         chunk: StreamChunk,
@@ -128,7 +132,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
         let input_pk_data_types = input_pk_indices
             .iter()
-            .map(|idx| schema.fields[*idx].data_type.clone())
+            .map(|idx| input_schema.fields[*idx].data_type.clone())
             .collect();
 
         // When applying batch, we will send columns of primary keys to the last N columns.
@@ -224,6 +228,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
             input,
             info,
             input_pk_indices,
+            input_schema,
             keyspace,
             mut states,
             agg_calls,
@@ -245,7 +250,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                     Self::apply_chunk(
                         &agg_calls,
                         &input_pk_indices,
-                        &info.schema,
+                        &input_schema,
                         &mut states,
                         &keyspace,
                         chunk,
