@@ -21,8 +21,8 @@ use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
 
-use super::aggregation::*;
 use crate::executor::{Executor, ExecutorBuilder};
+use crate::executor_v2::aggregation::AggCall;
 use crate::executor_v2::{Executor as ExecutorV2, SimpleAggExecutor as SimpleAggExecutorV2};
 use crate::task::{build_agg_call_from_prost, ExecutorParams, LocalStreamManagerCore};
 
