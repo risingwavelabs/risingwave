@@ -23,8 +23,10 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
 use super::{BoxedMessageStream, Executor, ExecutorInfo, Message, StreamExecutorResult};
-use crate::executor::{create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl};
-use crate::executor_v2::agg::generate_agg_schema;
+use crate::executor::PkIndicesRef;
+use crate::executor_v2::aggregation::{
+    create_streaming_agg_state, generate_agg_schema, AggCall, StreamingAggStateImpl,
+};
 use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
 use crate::executor_v2::PkIndices;
 
@@ -177,7 +179,8 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::AggKind;
 
-    use crate::executor::{AggArgs, AggCall, Message};
+    use crate::executor::Message;
+    use crate::executor_v2::aggregation::{AggArgs, AggCall};
     use crate::executor_v2::test_utils::MockSource;
     use crate::executor_v2::{Executor, LocalSimpleAggExecutor};
     use crate::row_nonnull;

@@ -23,9 +23,10 @@ use risingwave_common::error::Result;
 use risingwave_storage::{Keyspace, StateStore};
 
 use super::{Executor, ExecutorInfo, StreamExecutorResult};
-use crate::executor::{agg_input_array_refs, pk_input_array_refs, AggCall, AggState, PkIndicesRef};
-use crate::executor_v2::agg::{
-    generate_agg_schema, generate_agg_state, AggExecutor, AggExecutorWrapper,
+use crate::executor::{pk_input_array_refs, PkIndicesRef};
+use crate::executor_v2::aggregation::{
+    agg_input_array_refs, generate_agg_schema, generate_agg_state, AggCall, AggExecutor,
+    AggExecutorWrapper, AggState,
 };
 use crate::executor_v2::error::StreamExecutorError;
 use crate::executor_v2::PkIndices;
@@ -251,7 +252,7 @@ mod tests {
     use risingwave_common::types::*;
     use risingwave_expr::expr::*;
 
-    use crate::executor::AggArgs;
+    use crate::executor_v2::aggregation::AggArgs;
     use crate::executor_v2::test_utils::*;
     use crate::executor_v2::*;
     use crate::*;

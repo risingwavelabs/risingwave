@@ -23,7 +23,7 @@ pub use super::executor::{
     Barrier, Executor as ExecutorV1, Message, Mutation, PkIndices, PkIndicesRef,
 };
 
-mod agg;
+pub mod aggregation;
 mod batch_query;
 #[allow(dead_code)]
 mod chain;

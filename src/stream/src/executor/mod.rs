@@ -18,7 +18,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 pub use actor::Actor;
-pub use aggregation::*;
 use async_trait::async_trait;
 pub use batch_query::*;
 pub use chain::*;
@@ -61,7 +60,6 @@ use crate::executor_v2::LookupExecutorBuilder;
 use crate::task::{ActorId, ExecutorParams, LocalStreamManagerCore, ENABLE_BARRIER_AGGREGATION};
 
 mod actor;
-mod aggregation;
 mod barrier_align;
 mod batch_query;
 mod chain;
