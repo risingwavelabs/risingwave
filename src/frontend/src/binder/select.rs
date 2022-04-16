@@ -15,7 +15,6 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
-use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
@@ -174,12 +173,12 @@ impl Binder {
 
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
     /// We will extract ident from expr and concat it with `ids` to get `field_column_name`.
-    /// Will return `table_name` and `field_column_name` or `field_column_name`.
+    /// Will return `table_name` and `field_name` or `field_name`.
     pub fn extract_desc_and_name(
         &mut self,
         expr: Expr,
         ids: Vec<Ident>,
-    ) -> Result<(ColumnDesc, Option<String>, Vec<Ident>)> {
+    ) -> Result<(Option<String>, String)> {
         match expr {
             // For CompoundIdentifier, we will use first ident as `table_name` and second ident as
             // first part of `field_column_name` and then concat with ids.
@@ -194,11 +193,10 @@ impl Binder {
                         .into());
                     }
                 };
-                let index = self
-                    .context
-                    .get_column_binding_index(Some(table_name), column)?;
-                let desc = self.context.columns[index].desc.clone();
-                Ok((desc, Some(table_name.clone()), ids))
+                Ok((
+                    Some(table_name.clone()),
+                    Self::concat_ident_names(column.clone(), &ids),
+                ))
             }
             // For Identifier, we will first use the ident as first part of `field_column_name`
             // and judge if this name is exist.
@@ -206,30 +204,20 @@ impl Binder {
             // The reason is that in pgsql, for table name v3 have a column name v3 which
             // have a field name v3. Select (v3).v3 from v3 will return the field value instead
             // of column value.
-            Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.value) {
-                Some(indexs) => {
-                    if indexs.len() == 1 {
-                        let index = self.context.get_column_binding_index(None, &ident.value)?;
-                        let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, None, ids))
-                    } else {
-                        let column = &ids[0].value;
-                        let index = self
-                            .context
-                            .get_column_binding_index(Some(&ident.value), column)?;
-                        let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, Some(ident.value), ids[1..].to_vec()))
+            Expr::Identifier(ident) => {
+                match self.context.indexs_of.get(&ident.value) {
+                    Some(indexs) => {
+                        if indexs.len() == 1 {
+                            return Ok((None, Self::concat_ident_names(ident.value, &ids)));
+                        }
                     }
+                    None => {}
                 }
-                None => {
-                    let column = &ids[0].value;
-                    let index = self
-                        .context
-                        .get_column_binding_index(Some(&ident.value), column)?;
-                    let desc = self.context.columns[index].desc.clone();
-                    Ok((desc, Some(ident.value), ids[1..].to_vec()))
-                }
-            },
+                Ok((
+                    Some(ident.value),
+                    Self::concat_ident_names(ids[0].value.clone(), &ids[1..]),
+                ))
+            }
             Expr::Cast { .. } => {
                 todo!()
             }
@@ -243,11 +231,15 @@ impl Binder {
         expr: Expr,
         idents: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (desc, table, idents) = self.extract_desc_and_name(expr, idents.to_vec())?;
-        let column_desc = Self::bind_field(&idents, desc.clone())?;
-        let field_name = Self::concat_ident_names(desc.name, &idents);
-        let bindings: Vec<&ColumnBinding> = column_desc
-            .field_desc_iter()
+        let (table, field_name) = self.extract_desc_and_name(expr, idents.to_vec())?;
+        let desc = self
+            .context
+            .get_column_binding(table.clone(), &field_name)?
+            .desc
+            .clone();
+        let bindings: Vec<&ColumnBinding> = desc
+            .field_descs
+            .iter()
             .map(|f| {
                 self.context
                     .get_column_binding(table.clone(), &(field_name.clone() + "." + &f.name))
@@ -262,9 +254,7 @@ impl Binder {
         expr: Expr,
         idents: &[Ident],
     ) -> Result<(ExprImpl, Option<String>)> {
-        let (desc, table, idents) = self.extract_desc_and_name(expr, idents.to_vec())?;
-        Self::bind_field(&idents, desc.clone())?;
-        let field_name = Self::concat_ident_names(desc.name, &idents);
+        let (table, field_name) = self.extract_desc_and_name(expr, idents.to_vec())?;
         let binding = self.context.get_column_binding(table, &field_name)?;
         Ok((
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
@@ -272,7 +262,7 @@ impl Binder {
         ))
     }
 
-    /// Use . to concat ident name.
+    /// Concat `column_name` with idents value.
     pub fn concat_ident_names(mut column_name: String, idents: &[Ident]) -> String {
         for name in idents {
             column_name = column_name + "." + &name.value;
@@ -280,23 +270,7 @@ impl Binder {
         column_name
     }
 
-    /// Bind field in recursive way.
-    /// If bind success, will return the last `field_desc`.
-    /// Otherwise return err `item_not_found`.
-    pub fn bind_field(idents: &[Ident], desc: ColumnDesc) -> Result<ColumnDesc> {
-        match idents.get(0) {
-            Some(ident) => match desc.field_descs.get(&ident.value) {
-                Some(col) => Self::bind_field(&idents[1..], col.clone()),
-                None => Err(ErrorCode::ItemNotFound(format!(
-                    "Invalid field name: {}",
-                    ident.value
-                ))
-                .into()),
-            },
-            None => Ok(desc),
-        }
-    }
-
+    /// Bind columns from `&column_binding` iterator.
     pub fn bind_columns_iter<'a>(
         column_binding: impl Iterator<Item = &'a ColumnBinding>,
     ) -> (Vec<ExprImpl>, Vec<Option<String>>) {

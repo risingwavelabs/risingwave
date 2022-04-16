@@ -183,7 +183,7 @@ impl From<&ColumnDesc> for Field {
         Self {
             data_type: desc.data_type.clone(),
             name: desc.name.clone(),
-            sub_fields: desc.field_desc_iter().map(|d| d.into()).collect_vec(),
+            sub_fields: desc.field_descs.iter().map(|d| d.into()).collect_vec(),
             type_name: desc.type_name.clone(),
         }
     }
