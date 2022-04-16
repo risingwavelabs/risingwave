@@ -14,105 +14,54 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use futures::StreamExt;
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
 
-use super::{Executor, ExecutorInfo, StreamExecutorResult};
+use super::{BoxedMessageStream, Executor, ExecutorInfo, Message, StreamExecutorResult};
 use crate::executor::{create_streaming_agg_state, AggCall, PkIndicesRef, StreamingAggStateImpl};
-use crate::executor_v2::agg::{generate_agg_schema, AggExecutor, AggExecutorWrapper};
-use crate::executor_v2::error::StreamExecutorError;
+use crate::executor_v2::agg::generate_agg_schema;
+use crate::executor_v2::error::{StreamExecutorError, TracedStreamExecutorError};
 use crate::executor_v2::PkIndices;
 
-pub type LocalSimpleAggExecutor = AggExecutorWrapper<AggLocalSimpleAggExecutor>;
+pub struct LocalSimpleAggExecutor {
+    pub(super) input: Box<dyn Executor>,
+    pub(super) info: ExecutorInfo,
+    pub(super) agg_calls: Vec<AggCall>,
+}
+
+impl Executor for LocalSimpleAggExecutor {
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+
+    fn schema(&self) -> &Schema {
+        &self.info.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef {
+        &self.info.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.info.identity
+    }
+}
 
 impl LocalSimpleAggExecutor {
-    pub fn new(
-        input: Box<dyn Executor>,
-        agg_calls: Vec<AggCall>,
-        pk_indices: PkIndices,
-        executor_id: u64,
-    ) -> Result<Self> {
-        let info = input.info();
-        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
-
-        Ok(AggExecutorWrapper {
-            input,
-            inner: AggLocalSimpleAggExecutor::new(
-                info,
-                agg_calls,
-                pk_indices,
-                schema,
-                executor_id,
-            )?,
-        })
-    }
-}
-
-pub struct AggLocalSimpleAggExecutor {
-    info: ExecutorInfo,
-
-    /// Schema of the executor.
-    schema: Schema,
-
-    /// Primary key indices.
-    pk_indices: PkIndices,
-
-    /// Aggregation states after last barrier.
-    states: Vec<Box<dyn StreamingAggStateImpl>>,
-
-    /// Represents whether there is new data in the epoch.
-    is_dirty: bool,
-
-    /// An operator will support multiple aggregation calls.
-    agg_calls: Vec<AggCall>,
-}
-
-impl AggLocalSimpleAggExecutor {
-    pub fn new(
-        input_info: ExecutorInfo,
-        agg_calls: Vec<AggCall>,
-        pk_indices: PkIndices,
-        schema: Schema,
-        executor_id: u64,
-    ) -> Result<Self> {
-        // simple agg does not have group key
-        let states: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| {
-                create_streaming_agg_state(
-                    agg_call.args.arg_types(),
-                    &agg_call.kind,
-                    &agg_call.return_type,
-                    None,
-                )
-            })
-            .try_collect()?;
-        Ok(Self {
-            info: ExecutorInfo {
-                schema: input_info.schema,
-                pk_indices: input_info.pk_indices,
-                identity: format!("LocalSimpleAggExecutor {:X}", executor_id),
-            },
-            schema,
-            pk_indices,
-            states,
-            is_dirty: false,
-            agg_calls,
-        })
-    }
-}
-
-#[async_trait]
-impl AggExecutor for AggLocalSimpleAggExecutor {
-    async fn apply_chunk(&mut self, chunk: StreamChunk, _epoch: u64) -> StreamExecutorResult<()> {
+    fn apply_chunk(
+        agg_calls: &[AggCall],
+        states: &mut [Box<dyn StreamingAggStateImpl>],
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<()> {
         let (ops, columns, visibility) = chunk.into_inner();
-        self.agg_calls
+        agg_calls
             .iter()
-            .zip_eq(self.states.iter_mut())
+            .zip_eq(states.iter_mut())
             .try_for_each(|(agg_call, state)| {
                 let cols = agg_call
                     .args
@@ -123,49 +72,96 @@ impl AggExecutor for AggLocalSimpleAggExecutor {
                 state.apply_batch(&ops, visibility.as_ref(), &cols[..])
             })
             .map_err(StreamExecutorError::agg_state_error)?;
-        self.is_dirty = true;
         Ok(())
     }
 
-    async fn flush_data(&mut self, _epoch: u64) -> StreamExecutorResult<Option<StreamChunk>> {
-        if !self.is_dirty {
-            return Ok(None);
-        }
-        let mut builders = self
-            .schema
-            .create_array_builders(1)
-            .map_err(StreamExecutorError::eval_error)?;
-        self.states
-            .iter_mut()
-            .zip_eq(builders.iter_mut())
-            .try_for_each(|(state, builder)| -> Result<_> {
-                let data = state.get_output()?;
-                trace!("append_datum: {:?}", data);
-                builder.append_datum(&data)?;
-                state.reset();
-                Ok(())
+    #[try_stream(ok = Message, error = TracedStreamExecutorError)]
+    async fn execute_inner(self) {
+        let LocalSimpleAggExecutor {
+            input,
+            info,
+            agg_calls,
+        } = self;
+        let input = input.execute();
+        let mut is_dirty = false;
+        let mut states: Vec<_> = agg_calls
+            .iter()
+            .map(|agg_call| {
+                create_streaming_agg_state(
+                    agg_call.args.arg_types(),
+                    &agg_call.kind,
+                    &agg_call.return_type,
+                    None,
+                )
             })
-            .map_err(StreamExecutorError::agg_state_error)?;
-        let columns: Vec<Column> = builders
-            .into_iter()
-            .map(|builder| -> Result<_> { Ok(Column::new(Arc::new(builder.finish()?))) })
             .try_collect()
-            .map_err(StreamExecutorError::eval_error)?;
-        let ops = vec![Op::Insert; 1];
-        self.is_dirty = false;
-        Ok(Some(StreamChunk::new(ops, columns, None)))
-    }
+            .map_err(StreamExecutorError::agg_state_error)?;
 
-    fn schema(&self) -> &Schema {
-        &self.schema
-    }
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Chunk(chunk) => {
+                    Self::apply_chunk(&agg_calls, &mut states, chunk)?;
+                    is_dirty = true;
+                }
+                m @ Message::Barrier(_) => {
+                    if is_dirty {
+                        is_dirty = false;
 
-    fn pk_indices(&self) -> PkIndicesRef {
-        &self.pk_indices
-    }
+                        let mut builders = info
+                            .schema
+                            .create_array_builders(1)
+                            .map_err(StreamExecutorError::eval_error)?;
+                        states
+                            .iter_mut()
+                            .zip_eq(builders.iter_mut())
+                            .try_for_each(|(state, builder)| -> Result<_> {
+                                let data = state.get_output()?;
+                                trace!("append_datum: {:?}", data);
+                                builder.append_datum(&data)?;
+                                state.reset();
+                                Ok(())
+                            })
+                            .map_err(StreamExecutorError::agg_state_error)?;
+                        let columns: Vec<Column> = builders
+                            .into_iter()
+                            .map(|builder| -> Result<_> {
+                                Ok(Column::new(Arc::new(builder.finish()?)))
+                            })
+                            .try_collect()
+                            .map_err(StreamExecutorError::eval_error)?;
+                        let ops = vec![Op::Insert; 1];
 
-    fn identity(&self) -> &str {
-        self.info.identity.as_str()
+                        yield Message::Chunk(StreamChunk::new(ops, columns, None));
+                    }
+
+                    yield m;
+                }
+            }
+        }
+    }
+}
+
+impl LocalSimpleAggExecutor {
+    pub fn new(
+        input: Box<dyn Executor>,
+        agg_calls: Vec<AggCall>,
+        pk_indices: PkIndices,
+        executor_id: u64,
+    ) -> Result<Self> {
+        let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
+        let info = ExecutorInfo {
+            schema,
+            pk_indices,
+            identity: format!("LocalSimpleAggExecutor-{}", executor_id),
+        };
+
+        Ok(LocalSimpleAggExecutor {
+            input,
+            info,
+            agg_calls,
+        })
     }
 }
 
@@ -286,7 +282,6 @@ mod tests {
         simple_agg.next().await.unwrap().unwrap();
         // Consume stream chunk
         let msg = simple_agg.next().await.unwrap().unwrap();
-        println!("{:?}", msg);
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
@@ -300,8 +295,10 @@ mod tests {
             unreachable!("unexpected message {:?}", msg);
         }
 
-        println!("{:?}", simple_agg.next().await.unwrap().unwrap());
-        // assert_matches!(, Message::Barrier { .. });
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
 
         let msg = simple_agg.next().await.unwrap().unwrap();
         if let Message::Chunk(chunk) = msg {
