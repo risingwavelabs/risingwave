@@ -82,7 +82,7 @@ impl LocalSimpleAggExecutor {
             info,
             agg_calls,
         } = self;
-        let input = input.execute();
+        let mut input = input.execute();
         let mut is_dirty = false;
         let mut states: Vec<_> = agg_calls
             .iter()
@@ -108,33 +108,33 @@ impl LocalSimpleAggExecutor {
                 m @ Message::Barrier(_) => {
                     if is_dirty {
                         is_dirty = false;
+
+                        let mut builders = info
+                            .schema
+                            .create_array_builders(1)
+                            .map_err(StreamExecutorError::eval_error)?;
+                        states
+                            .iter_mut()
+                            .zip_eq(builders.iter_mut())
+                            .try_for_each(|(state, builder)| -> Result<_> {
+                                let data = state.get_output()?;
+                                trace!("append_datum: {:?}", data);
+                                builder.append_datum(&data)?;
+                                state.reset();
+                                Ok(())
+                            })
+                            .map_err(StreamExecutorError::agg_state_error)?;
+                        let columns: Vec<Column> = builders
+                            .into_iter()
+                            .map(|builder| -> Result<_> {
+                                Ok(Column::new(Arc::new(builder.finish()?)))
+                            })
+                            .try_collect()
+                            .map_err(StreamExecutorError::eval_error)?;
+                        let ops = vec![Op::Insert; 1];
+
+                        yield Message::Chunk(StreamChunk::new(ops, columns, None));
                     }
-
-                    let mut builders = info
-                        .schema
-                        .create_array_builders(1)
-                        .map_err(StreamExecutorError::eval_error)?;
-                    states
-                        .iter_mut()
-                        .zip_eq(builders.iter_mut())
-                        .try_for_each(|(state, builder)| -> Result<_> {
-                            let data = state.get_output()?;
-                            trace!("append_datum: {:?}", data);
-                            builder.append_datum(&data)?;
-                            state.reset();
-                            Ok(())
-                        })
-                        .map_err(StreamExecutorError::agg_state_error)?;
-                    let columns: Vec<Column> = builders
-                        .into_iter()
-                        .map(|builder| -> Result<_> {
-                            Ok(Column::new(Arc::new(builder.finish()?)))
-                        })
-                        .try_collect()
-                        .map_err(StreamExecutorError::eval_error)?;
-                    let ops = vec![Op::Insert; 1];
-
-                    yield Message::Chunk(StreamChunk::new(ops, columns, None));
 
                     yield m;
                 }
@@ -282,7 +282,6 @@ mod tests {
         simple_agg.next().await.unwrap().unwrap();
         // Consume stream chunk
         let msg = simple_agg.next().await.unwrap().unwrap();
-        println!("{:?}", msg);
         if let Message::Chunk(chunk) = msg {
             let (data_chunk, ops) = chunk.into_parts();
             let rows = ops
@@ -296,8 +295,10 @@ mod tests {
             unreachable!("unexpected message {:?}", msg);
         }
 
-        println!("{:?}", simple_agg.next().await.unwrap().unwrap());
-        // assert_matches!(, Message::Barrier { .. });
+        assert_matches!(
+            simple_agg.next().await.unwrap().unwrap(),
+            Message::Barrier { .. }
+        );
 
         let msg = simple_agg.next().await.unwrap().unwrap();
         if let Message::Chunk(chunk) = msg {
