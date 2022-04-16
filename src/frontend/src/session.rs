@@ -27,7 +27,6 @@ use pgwire::pg_server::{Session, SessionManager};
 use risingwave_common::config::FrontendConfig;
 use risingwave_common::error::Result;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::env_var::env_var_is_true;
 use risingwave_pb::common::WorkerType;
 use risingwave_rpc_client::MetaClient;
 use risingwave_sqlparser::parser::Parser;
@@ -145,7 +144,7 @@ impl FrontendEnv {
         let catalog_writer = Arc::new(MockCatalogWriter::new(catalog.clone()));
         let catalog_reader = CatalogReader::new(catalog);
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
-        let query_manager = QueryManager::new(worker_node_manager.clone(), false);
+        let query_manager = QueryManager::new(worker_node_manager.clone());
         Self {
             catalog_writer,
             catalog_reader,
@@ -187,9 +186,7 @@ impl FrontendEnv {
         let catalog_reader = CatalogReader::new(catalog.clone());
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new(meta_client.clone()).await?);
-        // TODO(renjie): Remove this after set is supported.
-        let dist_query = env_var_is_true("RW_DIST_QUERY");
-        let query_manager = QueryManager::new(worker_node_manager.clone(), dist_query);
+        let query_manager = QueryManager::new(worker_node_manager.clone());
 
         let observer_manager = ObserverManager::new(
             meta_client.clone(),

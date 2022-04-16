@@ -124,7 +124,7 @@ impl SourceManager for MemSourceManager {
             SourceConfig::Connector(config) => {
                 let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
                     Arc::new(tokio::sync::Mutex::new(
-                        new_connector(config.clone(), None)
+                        new_connector(Properties::new(config.clone()), None)
                             .await
                             .map_err(|e| RwError::from(InternalError(e.to_string())))?,
                     ));
@@ -210,7 +210,7 @@ impl SourceManager for MemSourceManager {
                 SourceConfig::Connector(config) => {
                     let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
                         Arc::new(tokio::sync::Mutex::new(
-                            new_connector(config.clone(), None)
+                            new_connector(Properties::new(config.clone()), None)
                                 .await
                                 .map_err(|e| RwError::from(InternalError(e.to_string())))?,
                         ));

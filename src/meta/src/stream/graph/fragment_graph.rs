@@ -42,7 +42,7 @@ pub struct StreamFragment {
     pub fragment_id: LocalFragmentId,
 
     /// root stream node in this fragment.
-    pub node: Arc<StreamNode>,
+    pub node: Option<Arc<StreamNode>>,
 
     /// type of this fragment.
     pub fragment_type: FragmentType,
@@ -52,13 +52,23 @@ pub struct StreamFragment {
 }
 
 impl StreamFragment {
-    pub fn new(fragment_id: LocalFragmentId, node: Arc<StreamNode>) -> Self {
+    pub fn new(fragment_id: LocalFragmentId) -> Self {
         Self {
             fragment_id,
-            node,
             fragment_type: FragmentType::Others,
             is_singleton: false,
+            node: None,
         }
+    }
+
+    /// Seal the fragment and update the stream node content.
+    pub fn seal_node(&mut self, node: StreamNode) {
+        assert!(self.node.is_none());
+        self.node = Some(Arc::new(node));
+    }
+
+    pub fn get_node(&self) -> Arc<StreamNode> {
+        self.node.as_ref().unwrap().clone()
     }
 }
 

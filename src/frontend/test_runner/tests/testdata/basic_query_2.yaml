@@ -120,7 +120,8 @@
     StreamMaterialize { columns: [expr#0, agg#0(hidden), agg#1(hidden), agg#2(hidden), agg#3(hidden)], pk_columns: [agg#0, agg#1, agg#2, agg#3] }
       StreamProject { exprs: [($1 + ($2 * $3)), $0, $1, $2, $3], expr_alias: [ ,  ,  ,  ,  ] }
         StreamSimpleAgg { aggs: [count, min($0), max($1), count($2)] }
-          StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
+          StreamExchange { dist: Single }
+            StreamTableScan { table: t, columns: [v1, v2, v3, _row_id#0], pk_indices: [3] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v2;
@@ -157,8 +158,9 @@
   stream_plan: |
     StreamMaterialize { columns: [agg#0(hidden), agg#1, agg#2], pk_columns: [agg#0, agg#1, agg#2] }
       StreamSimpleAgg { aggs: [count, count($0), sum($0)] }
-        StreamProject { exprs: [($0 + $1), $2], expr_alias: [ ,  ] }
-          StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
+        StreamExchange { dist: Single }
+          StreamProject { exprs: [($0 + $1), $2], expr_alias: [ ,  ] }
+            StreamTableScan { table: t, columns: [v1, v2, _row_id#0], pk_indices: [2] }
 - sql: |
     create table t(v1 int, v2 int, v3 int);
     select v1, sum(v2 + v3) / count(v2 + v3) + max(v1) from t group by v1;
