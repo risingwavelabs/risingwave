@@ -87,18 +87,17 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
         keyspace: Keyspace<S>,
-        _pk_indices: PkIndices,
+        pk_indices: PkIndices,
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
-        let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
         Ok(Self {
             input,
             info: ExecutorInfo {
                 schema,
-                pk_indices: input_info.pk_indices,
+                pk_indices,
                 identity: format!("SimpleAggExecutor-{:X}", executor_id),
             },
             keyspace,
