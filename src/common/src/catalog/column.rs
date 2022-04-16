@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use itertools::Itertools;
 use risingwave_pb::plan::{
     ColumnDesc as ProstColumnDesc, OrderType as ProstOrderType,
@@ -65,7 +67,7 @@ pub struct ColumnDesc {
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub name: String, // for debugging
-    pub field_descs: Vec<ColumnDesc>,
+    pub field_descs: HashMap<String, ColumnDesc>,
     pub type_name: String,
     pub is_nested: bool,
 }
@@ -82,7 +84,7 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: String::new(),
-            field_descs: vec![],
+            field_descs: HashMap::new(),
             type_name: String::new(),
             is_nested: false,
         }
@@ -93,7 +95,7 @@ impl ColumnDesc {
             data_type,
             column_id,
             name: name.into(),
-            field_descs: vec![],
+            field_descs: HashMap::new(),
             type_name: "".to_string(),
             is_nested: false,
         }
@@ -107,9 +109,8 @@ impl ColumnDesc {
             name: self.name.clone(),
             field_descs: self
                 .field_descs
-                .clone()
-                .into_iter()
-                .map(|f| f.to_protobuf())
+                .iter()
+                .map(|(_, f)| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
             is_nested: self.is_nested,
@@ -126,13 +127,14 @@ impl ColumnDesc {
             &mut self
                 .field_descs
                 .iter()
-                .flat_map(|d| {
+                .flat_map(|(_, d)| {
                     let mut desc = d.clone();
                     desc.name = self.name.clone() + "." + &desc.name;
                     desc.flatten()
                 })
                 .collect_vec(),
         );
+        descs.sort_by(|a, b| a.name.cmp(&b.name));
         descs
     }
 
@@ -141,7 +143,7 @@ impl ColumnDesc {
             data_type,
             column_id: ColumnId::new(column_id),
             name: name.to_string(),
-            field_descs: vec![],
+            field_descs: HashMap::new(),
             type_name: "".to_string(),
             is_nested,
         }
@@ -165,7 +167,10 @@ impl ColumnDesc {
             data_type,
             column_id: ColumnId::new(column_id),
             name: name.to_string(),
-            field_descs: fields,
+            field_descs: fields
+                .into_iter()
+                .map(|f| (f.name.clone(), f))
+                .collect::<HashMap<String, ColumnDesc>>(),
             type_name: type_name.to_string(),
             is_nested,
         }
@@ -175,7 +180,7 @@ impl ColumnDesc {
     pub fn generate_increment_id(&mut self, index: &mut i32) {
         self.column_id = ColumnId::new(*index);
         *index += 1;
-        for field in &mut self.field_descs {
+        for field in self.field_descs.values_mut() {
             field.generate_increment_id(index);
         }
     }
@@ -204,7 +209,10 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 column_id: ColumnId::new(prost.column_id),
                 name: prost.name,
                 type_name: prost.type_name,
-                field_descs: descs,
+                field_descs: descs
+                    .into_iter()
+                    .map(|f| (f.name.clone(), f))
+                    .collect::<HashMap<String, ColumnDesc>>(),
                 is_nested: prost.is_nested,
             }
         } else {
@@ -213,7 +221,7 @@ impl From<ProstColumnDesc> for ColumnDesc {
                 column_id: ColumnId::new(prost.column_id),
                 name: prost.name,
                 type_name: prost.type_name,
-                field_descs: vec![],
+                field_descs: HashMap::new(),
                 is_nested: prost.is_nested,
             }
         }
@@ -232,7 +240,7 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             column_type: c.data_type.to_protobuf().into(),
             column_id: c.column_id.into(),
             name: c.name.clone(),
-            field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
+            field_descs: c.field_descs.iter().map(|(_, c)| c.to_protobuf()).collect(),
             type_name: c.type_name.clone(),
             is_nested: c.is_nested,
         }

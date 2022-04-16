@@ -175,11 +175,11 @@ impl Binder {
     /// This function will accept three expr type: `CompoundIdentifier`,`Identifier`,`Cast(Todo)`
     /// We will extract ident from expr and concat it with `ids` to get `field_column_name`.
     /// Will return `table_name` and `field_column_name` or `field_column_name`.
-    pub fn extract_column_desc_and_idents(
+    pub fn extract_desc_and_name(
         &mut self,
         expr: Expr,
         ids: Vec<Ident>,
-    ) -> Result<(ColumnDesc, String, Vec<Ident>)> {
+    ) -> Result<(ColumnDesc, Option<String>, Vec<Ident>)> {
         match expr {
             // For CompoundIdentifier, we will use first ident as `table_name` and second ident as
             // first part of `field_column_name` and then concat with ids.
@@ -194,9 +194,11 @@ impl Binder {
                         .into());
                     }
                 };
-                let index = self.context.get_column_binding(Some(table_name), column)?;
+                let index = self
+                    .context
+                    .get_column_binding_index(Some(table_name), column)?;
                 let desc = self.context.columns[index].desc.clone();
-                Ok((desc, table_name.clone(), ids))
+                Ok((desc, Some(table_name.clone()), ids))
             }
             // For Identifier, we will first use the ident as first part of `field_column_name`
             // and judge if this name is exist.
@@ -207,25 +209,25 @@ impl Binder {
             Expr::Identifier(ident) => match self.context.indexs_of.get(&ident.value) {
                 Some(indexs) => {
                     if indexs.len() == 1 {
-                        let index = self.context.get_column_binding(None, &ident.value)?;
+                        let index = self.context.get_column_binding_index(None, &ident.value)?;
                         let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, String::new(), ids))
+                        Ok((desc, None, ids))
                     } else {
                         let column = &ids[0].value;
                         let index = self
                             .context
-                            .get_column_binding(Some(&ident.value), column)?;
+                            .get_column_binding_index(Some(&ident.value), column)?;
                         let desc = self.context.columns[index].desc.clone();
-                        Ok((desc, ident.value, ids[1..].to_vec()))
+                        Ok((desc, Some(ident.value), ids[1..].to_vec()))
                     }
                 }
                 None => {
                     let column = &ids[0].value;
                     let index = self
                         .context
-                        .get_column_binding(Some(&ident.value), column)?;
+                        .get_column_binding_index(Some(&ident.value), column)?;
                     let desc = self.context.columns[index].desc.clone();
-                    Ok((desc, ident.value, ids[1..].to_vec()))
+                    Ok((desc, Some(ident.value), ids[1..].to_vec()))
                 }
             },
             Expr::Cast { .. } => {
@@ -239,23 +241,20 @@ impl Binder {
     pub fn bind_wildcard_field_column(
         &mut self,
         expr: Expr,
-        ids: &[Ident],
+        idents: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (desc, table, idents) = self.extract_column_desc_and_idents(expr, ids.to_vec())?;
-        let table = match table.as_str() {
-            "" => None,
-            _ => Some(&table),
-        };
-        let column_desc = Self::bind_field(&idents, desc.clone(), desc.name)?;
-        let bindings: Vec<&ColumnBinding> = column_desc
+        let (desc, table, idents) = self.extract_desc_and_name(expr, idents.to_vec())?;
+        let column_desc = Self::bind_field(&idents, desc.clone())?;
+        let field_name = Self::concat_ident_names(desc.name, &idents);
+        let mut bindings: Vec<&ColumnBinding> = column_desc
             .field_descs
             .iter()
-            .map(|f| {
-                let name = column_desc.name.clone() + "." + &f.name;
-                Ok(&self.context.columns[self.context.get_column_binding(table, &name)?])
+            .map(|(f, _)| {
+                self.context
+                    .get_column_binding(table.clone(), &(field_name.clone() + "." + f))
             })
             .collect::<Result<_>>()?;
-
+        bindings.sort_by(|a, b| a.index.cmp(&b.index));
         Ok(Self::bind_columns_iter(bindings.into_iter()))
     }
 
@@ -263,37 +262,40 @@ impl Binder {
     pub fn bind_single_field_column(
         &mut self,
         expr: Expr,
-        ids: &[Ident],
+        idents: &[Ident],
     ) -> Result<(ExprImpl, Option<String>)> {
-        let (desc, table, idents) = self.extract_column_desc_and_idents(expr, ids.to_vec())?;
-        let table = match table.as_str() {
-            "" => None,
-            _ => Some(&table),
-        };
-        let column_desc = Self::bind_field(&idents, desc.clone(), desc.name)?;
-        let binding =
-            &self.context.columns[self.context.get_column_binding(table, &column_desc.name)?];
+        let (desc, table, idents) = self.extract_desc_and_name(expr, idents.to_vec())?;
+        Self::bind_field(&idents, desc.clone())?;
+        let field_name = Self::concat_ident_names(desc.name, &idents);
+        let binding = self.context.get_column_binding(table, &field_name)?;
         Ok((
             InputRef::new(binding.index, binding.desc.data_type.clone()).into(),
-            Some(column_desc.name),
+            Some(field_name),
         ))
     }
 
-    pub fn bind_field(idents: &[Ident], mut desc: ColumnDesc, name: String) -> Result<ColumnDesc> {
+    /// Use . to concat ident name.
+    pub fn concat_ident_names(mut column_name: String, idents: &[Ident]) -> String {
+        for name in idents {
+            column_name = column_name + "." + &name.value;
+        }
+        column_name
+    }
+
+    /// Bind field in recursive way.
+    /// If bind success, will return the last `field_desc`.
+    /// Otherwise return err `item_not_found`.
+    pub fn bind_field(idents: &[Ident], desc: ColumnDesc) -> Result<ColumnDesc> {
         match idents.get(0) {
-            Some(ident) => {
-                let field_name = ident.value.clone();
-                for col in desc.field_descs {
-                    if field_name == col.name {
-                        return Self::bind_field(&idents[1..], col, name + "." + &field_name);
-                    }
-                }
-                Err(ErrorCode::ItemNotFound(format!("Invalid field name: {}", field_name)).into())
-            }
-            None => {
-                desc.name = name;
-                Ok(desc)
-            }
+            Some(ident) => match desc.field_descs.get(&ident.value) {
+                Some(col) => Self::bind_field(&idents[1..], col.clone()),
+                None => Err(ErrorCode::ItemNotFound(format!(
+                    "Invalid field name: {}",
+                    ident.value
+                ))
+                .into()),
+            },
+            None => Ok(desc),
         }
     }
 

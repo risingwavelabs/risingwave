@@ -171,7 +171,7 @@ impl From<&ProstTable> for TableCatalog {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, OrderedColumnDesc, TableId};
+    use risingwave_common::catalog::{ColumnDesc, OrderedColumnDesc, TableId};
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
@@ -235,13 +235,11 @@ mod tests {
                 columns: vec![
                     ColumnCatalog::row_id_column(),
                     ColumnCatalog {
-                        column_desc: ColumnDesc {
-                            data_type: DataType::Struct {
-                                fields: vec![DataType::Varchar, DataType::Varchar].into()
-                            },
-                            column_id: ColumnId::new(1),
-                            name: "country".to_string(),
-                            field_descs: vec![
+                        column_desc: ColumnDesc::new_struct(
+                            "country",
+                            1,
+                            ".test.Country",
+                            vec![
                                 ColumnDesc::new_atomic(
                                     DataType::Varchar,
                                     "country.address",
@@ -255,9 +253,9 @@ mod tests {
                                     true
                                 ),
                             ],
-                            type_name: ".test.Country".to_string(),
-                            is_nested: false
-                        },
+                            false
+                        ),
+
                         is_hidden: false
                     }
                 ],

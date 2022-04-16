@@ -32,7 +32,10 @@ impl Binder {
             }
         };
 
-        if let Ok(index) = self.context.get_column_binding(table_name, column_name) {
+        if let Ok(index) = self
+            .context
+            .get_column_binding_index(table_name, column_name)
+        {
             let column = &self.context.columns[index];
             return Ok(InputRef::new(column.index, column.desc.data_type.clone()).into());
         }
@@ -42,7 +45,7 @@ impl Binder {
         for (i, context) in self.upper_contexts.iter().rev().enumerate() {
             // `depth` starts from 1.
             let depth = i + 1;
-            match context.get_column_binding(table_name, column_name) {
+            match context.get_column_binding_index(table_name, column_name) {
                 Ok(index) => {
                     let column = &context.columns[index];
                     return Ok(CorrelatedInputRef::new(

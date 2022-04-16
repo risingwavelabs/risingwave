@@ -67,7 +67,7 @@ pub struct BindContext {
 }
 
 impl BindContext {
-    pub fn get_column_binding(
+    pub fn get_column_binding_index(
         &self,
         table_name: Option<&String>,
         column_name: &String,
@@ -76,6 +76,18 @@ impl BindContext {
             Some(table_name) => self.get_index_with_table_name(column_name, table_name),
             None => self.get_index(column_name),
         }
+    }
+
+    pub fn get_column_binding(
+        &self,
+        table_name: Option<String>,
+        column_name: &String,
+    ) -> Result<&ColumnBinding> {
+        let index = match table_name {
+            Some(table_name) => self.get_index_with_table_name(column_name, &table_name)?,
+            None => self.get_index(column_name)?,
+        };
+        Ok(&self.columns[index])
     }
 
     fn get_index(&self, column_name: &String) -> Result<usize> {

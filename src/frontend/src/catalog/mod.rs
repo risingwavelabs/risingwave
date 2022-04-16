@@ -60,14 +60,7 @@ pub const TABLE_SOURCE_PK_COLID: ColumnId = ColumnId::new(0);
 
 /// Creates a row ID column (for implicit primary key).
 pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Int64,
-        column_id: ColumnId::new(0),
-        name: gen_row_id_column_name(0),
-        field_descs: vec![],
-        type_name: "".to_string(),
-        is_nested: false,
-    }
+    ColumnDesc::with_name(DataType::Int64, gen_row_id_column_name(0), ColumnId::new(0))
 }
 
 #[derive(Error, Debug)]
