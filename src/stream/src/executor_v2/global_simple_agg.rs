@@ -48,9 +48,6 @@ pub struct SimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     info: ExecutorInfo,
 
-    /// Schema of the executor.
-    schema: Schema,
-
     /// The executor operates on this keyspace.
     keyspace: Keyspace<S>,
 
@@ -100,11 +97,10 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         Ok(Self {
             input,
             info: ExecutorInfo {
-                schema: input_info.schema,
+                schema,
                 pk_indices: input_info.pk_indices,
-                identity: format!("SimpleAggExecutor {:X}", executor_id),
+                identity: format!("SimpleAggExecutor-{:X}", executor_id),
             },
-            schema,
             keyspace,
             states: None,
             agg_calls,
@@ -223,7 +219,6 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let SimpleAggExecutor {
             input,
             info,
-            schema,
             keyspace,
             mut states,
             agg_calls,
@@ -256,7 +251,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Barrier(barrier) => {
                     let next_epoch = barrier.epoch.curr;
                     if let Some(chunk) =
-                        Self::flush_data(&schema, &mut states, &keyspace, epoch).await?
+                        Self::flush_data(&info.schema, &mut states, &keyspace, epoch).await?
                     {
                         assert_eq!(epoch, barrier.epoch.prev);
                         yield Message::Chunk(chunk);
