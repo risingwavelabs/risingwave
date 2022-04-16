@@ -246,15 +246,13 @@ impl Binder {
         let (desc, table, idents) = self.extract_desc_and_name(expr, idents.to_vec())?;
         let column_desc = Self::bind_field(&idents, desc.clone())?;
         let field_name = Self::concat_ident_names(desc.name, &idents);
-        let mut bindings: Vec<&ColumnBinding> = column_desc
-            .field_descs
-            .iter()
-            .map(|(f, _)| {
+        let bindings: Vec<&ColumnBinding> = column_desc
+            .field_desc_iter()
+            .map(|f| {
                 self.context
-                    .get_column_binding(table.clone(), &(field_name.clone() + "." + f))
+                    .get_column_binding(table.clone(), &(field_name.clone() + "." + &f.name))
             })
             .collect::<Result<_>>()?;
-        bindings.sort_by(|a, b| a.index.cmp(&b.index));
         Ok(Self::bind_columns_iter(bindings.into_iter()))
     }
 

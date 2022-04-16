@@ -108,13 +108,18 @@ impl ColumnDesc {
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
             field_descs: self
-                .field_descs
-                .iter()
-                .map(|(_, f)| f.to_protobuf())
+                .field_desc_iter()
+                .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
             is_nested: self.is_nested,
         }
+    }
+
+    pub fn field_desc_iter(&self) -> impl Iterator<Item = &ColumnDesc> {
+        self.field_descs
+            .values()
+            .sorted_by(|a, b| a.name.cmp(&b.name))
     }
 
     /// Flatten a nested column to a list of columns (including itself).
@@ -125,16 +130,14 @@ impl ColumnDesc {
         let mut descs = vec![self.clone()];
         descs.append(
             &mut self
-                .field_descs
-                .iter()
-                .flat_map(|(_, d)| {
+                .field_desc_iter()
+                .flat_map(|d| {
                     let mut desc = d.clone();
                     desc.name = self.name.clone() + "." + &desc.name;
                     desc.flatten()
                 })
                 .collect_vec(),
         );
-        descs.sort_by(|a, b| a.name.cmp(&b.name));
         descs
     }
 
@@ -180,7 +183,12 @@ impl ColumnDesc {
     pub fn generate_increment_id(&mut self, index: &mut i32) {
         self.column_id = ColumnId::new(*index);
         *index += 1;
-        for field in self.field_descs.values_mut() {
+        for field in self
+            .field_descs
+            .values_mut()
+            .sorted_by(|a, b| a.name.cmp(&b.name))
+            .collect_vec()
+        {
             field.generate_increment_id(index);
         }
     }
@@ -240,7 +248,7 @@ impl From<&ColumnDesc> for ProstColumnDesc {
             column_type: c.data_type.to_protobuf().into(),
             column_id: c.column_id.into(),
             name: c.name.clone(),
-            field_descs: c.field_descs.iter().map(|(_, c)| c.to_protobuf()).collect(),
+            field_descs: c.field_desc_iter().map(|c| c.to_protobuf()).collect(),
             type_name: c.type_name.clone(),
             is_nested: c.is_nested,
         }
