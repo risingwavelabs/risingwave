@@ -48,6 +48,9 @@ pub struct SimpleAggExecutor<S: StateStore> {
     input: Box<dyn Executor>,
     info: ExecutorInfo,
 
+    /// Pk indices from input
+    input_pk_indices: Vec<usize>,
+
     /// The executor operates on this keyspace.
     keyspace: Keyspace<S>,
 
@@ -91,6 +94,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         executor_id: u64,
         key_indices: Vec<usize>,
     ) -> Result<Self> {
+        let input_info = input.info();
         let schema = generate_agg_schema(input.as_ref(), &agg_calls, None);
 
         Ok(Self {
@@ -100,6 +104,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 pk_indices,
                 identity: format!("SimpleAggExecutor-{:X}", executor_id),
             },
+            input_pk_indices: input_info.pk_indices,
             keyspace,
             states: None,
             agg_calls,
@@ -109,7 +114,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
     async fn apply_chunk(
         agg_calls: &[AggCall],
-        pk_indices: &[usize],
+        input_pk_indices: &[usize],
         schema: &Schema,
         states: &mut Option<AggState<S>>,
         keyspace: &Keyspace<S>,
@@ -120,8 +125,8 @@ impl<S: StateStore> SimpleAggExecutor<S> {
 
         // --- Retrieve all aggregation inputs in advance ---
         let all_agg_input_arrays = agg_input_array_refs(agg_calls, &columns);
-        let pk_input_arrays = pk_input_array_refs(pk_indices, &columns);
-        let input_pk_data_types = pk_indices
+        let pk_input_arrays = pk_input_array_refs(input_pk_indices, &columns);
+        let input_pk_data_types = input_pk_indices
             .iter()
             .map(|idx| schema.fields[*idx].data_type.clone())
             .collect();
@@ -218,6 +223,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
         let SimpleAggExecutor {
             input,
             info,
+            input_pk_indices,
             keyspace,
             mut states,
             agg_calls,
@@ -238,7 +244,7 @@ impl<S: StateStore> SimpleAggExecutor<S> {
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(
                         &agg_calls,
-                        &info.pk_indices,
+                        &input_pk_indices,
                         &info.schema,
                         &mut states,
                         &keyspace,
