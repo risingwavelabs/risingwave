@@ -247,7 +247,7 @@ pub fn extract_common_factor(expr: ExprImpl) -> Vec<ExprImpl> {
     // For example, we assume that expr is (A & B & C & D) | (B & C & D) | (C & D & E)
     let disjunctions: Vec<ExprImpl> = to_disjunctions(expr);
 
-    // `expr` can not be divided into several disjunctions
+    // if `expr` can not be divided into several disjunctions...
     if disjunctions.len() == 1 {
         return disjunctions;
     }
