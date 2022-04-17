@@ -56,14 +56,16 @@ pub use error::*;
 use value::*;
 
 use self::iterator::{
-    BoxedHummockIterator, DirectedUserIterator, HummockIterator, MergeIterator,
+    BoxedHummockIterator, DirectedUserIterator, DirectionalHummockIterator, MergeIterator,
     ReverseMergeIterator, UserIterator,
 };
 use self::key::{key_with_epoch, user_key, FullKey};
 pub use self::sstable_store::*;
 use self::utils::range_overlap;
 use super::monitor::StateStoreMetrics;
-use crate::hummock::iterator::{ConcatIterator, ReverseConcatIterator, ReverseUserIterator};
+use crate::hummock::iterator::{
+    BoxedBackwardHummockIterator, ConcatIterator, ReverseConcatIterator, ReverseUserIterator,
+};
 use crate::hummock::local_version_manager::LocalVersionManager;
 use crate::hummock::shared_buffer::shared_buffer_manager::SharedBufferManager;
 use crate::hummock::utils::{validate_epoch, validate_table_key_range};
@@ -535,7 +537,7 @@ impl StateStore for HummockStorage {
                                 table,
                                 self.sstable_store.clone(),
                             ))
-                                as BoxedHummockIterator);
+                                as BoxedBackwardHummockIterator);
                         }
                     }
                     LevelType::Nonoverlapping => {
@@ -550,7 +552,7 @@ impl StateStore for HummockStorage {
                                 tables.pop().unwrap(),
                                 self.sstable_store.clone(),
                             ))
-                                as BoxedHummockIterator);
+                                as BoxedBackwardHummockIterator);
                         }
                     }
                 }
@@ -565,7 +567,7 @@ impl StateStore for HummockStorage {
                     .shared_buffer_manager
                     .reverse_iters(&key_range, (version.max_committed_epoch() + 1)..=epoch)
                     .into_iter()
-                    .map(|i| Box::new(i) as BoxedHummockIterator);
+                    .map(|i| Box::new(i) as BoxedBackwardHummockIterator);
                 ReverseMergeIterator::new(
                     overlapped_shared_buffer_iters.chain(overlapped_sstable_iters),
                     self.stats.clone(),

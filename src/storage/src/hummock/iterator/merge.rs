@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use super::variants::FORWARD;
-use crate::hummock::iterator::merge_inner::MergeIteratorInner;
+use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
 
-pub type MergeIterator<'a> = MergeIteratorInner<'a, FORWARD>;
+pub type MergeIterator<'a> = UnorderedMergeIteratorInner<'a, FORWARD>;
 
 #[cfg(test)]
 mod test {
@@ -26,7 +26,7 @@ mod test {
         default_builder_opt_for_test, gen_iterator_test_sstable_base, iterator_test_key_of,
         iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::{BoxedHummockIterator, HummockIterator};
+    use crate::hummock::iterator::{BoxedHummockIterator, DirectionalHummockIterator};
     use crate::hummock::sstable::SSTableIterator;
     use crate::monitor::StateStoreMetrics;
 

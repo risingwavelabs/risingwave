@@ -19,12 +19,9 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use crate::hummock::iterator::variants::BACKWARD;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::DirectionalHummockIterator;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{
-    BlockIterator, HummockResult, SSTableIteratorBase, SSTableIteratorType, Sstable,
-    SstableStoreRef,
-};
+use crate::hummock::{BlockIterator, HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
 /// Reversely iterates on a table.
 pub struct ReverseSSTableIterator {
@@ -75,7 +72,7 @@ impl ReverseSSTableIterator {
 }
 
 #[async_trait]
-impl HummockIterator for ReverseSSTableIterator {
+impl DirectionalHummockIterator<BACKWARD> for ReverseSSTableIterator {
     async fn next(&mut self) -> HummockResult<()> {
         let block_iter = self.block_iter.as_mut().expect("no block iter");
         block_iter.prev();
@@ -134,12 +131,8 @@ impl HummockIterator for ReverseSSTableIterator {
     }
 }
 
-impl SSTableIteratorBase for ReverseSSTableIterator {}
-
-impl SSTableIteratorType for ReverseSSTableIterator {
+impl SSTableIteratorType<BACKWARD> for ReverseSSTableIterator {
     type SSTableIterator = ReverseSSTableIterator;
-
-    const DIRECTION: usize = BACKWARD;
 
     fn new(table: Arc<Sstable>, sstable_store: SstableStoreRef) -> Self::SSTableIterator {
         ReverseSSTableIterator::new(table, sstable_store)

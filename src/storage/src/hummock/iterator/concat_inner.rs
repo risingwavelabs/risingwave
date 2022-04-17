@@ -19,12 +19,12 @@ use async_trait::async_trait;
 use risingwave_hummock_sdk::VersionedComparator;
 
 use super::variants::*;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::DirectionalHummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockResult, SSTableIteratorType, Sstable, SstableStoreRef};
 
 /// Served as the concrete implementation of `ConcatIterator` and `ReverseConcatIterator`.
-pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
+pub struct ConcatIteratorInner<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>> {
     /// The iterator of the current table.
     sstable_iter: Option<TI::SSTableIterator>,
 
@@ -37,7 +37,9 @@ pub struct ConcatIteratorInner<TI: SSTableIteratorType> {
     sstable_store: SstableStoreRef,
 }
 
-impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
+impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
+    ConcatIteratorInner<DIRECTION, TI>
+{
     /// Caller should make sure that `tables` are non-overlapping,
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a reverse iterator.
@@ -70,7 +72,9 @@ impl<TI: SSTableIteratorType> ConcatIteratorInner<TI> {
 }
 
 #[async_trait]
-impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
+impl<const DIRECTION: usize, TI: SSTableIteratorType<DIRECTION>>
+    DirectionalHummockIterator<DIRECTION> for ConcatIteratorInner<DIRECTION, TI>
+{
     async fn next(&mut self) -> HummockResult<()> {
         let sstable_iter = self.sstable_iter.as_mut().expect("no table iter");
         sstable_iter.next().await?;
@@ -102,7 +106,7 @@ impl<TI: SSTableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()> {
         let table_idx = self
             .tables
-            .partition_point(|table| match TI::DIRECTION {
+            .partition_point(|table| match DIRECTION {
                 FORWARD => {
                     let ord = VersionedComparator::compare_key(&table.meta.smallest_key, key);
                     ord == Less || ord == Equal

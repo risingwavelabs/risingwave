@@ -41,7 +41,7 @@ use async_trait::async_trait;
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
 #[async_trait]
-pub trait HummockIterator: Send + Sync {
+pub trait DirectionalHummockIterator<const DIRECTION: usize>: Send + Sync {
     /// Moves a valid iterator to the next key.
     ///
     /// Note:
@@ -103,7 +103,14 @@ pub trait HummockIterator: Send + Sync {
     async fn seek(&mut self, key: &[u8]) -> HummockResult<()>;
 }
 
+/// The default direction of `DirectionalHummockIterator` is `FORWARD`.
+pub trait HummockIterator = DirectionalHummockIterator<{ variants::FORWARD }>;
+pub trait BackwardHummockIterator = DirectionalHummockIterator<{ variants::BACKWARD }>;
+
 pub type BoxedHummockIterator<'a> = Box<dyn HummockIterator + 'a>;
+pub type BoxedBackwardHummockIterator<'a> = Box<dyn BackwardHummockIterator + 'a>;
+pub type BoxedDirectionalHummockIterator<'a, const DIRECTION: usize> =
+    Box<dyn DirectionalHummockIterator<DIRECTION> + 'a>;
 
 pub mod variants {
     pub const FORWARD: usize = 0;

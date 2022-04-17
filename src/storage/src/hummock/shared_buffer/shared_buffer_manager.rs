@@ -387,7 +387,8 @@ mod tests {
     use super::*;
     use crate::hummock::iterator::test_utils::iterator_test_value_of;
     use crate::hummock::iterator::{
-        BoxedHummockIterator, HummockIterator, MergeIterator, ReverseMergeIterator,
+        BoxedBackwardHummockIterator, BoxedHummockIterator, DirectionalHummockIterator,
+        MergeIterator, ReverseMergeIterator,
     };
     use crate::hummock::test_utils::default_config_for_test;
     use crate::hummock::SstableStore;
@@ -718,7 +719,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -742,7 +743,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();
@@ -797,7 +798,7 @@ mod tests {
         let mut merge_iterator = ReverseMergeIterator::new(
             iters
                 .into_iter()
-                .map(|i| Box::new(i) as BoxedHummockIterator),
+                .map(|i| Box::new(i) as BoxedBackwardHummockIterator),
             Arc::new(StateStoreMetrics::unused()),
         );
         merge_iterator.rewind().await.unwrap();

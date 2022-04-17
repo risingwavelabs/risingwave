@@ -18,7 +18,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 
 use crate::hummock::iterator::variants::*;
-use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::DirectionalHummockIterator;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{key, HummockEpoch, HummockResult};
 use crate::storage_value::VALUE_META_SIZE;
@@ -124,7 +124,9 @@ impl<const DIRECTION: usize> SharedBufferBatchIterator<DIRECTION> {
 }
 
 #[async_trait]
-impl<const DIRECTION: usize> HummockIterator for SharedBufferBatchIterator<DIRECTION> {
+impl<const DIRECTION: usize> DirectionalHummockIterator<DIRECTION>
+    for SharedBufferBatchIterator<DIRECTION>
+{
     async fn next(&mut self) -> HummockResult<()> {
         assert!(self.is_valid());
         self.current_idx += 1;
