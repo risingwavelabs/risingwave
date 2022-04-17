@@ -55,7 +55,7 @@ impl StreamChunkBuilder {
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
-        assert_ne!(capacity, 0);
+        // TODO: assert `capacity != 0`
         let ops = Vec::with_capacity(capacity);
         let column_builders = data_types
             .iter()
