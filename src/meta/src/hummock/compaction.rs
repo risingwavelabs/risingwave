@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::io::Cursor;
 
@@ -99,22 +100,30 @@ impl CompactStatus {
 
         let num_levels = self.level_handlers.len();
         let mut idle_levels = Vec::with_capacity(num_levels - 1);
-        for (level_handler_idx, level_handler) in
-            self.level_handlers[..num_levels - 1].iter().enumerate()
+        let mut last_level_idle = true;
+        for (level_handler_idx, level_handler) in self.level_handlers[..num_levels - 1]
+            .iter()
+            .enumerate()
+            .rev()
         {
             match level_handler {
                 LevelHandler::Overlapping(_, compacting_key_ranges)
                 | LevelHandler::Nonoverlapping(_, compacting_key_ranges) => {
-                    if compacting_key_ranges.is_empty() {
-                        idle_levels.push(level_handler_idx);
+                    last_level_idle = if compacting_key_ranges.is_empty() {
+                        if last_level_idle {
+                            idle_levels.push(level_handler_idx);
+                        }
+                        true
+                    } else {
+                        false
                     }
                 }
             }
         }
-        let select_level = if idle_levels.is_empty() {
-            0
+        let (select_level, _must_l0_to_l0) = if idle_levels.is_empty() {
+            (0, true)
         } else {
-            *idle_levels.first().unwrap() as u32
+            (*idle_levels.last().unwrap() as u32, false)
         };
 
         enum SearchResult {
@@ -129,6 +138,15 @@ impl CompactStatus {
         let (prior, posterior) = (prior.last_mut().unwrap(), posterior.first_mut().unwrap());
         let is_select_level_leveling = matches!(prior, LevelHandler::Nonoverlapping(_, _));
         let is_target_level_leveling = matches!(posterior, LevelHandler::Nonoverlapping(_, _));
+        let ord_table_id = |x: u64, y: u64| {
+            if x == y {
+                Ordering::Equal
+            } else if y.wrapping_sub(x) <= u64::MAX / 2 {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        };
         // Try to select and merge table(s) in `select_level` into `target_level`
         match prior {
             LevelHandler::Overlapping(compacting_ssts_l_n, compacting_key_ranges_l_n)
@@ -146,6 +164,7 @@ impl CompactStatus {
                             ..
                         } = &l_n[sst_idx];
                         let mut select_level_inputs = vec![*table_id];
+                        let mut earliest_table_id = *table_id;
                         let key_range;
                         let mut tier_key_range;
                         // Must ensure that there exists no SSTs in `select_level` which have
@@ -166,6 +185,11 @@ impl CompactStatus {
                                     <= user_key(&tier_key_range.right)
                                 {
                                     select_level_inputs.push(*other_table_id);
+                                    if ord_table_id(*other_table_id, earliest_table_id)
+                                        == Ordering::Less
+                                    {
+                                        earliest_table_id = *other_table_id;
+                                    }
                                     tier_key_range.full_key_extend(other_key_range);
                                 } else {
                                     next_sst_idx = sst_idx + 1 + delta_idx;
@@ -182,6 +206,7 @@ impl CompactStatus {
                         }
 
                         polysst_candidates.push((
+                            earliest_table_id,
                             (sst_idx, next_sst_idx),
                             select_level_inputs,
                             key_range.clone(),
@@ -193,8 +218,14 @@ impl CompactStatus {
 
                 let mut rng = thread_rng();
                 polysst_candidates.shuffle(&mut rng);
+                if select_level == 0 {
+                    polysst_candidates.sort_by(|(table_id_a, ..), (table_id_b, ..)| {
+                        ord_table_id(*table_id_a, *table_id_b)
+                    });
+                }
 
-                for ((sst_idx, next_sst_idx), select_level_inputs, key_range) in polysst_candidates
+                for (_, (sst_idx, next_sst_idx), select_level_inputs, key_range) in
+                    polysst_candidates
                 {
                     let mut is_select_idle = true;
                     for SSTableInfo { table_id, .. } in &l_n[sst_idx..next_sst_idx] {
