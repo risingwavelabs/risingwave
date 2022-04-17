@@ -140,6 +140,7 @@ pub struct Utf8ArrayBuilder {
     offset: Vec<usize>,
     bitmap: BitmapBuilder,
     data: Vec<u8>,
+    capacity: usize,
 }
 
 impl ArrayBuilder for Utf8ArrayBuilder {
@@ -152,6 +153,7 @@ impl ArrayBuilder for Utf8ArrayBuilder {
             offset,
             data: Vec::with_capacity(capacity),
             bitmap: BitmapBuilder::with_capacity(capacity),
+            capacity,
         })
     }
 
@@ -187,6 +189,20 @@ impl ArrayBuilder for Utf8ArrayBuilder {
             bitmap: (self.bitmap).finish(),
             data: self.data,
             offset: self.offset,
+        })
+    }
+
+    fn take(&mut self) -> Result<Utf8Array> {
+        let Utf8ArrayBuilder {
+            offset,
+            mut bitmap,
+            data,
+            ..
+        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+        Ok(Utf8Array {
+            bitmap: bitmap.finish(),
+            data,
+            offset,
         })
     }
 }

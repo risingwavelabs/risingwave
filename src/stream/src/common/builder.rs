@@ -40,6 +40,12 @@ pub struct StreamChunkBuilder {
     /// If the coming side is the right, the `matched_start_pos`
     /// should be 0.
     matched_start_pos: usize,
+
+    /// Maximum capacity of column builder
+    capacity: usize,
+
+    /// Size of column builder
+    size: usize,
 }
 
 impl StreamChunkBuilder {
@@ -49,6 +55,7 @@ impl StreamChunkBuilder {
         update_start_pos: usize,
         matched_start_pos: usize,
     ) -> Result<Self> {
+        assert_ne!(capacity, 0);
         let ops = Vec::with_capacity(capacity);
         let column_builders = data_types
             .iter()
@@ -59,8 +66,39 @@ impl StreamChunkBuilder {
             column_builders,
             update_start_pos,
             matched_start_pos,
+            capacity,
+            size: 0,
         })
     }
+
+    /// Append a row with coming update value and matched value, while tracking the chunk size under
+    /// the capacity limit
+    ///
+    /// A [`StreamChunk`] will be returned when `size == capacity`
+    pub fn append_row_with_limit(
+        &mut self,
+        op: Op,
+        row_update: &RowRef<'_>,
+        row_matched: &Row,
+    ) -> Result<Option<StreamChunk>> {
+        self.ops.push(op);
+        for i in 0..row_update.size() {
+            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
+        }
+        for i in 0..row_matched.size() {
+            self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
+        }
+
+        // TODO: check `size == 0` when builder is dropped
+        self.size += 1;
+        if self.size == self.capacity {
+            self.take()
+        } else {
+            Ok(None)
+        }
+    }
+
+    // TODO: refactor following methods with limit
 
     /// append a row with coming update value and matched value.
     pub fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
@@ -111,5 +149,25 @@ impl StreamChunkBuilder {
             .collect::<Vec<_>>();
 
         Ok(StreamChunk::new(self.ops, new_columns, None))
+    }
+
+    pub fn take(&mut self) -> Result<Option<StreamChunk>> {
+        self.size = 0;
+        let new_arrays = self
+            .column_builders
+            .iter_mut()
+            .map(|builder| builder.take())
+            .try_collect::<Vec<_>>()?;
+
+        let new_columns = new_arrays
+            .into_iter()
+            .map(|array_impl| Column::new(Arc::new(array_impl)))
+            .collect::<Vec<_>>();
+
+        Ok(Some(StreamChunk::new(
+            std::mem::take(&mut self.ops),
+            new_columns,
+            None,
+        )))
     }
 }

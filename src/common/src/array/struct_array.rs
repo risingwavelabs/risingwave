@@ -36,6 +36,7 @@ pub struct StructArrayBuilder {
     children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
+    capacity: usize,
 }
 
 impl ArrayBuilder for StructArrayBuilder {
@@ -67,6 +68,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 children_array,
                 children_type: children,
                 len: 0,
+                capacity,
             })
         } else {
             panic!("must be ArrayMeta::Struct");
@@ -115,6 +117,35 @@ impl ArrayBuilder for StructArrayBuilder {
             children,
             children_type: self.children_type,
             len: self.len,
+        })
+    }
+
+    fn take(&mut self) -> Result<StructArray> {
+        let StructArrayBuilder {
+            mut bitmap,
+            children_array,
+            children_type,
+            len,
+            ..
+        } = std::mem::replace(
+            self,
+            Self::new_with_meta(
+                self.capacity,
+                ArrayMeta::Struct {
+                    children: self.children_type.clone(),
+                },
+            )?,
+        );
+
+        let children = children_array
+            .into_iter()
+            .map(|b| b.finish())
+            .try_collect()?;
+        Ok(StructArray {
+            bitmap: bitmap.finish(),
+            children,
+            children_type,
+            len,
         })
     }
 }

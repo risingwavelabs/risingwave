@@ -113,7 +113,8 @@ macro_rules! get_chrono_array {
             #[derive(Debug)]
             pub struct $builder {
                 bitmap: BitmapBuilder,
-                data: Vec<$variant_name>
+                data: Vec<$variant_name>,
+                capacity: usize,
             }
 
             impl ArrayBuilder for $builder {
@@ -123,6 +124,7 @@ macro_rules! get_chrono_array {
                     Ok(Self {
                         bitmap: BitmapBuilder::with_capacity(capacity),
                         data: Vec::with_capacity(capacity),
+                        capacity,
                     })
                 }
 
@@ -152,6 +154,16 @@ macro_rules! get_chrono_array {
                     Ok(Self::ArrayType {
                         bitmap: self.bitmap.finish(),
                         data: self.data,
+                    })
+                }
+
+                fn take(&mut self) -> Result<Self::ArrayType> {
+                    let $builder {
+                        mut bitmap, data, ..
+                    } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+                    Ok(Self::ArrayType {
+                        bitmap: bitmap.finish(),
+                        data,
                     })
                 }
             }

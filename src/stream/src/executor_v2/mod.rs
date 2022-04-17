@@ -67,6 +67,9 @@ pub type BoxedMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 pub type MessageStreamItem = StreamExecutorResult<Message>;
 pub trait MessageStream = futures::Stream<Item = MessageStreamItem> + Send;
 
+/// The maximum chunk length produced by executor at a time.
+const PROCESSING_WINDOW_SIZE: usize = 1024;
+
 /// Static information of an executor.
 #[derive(Debug)]
 pub struct ExecutorInfo {

@@ -111,6 +111,7 @@ impl Array for BoolArray {
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,
+    capacity: usize,
 }
 
 impl ArrayBuilder for BoolArrayBuilder {
@@ -120,6 +121,7 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
+            capacity,
         })
     }
 
@@ -153,6 +155,18 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(BoolArray {
             bitmap: self.bitmap.finish(),
             data: self.data.finish(),
+        })
+    }
+
+    fn take(&mut self) -> Result<BoolArray> {
+        let BoolArrayBuilder {
+            mut bitmap,
+            mut data,
+            ..
+        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+        Ok(BoolArray {
+            bitmap: bitmap.finish(),
+            data: data.finish(),
         })
     }
 }

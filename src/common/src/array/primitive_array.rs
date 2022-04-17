@@ -172,6 +172,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
     bitmap: BitmapBuilder,
     data: Vec<T>,
+    capacity: usize,
 }
 
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
@@ -181,6 +182,7 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
+            capacity,
         })
     }
 
@@ -210,6 +212,16 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(PrimitiveArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
+        })
+    }
+
+    fn take(&mut self) -> Result<PrimitiveArray<T>> {
+        let PrimitiveArrayBuilder {
+            mut bitmap, data, ..
+        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+        Ok(PrimitiveArray {
+            bitmap: bitmap.finish(),
+            data,
         })
     }
 }

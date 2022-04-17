@@ -39,6 +39,7 @@
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
 #![feature(unzip_option)]
+#![feature(iterator_try_collect)]
 
 #[macro_use]
 extern crate log;

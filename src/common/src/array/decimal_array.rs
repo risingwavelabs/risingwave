@@ -126,6 +126,7 @@ impl Array for DecimalArray {
 pub struct DecimalArrayBuilder {
     bitmap: BitmapBuilder,
     data: Vec<Decimal>,
+    capacity: usize,
 }
 
 impl ArrayBuilder for DecimalArrayBuilder {
@@ -135,6 +136,7 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
+            capacity,
         })
     }
 
@@ -164,6 +166,16 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(DecimalArray {
             bitmap: self.bitmap.finish(),
             data: self.data,
+        })
+    }
+
+    fn take(&mut self) -> Result<DecimalArray> {
+        let DecimalArrayBuilder {
+            mut bitmap, data, ..
+        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+        Ok(DecimalArray {
+            bitmap: bitmap.finish(),
+            data,
         })
     }
 }

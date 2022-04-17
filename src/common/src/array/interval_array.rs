@@ -34,6 +34,7 @@ pub struct IntervalArray {
 pub struct IntervalArrayBuilder {
     bitmap: BitmapBuilder,
     interval_buffer: Vec<IntervalUnit>,
+    capacity: usize,
 }
 
 impl IntervalArray {
@@ -116,6 +117,7 @@ impl ArrayBuilder for IntervalArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             interval_buffer: Vec::with_capacity(capacity),
+            capacity,
         })
     }
 
@@ -147,6 +149,18 @@ impl ArrayBuilder for IntervalArrayBuilder {
         Ok(IntervalArray {
             bitmap: self.bitmap.finish(),
             interval_buffer: self.interval_buffer,
+        })
+    }
+
+    fn take(&mut self) -> Result<Self::ArrayType> {
+        let IntervalArrayBuilder {
+            mut bitmap,
+            interval_buffer,
+            ..
+        } = std::mem::replace(self, Self::new_with_meta(self.capacity, ArrayMeta::Simple)?);
+        Ok(IntervalArray {
+            bitmap: bitmap.finish(),
+            interval_buffer,
         })
     }
 }

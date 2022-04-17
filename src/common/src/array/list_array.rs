@@ -37,6 +37,7 @@ pub struct ListArrayBuilder {
     value: Box<ArrayBuilderImpl>,
     value_type: DataType,
     len: usize,
+    capacity: usize,
 }
 
 impl ArrayBuilder for ListArrayBuilder {
@@ -66,6 +67,7 @@ impl ArrayBuilder for ListArrayBuilder {
                 value: Box::new(datatype.create_array_builder(capacity)?),
                 value_type: *datatype,
                 len: 0,
+                capacity,
             })
         } else {
             panic!("must be ArrayMeta::List");
@@ -110,6 +112,33 @@ impl ArrayBuilder for ListArrayBuilder {
             value: Box::new(self.value.finish()?),
             value_type: self.value_type,
             len: self.len,
+        })
+    }
+
+    fn take(&mut self) -> Result<ListArray> {
+        let ListArrayBuilder {
+            mut bitmap,
+            offsets,
+            value,
+            value_type,
+            len,
+            ..
+        } = std::mem::replace(
+            self,
+            Self::new_with_meta(
+                self.capacity,
+                ArrayMeta::List {
+                    datatype: Box::new(self.value_type.clone()),
+                },
+            )?,
+        );
+        let value = Box::new(value.finish()?);
+        Ok(ListArray {
+            bitmap: bitmap.finish(),
+            offsets,
+            value,
+            value_type,
+            len,
         })
     }
 }
