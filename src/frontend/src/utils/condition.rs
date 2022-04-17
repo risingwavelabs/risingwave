@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 
 use crate::expr::{
-    fold_boolean_constant, push_down_not, to_conjunctions, try_get_bool_constant, ExprImpl,
-    ExprRewriter, ExprType, ExprVisitor, InputRef, extract_common_factor,
+    extract_common_factor, fold_boolean_constant, push_down_not, to_conjunctions,
+    try_get_bool_constant, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef,
 };
 
 #[derive(Debug, Clone)]
@@ -228,8 +229,8 @@ impl Condition {
             .map(fold_boolean_constant)
             .flat_map(to_conjunctions)
             .collect();
-
         let mut res: Vec<ExprImpl> = Vec::new();
+        let mut already_in_res: HashSet<ExprImpl> = HashSet::new();
         for i in conjunctions {
             if let Some(v) = try_get_bool_constant(&i) {
                 if !v {
@@ -238,8 +239,18 @@ impl Condition {
                     res.push(ExprImpl::literal_bool(false));
                     break;
                 }
+            } else if !i.has_subquery() {
+                // extract_common_factor requires hash-able ExprImpl
+                let extracted_expr = extract_common_factor(i);
+                res.extend(
+                    extracted_expr
+                        .clone()
+                        .into_iter()
+                        .filter(|expr| !already_in_res.contains(expr)),
+                );
+                already_in_res.extend(extracted_expr);
             } else {
-                res.extend(extract_common_factor(i));
+                res.push(i);
             }
         }
         Self { conjunctions: res }
