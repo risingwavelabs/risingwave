@@ -82,7 +82,7 @@ impl ExprRewriter for BooleanConstantFolding {
     /// This rewriter will panic if the length of the inputs is not `2`.
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
         let (func_type, inputs, ret) = func_call.decompose();
-        let inputs: Vec<_> = inputs
+        let mut inputs: Vec<_> = inputs
             .into_iter()
             .map(|expr| self.rewrite_expr(expr))
             .collect();
@@ -103,6 +103,12 @@ impl ExprRewriter for BooleanConstantFolding {
         };
         if contains_bool_constant {
             match func_type {
+                Type::Not => {
+                    let constant_value = inputs.pop().unwrap();
+                    if let Some(v) = try_get_bool_constant(&constant_value) {
+                        return ExprImpl::literal_bool(!v);
+                    }
+                }
                 Type::And => {
                     let (constant_lhs, rhs) = prepare_binary_function_inputs(inputs);
                     return boolean_constant_fold_and(constant_lhs, rhs);
