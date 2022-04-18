@@ -71,8 +71,8 @@ impl SchemaCatalog {
             .filter(|(_, v)| {
                 // Internally, a table with an associated source can be
                 // MATERIALIZED SOURCE or TABLE.
-                let s = self.get_source_by_name(v.name()).unwrap();
-                v.associated_source_id.is_some() && s.source_type == SourceType::Table
+                v.associated_source_id.is_some()
+                    && self.get_source_by_name(v.name()).unwrap().source_type == SourceType::Table
             })
             .map(|(_, v)| v)
     }
