@@ -20,7 +20,7 @@ use itertools::Itertools;
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
-use crate::types::DataType;
+use crate::types::{DataType, Datum, DatumRef};
 
 pub const DEFAULT_CHUNK_BUFFER_SIZE: usize = 2048;
 
@@ -172,15 +172,17 @@ impl DataChunkBuilder {
         self.append_one_row_ref_impl(data_chunk.row_at(row_idx)?.0)
     }
 
+    // TODO(bugen): deprecate this
     fn append_one_row_ref_impl(&mut self, row_ref: RowRef<'_>) -> Result<()> {
         self.array_builders
             .iter_mut()
-            .zip_eq(row_ref.0)
+            .zip_eq(row_ref.values())
             .try_for_each(|(array_builder, scalar)| array_builder.append_datum_ref(scalar))?;
         self.buffered_count += 1;
         Ok(())
     }
 
+    // TODO(bugen): deprecate this
     /// Used for append one row in some executors.
     /// Return a Some(data chunk) if the buffer is full after append one row.
     /// Otherwise None.
@@ -189,6 +191,60 @@ impl DataChunkBuilder {
         self.ensure_builders()?;
 
         self.append_one_row_ref_impl(row_ref)?;
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn do_append_one_row_from_datum_refs<'a>(
+        &mut self,
+        datum_refs: impl Iterator<Item = DatumRef<'a>>,
+    ) -> Result<()> {
+        self.array_builders
+            .iter_mut()
+            .zip_eq(datum_refs)
+            .try_for_each(|(array_builder, datum_ref)| array_builder.append_datum_ref(datum_ref))?;
+        self.buffered_count += 1;
+        Ok(())
+    }
+
+    fn do_append_one_row_from_datums<'a>(
+        &mut self,
+        datums: impl Iterator<Item = &'a Datum>,
+    ) -> Result<()> {
+        self.array_builders
+            .iter_mut()
+            .zip_eq(datums)
+            .try_for_each(|(array_builder, datum)| array_builder.append_datum(datum))?;
+        self.buffered_count += 1;
+        Ok(())
+    }
+
+    pub fn append_one_row_from_datum_refs<'a>(
+        &mut self,
+        datum_refs: impl Iterator<Item = DatumRef<'a>>,
+    ) -> Result<Option<DataChunk>> {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        self.do_append_one_row_from_datum_refs(datum_refs)?;
+        if self.buffered_count == self.batch_size {
+            Ok(Some(self.build_data_chunk()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn append_one_row_from_datums<'a>(
+        &mut self,
+        datums: impl Iterator<Item = &'a Datum>,
+    ) -> Result<Option<DataChunk>> {
+        ensure!(self.buffered_count < self.batch_size);
+        self.ensure_builders()?;
+
+        self.do_append_one_row_from_datums(datums)?;
         if self.buffered_count == self.batch_size {
             Ok(Some(self.build_data_chunk()?))
         } else {

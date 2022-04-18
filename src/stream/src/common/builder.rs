@@ -66,7 +66,7 @@ impl StreamChunkBuilder {
     pub fn append_row(&mut self, op: Op, row_update: &RowRef<'_>, row_matched: &Row) -> Result<()> {
         self.ops.push(op);
         for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
+            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update.value_at(i))?;
         }
         for i in 0..row_matched.size() {
             self.column_builders[i + self.matched_start_pos].append_datum(&row_matched[i])?;
@@ -78,7 +78,7 @@ impl StreamChunkBuilder {
     pub fn append_row_update(&mut self, op: Op, row_update: &RowRef<'_>) -> Result<()> {
         self.ops.push(op);
         for i in 0..row_update.size() {
-            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update[i])?;
+            self.column_builders[i + self.update_start_pos].append_datum_ref(row_update.value_at(i))?;
         }
         for i in 0..self.column_builders.len() - row_update.size() {
             self.column_builders[i + self.matched_start_pos].append_datum(&None)?;

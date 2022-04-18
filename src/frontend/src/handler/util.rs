@@ -50,7 +50,7 @@ pub fn to_pg_rows(chunk: DataChunk) -> Vec<Row> {
         .rows()
         .map(|r| {
             Row::new(
-                r.0.into_iter()
+                r.values()
                     .map(|data| data.map(pg_value_format))
                     .collect_vec(),
             )

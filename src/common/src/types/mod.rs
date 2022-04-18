@@ -302,6 +302,10 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
+    datum.as_ref().map(|d| d.as_scalar_ref_impl())
+}
+
 // TODO: specify `NULL FIRST` or `NULL LAST`.
 pub fn serialize_datum_ref_into(
     datum_ref: &DatumRef,

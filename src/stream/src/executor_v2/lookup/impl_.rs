@@ -281,18 +281,19 @@ impl<S: StateStore> LookupExecutor<S> {
 
         // Serialize join key to a state store key.
         let key_prefix = {
-            let row = RowRef(
-                self.arrangement
-                    .join_key_indices
-                    .iter()
-                    .map(|x| row.0[*x])
-                    .collect_vec(),
-            );
-            tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", row);
+            let row = row.project(&self.arrangement.join_key_indices);
+            // let row = RowRef(
+            //     self.arrangement
+            //         .join_key_indices
+            //         .iter()
+            //         .map(|x| row.0[*x])
+            //         .collect_vec(),
+            // );
+            // tracing::trace!(target: "events::stream::lookup::one_row", "{:?}", row);
             let mut key_prefix = vec![];
             self.arrangement
                 .serializer
-                .serialize_row_ref(&row, &mut key_prefix);
+                .serialize_row_ref(row, &mut key_prefix);
             key_prefix
         };
 
