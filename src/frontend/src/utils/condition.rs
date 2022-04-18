@@ -230,7 +230,7 @@ impl Condition {
             .flat_map(to_conjunctions)
             .collect();
         let mut res: Vec<ExprImpl> = Vec::new();
-        let mut already_in_res: HashSet<ExprImpl> = HashSet::new();
+        let mut visited: HashSet<ExprImpl> = HashSet::new();
         for i in conjunctions {
             if let Some(v) = try_get_bool_constant(&i) {
                 if !v {
@@ -246,9 +246,9 @@ impl Condition {
                     extracted_expr
                         .clone()
                         .into_iter()
-                        .filter(|expr| !already_in_res.contains(expr)),
+                        .filter(|expr| !visited.contains(expr)),
                 );
-                already_in_res.extend(extracted_expr);
+                visited.extend(extracted_expr);
             } else {
                 res.push(i);
             }

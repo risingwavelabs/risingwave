@@ -488,7 +488,7 @@
       LogicalAgg { group_keys: [0, 1, 2], agg_calls: [sum($3)] }
         LogicalProject { exprs: [$0, $1, $2, $3], expr_alias: [ ,  ,  ,  ] }
           LogicalProject { exprs: [$46, $51, Extract('YEAR':Varchar, $19), ($14 * (1:Int32 - $15))], expr_alias: [supp_nation, cust_nation, l_year, volume] }
-            LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($36 = $27) AND ($4 = $45) AND ($39 = $50) AND ((($46 = 'ROMANIA':Varchar) AND ($51 = 'IRAN':Varchar)) OR (($51 = 'ROMANIA':Varchar) AND ($46 = 'IRAN':Varchar))) AND ($19 >= '1983-01-01':Varchar::Date) AND ($19 <= '2000-12-31':Varchar::Date) }
+            LogicalFilter { predicate: ($1 = $11) AND ($26 = $9) AND ($36 = $27) AND ($4 = $45) AND ($39 = $50) AND ((($46 = 'ROMANIA':Varchar) AND ($51 = 'IRAN':Varchar)) OR (($46 = 'IRAN':Varchar) AND ($51 = 'ROMANIA':Varchar))) AND ($19 >= '1983-01-01':Varchar::Date) AND ($19 <= '2000-12-31':Varchar::Date) }
               LogicalJoin { type: Inner, on: always }
                 LogicalJoin { type: Inner, on: always }
                   LogicalJoin { type: Inner, on: always }
@@ -540,7 +540,7 @@
         StreamHashAgg { group_keys: [$0, $1, $2], aggs: [count, sum($3)] }
           StreamExchange { dist: HashShard([0, 1, 2]) }
             StreamProject { exprs: [$4, $11, Extract('YEAR':Varchar, $2), ($0 * (1:Int32 - $1)), $5, $6, $7, $8, $9, $12], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
-              StreamFilter { predicate: ((($11 = 'IRAN':Varchar) AND ($4 = 'ROMANIA':Varchar)) OR (($4 = 'IRAN':Varchar) AND ($11 = 'ROMANIA':Varchar))) }
+              StreamFilter { predicate: ((($4 = 'ROMANIA':Varchar) AND ($11 = 'IRAN':Varchar)) OR (($4 = 'IRAN':Varchar) AND ($11 = 'ROMANIA':Varchar))) }
                 StreamHashJoin { type: Inner, predicate: $3 = $10 }
                   StreamProject { exprs: [$1, $2, $3, $4, $10, $5, $6, $7, $8, $11], expr_alias: [ ,  ,  ,  ,  ,  ,  ,  ,  ,  ] }
                     StreamExchange { dist: HashShard([4]) }

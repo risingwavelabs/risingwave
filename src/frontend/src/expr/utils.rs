@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
-
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::ScalarImpl;
 use risingwave_pb::expr::expr_node::Type;
@@ -253,22 +251,22 @@ pub fn extract_common_factor(expr: ExprImpl) -> Vec<ExprImpl> {
     }
 
     // extract (A & B & C & D) | (B & C & D) | (C & D & E)
-    // into [{A, B, C, D}, {B, C, D}, {C, D, E}]
-    let mut disjunctions: Vec<HashSet<_>> = disjunctions
+    // into [[A, B, C, D], [B, C, D], [C, D, E]]
+    let mut disjunctions: Vec<Vec<_>> = disjunctions
         .into_iter()
         .map(|x| to_conjunctions(x).into_iter().collect())
         .collect();
     let last = disjunctions.pop().unwrap();
-    let (greatest_common_divider, others): (HashSet<_>, _) = last
+    let (greatest_common_divider, others): (Vec<_>, _) = last
         .into_iter()
         .partition(|x| disjunctions.iter().all(|y| y.contains(x)));
-    // now greatest_common_factor == {C, D}
+    // now greatest_common_factor == [C, D]
     disjunctions.push(others);
     for i in &mut disjunctions {
         // remove common factors
         i.retain(|x| !greatest_common_divider.contains(x));
     }
-    // now disjunctions == [{A, B}, {B}, {E}]
+    // now disjunctions == [[A, B], [B], [E]]
     let remaining = merge_expr_by_binary(
         disjunctions.into_iter().map(|x| {
             merge_expr_by_binary(x.into_iter(), ExprType::And, ExprImpl::literal_bool(true))
