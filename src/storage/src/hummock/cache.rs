@@ -20,10 +20,10 @@ use spin::Mutex;
 const IN_CACHE: u8 = 1;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 
-pub struct LRUHandle<K: PartialEq + Default, T> {
-    next_hash: *mut LRUHandle<K, T>,
-    next: *mut LRUHandle<K, T>,
-    prev: *mut LRUHandle<K, T>,
+pub struct LruHandle<K: PartialEq + Default, T> {
+    next_hash: *mut LruHandle<K, T>,
+    next: *mut LruHandle<K, T>,
+    prev: *mut LruHandle<K, T>,
     key: K,
     hash: u64,
     value: Option<T>,
@@ -32,7 +32,7 @@ pub struct LRUHandle<K: PartialEq + Default, T> {
     flags: u8,
 }
 
-impl<K: PartialEq + Default, T> Default for LRUHandle<K, T> {
+impl<K: PartialEq + Default, T> Default for LruHandle<K, T> {
     fn default() -> Self {
         Self {
             next_hash: null_mut(),
@@ -48,7 +48,7 @@ impl<K: PartialEq + Default, T> Default for LRUHandle<K, T> {
     }
 }
 
-impl<K: PartialEq + Default, T> LRUHandle<K, T> {
+impl<K: PartialEq + Default, T> LruHandle<K, T> {
     pub fn new(key: K, value: Option<T>) -> Self {
         Self {
             key,
@@ -89,14 +89,14 @@ impl<K: PartialEq + Default, T> LRUHandle<K, T> {
     }
 }
 
-unsafe impl<K: PartialEq + Default, T> Send for LRUHandle<K, T> {}
+unsafe impl<K: PartialEq + Default, T> Send for LruHandle<K, T> {}
 
-pub struct LRUHandleTable<K: PartialEq + Default, T> {
-    list: Vec<*mut LRUHandle<K, T>>,
+pub struct LruHandleTable<K: PartialEq + Default, T> {
+    list: Vec<*mut LruHandle<K, T>>,
     elems: usize,
 }
 
-impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
+impl<K: PartialEq + Default, T> LruHandleTable<K, T> {
     fn new() -> Self {
         Self {
             list: vec![null_mut(); 16],
@@ -108,7 +108,7 @@ impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
         &self,
         idx: usize,
         key: &K,
-    ) -> (*mut LRUHandle<K, T>, *mut LRUHandle<K, T>) {
+    ) -> (*mut LruHandle<K, T>, *mut LruHandle<K, T>) {
         let mut ptr = self.list[idx];
         let mut prev = null_mut();
         while !ptr.is_null() && !(*ptr).key.eq(key) {
@@ -118,7 +118,7 @@ impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
         (prev, ptr)
     }
 
-    unsafe fn remove(&mut self, hash: u64, key: &K) -> *mut LRUHandle<K, T> {
+    unsafe fn remove(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
         let idx = (hash as usize) & (self.list.len() - 1);
         let (mut prev, ptr) = self.find_pointer(idx, key);
         if ptr.is_null() {
@@ -133,7 +133,7 @@ impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
         ptr
     }
 
-    unsafe fn insert(&mut self, hash: u64, h: *mut LRUHandle<K, T>) -> *mut LRUHandle<K, T> {
+    unsafe fn insert(&mut self, hash: u64, h: *mut LruHandle<K, T>) -> *mut LruHandle<K, T> {
         let idx = (hash as usize) & (self.list.len() - 1);
         let (mut prev, ptr) = self.find_pointer(idx, &(*h).key);
         if prev.is_null() {
@@ -156,7 +156,7 @@ impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
         null_mut()
     }
 
-    unsafe fn lookup(&self, hash: u64, key: &K) -> *mut LRUHandle<K, T> {
+    unsafe fn lookup(&self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
         let idx = (hash as usize) & (self.list.len() - 1);
         let (_, ptr) = self.find_pointer(idx, key);
         ptr
@@ -187,9 +187,9 @@ impl<K: PartialEq + Default, T> LRUHandleTable<K, T> {
 }
 
 pub struct LRUCacheShard<K: PartialEq + Default, T> {
-    lru: Box<LRUHandle<K, T>>,
-    table: LRUHandleTable<K, T>,
-    object_pool: Vec<Box<LRUHandle<K, T>>>,
+    lru: Box<LruHandle<K, T>>,
+    table: LruHandleTable<K, T>,
+    object_pool: Vec<Box<LruHandle<K, T>>>,
     lru_usage: usize,
     usage: usize,
     capacity: usize,
@@ -201,12 +201,12 @@ unsafe impl<K: PartialEq + Default, T> Sync for LRUCacheShard<K, T> {}
 
 impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
     fn new(capacity: usize, object_capacity: usize, strict_capacity_limit: bool) -> Self {
-        let mut lru = Box::new(LRUHandle::new(K::default(), None));
+        let mut lru = Box::new(LruHandle::new(K::default(), None));
         lru.prev = lru.as_mut();
         lru.next = lru.as_mut();
         let mut object_pool = Vec::with_capacity(object_capacity);
         for _ in 0..object_capacity {
-            object_pool.push(Box::new(LRUHandle::default()));
+            object_pool.push(Box::new(LruHandle::default()));
         }
         Self {
             capacity,
@@ -215,11 +215,11 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
             object_pool,
             strict_capacity_limit,
             lru,
-            table: LRUHandleTable::new(),
+            table: LruHandleTable::new(),
         }
     }
 
-    unsafe fn lru_remove(&mut self, e: *mut LRUHandle<K, T>) {
+    unsafe fn lru_remove(&mut self, e: *mut LruHandle<K, T>) {
         (*(*e).next).prev = (*e).prev;
         (*(*e).prev).next = (*e).next;
         (*e).prev = null_mut();
@@ -228,7 +228,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
     }
 
     // insert entry in the end of the linked-list
-    unsafe fn lru_insert(&mut self, e: *mut LRUHandle<K, T>) {
+    unsafe fn lru_insert(&mut self, e: *mut LruHandle<K, T>) {
         (*e).next = self.lru.as_mut();
         (*e).prev = self.lru.prev;
         (*(*e).prev).next = e;
@@ -240,12 +240,8 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         while self.usage + charge > self.capacity && !std::ptr::eq(self.lru.next, self.lru.as_mut())
         {
             let old_ptr = self.lru.next;
-            let tmp = self.table.remove((*old_ptr).hash, &(*old_ptr).key);
-            if tmp.is_null() {
-                println!("remove hash: {}", (*old_ptr).hash);
-            }
+            self.table.remove((*old_ptr).hash, &(*old_ptr).key);
             assert!((*old_ptr).is_in_cache());
-            assert!(!tmp.is_null());
             self.lru_remove(old_ptr);
             (*old_ptr).set_in_cache(false);
             self.usage -= (*old_ptr).charge;
@@ -256,7 +252,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         }
     }
 
-    fn recyle_handle_object(&mut self, mut node: Box<LRUHandle<K, T>>) {
+    fn recyle_handle_object(&mut self, mut node: Box<LruHandle<K, T>>) {
         if self.object_pool.len() < self.object_pool.capacity() {
             node.next_hash = null_mut();
             node.next = null_mut();
@@ -272,13 +268,13 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         charge: usize,
         value: T,
         last_reference_list: &mut Vec<T>,
-    ) -> *mut LRUHandle<K, T> {
+    ) -> *mut LruHandle<K, T> {
         let mut handle = if let Some(mut h) = self.object_pool.pop() {
             h.key = key;
             h.value = Some(value);
             h
         } else {
-            Box::new(LRUHandle::new(key, Some(value)))
+            Box::new(LruHandle::new(key, Some(value)))
         };
         handle.charge = charge;
         handle.hash = hash;
@@ -312,7 +308,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         }
     }
 
-    unsafe fn release(&mut self, e: *mut LRUHandle<K, T>) -> Option<T> {
+    unsafe fn release(&mut self, e: *mut LruHandle<K, T>) -> Option<T> {
         if e.is_null() {
             return None;
         }
@@ -337,7 +333,7 @@ impl<K: PartialEq + Default, T> LRUCacheShard<K, T> {
         }
     }
 
-    unsafe fn lookup(&mut self, hash: u64, key: &K) -> *mut LRUHandle<K, T> {
+    unsafe fn lookup(&mut self, hash: u64, key: &K) -> *mut LruHandle<K, T> {
         let e = self.table.lookup(hash, key);
         if !e.is_null() {
             if !(*e).has_refs() {
@@ -405,7 +401,7 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
         }
     }
 
-    unsafe fn release(&self, handle: *mut LRUHandle<K, T>) {
+    unsafe fn release(&self, handle: *mut LruHandle<K, T>) {
         let data = {
             let mut shard = self.shards[self.shard((*handle).hash)].lock();
             shard.release(handle)
@@ -461,7 +457,7 @@ impl<K: PartialEq + Default, T> LRUCache<K, T> {
 
 pub struct CachableEntry<K: PartialEq + Default, T> {
     cache: Arc<LRUCache<K, T>>,
-    handle: *mut LRUHandle<K, T>,
+    handle: *mut LruHandle<K, T>,
 }
 
 unsafe impl<K: PartialEq + Default, T> Send for CachableEntry<K, T> {}
@@ -491,7 +487,7 @@ mod tests {
     use rand::{RngCore, SeedableRng};
 
     use super::*;
-    use crate::hummock::cache::{LRUHandle, IN_CACHE};
+    use crate::hummock::cache::{LruHandle, IN_CACHE};
     use crate::hummock::LRUCache;
 
     pub struct Block {
@@ -502,7 +498,12 @@ mod tests {
     #[test]
     fn test_cache_handle_basic() {
         println!("not in cache: {}, in cache {}", REVERSE_IN_CACHE, IN_CACHE);
-        let mut h = Box::new(LRUHandle::new(1, Some(2)));
+        println!(
+            "cache shard size: {}, cache size {}",
+            std::mem::size_of::<Mutex<LRUCacheShard<u32, String>>>(),
+            std::mem::size_of::<LRUCache<String, String>>()
+        );
+        let mut h = Box::new(LruHandle::new(1, Some(2)));
         h.set_in_cache(true);
         assert!(h.is_in_cache());
         h.set_in_cache(false);
@@ -540,7 +541,7 @@ mod tests {
 
     fn validate_lru_list(cache: &mut LRUCacheShard<String, String>, keys: Vec<&str>) {
         unsafe {
-            let mut lru: *mut LRUHandle<String, String> = cache.lru.as_mut();
+            let mut lru: *mut LruHandle<String, String> = cache.lru.as_mut();
             for k in keys {
                 lru = (*lru).next;
                 assert!(
