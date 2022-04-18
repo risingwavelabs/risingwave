@@ -481,18 +481,8 @@ mod tests {
         let parser = create_parser(PROTO_NESTED_FILE_DATA).unwrap();
         let columns = parser.map_to_columns().unwrap();
         let city = vec![
-            ColumnDesc::new_atomic(
-                DataType::Varchar.to_protobuf(),
-                "address",
-                3,
-                true,
-            ),
-            ColumnDesc::new_atomic(
-                DataType::Varchar.to_protobuf(),
-                "zipcode",
-                4,
-                true,
-            ),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 3, true),
+            ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 4, true),
         ];
         let country = vec![
             ColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2, true),
