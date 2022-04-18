@@ -85,8 +85,6 @@ impl Executor for SortMergeJoinExecutor {
                         let datum_refs = cur_probe_row
                             .values()
                             .chain(build_row.0.iter().map(to_datum_ref));
-                        // let join_row =
-                        //     Self::combine_two_row_ref(cur_probe_row.clone(), build_row.into());
                         if let Some(ret_chunk) = self
                             .chunk_builder
                             .append_one_row_from_datum_refs(datum_refs)?
@@ -111,8 +109,8 @@ impl Executor for SortMergeJoinExecutor {
 
             match (cur_probe_row_opt, cur_build_row_opt) {
                 (Some(cur_probe_row_ref), Some(cur_build_row_ref)) => {
-                    let probe_key = cur_probe_row_ref.row_by_slice(&self.probe_key_idxs);
-                    let build_key = cur_build_row_ref.row_by_slice(&self.build_key_idxs);
+                    let probe_key = cur_probe_row_ref.row_by_indices(&self.probe_key_idxs);
+                    let build_key = cur_build_row_ref.row_by_indices(&self.build_key_idxs);
 
                     // TODO: [`Row`] may not be PartialOrd. May use some trait like
                     // [`ScalarPartialOrd`].
@@ -166,7 +164,7 @@ impl Executor for SortMergeJoinExecutor {
 
                 (Some(cur_probe_row_ref), None) => {
                     self.last_probe_key =
-                        Some(cur_probe_row_ref.row_by_slice(&self.probe_key_idxs));
+                        Some(cur_probe_row_ref.row_by_indices(&self.probe_key_idxs));
                     self.probe_side_source.advance_row();
                 }
                 // Once probe row is None, consume all results or terminate.
@@ -225,7 +223,7 @@ impl SortMergeJoinExecutor {
             .clone()
             .zip(cur_row)
             .map_or(false, |(row1, row2)| {
-                row1 == row2.row_by_slice(&self.probe_key_idxs)
+                row1 == row2.row_by_indices(&self.probe_key_idxs)
             })
     }
 }

@@ -302,6 +302,7 @@ for_all_scalar_variants! { scalar_impl_enum }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
+/// Convert a [`Datum`] to a [`DatumRef`].
 pub fn to_datum_ref(datum: &Datum) -> DatumRef<'_> {
     datum.as_ref().map(|d| d.as_scalar_ref_impl())
 }

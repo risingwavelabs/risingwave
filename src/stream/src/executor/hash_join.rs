@@ -417,18 +417,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         ht.get_mut(key).await
     }
 
-    fn hash_key_from_row_ref(row: &RowRef, key_indices: &[usize]) -> HashKeyType {
-        let key = row
-            .project(key_indices)
-            .map(ToOwnedDatum::to_owned_datum)
-            .collect();
-        Row(key)
-    }
-
-    fn pk_from_row_ref(row: &RowRef, pk_indices: &[usize]) -> Row {
-        row.row_by_slice(pk_indices)
-    }
-
     fn row_concat(
         row_update: &RowRef<'_>,
         update_start_pos: usize,
@@ -500,9 +488,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<S, T> {
         )?;
 
         for (row, op) in data_chunk.rows().zip_eq(ops.iter()) {
-            let key = Self::hash_key_from_row_ref(&row, &side_update.key_indices);
+            let key = row.row_by_indices(&side_update.key_indices);
             let value = row.to_owned_row();
-            let pk = Self::pk_from_row_ref(&row, &side_update.pk_indices);
+            let pk = row.row_by_indices(&side_update.pk_indices);
+
             let matched_rows = Self::hash_eq_match(&key, &mut side_match.ht).await;
             if let Some(matched_rows) = matched_rows {
                 match *op {

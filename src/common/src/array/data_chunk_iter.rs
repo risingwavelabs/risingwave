@@ -114,30 +114,27 @@ impl<'a> RowRef<'a> {
         Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
     }
 
-    /// Get `Row` by slice of index from current row ref.
-    pub fn row_by_slice(&self, indices: &[usize]) -> Row {
+    /// Get an owned `Row` by the given `indices` from current row ref.
+    ///
+    /// Use `datum_refs_by_indices` if possible instead to avoid allocating owned datums.
+    pub fn row_by_indices(&self, indices: &[usize]) -> Row {
         Row(indices
             .iter()
             .map(|&idx| self.value_at(idx).to_owned_datum())
             .collect_vec())
     }
 
-    pub fn project<'b, 'c>(&'b self, indices: &'c [usize]) -> impl Iterator<Item = DatumRef<'c>>
+    /// Get an iterator of datum refs by the given `indices` from current row ref.
+    pub fn datum_refs_by_indices<'b, 'c>(
+        &'b self,
+        indices: &'c [usize],
+    ) -> impl Iterator<Item = DatumRef<'c>>
     where
         'a: 'b,
         'b: 'c,
     {
         indices.iter().map(|&idx| self.value_at(idx))
     }
-
-    // /// Get value by slice of index from current row ref.
-    // pub fn value_by_slice(&self, idxs: &[usize]) -> RowRef<'_> {
-    //     let mut row_vec = vec![];
-    //     for idx in idxs {
-    //         row_vec.push(self.value_at(*idx));
-    //     }
-    //     RowRef::new(row_vec)
-    // }
 }
 
 impl<'a> PartialEq for RowRef<'a> {
@@ -178,6 +175,7 @@ impl ops::Index<usize> for Row {
     }
 }
 
+// TODO: remove this due to implicit allocation
 impl From<RowRef<'_>> for Row {
     fn from(row_ref: RowRef<'_>) -> Self {
         row_ref.to_owned_row()
@@ -252,6 +250,10 @@ impl Row {
     /// Return number of cells in the row.
     pub fn size(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn values(&self) -> impl Iterator<Item = &Datum> {
+        self.0.iter()
     }
 }
 

@@ -482,7 +482,7 @@ impl NestedLoopJoinExecutor {
                     if !self.build_table.is_build_matched(row_id)?
                         && self.join_type == JoinType::RightSemi
                     {
-                        rows_ref.push(row_ref.row_by_slice(
+                        rows_ref.push(row_ref.row_by_indices(
                             &(self.probe_side_schema.len()..row_ref.size()).collect::<Vec<usize>>(),
                         ));
                     }
@@ -524,10 +524,6 @@ impl NestedLoopJoinExecutor {
                 let datum_refs = std::iter::repeat(None)
                     .take(self.probe_side_source.get_schema().len())
                     .chain(cur_row.values());
-                // let mut cur_row_vec = cur_row.0;
-                // for _ in 0..self.probe_side_source.get_schema().fields.len() {
-                //     cur_row_vec.insert(0, None);
-                // }
                 if let Some(ret_chunk) = self
                     .chunk_builder
                     .append_one_row_from_datum_refs(datum_refs)?
