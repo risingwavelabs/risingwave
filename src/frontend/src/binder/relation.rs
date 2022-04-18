@@ -16,7 +16,7 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, DEFAULT_SCHEMA_NAME};
+use risingwave_common::catalog::{ColumnDesc, DEFAULT_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_pb::plan::JoinType;
@@ -267,7 +267,8 @@ impl Binder {
         let table_catalog = self
             .catalog
             .get_table_by_name(&self.db_name, schema_name, table_name)?
-            .clone();
+            .clone()
+            .flatten();
         let columns = table_catalog.columns.clone();
 
         self.bind_context(columns.iter().cloned(), table_name.to_string(), alias)?;
@@ -391,16 +392,19 @@ impl Binder {
     ) -> Result<BoundSubquery> {
         let query = self.bind_query(query)?;
         let sub_query_id = self.next_subquery_id();
+
+        let columns = query
+            .body
+            .fields()
+            .iter()
+            .flat_map(|f| f.to_column_desc(false).flatten())
+            .collect_vec();
+
         self.bind_context(
-            query
-                .names()
-                .into_iter()
-                .zip_eq(query.data_types().into_iter())
-                //.map(|(x, y)| (x, y, false))
-                .map(|(x, y)| ColumnCatalog {
-                    column_desc: ColumnDesc::with_name(y, x, ColumnId::new(0)),
-                    is_hidden: false,
-                }),
+            columns.iter().map(|f| ColumnCatalog {
+                column_desc: f.clone(),
+                is_hidden: false,
+            }),
             format!("{}_{}", UNNAMED_SUBQUERY, sub_query_id),
             alias,
         )?;

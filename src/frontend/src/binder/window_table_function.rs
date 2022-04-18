@@ -96,9 +96,11 @@ impl Binder {
 
         self.pop_context();
 
-        let table_catalog =
-            self.catalog
-                .get_table_by_name(&self.db_name, &schema_name, &table_name)?;
+        let table_catalog = self
+            .catalog
+            .get_table_by_name(&self.db_name, &schema_name, &table_name)?
+            .clone()
+            .flatten();
 
         let columns = table_catalog.columns().to_vec();
         if columns.iter().any(|col| {

@@ -58,6 +58,10 @@ impl Expr for CorrelatedInputRef {
     fn to_protobuf(&self) -> risingwave_pb::expr::ExprNode {
         unreachable!("CorrelatedInputRef {:?} has not been decorrelated", self)
     }
+
+    fn get_index(&self) -> Option<usize> {
+        None
+    }
 }
 
 impl fmt::Debug for CorrelatedInputRef {

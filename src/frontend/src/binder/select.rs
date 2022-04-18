@@ -15,6 +15,7 @@
 use std::fmt::Debug;
 
 use itertools::Itertools;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Expr, Ident, Select, SelectItem};
@@ -33,6 +34,7 @@ pub struct BoundSelect {
     pub from: Option<Relation>,
     pub where_clause: Option<ExprImpl>,
     pub group_by: Vec<ExprImpl>,
+    pub schema: Schema,
 }
 
 impl BoundSelect {
@@ -96,6 +98,27 @@ impl Binder {
         // Bind SELECT clause.
         let (select_items, aliases) = self.bind_project(select.projection)?;
 
+        let fields = select_items
+            .iter()
+            .zip_eq(aliases.iter())
+            .map(|(s, a)| {
+                let mut field = match s.get_index() {
+                    Some(index) => {
+                        let field: Field = (&self.context.columns[index].desc).into();
+                        field
+                    }
+                    None => Field {
+                        data_type: s.return_type(),
+                        name: "".to_string(),
+                        sub_fields: vec![],
+                        type_name: "".to_string(),
+                    },
+                };
+                field.name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
+                field
+            })
+            .collect_vec();
+
         Ok(BoundSelect {
             distinct: select.distinct,
             select_items,
@@ -103,6 +126,7 @@ impl Binder {
             from,
             where_clause: selection,
             group_by,
+            schema: Schema { fields },
         })
     }
 

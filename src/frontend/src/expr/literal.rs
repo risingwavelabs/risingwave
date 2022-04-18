@@ -69,6 +69,10 @@ impl Expr for Literal {
             rex_node: literal_to_protobuf(self.get_data()),
         }
     }
+
+    fn get_index(&self) -> Option<usize> {
+        None
+    }
 }
 
 /// Convert a literal value (datum) into protobuf.
