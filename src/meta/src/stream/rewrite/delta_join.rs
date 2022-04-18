@@ -213,6 +213,7 @@ where
                 arrange_key: hash_join_node.left_key.clone(),
                 stream_key: hash_join_node.right_key.clone(),
                 use_current_epoch: false,
+                // will be filled later in StreamFragment::seal
                 arrange_fragment_id: u32::MAX,
                 arrange_local_fragment_id: arrange_0_frag.fragment_id.as_local_id(),
                 arrange_operator_id: arrange_0_frag.node.unwrap().operator_id,
@@ -227,6 +228,7 @@ where
                 arrange_key: hash_join_node.right_key.clone(),
                 stream_key: hash_join_node.left_key.clone(),
                 use_current_epoch: true,
+                // will be filled later in StreamFragment::seal
                 arrange_fragment_id: u32::MAX,
                 arrange_local_fragment_id: arrange_1_frag.fragment_id.as_local_id(),
                 arrange_operator_id: arrange_1_frag.node.unwrap().operator_id,
