@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::DataType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::plan::JoinType;
 
@@ -75,12 +76,16 @@ impl Rule for UnnestAggForLOJ {
         // We use all columns of Apply's left child as group keys here,.
         group_keys.extend(0..apply_left_len);
 
-        if let Some(count) = agg_calls.iter_mut().find(|agg_call| {
-            matches!(agg_call.agg_kind, AggKind::Count) && agg_call.inputs.is_empty()
-        }) {
-            let input_ref = InputRef::new(idx_of_constant, count.return_type.clone());
-            count.inputs.push(input_ref);
-        }
+        agg_calls
+            .iter_mut()
+            .filter(|agg_call| {
+                matches!(agg_call.agg_kind, AggKind::Count) && agg_call.inputs.is_empty()
+            })
+            .for_each(|count| {
+                let input_ref = InputRef::new(idx_of_constant, DataType::Int32);
+                count.inputs.push(input_ref);
+            });
+
         // Shift index of agg_calls' input_ref with `apply_left_len`.
         agg_calls.iter_mut().for_each(|agg_call| {
             agg_call.inputs.iter_mut().for_each(|input_ref| {
