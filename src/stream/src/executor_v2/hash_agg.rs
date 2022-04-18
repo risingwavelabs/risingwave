@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use futures::{stream, StreamExt};
@@ -59,15 +60,14 @@ pub struct HashAggExecutor<K: HashKey, S: StateStore> {
     /// The executor operates on this keyspace.
     keyspace: Keyspace<S>,
 
-    /// The cached states. `HashKey -> (prev_value, value)`.
-    state_map: EvictableHashMap<K, Option<Box<AggState<S>>>>,
-
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
     /// Indices of the columns
     /// all of the aggregation functions in this executor should depend on same group of keys
     key_indices: Vec<usize>,
+
+    _phantom: PhantomData<K>,
 }
 
 impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
@@ -110,9 +110,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input_pk_indices: input_info.pk_indices,
             input_schema: input_info.schema,
             keyspace,
-            state_map: EvictableHashMap::new(1 << 16),
             agg_calls,
             key_indices,
+            _phantom: PhantomData,
         })
     }
 
@@ -370,10 +370,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             input_pk_indices,
             input_schema,
             keyspace,
-            mut state_map,
             agg_calls,
             key_indices,
+            ..
         } = self;
+
+        // The cached states. `HashKey -> (prev_value, value)`.
+        let mut state_map = EvictableHashMap::new(1 << 16);
+
         let mut input = input.execute();
         let first_msg = input.next().await.unwrap()?;
         let barrier = first_msg
