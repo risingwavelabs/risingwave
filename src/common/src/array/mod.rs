@@ -27,7 +27,7 @@ pub mod list_array;
 mod macros;
 mod primitive_array;
 pub mod stream_chunk;
-pub mod stream_chunk_iter;
+mod stream_chunk_iter;
 pub mod struct_array;
 mod utf8_array;
 mod value_reader;

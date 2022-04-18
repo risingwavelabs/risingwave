@@ -16,13 +16,11 @@ use std::iter::once;
 
 use auto_enums::auto_enum;
 
-use super::column::Column;
-use super::data_chunk_iter::RowRef as DataChunkRowRef;
-use super::Row;
+use super::RowRef;
 use crate::array::{Op, StreamChunk};
-use crate::types::{DatumRef, ToOwnedDatum};
 
 impl StreamChunk {
+    /// Return an iterator on stream records of this stream chunk.
     pub fn records(&self) -> impl Iterator<Item = RecordRef<'_>> {
         StreamChunkRefIter {
             chunk: self,
@@ -30,17 +28,20 @@ impl StreamChunk {
         }
     }
 
-    pub fn rows(&self) -> impl Iterator<Item = (Op, DataChunkRowRef<'_>)> {
+    /// Return an iterator on rows of this stream chunk.
+    ///
+    /// Should consider using [`StreamChunk::records`] if possible.
+    pub fn rows(&self) -> impl Iterator<Item = (Op, RowRef<'_>)> {
         self.records().flat_map(|r| r.into_row_refs())
     }
 }
 
-type DataChunkRefIterr<'a> = impl Iterator<Item = DataChunkRowRef<'a>>;
+type RowRefIter<'a> = impl Iterator<Item = RowRef<'a>>;
 
 struct StreamChunkRefIter<'a> {
     chunk: &'a StreamChunk,
 
-    inner: DataChunkRefIterr<'a>,
+    inner: RowRefIter<'a>,
 }
 
 impl<'a> Iterator for StreamChunkRefIter<'a> {
@@ -71,17 +72,18 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
 }
 
 pub enum RecordRef<'a> {
-    Insert(DataChunkRowRef<'a>),
-    Delete(DataChunkRowRef<'a>),
+    Insert(RowRef<'a>),
+    Delete(RowRef<'a>),
     Update {
-        delete: DataChunkRowRef<'a>,
-        insert: DataChunkRowRef<'a>,
+        delete: RowRef<'a>,
+        insert: RowRef<'a>,
     },
 }
 
 impl<'a> RecordRef<'a> {
+    /// Convert this stream record to one or two rows with corresponding ops.
     #[auto_enum(Iterator)]
-    pub fn into_row_refs(self) -> impl Iterator<Item = (Op, DataChunkRowRef<'a>)> {
+    pub fn into_row_refs(self) -> impl Iterator<Item = (Op, RowRef<'a>)> {
         match self {
             RecordRef::Insert(row_ref) => once((Op::Insert, row_ref)),
             RecordRef::Delete(row_ref) => once((Op::Delete, row_ref)),
@@ -89,62 +91,6 @@ impl<'a> RecordRef<'a> {
                 [(Op::UpdateDelete, delete), (Op::UpdateInsert, insert)].into_iter()
             }
         }
-    }
-}
-
-pub struct RowRef<'a> {
-    pub(super) chunk: &'a StreamChunk,
-
-    pub(super) idx: usize,
-}
-
-impl<'a> RowRef<'a> {
-    pub fn value_at(&self, pos: usize) -> DatumRef<'_> {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // TODO: It's safe to use value_at_unchecked here.
-        self.chunk.columns()[pos].array_ref().value_at(self.idx)
-    }
-
-    pub fn op(&self) -> Op {
-        debug_assert!(self.idx < self.chunk.capacity());
-        // SAFETY: idx is checked while creating `RowRefV2`.
-        unsafe { *self.chunk.ops().get_unchecked(self.idx) }
-    }
-
-    pub fn size(&self) -> usize {
-        self.chunk.columns().len()
-    }
-
-    pub fn values<'b>(&'b self) -> RowRefIter<'a>
-    where
-        'a: 'b,
-    {
-        debug_assert!(self.idx < self.chunk.capacity());
-        RowRefIter::<'a> {
-            columns: self.chunk.columns().iter(),
-            row_idx: self.idx,
-        }
-    }
-
-    pub fn to_owned_row(&self) -> Row {
-        Row(self.values().map(ToOwnedDatum::to_owned_datum).collect())
-    }
-}
-
-#[derive(Clone)]
-pub struct RowRefIter<'a> {
-    columns: std::slice::Iter<'a, Column>,
-    row_idx: usize,
-}
-
-impl<'a> Iterator for RowRefIter<'a> {
-    type Item = DatumRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // TODO: It's safe to use value_at_unchecked here.
-        self.columns
-            .next()
-            .map(|col| col.array_ref().value_at(self.row_idx))
     }
 }
 

@@ -127,11 +127,11 @@ impl StreamChunk {
     }
 
     pub fn columns(&self) -> &[Column] {
-        &self.data_chunk.columns()
+        self.data_chunk.columns()
     }
 
     pub fn column_at(&self, index: usize) -> &Column {
-        &self.data_chunk.column_at(index)
+        self.data_chunk.column_at(index)
     }
 
     /// compact the `StreamChunk` with its visibility map
@@ -204,7 +204,7 @@ impl StreamChunk {
     }
 
     pub fn visibility(&self) -> &Option<Bitmap> {
-        &self.data_chunk.visibility()
+        self.data_chunk.visibility()
     }
 
     pub fn get_hash_values<H: BuildHasher>(

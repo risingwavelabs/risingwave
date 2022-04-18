@@ -13,10 +13,9 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use risingwave_common::array::{Op, Row, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::ordered::{OrderedRow, OrderedRowDeserializer};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::cell_based_row_deserializer::CellBasedRowDeserializer;
@@ -238,11 +237,7 @@ impl<S: StateStore> TopNExecutorBase for InnerTopNExecutor<S> {
         let mut new_rows = vec![];
 
         for (op, row_ref) in chunk.rows() {
-            let pk_row = Row(self
-                .pk_indices
-                .iter()
-                .map(|&idx| row_ref.value_at(idx).to_owned_datum())
-                .collect());
+            let pk_row = row_ref.row_by_indices(&self.pk_indices);
             let ordered_pk_row = OrderedRow::new(pk_row, &self.pk_order_types);
             let row = row_ref.to_owned_row();
 
