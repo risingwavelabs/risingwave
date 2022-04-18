@@ -106,25 +106,6 @@ impl FunctionCall {
         Some(Self::new_with_return_type(func_type, inputs, return_type))
     }
 
-    /// Different from `new()`, only takes the first n elements as look up key in type infer maps.
-    /// This is used to handle `IN` (may have varied length expression inputs) or other potential
-    /// cases.
-    pub fn new_with_first_n(
-        func_type: ExprType,
-        inputs: Vec<ExprImpl>,
-        num: usize,
-    ) -> Option<Self> {
-        let return_type = infer_type(
-            func_type,
-            inputs
-                .iter()
-                .take(num)
-                .map(|expr| expr.return_type())
-                .collect(),
-        )?; // should be derived from inputs
-        Some(Self::new_with_return_type(func_type, inputs, return_type))
-    }
-
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(child: ExprImpl, target: DataType, allows: CastContext) -> Result<ExprImpl> {
         let source = child.return_type();

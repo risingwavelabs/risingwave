@@ -127,20 +127,24 @@ impl Binder {
         &mut self,
         expr: Expr,
         list: Vec<Expr>,
-        _negated: bool,
+        negated: bool,
     ) -> Result<ExprImpl> {
-        // FIXME: Handle `not in`.
         let mut bound_expr_list = vec![self.bind_expr(expr)?];
         for elem in list {
             bound_expr_list.push(self.bind_expr(elem)?);
         }
-        // Only look the first two. [0] is the value, [1] is the first of target list and all
-        // subsequent elements in target list should have same type.
-        Ok(
-            FunctionCall::new_with_first_n(ExprType::In, bound_expr_list, 2)
-                .unwrap()
-                .into(),
-        )
+        let in_expr =
+            FunctionCall::new_with_return_type(ExprType::In, bound_expr_list, DataType::Boolean);
+        if negated {
+            Ok(FunctionCall::new_with_return_type(
+                ExprType::Not,
+                vec![in_expr.into()],
+                DataType::Boolean,
+            )
+            .into())
+        } else {
+            Ok(in_expr.into())
+        }
     }
 
     pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
