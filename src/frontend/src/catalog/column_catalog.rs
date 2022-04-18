@@ -47,6 +47,10 @@ impl ColumnCatalog {
         self.column_desc.name.as_ref()
     }
 
+    pub fn overwrite_name(&mut self, name: String) {
+        self.column_desc.name = name;
+    }
+
     /// Convert column catalog to proto
     pub fn to_protobuf(&self) -> ProstColumnCatalog {
         ProstColumnCatalog {

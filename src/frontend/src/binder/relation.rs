@@ -339,7 +339,7 @@ impl Binder {
         columns
             .into_iter()
             .enumerate()
-            .for_each(|(index, catalog)| {
+            .for_each(|(index, mut catalog)| {
                 let name = match catalog.is_hidden {
                     true => catalog.name().to_string(),
                     false => alias_iter
@@ -347,6 +347,7 @@ impl Binder {
                         .map(|t| t.value)
                         .unwrap_or_else(|| catalog.name().to_string()),
                 };
+                catalog.overwrite_name(name.clone());
                 self.context.columns.push(ColumnBinding::new(
                     table_name.clone(),
                     begin + index,

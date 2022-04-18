@@ -164,7 +164,7 @@ impl Field {
             name: self.name.clone(),
             field_descs,
             type_name: self.type_name.clone(),
-            is_nested
+            is_nested,
         }
     }
 }
