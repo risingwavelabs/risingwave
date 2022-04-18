@@ -14,10 +14,11 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::stream_plan;
 use risingwave_pb::stream_plan::stream_node::Node;
 use risingwave_storage::{Keyspace, StateStore};
@@ -83,7 +84,7 @@ impl<S: StateStore> Executor for LookupExecutor<S> {
     }
 
     fn identity(&self) -> &str {
-        "<unknown>"
+        "LookupExecutor"
     }
 }
 
@@ -103,13 +104,26 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let arrangement = params.input.remove(0);
         let arrangement = Box::new(ExecutorV1AsV2(arrangement));
 
+        let arrangement_col_descs = arrangement
+            .schema()
+            .fields()
+            .iter()
+            .map(ColumnDesc::from_field_without_column_id)
+            .collect();
+
+        let arrangement_order_rules = node
+            .arrange_key
+            .iter()
+            .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
+            .collect();
+
         Ok(Box::new(
             Box::new(LookupExecutor::new(LookupExecutorParams {
                 arrangement,
                 stream,
-                arrangement_keyspace: Keyspace::shared_executor_root(store, u64::MAX),
-                arrangement_col_descs: vec![], // TODO: fill this field
-                arrangement_order_rules: vec![], // TODO: fill this field
+                arrangement_keyspace: Keyspace::shared_executor_root(store, u64::MAX), // TODO: specify keyspace
+                arrangement_col_descs,
+                arrangement_order_rules,
                 pk_indices: params.pk_indices,
                 use_current_epoch: node.use_current_epoch,
                 stream_join_key_indices: node.stream_key.iter().map(|x| *x as usize).collect(),
