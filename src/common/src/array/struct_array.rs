@@ -36,7 +36,6 @@ pub struct StructArrayBuilder {
     children_array: Vec<ArrayBuilderImpl>,
     children_type: Arc<[DataType]>,
     len: usize,
-    capacity: usize,
 }
 
 impl ArrayBuilder for StructArrayBuilder {
@@ -68,7 +67,6 @@ impl ArrayBuilder for StructArrayBuilder {
                 children_array,
                 children_type: children,
                 len: 0,
-                capacity,
             })
         } else {
             panic!("must be ArrayMeta::Struct");

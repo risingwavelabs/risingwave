@@ -111,7 +111,6 @@ impl Array for BoolArray {
 pub struct BoolArrayBuilder {
     bitmap: BitmapBuilder,
     data: BitmapBuilder,
-    capacity: usize,
 }
 
 impl ArrayBuilder for BoolArrayBuilder {
@@ -121,7 +120,6 @@ impl ArrayBuilder for BoolArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: BitmapBuilder::with_capacity(capacity),
-            capacity,
         })
     }
 

@@ -113,8 +113,7 @@ macro_rules! get_chrono_array {
             #[derive(Debug)]
             pub struct $builder {
                 bitmap: BitmapBuilder,
-                data: Vec<$variant_name>,
-                capacity: usize,
+                data: Vec<$variant_name>
             }
 
             impl ArrayBuilder for $builder {
@@ -124,7 +123,6 @@ macro_rules! get_chrono_array {
                     Ok(Self {
                         bitmap: BitmapBuilder::with_capacity(capacity),
                         data: Vec::with_capacity(capacity),
-                        capacity,
                     })
                 }
 

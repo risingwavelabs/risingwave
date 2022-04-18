@@ -140,7 +140,6 @@ pub struct Utf8ArrayBuilder {
     offset: Vec<usize>,
     bitmap: BitmapBuilder,
     data: Vec<u8>,
-    capacity: usize,
 }
 
 impl ArrayBuilder for Utf8ArrayBuilder {
@@ -153,7 +152,6 @@ impl ArrayBuilder for Utf8ArrayBuilder {
             offset,
             data: Vec::with_capacity(capacity),
             bitmap: BitmapBuilder::with_capacity(capacity),
-            capacity,
         })
     }
 

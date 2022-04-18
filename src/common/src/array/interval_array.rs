@@ -34,7 +34,6 @@ pub struct IntervalArray {
 pub struct IntervalArrayBuilder {
     bitmap: BitmapBuilder,
     interval_buffer: Vec<IntervalUnit>,
-    capacity: usize,
 }
 
 impl IntervalArray {
@@ -117,7 +116,6 @@ impl ArrayBuilder for IntervalArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             interval_buffer: Vec::with_capacity(capacity),
-            capacity,
         })
     }
 

@@ -37,7 +37,6 @@ pub struct ListArrayBuilder {
     value: Box<ArrayBuilderImpl>,
     value_type: DataType,
     len: usize,
-    capacity: usize,
 }
 
 impl ArrayBuilder for ListArrayBuilder {
@@ -67,7 +66,6 @@ impl ArrayBuilder for ListArrayBuilder {
                 value: Box::new(datatype.create_array_builder(capacity)?),
                 value_type: *datatype,
                 len: 0,
-                capacity,
             })
         } else {
             panic!("must be ArrayMeta::List");

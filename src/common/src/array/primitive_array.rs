@@ -172,7 +172,6 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
 pub struct PrimitiveArrayBuilder<T: PrimitiveArrayItemType> {
     bitmap: BitmapBuilder,
     data: Vec<T>,
-    capacity: usize,
 }
 
 impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
@@ -182,7 +181,6 @@ impl<T: PrimitiveArrayItemType> ArrayBuilder for PrimitiveArrayBuilder<T> {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
-            capacity,
         })
     }
 

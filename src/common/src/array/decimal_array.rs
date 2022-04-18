@@ -126,7 +126,6 @@ impl Array for DecimalArray {
 pub struct DecimalArrayBuilder {
     bitmap: BitmapBuilder,
     data: Vec<Decimal>,
-    capacity: usize,
 }
 
 impl ArrayBuilder for DecimalArrayBuilder {
@@ -136,7 +135,6 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Ok(Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             data: Vec::with_capacity(capacity),
-            capacity,
         })
     }
 
