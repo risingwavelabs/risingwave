@@ -12,57 +12,81 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::once;
+
+use auto_enums::auto_enum;
+
 use super::column::Column;
+use super::data_chunk_iter::RowRef as DataChunkRowRef;
 use super::Row;
 use crate::array::{Op, StreamChunk};
 use crate::types::{DatumRef, ToOwnedDatum};
 
 impl StreamChunk {
-    pub fn rows(&self) -> impl Iterator<Item = RowRef<'_>> {
+    pub fn records(&self) -> impl Iterator<Item = RecordRef<'_>> {
         StreamChunkRefIter {
             chunk: self,
-            idx: 0,
+            inner: self.data_chunk.rows(),
+        }
+    }
+
+    pub fn rows(&self) -> impl Iterator<Item = (Op, DataChunkRowRef<'_>)> {
+        self.records().flat_map(|r| r.into_row_refs())
+    }
+}
+
+type DataChunkRefIterr<'a> = impl Iterator<Item = DataChunkRowRef<'a>>;
+
+struct StreamChunkRefIter<'a> {
+    chunk: &'a StreamChunk,
+
+    inner: DataChunkRefIterr<'a>,
+}
+
+impl<'a> Iterator for StreamChunkRefIter<'a> {
+    type Item = RecordRef<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let row = self.inner.next()?;
+        // SAFETY: index is checked since `row` is `Some`.
+        let op = unsafe { self.chunk.ops().get_unchecked(row.index()) };
+
+        match op {
+            Op::Insert => Some(RecordRef::Insert(row)),
+            Op::Delete => Some(RecordRef::Delete(row)),
+            Op::UpdateDelete => {
+                let insert_row = self.inner.next().expect("expect a row after U-");
+                // SAFETY: index is checked since `insert_row` is `Some`.
+                let op = unsafe { self.chunk.ops().get_unchecked(insert_row.index()) };
+                assert_eq!(*op, Op::UpdateInsert, "expect a U+ after U-");
+
+                Some(RecordRef::Update {
+                    delete: row,
+                    insert: insert_row,
+                })
+            }
+            Op::UpdateInsert => panic!("expect a U- before U+"),
         }
     }
 }
 
-struct StreamChunkRefIter<'a> {
-    chunk: &'a StreamChunk,
-    idx: usize,
+pub enum RecordRef<'a> {
+    Insert(DataChunkRowRef<'a>),
+    Delete(DataChunkRowRef<'a>),
+    Update {
+        delete: DataChunkRowRef<'a>,
+        insert: DataChunkRowRef<'a>,
+    },
 }
 
-impl<'a> Iterator for StreamChunkRefIter<'a> {
-    type Item = RowRef<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.chunk.visibility() {
-            Some(bitmap) => {
-                loop {
-                    let idx = self.idx;
-                    if idx >= self.chunk.capacity() {
-                        return None;
-                    }
-                    // SAFETY: idx is checked.
-                    let vis = unsafe { bitmap.is_set_unchecked(idx) };
-                    self.idx += 1;
-                    if vis {
-                        return Some(RowRef {
-                            chunk: self.chunk,
-                            idx,
-                        });
-                    }
-                }
-            }
-            None => {
-                let idx = self.idx;
-                if idx >= self.chunk.capacity() {
-                    return None;
-                }
-                self.idx += 1;
-                Some(RowRef {
-                    chunk: self.chunk,
-                    idx,
-                })
+impl<'a> RecordRef<'a> {
+    #[auto_enum(Iterator)]
+    pub fn into_row_refs(self) -> impl Iterator<Item = (Op, DataChunkRowRef<'a>)> {
+        match self {
+            RecordRef::Insert(row_ref) => once((Op::Insert, row_ref)),
+            RecordRef::Delete(row_ref) => once((Op::Delete, row_ref)),
+            RecordRef::Update { delete, insert } => {
+                [(Op::UpdateDelete, delete), (Op::UpdateInsert, insert)].into_iter()
             }
         }
     }
@@ -70,6 +94,7 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
 
 pub struct RowRef<'a> {
     pub(super) chunk: &'a StreamChunk,
+
     pub(super) idx: usize,
 }
 
@@ -133,16 +158,7 @@ mod tests {
     #[test]
     fn test_chunk_rows() {
         let chunk = WhatEverStreamChunk::stream_chunk();
-        let row_to_owned = |row: RowRef| {
-            (
-                row.op(),
-                Row(row
-                    .values()
-                    .map(ToOwnedDatum::to_owned_datum)
-                    .collect::<Vec<_>>()),
-            )
-        };
-        let mut rows = chunk.rows().map(row_to_owned);
+        let mut rows = chunk.rows().map(|(op, row)| (op, row.to_owned_row()));
         assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(0)), rows.next());
         assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(1)), rows.next());
         assert_eq!(Some(WhatEverStreamChunk::row_with_op_at(2)), rows.next());

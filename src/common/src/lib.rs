@@ -31,6 +31,7 @@
 #![feature(is_sorted)]
 #![feature(backtrace)]
 #![feature(fn_traits)]
+#![feature(type_alias_impl_trait)]
 
 #[macro_use]
 pub mod error;
