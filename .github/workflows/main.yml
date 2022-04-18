@@ -499,6 +499,12 @@ jobs:
           ~/cargo-make/makers k
           ~/cargo-make/makers logs
           ~/cargo-make/makers check-logs
+      - name: e2e test w/ Rust frontend ci-3node, source with kafka
+        timeout-minutes: 2
+        run: |
+          ~/cargo-make/makers clean-data
+          ~/cargo-make/makers ci-start ci-kafka
+          sqllogictest -p 4566 './e2e_test/source/**/*.slt'
       - name: Dump last 100 lines of logs on failure
         if: ${{ failure() }}
         run: ~/cargo-make/makers logs

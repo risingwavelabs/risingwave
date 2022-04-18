@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use futures::StreamExt;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -25,7 +25,7 @@ use risingwave_storage::{Keyspace, StateStore};
 
 use crate::executor::{Executor as ExecutorV1, ExecutorBuilder};
 use crate::executor_v2::{Barrier, BoxedMessageStream, Executor, PkIndices, PkIndicesRef};
-use crate::task::{ExecutorParams, LocalStreamManagerCore};
+use crate::task::{unique_operator_id, ExecutorParams, LocalStreamManagerCore};
 
 mod sides;
 use self::sides::*;
@@ -109,6 +109,14 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .fields()
             .iter()
             .map(|f| f.to_column_desc(false))
+            .enumerate()
+            .map(|(idx, desc)| {
+                assert!(desc.field_descs.is_empty(), "sub-field not supported yet");
+                ColumnDesc {
+                    column_id: ColumnId::new(idx as i32),
+                    ..desc
+                }
+            })
             .collect();
 
         let arrangement_order_rules = node
@@ -117,11 +125,22 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(|x| OrderPair::new(*x as usize, OrderType::Ascending))
             .collect();
 
+        assert_ne!(
+            node.arrange_fragment_id,
+            u32::MAX,
+            "arrange fragment id is not available"
+        );
+        let arrangement_keyspace_id =
+            unique_operator_id(node.arrange_fragment_id, node.arrange_operator_id);
+
         Ok(Box::new(
             Box::new(LookupExecutor::new(LookupExecutorParams {
                 arrangement,
                 stream,
-                arrangement_keyspace: Keyspace::shared_executor_root(store, u64::MAX), // TODO: specify keyspace
+                arrangement_keyspace: Keyspace::shared_executor_root(
+                    store,
+                    arrangement_keyspace_id,
+                ),
                 arrangement_col_descs,
                 arrangement_order_rules,
                 pk_indices: params.pk_indices,

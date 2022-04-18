@@ -14,6 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_pb::stream_plan::source_node::SourceType;
 use risingwave_sqlparser::ast::ObjectName;
 
 use crate::binder::Binder;
@@ -27,6 +28,17 @@ pub async fn handle_drop_table(
     let (schema_name, table_name) = Binder::resolve_table_name(table_name)?;
 
     let catalog_reader = session.env().catalog_reader();
+
+    {
+        let reader = catalog_reader.read_guard();
+        if let Ok(s) = reader.get_source_by_name(session.database(), &schema_name, &table_name) {
+            if s.source_type == SourceType::Source {
+                return Err(RwError::from(ErrorCode::InvalidInputSyntax(
+                    "Use `DROP SOURCE` to drop a source.".to_owned(),
+                )));
+            }
+        }
+    }
 
     let (source_id, table_id) = {
         let reader = catalog_reader.read_guard();
@@ -48,12 +60,7 @@ pub async fn handle_drop_table(
         .drop_materialized_source(source_id.table_id(), table_id)
         .await?;
 
-    Ok(PgResponse::new(
-        StatementType::DROP_TABLE,
-        0,
-        vec![],
-        vec![],
-    ))
+    Ok(PgResponse::empty_result(StatementType::DROP_TABLE))
 }
 
 #[cfg(test)]

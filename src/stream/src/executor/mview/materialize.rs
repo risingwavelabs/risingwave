@@ -72,7 +72,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
     ) -> Result<Box<dyn Executor>> {
         let arrange_node = try_match_expand!(node.get_node().unwrap(), Node::ArrangeNode)?;
 
-        let keyspace = Keyspace::shared_executor_root(store, params.executor_id);
+        let keyspace = Keyspace::shared_executor_root(store, params.operator_id);
 
         // Set materialize keys as arrange key + pk
         let keys = arrange_node

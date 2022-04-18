@@ -29,20 +29,14 @@ use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
 use crate::table_v2::TableSourceV2;
-use crate::{
-    DebeziumJsonParser, HighLevelKafkaSource, JSONParser, ProtobufParser, SourceConfig,
-    SourceFormat, SourceImpl, SourceParser,
-};
+use crate::{SourceConfig, SourceFormat, SourceImpl, SourceParserImpl};
 
 pub type SourceRef = Arc<SourceImpl>;
 
-// the same key is defined in `src/batch/src/executor/create_source.rs`, remove in batch if
-// necessary
 const UPSTREAM_SOURCE_KEY: &str = "connector";
 const KINESIS_SOURCE: &str = "kinesis";
 const KAFKA_SOURCE: &str = "kafka";
 
-const PROTOBUF_MESSAGE_KEY: &str = "proto.message";
 const PROTOBUF_TEMP_LOCAL_FILENAME: &str = "rw.proto";
 const PROTOBUF_FILE_URL_SCHEME: &str = "file";
 
@@ -52,7 +46,7 @@ pub trait SourceManager: Debug + Sync + Send {
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
@@ -110,17 +104,12 @@ impl SourceManager for MemSourceManager {
         &self,
         source_id: &TableId,
         format: SourceFormat,
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         config: &SourceConfig,
         columns: Vec<SourceColumnDesc>,
         row_id_index: Option<usize>,
     ) -> Result<()> {
         let source = match config {
-            SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(HighLevelKafkaSource::new(
-                config.clone(),
-                Arc::new(columns.clone()),
-                parser.clone(),
-            )),
             SourceConfig::Connector(config) => {
                 let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
                     Arc::new(tokio::sync::Mutex::new(
@@ -168,7 +157,8 @@ impl SourceManager for MemSourceManager {
         }
 
         let properties = Properties::new(info.properties.clone());
-        let parser = build_source_parser(&format, &properties, info.row_schema_location.as_str())?;
+        let parser =
+            SourceParserImpl::create(&format, &properties, info.row_schema_location.as_str())?;
 
         let columns = info
             .columns
@@ -202,25 +192,21 @@ impl SourceManager for MemSourceManager {
             )))),
         }?;
 
-        let source =
-            match config {
-                SourceConfig::Kafka(config) => SourceImpl::HighLevelKafka(
-                    HighLevelKafkaSource::new(config, Arc::new(columns.clone()), parser.clone()),
-                ),
-                SourceConfig::Connector(config) => {
-                    let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-                        Arc::new(tokio::sync::Mutex::new(
-                            new_connector(Properties::new(config.clone()), None)
-                                .await
-                                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-                        ));
-                    SourceImpl::Connector(ConnectorSource {
-                        parser: parser.clone(),
-                        reader: split_reader,
-                        column_descs: columns.clone(),
-                    })
-                }
-            };
+        let source = match config {
+            SourceConfig::Connector(config) => {
+                let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
+                    Arc::new(tokio::sync::Mutex::new(
+                        new_connector(Properties::new(config.clone()), None)
+                            .await
+                            .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+                    ));
+                SourceImpl::Connector(ConnectorSource {
+                    parser: parser.clone(),
+                    reader: split_reader,
+                    column_descs: columns.clone(),
+                })
+            }
+        };
 
         let desc = SourceDesc {
             source: Arc::new(source),
@@ -307,38 +293,8 @@ impl Default for MemSourceManager {
     }
 }
 
-fn build_source_parser(
-    format: &SourceFormat,
-    properties: &Properties,
-    schema_location: &str,
-) -> Result<Arc<dyn SourceParser + Send + Sync>> {
-    let parser: Arc<dyn SourceParser + Send + Sync> = match format {
-        SourceFormat::Json => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(JSONParser {});
-            Ok(parser)
-        }
-        SourceFormat::Protobuf => {
-            let message_name = properties.get(PROTOBUF_MESSAGE_KEY)?;
-            let parser: Arc<dyn SourceParser + Send + Sync> =
-                Arc::new(ProtobufParser::new(schema_location, &message_name)?);
-
-            Ok(parser)
-        }
-        SourceFormat::DebeziumJson => {
-            let parser: Arc<dyn SourceParser + Send + Sync> = Arc::new(DebeziumJsonParser {});
-            Ok(parser)
-        }
-        _ => Err(RwError::from(InternalError(
-            "format not support".to_string(),
-        ))),
-    }?;
-
-    Ok(parser)
-}
-
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::error::Result;
@@ -353,55 +309,6 @@ mod tests {
 
     const KAFKA_TOPIC_KEY: &str = "kafka.topic";
     const KAFKA_BOOTSTRAP_SERVERS_KEY: &str = "kafka.bootstrap.servers";
-
-    #[tokio::test]
-    async fn test_source() -> Result<()> {
-        // init
-        let table_id = TableId::default();
-        let format = SourceFormat::Json;
-        let parser = Arc::new(JSONParser {});
-
-        let config = SourceConfig::Kafka(HighLevelKafkaSourceConfig {
-            bootstrap_servers: KAFKA_BOOTSTRAP_SERVERS_KEY
-                .split(',')
-                .map(|s| s.to_string())
-                .collect::<Vec<String>>(),
-            topic: KAFKA_TOPIC_KEY.to_string(),
-            properties: Default::default(),
-        });
-
-        let columns = vec![ColumnDesc::unnamed(ColumnId::from(0), DataType::Int64)];
-        let source_columns = columns
-            .iter()
-            .map(|c| SourceColumnDesc {
-                name: "123".to_string(),
-                data_type: c.data_type.clone(),
-                column_id: c.column_id,
-                skip_parse: false,
-            })
-            .collect();
-
-        // create source
-        let mem_source_manager = MemSourceManager::new();
-        let new_source = mem_source_manager
-            .create_source(&table_id, format, parser, &config, source_columns, Some(0))
-            .await;
-        assert!(new_source.is_ok());
-
-        // get source
-        let get_source_res = mem_source_manager.get_source(&table_id)?;
-        assert_eq!(get_source_res.columns[0].name, "123");
-
-        // drop source
-        let drop_source_res = mem_source_manager.drop_source(&table_id);
-        assert!(drop_source_res.is_ok());
-
-        let get_source_res = mem_source_manager.get_source(&table_id);
-
-        assert!(get_source_res.is_err());
-
-        Ok(())
-    }
 
     #[tokio::test]
     #[ignore] // ignored because the test involves aws credentials, remove this line after changing to other
