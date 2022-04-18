@@ -23,8 +23,7 @@ use risingwave_common::ensure;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
-use risingwave_connector::base::SourceReader;
-use risingwave_connector::{new_connector, Properties};
+use risingwave_connector::{Properties, SourceReaderImpl};
 use risingwave_pb::catalog::{RowFormatType, StreamSourceInfo};
 
 use crate::connector_source::ConnectorSource;
@@ -142,12 +141,11 @@ impl SourceManager for MemSourceManager {
             }
         };
 
-        let split_reader: Arc<tokio::sync::Mutex<Box<dyn SourceReader + Send + Sync>>> =
-            Arc::new(tokio::sync::Mutex::new(
-                new_connector(properties, None)
-                    .await
-                    .map_err(|e| RwError::from(InternalError(e.to_string())))?,
-            ));
+        let split_reader = Arc::new(tokio::sync::Mutex::new(
+            SourceReaderImpl::create(properties, None)
+                .await
+                .map_err(|e| RwError::from(InternalError(e.to_string())))?,
+        ));
         let source = SourceImpl::Connector(ConnectorSource {
             parser: parser.clone(),
             reader: split_reader,
