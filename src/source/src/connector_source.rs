@@ -27,14 +27,14 @@ use risingwave_storage::StateStore;
 use tokio::sync::Mutex;
 
 use crate::common::SourceChunkBuilder;
-use crate::{SourceColumnDesc, SourceParser, StreamSourceReader};
+use crate::{SourceColumnDesc, SourceParserImpl, StreamSourceReader};
 
 /// [`ConnectorSource`] serves as a bridge between external components and streaming or batch
 /// processing. [`ConnectorSource`] introduces schema at this level while [`SourceReader`] simply
 /// loads raw content from message queue or file system.
 #[derive(Clone)]
 pub struct ConnectorSource {
-    pub parser: Arc<dyn SourceParser + Send + Sync>,
+    pub parser: Arc<SourceParserImpl>,
     pub reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
     pub column_descs: Vec<SourceColumnDesc>,
 }
@@ -49,7 +49,7 @@ impl Debug for ConnectorSource {
 
 impl ConnectorSource {
     pub fn new(
-        parser: Arc<dyn SourceParser + Send + Sync>,
+        parser: Arc<SourceParserImpl>,
         reader: Arc<Mutex<Box<dyn SourceReader + Send + Sync>>>,
         column_descs: Vec<SourceColumnDesc>,
     ) -> Self {
